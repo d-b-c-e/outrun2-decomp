@@ -43,6 +43,9 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include "native_window.hpp"
+
+namespace outrun::xbox_runtime { InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;} }
 
 namespace {
 namespace rt=outrun::runtime;
@@ -221,7 +224,9 @@ int or2_xbox_main(int argc,char** argv){
         pad.sample.buttons=std::uint32_t((pad.sample.buttons&~dualsense_mapped())|to_dualsense(held));
         // Autoplay / replayed buttons count as a connected pad (no gamepad on a test PC).
         if(held)pad.sample.connected=true;
-        out=input_adapter.update(pad.sample,diag.runtime?diag.runtime->mode_state.current:0u);
+        const std::uint32_t mode=diag.runtime?diag.runtime->mode_state.current:0u;
+        out=input_adapter.update(pad.sample,mode);
+        if(const auto filter=outrun::xbox_runtime::input_filter())filter(out,mode);
         out.exit_requested|=diag.render_failed||!application_running();
         if(out.exit_requested)lifecycle.stop();};
     diag.sample_status=[&diag,&console_live](const outrun::platform::NativeInputState& out,std::uint64_t held,std::uint64_t down,std::uint64_t up){

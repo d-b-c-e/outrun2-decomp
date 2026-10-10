@@ -819,6 +819,10 @@ if(APPLE)
 endif()
 if(OR2_XBOX)
     add_subdirectory(xbox)
+    # Windows desktop build over the Xbox port's PC configuration (windows/).
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+        add_subdirectory(windows)
+    endif()
 endif()
 
 # Tests read the EXE-owned tables from the player's decompressed Steam
