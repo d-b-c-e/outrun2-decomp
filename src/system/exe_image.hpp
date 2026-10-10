@@ -1,6 +1,6 @@
 #pragma once
-// The player's own OR2006C2C.EXE (decompressed Steam build), mapped at its PC
-// addresses. Nothing of the original executable is compiled into the port:
+// The player's own OR2006C2C.EXE (decompressed Steam build, or the retail build
+// as OutRun2006Tweaks ships it), mapped at its PC addresses. Nothing of the original executable is compiled into the port:
 // the data the port reads by PC address comes from this image, which the
 // first launch (or tools/or2setup) builds from the player's file and keeps in
 // a cache next to the game.

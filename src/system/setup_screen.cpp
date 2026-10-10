@@ -157,10 +157,12 @@ bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_d
             case ExeSource::OtherVersion:
                 return fail("OR2006C2C.EXE is another version",
                     {"This file is required from your own OutRun 2006 Coast 2 Coast installation (Steam version).",
+                     "Retail (DVD) copies: use the OR2006C2C.exe of OutRun2006Tweaks.",
                      "Folder: "+game_dir},e);
             default:
                 return fail("OR2006C2C.EXE not found",
                     {"This file is required from your own OutRun 2006 Coast 2 Coast installation (Steam version).",
+                     "Retail (DVD) copies: use the OR2006C2C.exe of OutRun2006Tweaks.",
                      "Folder: "+game_dir},e);
         }
     }

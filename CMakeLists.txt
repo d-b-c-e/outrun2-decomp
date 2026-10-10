@@ -99,6 +99,9 @@ add_test(NAME reconstructed_driving COMMAND test_driving)
 add_executable(test_environment_blend tests/test_environment_blend.cpp)
 target_link_libraries(test_environment_blend PRIVATE outrun_driving)
 add_test(NAME environment_blend COMMAND test_environment_blend)
+add_executable(test_exe_image tests/test_exe_image.cpp)
+target_link_libraries(test_exe_image PRIVATE outrun_driving)
+add_test(NAME exe_image COMMAND test_exe_image)
 
 # r089: platform-neutral runtime entry below the PC WinMain shell.
 find_package(ZLIB REQUIRED)

@@ -22,6 +22,13 @@ constexpr char CacheMagic[8]={'O','R','2','I','M','G','1','\0'};
 constexpr std::uint32_t CacheVersion=1u;
 constexpr std::size_t CacheHeader=64u;
 constexpr std::uint32_t ImportTableVa=0x00596000u,ImportTableSize=0x300u;   // ADVAPI32 596000 .. ole32 5962F0 + terminator
+// The retail build (the OR2006C2C.exe of OutRun2006Tweaks, the DVD build without its
+// protection) is the Steam build with a smaller SizeOfImage and debug metadata the
+// Steam image lacks: the CodeView entry of the debug directory and ten bytes ahead of
+// its RSDS record (6283C8). Nothing reads them; mapping blanks them as Steam has them.
+constexpr std::uint32_t RetailImageSize=0x0058E000u;
+struct ExeSpan{std::uint32_t va,size;};
+constexpr ExeSpan DebugMetadata[]={{0x00596300u,0x1Cu},{0x00628380u,0x1u},{0x006283BDu,0x9u}};
 std::vector<std::uint8_t>& image_storage(){static std::vector<std::uint8_t> image;return image;}
 struct CopyEntry{std::uint8_t* destination;std::uint32_t va,size;};
 std::vector<CopyEntry>& copies(){static std::vector<CopyEntry> list;return list;}
@@ -108,7 +115,9 @@ bool exe_image_map_pe(const std::vector<std::uint8_t>& file,std::vector<std::uin
     if(pe>file.size()||file.size()-pe<24u+0xE0u||std::memcmp(file.data()+pe,"PE\0\0",4)!=0)return fail(error,"not a Windows executable");
     const auto count=rd16(file.data()+pe+6),optional=rd16(file.data()+pe+20);
     const auto* opt=file.data()+pe+24;
-    if(rd16(opt)!=0x10Bu||rd32(opt+28)!=ExeImageBase||rd32(opt+56)!=ExeImageSize)return fail(error,"not OutRun 2006 Coast 2 Coast (OR2006C2C.EXE)");
+    const auto size_of_image=rd32(opt+56);
+    if(rd16(opt)!=0x10Bu||rd32(opt+28)!=ExeImageBase||(size_of_image!=ExeImageSize&&size_of_image!=RetailImageSize))
+        return fail(error,"not OutRun 2006 Coast 2 Coast (OR2006C2C.EXE)");
     const std::size_t table=pe+24u+optional;
     if(table>file.size()||(file.size()-table)/40u<count)return fail(error,"damaged executable header");
     image.assign(ExeImageSize,0);
@@ -122,6 +131,7 @@ bool exe_image_map_pe(const std::vector<std::uint8_t>& file,std::vector<std::uin
     // The import address table holds whatever the decompressing tool left
     // there (thunks, resolved addresses or zeros); the port never reads it.
     std::memset(image.data()+(ImportTableVa-ExeImageBase),0,ImportTableSize);
+    for(const auto& d:DebugMetadata)std::memset(image.data()+(d.va-ExeImageBase),0,d.size);
     return true;
 }
 
@@ -134,7 +144,7 @@ bool exe_image_verify(const std::vector<std::uint8_t>& image,std::string* error,
         if(r.va<ExeImageBase||r.va-ExeImageBase>ExeImageSize||r.size>ExeImageSize-(r.va-ExeImageBase)){if(bad)*bad=i;return fail(error,"range table outside the image");}
         if(sha256(image.data()+(r.va-ExeImageBase),r.size)!=r.sha256){
             if(bad)*bad=i;
-            char t[128];std::snprintf(t,sizeof t,"OR2006C2C.EXE data at %08X (%u bytes) differs from the supported Steam build",r.va,r.size);
+            char t[128];std::snprintf(t,sizeof t,"OR2006C2C.EXE data at %08X (%u bytes) differs from the supported builds",r.va,r.size);
             return fail(error,t);
         }
         done+=r.size;if(progress)progress(done,total);
@@ -215,7 +225,7 @@ bool exe_image_find_source(const std::string& dir,std::vector<std::uint8_t>& ima
         std::vector<std::uint8_t> mapped;
         if(!exe_image_map_pe(file,mapped,&e)){
             // Another program (Config.exe...), or an OR2006C2C.EXE of another edition.
-            if(!steam&&l=="or2006c2c.exe"&&other.empty())other=name+": not the Steam version";
+            if(!steam&&l=="or2006c2c.exe"&&other.empty())other=name+": not a supported version";
             continue;
         }
         if(!exe_image_verify(mapped,&e,progress)){if(!steam&&other.empty())other=name+": "+e;continue;}

@@ -36,6 +36,11 @@ the original executable.** To play, you need your own copy of the game
   the first launch, checks every range it uses against SHA-256 hashes
   (`src/system/exe_image_ranges.inc`), then keeps a prepared image,
   `OR2006C2C.cache`, in the game folder. Later launches only read that file.
+- Retail (DVD) copies work too, with the protection-free `OR2006C2C.exe` that
+  [OutRun2006Tweaks](https://github.com/emoose/OutRun2006Tweaks/releases)
+  ships in place of the original one. It is the same build as Steam's, and
+  the game data on both releases is identical; the DVD's own protected EXE
+  cannot be read.
 
 The game files are read in place and never modified; `OR2006C2C.cache` can be
 deleted at any time and is rebuilt at the next launch.
