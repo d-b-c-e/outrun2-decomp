@@ -34,27 +34,43 @@ and the saves in it.
 ## Wheel settings
 
 `OutRunDesktop.ini` beside the executable, written with comments on the first
-run. Its sections and keys are those of `OutRun2006Tweaks.ini`, so the
-`[DirectInput]`, `[DirectInput.Shifter]` and `[DirectInput.Aux]` sections of a
-Tweaks install can be pasted in unchanged; without `OutRunDesktop.ini`, a
-`OutRun2006Tweaks.ini` in the folder is read instead.
+run. **`[Controls]` is the game's only binding store**, in the wheel toolkit's
+`ini-controls-1` form (STD-033, `vendor/controls`): `Schema = 1`, `Profile`,
+`Revision`, `Transmission` and one line per action, e.g.
 
-| Key | Meaning |
-| --- | --- |
-| `[DirectInput] UseDirectInputRemap` | wheel input on (default true) |
-| `DeviceGuid` | `auto` (the force-feedback controller with the most axes, gamepads skipped) or a GUID |
-| `SteeringAxis`, `AccelerationAxis`, `BrakeAxis` | 0=X 1=Y 2=Z 3=Rx 4=Ry 5=Rz 6=Slider0 7=Slider1 |
-| `...Invert`, `SteeringSensitivity` | as in Tweaks (pedals: raw / 65535, inverted when set) |
-| `ThrottleDeviceGuid`, `BrakeDeviceGuid` | separate pedal devices (empty: the wheel) |
-| `ButtonA` .. `ButtonSelRight` | 0..127, or 128 + hat*4 + direction (0 up, 1 right, 2 down, 3 left); -1 unbound |
-| `[DirectInput.Shifter] DeviceGuid`, `GearMode` | a shifter on its own device; `sequential` uses `ButtonGearUp/Down` |
-| `[DirectInput.Aux] DeviceGuid`, `Button*` | a button box or second rim, ORed with the wheel's buttons |
-| `[Controls] SteeringDeadZone` | 0..0.9 |
+```ini
+steer = axis 0 dev={d71b8350-...} prod={0006346e-...} range=0..65535 rest=33265 travel=-1 name="MOZA R12 Base"
+```
 
-`runtime.log` lists every controller (GUID, name, type, axes, buttons, force
-feedback) and the device bound to each role; for the first two minutes it also
-logs every button pressed and the wheel's axes when they move, to find the
-numbers above.
+Wheelkit writes it when it applies a rig profile. Devices are matched by their
+instance GUID only. Mapped actions: `steer`, `throttle`, `brake`, `shiftUp`,
+`shiftDown`, `gear1`..`gear6` (with `Transmission = H-pattern`), `confirm`,
+`back`, `start`, `navUp/Down/Left/Right`, `camera`. Others are reported as
+unavailable with the reason (no clutch, handbrake, neutral or reverse in the game;
+no F6 panel or force feedback yet). At start `runtime.log` gets the standard line
+`controls: profile "<name>" revision <rev> via ini-controls-1: applied n (...); unsupported m (...); invalid k (...)`.
+
+Without a `[Controls]` section, the OutRun2006Tweaks `[DirectInput]`,
+`[DirectInput.Shifter]` and `[DirectInput.Aux]` keys (this file's, else the
+folder's `OutRun2006Tweaks.ini`) are imported **once** at the first start with
+their devices connected: a copy of the file is kept as
+`OutRunDesktop.ini.pre-controls-import` and `[ControlsImport]` records it. Tweaks'
+`ButtonX` / `ButtonY` have no contract action and are not imported. `[Wheel]
+SteeringSensitivity` and `SteeringDeadZone` (0..0.9) shape the steering after the
+binding.
+
+`runtime.log` lists every controller (instance and product GUIDs, name, type,
+axes, buttons, hats, force feedback); for the first two minutes it also logs
+every button pressed and the axes moved on the opened devices.
+
+H-pattern: each gate holds its gear; the build pulses shift up / down, one every
+other frame, until the car's gear (+208) matches, and stops after four pulses
+without a change (top gear, automatic transmission).
+
+Test injection (development only, for Wheelkit's closed-loop tests): see
+`source/test_injection.hpp`. It arms only with a valid
+`%LOCALAPPDATA%\dbce\outrun2006-decomp\inject.on` session and an applied
+`[Controls]`, and this build sends no force.
 
 In the race the wheel feeds the device record of 453BB0 directly: the
 full-range steering word (index 0x0E), the 0..255 accelerator (0x0D) and brake
@@ -62,5 +78,6 @@ full-range steering word (index 0x0E), the 0..255 accelerator (0x0D) and brake
 them. The original game then applies its own small dead zone and quantises the
 steering to -127..127.
 
-Not yet: H-pattern shifting (use the paddles), calibration, force feedback,
-telemetry, multiple screens (see the roadmap).
+Not yet: force feedback, telemetry, the F6 panel, multiple screens (see the
+roadmap). Standards adoption: [TOOLKIT-ADOPTION.md](TOOLKIT-ADOPTION.md); product
+record for Wheelkit: [product.json](product.json).

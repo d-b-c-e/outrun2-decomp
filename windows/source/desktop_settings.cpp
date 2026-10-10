@@ -1,9 +1,11 @@
 #include "desktop_settings.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 namespace outrun::desktop {
 namespace {
 std::string lower(std::string s){for(auto& c:s)c=char(std::tolower(static_cast<unsigned char>(c)));return s;}
@@ -16,69 +18,64 @@ std::string strip_comment(const std::string& v){
     for(std::size_t i=1;i<v.size();++i)if((v[i]==';'||v[i]=='#')&&(v[i-1]==' '||v[i-1]=='\t'))return trim(v.substr(0,i));
     return trim(v);
 }
+// "[name]" -> lower-case name, else "".
+std::string header(const std::string& line){
+    const auto t=trim(line);
+    if(t.size()<2||t[0]!='[')return {};
+    const auto e=t.find(']');
+    return e==std::string::npos?std::string():lower(trim(t.substr(1,e-1)));
+}
 constexpr const char* Template=
-"; OutRun 2006 desktop build: wheel, pedals, shifter and button box through DirectInput.\n"
-"; Sections and keys are those of OutRun2006Tweaks.ini: the [DirectInput], [DirectInput.Shifter]\n"
-"; and [DirectInput.Aux] sections of a Tweaks install can be pasted here unchanged.\n"
-"; runtime.log lists every controller (GUID, name, axes, buttons) and, for the first two\n"
-"; minutes, every button pressed and the axis positions, to find the numbers below.\n"
-"\n"
-"[DirectInput]\n"
-"UseDirectInputRemap = true\n"
-"; auto: the force-feedback controller with the most axes (gamepads skipped), or a GUID.\n"
-"DeviceGuid = auto\n"
-"; Axes: 0=X 1=Y 2=Z 3=Rx 4=Ry 5=Rz 6=Slider0 7=Slider1.\n"
-"SteeringAxis = 0\n"
-"SteeringInvert = false\n"
-"SteeringSensitivity = 1.0\n"
-"AccelerationAxis = 2\n"
-"AccelerationInvert = false\n"
-"BrakeAxis = 5\n"
-"BrakeInvert = false\n"
-"; Separate pedal devices (empty: the wheel).\n"
-"ThrottleDeviceGuid =\n"
-"BrakeDeviceGuid =\n"
-"; Buttons 0..127; 128 + hat*4 + direction (0 up, 1 right, 2 down, 3 left) for a POV; -1 unbound.\n"
-"ButtonA = 0\n"
-"ButtonB = 1\n"
-"ButtonX = 2\n"
-"ButtonY = 3\n"
-"ButtonStart = 7\n"
-"ButtonBack = 6\n"
-"ButtonGearUp = 4\n"
-"ButtonGearDown = 5\n"
-"ButtonChangeView = 8\n"
-"ButtonSelUp = 128\n"
-"ButtonSelDown = 130\n"
-"ButtonSelLeft = 131\n"
-"ButtonSelRight = 129\n"
-"\n"
-"[DirectInput.Shifter]\n"
-"; A shifter on its own device; empty DeviceGuid disables the section.\n"
-"DeviceGuid =\n"
-"GearMode = sequential\n"
-"ButtonGearUp = 4\n"
-"ButtonGearDown = 5\n"
-"\n"
-"[DirectInput.Aux]\n"
-"; A button box or second rim; empty DeviceGuid disables the section.\n"
-"DeviceGuid =\n"
+"; OutRun 2006 desktop build (OutRunDesktop.exe).\n"
 "\n"
 "[Controls]\n"
-"SteeringDeadZone = 0.0\n";
+"; The control bindings, in the wheel toolkit's ini-controls-1 form (one line per action, e.g.\n"
+"; steer = axis 0 dev={...} prod={...} range=0..65535 rest=32768 travel=+1 name=\"...\").\n"
+"; Wheelkit writes them when it applies a rig profile; runtime.log lists every controller with its\n"
+"; GUIDs and, for the first two minutes, the buttons pressed and the axes moved.\n"
+"Schema = 1\n"
+"Profile =\n"
+"Revision =\n"
+"Transmission = Sequential\n"
+"\n"
+"[Wheel]\n"
+"SteeringSensitivity = 1.0\n"
+"SteeringDeadZone = 0.0\n"
+"\n"
+"[Window]\n"
+"; false: a 1280x720 window (or start with --windowed).\n"
+"WindowedBorderless = true\n";
+constexpr const char* ImportHeader=
+"; OutRun 2006 desktop build (OutRunDesktop.exe). The wheel bindings of this folder's\n"
+"; OutRun2006Tweaks.ini are imported into [Controls] at the first start with the devices connected.\n"
+"\n"
+"[Wheel]\n"
+"SteeringSensitivity = 1.0\n"
+"SteeringDeadZone = 0.0\n"
+"\n"
+"[Window]\n"
+"WindowedBorderless = true\n";
 }
 bool Ini::load(const std::string& path){
-    values_.clear();path_=path;
+    values_.clear();sections_.clear();path_=path;
     std::ifstream f(path);if(!f)return false;
     std::string line,section;
     while(std::getline(f,line)){
-        line=trim(line);
-        if(line.empty()||line[0]==';'||line[0]=='#')continue;
-        if(line[0]=='['){const auto e=line.find(']');section=lower(trim(line.substr(1,e==std::string::npos?std::string::npos:e-1)));continue;}
-        const auto eq=line.find('=');if(eq==std::string::npos)continue;
-        values_[section+"/"+lower(trim(line.substr(0,eq)))]=strip_comment(line.substr(eq+1));
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        const auto h=header(line);
+        if(!h.empty()){section=h;sections_[section];continue;}
+        sections_[section].push_back(line);
+        const auto t=trim(line);
+        if(t.empty()||t[0]==';'||t[0]=='#')continue;
+        const auto eq=t.find('=');if(eq==std::string::npos)continue;
+        values_[section+"/"+lower(trim(t.substr(0,eq)))]=strip_comment(t.substr(eq+1));
     }
     return true;
+}
+bool Ini::has_section(const std::string& section)const{return sections_.count(lower(section))!=0;}
+std::vector<std::string> Ini::section_lines(const std::string& section)const{
+    const auto i=sections_.find(lower(section));
+    return i==sections_.end()?std::vector<std::string>{}:i->second;
 }
 std::string Ini::text(const std::string& section,const std::string& key,const std::string& fallback)const{
     const auto i=values_.find(lower(section)+"/"+lower(key));
@@ -100,14 +97,52 @@ bool Ini::flag(const std::string& section,const std::string& key,bool fallback)c
     if(v=="false"||v=="0"||v=="no"||v=="off")return false;
     return fallback;
 }
+bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error){
+    std::string text;
+    {std::ifstream f(path,std::ios::binary);if(f){std::ostringstream s;s<<f.rdbuf();text=s.str();}}
+    const std::string eol=text.find("\r\n")!=std::string::npos?"\r\n":"\n";
+    // Lines with their own line ends, so untouched lines are copied byte for byte.
+    std::vector<std::string> lines;
+    for(std::size_t pos=0;pos<text.size();){
+        const auto nl=text.find('\n',pos);const auto next=nl==std::string::npos?text.size():nl+1;
+        lines.push_back(text.substr(pos,next-pos));pos=next;
+    }
+    if(!lines.empty()&&lines.back().back()!='\n')lines.back()+=eol;
+    std::vector<std::string> block{"["+section+"]"+eol};
+    for(const auto& l:body)block.push_back(l+eol);
+    // The section runs from its header to the next header or the end; its trailing blank lines stay in place.
+    const auto want=lower(section);
+    std::size_t start=lines.size(),end=lines.size();
+    for(std::size_t i=0;i<lines.size();++i){
+        const auto h=header(lines[i]);if(h.empty())continue;
+        if(start!=lines.size()){end=i;break;}
+        if(h==want)start=i;
+    }
+    if(start==lines.size()){
+        if(!lines.empty())lines.push_back(eol);
+        lines.insert(lines.end(),block.begin(),block.end());
+    }else{
+        while(end>start+1&&trim(lines[end-1]).empty())--end;
+        lines.erase(lines.begin()+std::ptrdiff_t(start),lines.begin()+std::ptrdiff_t(end));
+        lines.insert(lines.begin()+std::ptrdiff_t(start),block.begin(),block.end());
+    }
+    text.clear();for(const auto& l:lines)text+=l;
+    const auto temp=path+".tmp";
+    {std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f){error="cannot write "+temp;return false;}
+     f<<text;if(!f){error="cannot write "+temp;return false;}}
+    std::remove(path.c_str());
+    if(std::rename(temp.c_str(),path.c_str())!=0){error="cannot replace "+path;return false;}
+    return true;
+}
 Ini load_desktop_settings(const std::string& folder){
     Ini ini;
-    const auto own=folder+"/OutRunDesktop.ini",tweaks=folder+"/OutRun2006Tweaks.ini";
+    const auto own=folder+"/OutRunDesktop.ini";
     if(ini.load(own)){std::printf("settings: %s\n",own.c_str());return ini;}
-    if(ini.load(tweaks)){std::printf("settings: %s (no OutRunDesktop.ini)\n",tweaks.c_str());return ini;}
-    if(std::FILE* f=std::fopen(own.c_str(),"wb")){std::fputs(Template,f);std::fclose(f);}
+    Ini tweaks;
+    const bool legacy=tweaks.load(folder+"/OutRun2006Tweaks.ini")&&tweaks.has_section("DirectInput");
+    if(std::FILE* f=std::fopen(own.c_str(),"wb")){std::fputs(legacy?ImportHeader:Template,f);std::fclose(f);}
     ini.load(own);
-    std::printf("settings: %s (new)\n",own.c_str());
+    std::printf("settings: %s (new%s)\n",own.c_str(),legacy?"; OutRun2006Tweaks.ini bindings to import":"");
     return ini;
 }
 }

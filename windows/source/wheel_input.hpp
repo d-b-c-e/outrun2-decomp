@@ -1,17 +1,18 @@
 #pragma once
-// Wheel, pedals, shifter and button box through DirectInput (windows/): up to
-// five devices (wheel, separate throttle and brake, shifter, aux) bound with
-// the OutRun2006Tweaks [DirectInput] settings, merged into the game input
-// after the gamepad mapping (xbox_runtime::input_filter). In the race the
-// device record of 453BB0 carries the full-range steering word and the 0..255
-// pedals directly; in the menus the bound buttons drive the frontend.
-#include <cstdint>
-namespace outrun::platform { struct NativeInputState; }
+// Wheels, pedals, shifters and button boxes through DirectInput (windows/),
+// bound by the canonical [Controls] of OutRunDesktop.ini (controls_store.hpp;
+// Wheelkit writes it), merged into the game input after the gamepad mapping
+// (xbox_runtime::input_filter). Devices are matched by instance GUID only. In
+// the race the device record of 453BB0 carries the full-range steering word and
+// the 0..255 pedals directly; in the menus the bound buttons drive the
+// frontend. Development test injection and its observer: test_injection.hpp.
+namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::desktop {
 class Ini;
-// Reads the settings; the devices open with the first input sample (the
-// game window exists by then).
+// Reads the settings and logs the controls start line (after the one-time
+// import, at the first input sample, when one is pending). The devices open
+// with the first input sample (the game window exists by then).
 void wheel_input_configure(const Ini&);
-void wheel_input_filter(platform::NativeInputState&,std::uint32_t mode);
+void wheel_input_filter(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 void wheel_input_shutdown();
 }

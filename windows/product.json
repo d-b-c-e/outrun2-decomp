@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "productId": "outrun-2006-decomp",
+  "displayName": "OutRun 2006 (Decomp)",
+  "maturity": "Alpha",
+  "game": "OutRun 2006: Coast 2 Coast PC",
+  "family": "outrun-2006",
+  "canonicalRepository": "d-b-c-e/outrun2-decomp",
+  "repositoryUrl": "https://github.com/d-b-c-e/outrun2-decomp",
+  "upstreamRepository": "r4dius/outrun2-decomp",
+  "runtime": "OutRunDesktop",
+  "executable": "OutRunDesktop.exe",
+  "architecture": "x64",
+  "gameData": "the game folder's own files; OR2006C2C.EXE (Steam build, or the OutRun2006Tweaks retail EXE) is read for tables and never launched",
+  "settings": "OutRunDesktop.ini",
+  "controlsStore": "ini-controls-1: [Controls] in OutRunDesktop.ini, canonical (the game's only binding store)",
+  "log": "runtime.log",
+  "testInjection": "%LOCALAPPDATA%\\dbce\\outrun2006-decomp\\ (inject.on, inject.txt); observer Local\\DbceOutRunDecompInjectObserve-<nonce>",
+  "distribution": "none: the upstream repository has no licence file",
+  "features": {
+    "wheel": { "implemented": true, "accepted": false, "status": "DirectInput, canonical [Controls]; not driven at the wheel" },
+    "separateDevices": { "implemented": true, "accepted": false, "status": "each binding read from its own device instance; unverified" },
+    "hPattern": { "implemented": true, "accepted": false, "status": "gear pulses toward the held gate; gears 1-6, no neutral or reverse in the game; unverified" },
+    "forceFeedback": { "implemented": false, "accepted": false, "status": "planned: toolkit force model + wheelffb" },
+    "telemetry": { "implemented": false, "accepted": false, "status": "planned: Forza Horizon layout (STD-016)" },
+    "tripleScreen": { "implemented": false, "accepted": false, "status": "planned: per-panel off-centre projection" },
+    "f6Panel": { "implemented": false, "accepted": false, "status": "planned next (STD-030)" },
+    "testInjection": { "implemented": true, "accepted": false, "status": "development only; review pending" }
+  },
+  "legacy": {
+    "settingsImport": "the OutRun2006Tweaks [DirectInput] keys (this file's, else the folder's OutRun2006Tweaks.ini) are imported once into [Controls]; backup OutRunDesktop.ini.pre-controls-import, marker [ControlsImport]",
+    "relation": "a separate product from dbce-mods-outrun-2006 (the Tweaks fork) until the owner decides otherwise (STD-001)"
+  }
+}

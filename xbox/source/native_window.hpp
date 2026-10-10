@@ -4,12 +4,12 @@
 // or2_xbox_main (main.cpp) on the thread that owns the window.
 #include <cstdint>
 #include <string>
-namespace outrun::platform { struct NativeInputState; }
+namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::xbox_runtime {
 // Desktop builds (windows/) adjust the game input after the gamepad mapping:
-// wheel, pedals and further devices. `mode` is the game mode (16 / 18: race).
+// wheel, pedals and further devices. `runtime` is null until the game runs.
 // Unset on the Xbox and in the PC test build.
-using InputFilter=void(*)(outrun::platform::NativeInputState&,std::uint32_t mode);
+using InputFilter=void(*)(outrun::platform::NativeInputState&,const outrun::platform::NativeRuntimeContext* runtime);
 InputFilter& input_filter();
 struct NativeWindow {
     void* hwnd{};          // HWND (PC build)

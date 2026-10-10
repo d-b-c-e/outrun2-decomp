@@ -226,7 +226,7 @@ int or2_xbox_main(int argc,char** argv){
         if(held)pad.sample.connected=true;
         const std::uint32_t mode=diag.runtime?diag.runtime->mode_state.current:0u;
         out=input_adapter.update(pad.sample,mode);
-        if(const auto filter=outrun::xbox_runtime::input_filter())filter(out,mode);
+        if(const auto filter=outrun::xbox_runtime::input_filter())filter(out,diag.runtime);
         out.exit_requested|=diag.render_failed||!application_running();
         if(out.exit_requested)lifecycle.stop();};
     diag.sample_status=[&diag,&console_live](const outrun::platform::NativeInputState& out,std::uint64_t held,std::uint64_t down,std::uint64_t up){

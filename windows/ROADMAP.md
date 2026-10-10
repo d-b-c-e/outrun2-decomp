@@ -17,11 +17,14 @@ go upstream as small pull requests (first: `tweaks-exe`).
 
 1. ✅ **Retail EXE.** The Tweaks `OR2006C2C.exe` (the DVD build without its
    protection) maps to the Steam image (`0af17f5`, PR candidate).
-2. 🟡 **Wheel input** (this folder, first cut): DirectInput wheel, separate
-   pedal devices, shifter and aux devices, Tweaks `[DirectInput]` keys. Next:
-   test at the rig, H-pattern gears, calibration, hot-plug of devices added
-   after launch.
-3. ⬜ **Triple screens**: true per-screen projection. Per panel a yaw offset in
+2. 🟡 **Wheel input on the toolkit's controls contract** (STD-033): canonical
+   `[Controls]` (`ini-controls-1`) that Wheelkit writes, one-time import of the
+   Tweaks `[DirectInput]` keys, H-pattern, test injection + observer for
+   Wheelkit's closed-loop tests (with Astra). Next: Astra's review, a run at the
+   rig, the closed-loop qualification (STD-034), hot-plug.
+2a. ⬜ **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
+   our own D3D11 renderer, standard pages, each later feature adds its controls.
+3. ⬜ **Triple screens**: true per-screen projection (triple toolkit math, STD-007/015/019/022). Per panel a yaw offset in
    `camera_view_482f20` and a matching off-centre frustum in
    `camera_perspective_404310` (it already builds `D3DXMatrixPerspectiveOffCenterRH`
    and the culling planes); the scene closure of `Presenter::set_pc_scene` drawn
@@ -30,8 +33,9 @@ go upstream as small pull requests (first: `tweaks-exe`).
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
    DirectInput effects on the wheel opened exclusively.
-5. ⬜ **Telemetry**: the Tweaks fork's shared-memory layout (`[Telemetry]
-   SharedMemName`), so the existing SimHub plugin works unchanged.
+5. ⬜ **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
+   toolkit `native/forza`); the Tweaks fork's shared memory as well if the SimHub
+   plugin still needs it.
 6. ⬜ **Tweaks parity** (table below) and the original game's limits the
    decomp can lift, e.g. steering quantised to -127..127 in 453860.
 7. Upstream bugs, as pull requests: #2 30-second hang at the end of a race,
@@ -51,12 +55,12 @@ needed in a native build.
 | | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); DirectInput devices re-acquire, new ones need a restart |
 | | DefaultManualTransmission, HudToggleKey | ⬜ | |
 | | Vibration\*, ImpulseVibration\* | ⬜ | gamepad rumble / trigger motors |
-| DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | same keys and scaling as Tweaks |
-| | ThrottleDeviceGuid, BrakeDeviceGuid | ✅ | by GUID (`...DeviceName` not read) |
-| DirectInput.Calibration | Steering/Throttle/Brake Min/Center/Max | ⬜ | |
+| DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | canonical `[Controls]` (`ini-controls-1`); the Tweaks keys are imported once with Tweaks' scaling |
+| | ThrottleDeviceGuid, BrakeDeviceGuid | ✅ | each binding names its own device instance |
+| DirectInput.Calibration | Steering/Throttle/Brake Min/Center/Max | ⬜ | contract `range` / `rest` / `travel` cover pedal endpoints; steering calibration open |
 | DirectInput.Shifter | sequential | ✅ | |
-| | hpattern gears 1-6, R | ⬜ | needs the current gear from the car state |
-| DirectInput.Aux | DeviceGuid, buttons | ✅ | |
+| | hpattern gears 1-6 | 🟡 | pulses toward the gate's gear (car +208); R: the game has no reverse |
+| DirectInput.Aux | DeviceGuid, buttons | ✅ | any action may sit on any device (one binding per action) |
 | Telemetry | Enable, SharedMemName | ⬜ | step 5 |
 | FFB | all | ⬜ | step 4 |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
