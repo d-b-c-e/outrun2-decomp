@@ -688,6 +688,8 @@ in the status.
   - then stop with `gear target not reached (gear g, target t)`, logged once until the gate changes.
 - Impossible gears (above the car's top gear) end the same way, because the car's gear count has not been read yet.
 - Neutral and reverse are `unsupported` (the game has none). Forward-gear chasing never stands in for them.
+- A scene change (any mode change) resets the gearbox, and its own tick sends no pulse, so every pulse is followed by a
+  released tick. A fresh sequence starts on the next tick (slice 2).
 
 **State signals:**
 - mode and in-gameplay;
@@ -806,7 +808,8 @@ Each slice is written as tests and code, reviewed, and accepted before the next 
 | P20 | Recorder: one producer, emission versus source times, bounded rows and bytes, overflow makes the capture incomplete, flush deadline, metadata pins | fake slow writer; managed `SessionReader` | U |
 | P21 | Shutdown order: neutral frame, then force stop (`none` here), then run end, then recorder drain, then leases; with the input thread stopped: no hang, no release of an in-use handle, `unresolved` reported | fake stuck input thread | U |
 
-**Slice 2: OutRun adapter on fakes.** No devices, no game window.
+**Slice 2: OutRun adapter on fakes.** No devices, no game window. It is split in two: 2a covers the consumer side (P22,
+P23, P25, P26); 2b covers the fences and the run folder (P24, P27).
 
 | # | Requirement | Proof | Level |
 |---|---|---|---|
@@ -853,3 +856,4 @@ Each slice is written as tests and code, reviewed, and accepted before the next 
 | P9 result | 2026-10-10 | Astra | Wheelkit has no generic controls runtime-status reader. The released writer refuses the shim receipt (P9a, proven). P9b, a versioned reader with freshness, build and profile checks, is future integration. UI integration is not claimed from a log token (`inbox/2026-10-10-romi-shim-wheelkit-p9.md`, hcom 9351). |
 | slice 1 review | 2026-10-10 | Astra | Four contract defects reproduced against `fe11a2b`: decisions used the tick's start time (stale input and expired injection got through after a slow read); a delayed admission extended the session; a profile with zero usable objects was admitted; the control-to-input event inbox was unbounded (hcom 9541). |
 | slice 1.1 | 2026-10-10 | zero | Fixes: the decision time is re-read after every device read, and stale samples fail a test (ordinary play: `stale`, unavailable); the session deadline is latched on the monotonic clock when admission is requested, and repeats never refresh it; admission requires at least one usable binding; the control inbox is bounded (64), duplicates are coalesced into one counted event per tick, refusals after the first are counted, and an overflow fails the run while generations stay accounted for. 134 checks. Mutation check 23 of 25 caught (the same 2 unreachable guards). Astra's four reproductions now show each defect gone. |
+| slice 2a | 2026-10-10 | zero | OutRun adapter on fakes (`windows/source/outrun_adapter.{hpp,cpp}`, `windows/tests/test_outrun_adapter.cpp`, 61 checks, clean at `/W4`). The chain is the game's own: fake pad, then `ps5::DualSenseInput`, then a shim frame from the core and fake provider, then the adapter, into `NativeInputState`. Covers P22 (sink, max-merge with the pad, pedals without steering, bits and edges), P23 (H-pattern on a monotonic clock: deadline, retries, ambiguous, unavailable, impossible, scene-change reset with a released tick), P25 (`select_pad` drops an owned WGI identity before the pad adapter; one consumer), P26 (native-only start, coexistence, latched and inert suppression), plus release and the stop frame. Mutation check (`windows/tests/mutations.py`, which replaces `shim_mutations.py`): adapter 15 of 16 caught; the miss is a redundant flag set that suppression already covers. P24 and P27 follow in 2b. |

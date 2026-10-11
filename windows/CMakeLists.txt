@@ -23,5 +23,13 @@ add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)
 target_include_directories(test_shim PRIVATE shim tests vendor/controls)
 target_compile_features(test_shim PRIVATE cxx_std_17)
 target_compile_options(test_shim PRIVATE /W4)
-target_compile_options(test_shim PRIVATE /W4)
 add_test(NAME shim COMMAND test_shim)
+
+# The OutRun 2006 shim adapter (source/outrun_adapter), slice 2: the game's pad adapter, the shim core and the adapter
+# on fakes, into the NativeInputState the game consumes.
+add_executable(test_outrun_adapter tests/test_outrun_adapter.cpp source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp
+    ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_outrun_adapter PRIVATE shim tests source vendor/controls ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_outrun_adapter PRIVATE cxx_std_17)
+target_compile_options(test_outrun_adapter PRIVATE /W4)
+add_test(NAME outrun_adapter COMMAND test_outrun_adapter)
