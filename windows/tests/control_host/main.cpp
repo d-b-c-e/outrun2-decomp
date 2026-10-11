@@ -16,7 +16,7 @@ struct NoCapture {
 struct Io final:c::Io {
     const std::string mode,dev;
     HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr),gate=CreateEventW(nullptr,TRUE,FALSE,nullptr);
-    std::atomic<int> appends{0},finishes{0},accepted{0};
+    std::atomic<int> appends{0},finishes{0},accepted{0},closed_events{0};
     Io(std::string m,std::string d):mode(std::move(m)),dev(std::move(d)){}
     ~Io(){CloseHandle(entered);CloseHandle(gate);}
     c::Read read_session()override{return {c::ReadState::Bytes,"nonce=ControlWorkerFixture\nexpires=2000\n",{}};}
@@ -25,7 +25,10 @@ struct Io final:c::Io {
         return {c::ReadState::Bytes,"nonce=ControlWorkerFixture\nbatch=1\ninject raw button 3 dev="+dev+" value=1 ms=5000\n",{}};
     }
     std::uint64_t unix_seconds()override{return 1000;}
-    bool append(const c::Journal& j)override{++appends;for(const auto& e:j.events)if(e.kind==EventKind::BatchAccepted)++accepted;return mode!="write-failed";}
+    bool append(const c::Journal& j)override{++appends;for(const auto& e:j.events){
+        if(e.kind==EventKind::BatchAccepted)++accepted;
+        if(e.kind==EventKind::RunChanged&&e.detail=="failed: control admission closed")++closed_events;
+    }return mode!="write-failed";}
     bool finish()override{
         ++finishes;
         if(mode=="finish-blocked"){SetEvent(entered);WaitForSingleObject(gate,INFINITE);}
@@ -52,19 +55,22 @@ int child(const std::string& mode,const std::wstring& folder){
     }
     require(observed,"control path observed before stop");
     host->close_control_admission();
-    const auto& neutral=host->tick();
-    require(neutral.suppress_native&&neutral.action[std::size_t(action_index("confirm"))].value==0,"final neutral Core frame");
+    if(mode!="missing-final-tick"){
+        const auto& neutral=host->tick();
+        require(neutral.suppress_native&&neutral.action[std::size_t(action_index("confirm"))].value==0,"final neutral Core frame");
+    }
     h::Budget budget;budget.control_ms=100;
     auto report=host->stop(budget);
     require(report.control_present,"control worker reported");
     require(in->counters.force_calls==0&&in->counters.release_during_read==0&&in->counters.after_release==0,"no force or lifetime misuse");
     if(mode=="resolved"){
         require(report.resolved&&report.control_joined&&report.control_complete,"normal worker completion");
-        require(io->accepted==1&&io->finishes==1,"final journal and sink close observed");
+        require(io->accepted==1&&io->closed_events==1&&io->finishes==1,"final journal and sink close observed");
         require(host->stop().elapsed_us==report.elapsed_us,"stop receipt immutable");
         host.reset();return 0;
     }
     require(!report.resolved,"fault cannot qualify host");
+    if(mode=="missing-final-tick")require(report.control_joined&&report.control_complete&&!report.control_final_tick&&io->closed_events==0,"missing closure tick distinguished from sink completion");
     if(mode=="late-read"){
         SetEvent(io->gate);Sleep(150);
         require(io->accepted==0,"late read cannot activate or log an accepted batch");

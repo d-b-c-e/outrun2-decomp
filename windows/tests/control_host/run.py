@@ -33,13 +33,13 @@ def child(exe,mode,dest):
     (dest.parent/(dest.name+'-supervisor.json')).write_text(json.dumps(result,indent=2))
     return result
 exe=build('original',here,out/'build');cases=[]
-for mode in ['resolved','write-failed','finish-failed','read-blocked','finish-blocked','thread-tail','late-read']:
+for mode in ['resolved','write-failed','finish-failed','read-blocked','finish-blocked','thread-tail','late-read','missing-final-tick']:
     r=child(exe,mode,out/mode);h=r['host'];good=mode=='resolved'
     if r['stderr'] or r['forced']==good or (good and r['exit']!=0):raise RuntimeError(mode+' child failure '+r['stderr'])
     if not h or h['pid']!=r['pid'] or h['creationTime']!=r['creationTime'] or h['nonce']!='ControlWorkerFixture':raise RuntimeError('Identity mismatch: '+mode)
     if h['state']!=('resolved' if good else 'unresolved') or not h['inputReleased'] or not h['controlPresent'] or h['elapsedUs']>1_850_000:raise RuntimeError('Stop report mismatch: '+mode)
-    joined=mode in ['resolved','write-failed','finish-failed'];complete=mode in ['resolved','thread-tail']
-    if h['controlJoined']!=joined or h['controlComplete']!=complete:raise RuntimeError('Outcome/join mismatch: '+mode)
+    joined=mode in ['resolved','write-failed','finish-failed','missing-final-tick'];complete=mode in ['resolved','thread-tail','missing-final-tick']
+    if h['controlJoined']!=joined or h['controlComplete']!=complete or h['controlFinalTick']!=(mode!='missing-final-tick'):raise RuntimeError('Outcome/join mismatch: '+mode)
     cases.append(r)
 for script in ['teardown_audit.py','teardown_objects.py']:
     run(script,[sys.executable,'-B',repo/'windows/tests'/script,repo]);run(script+'-mutations',[sys.executable,'-B',repo/'windows/tests'/script,repo,'--mutations'])
@@ -48,6 +48,7 @@ plans=[
     ('thread-tail','windows/host/provider_host.hpp','r.control_joined=returned&&join_by(control_thread_,deadline);','r.control_joined=returned;','thread-tail','fault cannot qualify host'),
     ('journal-failure','windows/host/provider_host.hpp','if(!r.control_complete)r.unresolved.push_back("control journal incomplete");','if(!r.control_complete){}','write-failed','fault cannot qualify host'),
     ('final-drain','windows/shim/control_pump.hpp','const bool written=io_.append(drain());','const bool written=true;','resolved','final journal and sink close observed'),
+    ('final-tick','windows/host/provider_host.hpp','if(!r.control_final_tick)r.unresolved.push_back("control closure has no final input tick");','if(!r.control_final_tick){}','missing-final-tick','fault cannot qualify host'),
 ]
 for name,rel,old,new,mode,why in plans:
     root=out/'mutations'/name
@@ -59,4 +60,4 @@ for name,rel,old,new,mode,why in plans:
     mutations.append(dict(name=name,caught=True,reason=bad['stderr'].strip()))
 if pin()!=before:raise RuntimeError('Source changed during proof')
 (out/'receipt.json').write_text(json.dumps(dict(source=before,passed=True,executableSha256=hashlib.sha256(exe.read_bytes()).hexdigest(),cases=cases,mutations=mutations,commands=commands),indent=2))
-print('PASS seven control-host child cases, teardown audits and three defect controls; '+str(out/'receipt.json'))
+print('PASS eight control-host child cases, teardown audits and four defect controls; '+str(out/'receipt.json'))

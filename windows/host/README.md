@@ -15,8 +15,12 @@ does not represent a complete recording or authorize a session seal.
 
 This extraction is source groundwork for desktop adoption, not a wired game
 host. No desktop build, installed game, controls path or recorder has changed.
-The caller must still implement the documented neutral step, fence/admission,
-control worker, capture lifecycle, immutable test latch and unresolved exit.
+The caller must still implement the documented neutral adapter step,
+fence/admission, concrete control I/O, capture lifecycle, immutable test latch
+and unresolved exit. The host now owns the control worker: close admission,
+then tick and apply the final neutral frame, then stop. With a control worker,
+skipping that final tick makes shutdown unresolved even if the sink closes.
+This verifies Core observation; only the game adapter can prove application.
 Synchronous report file I/O still needs the identity-bound external deadline.
 Host-side detach/termination policy belongs here, never in provider/Core workers.
 

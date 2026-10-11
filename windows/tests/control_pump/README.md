@@ -30,7 +30,7 @@ log evidence; a qualified capture must refuse a failed/unjoined control worker
 or any unexplained journal gap. No live game or installed input path changes.
 
 Follow-up host integration supplies an explicit `finish`: after the input thread
-has emitted its terminal neutral tick and closed admission, the worker drains
+has closed admission and then emitted its terminal neutral tick, the worker drains
 the remaining terminal status/event and closes its sink. Read/parse failures
 still drain into a healthy journal, while the outcome remains Failed. A broken
 journal is never retried, and any reader must require the terminal reason before

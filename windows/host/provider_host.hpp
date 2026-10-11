@@ -46,7 +46,7 @@ struct ReleaseState {
 };
 
 struct Report : LifetimeReport {
-    bool control_present=false,control_joined=true,control_complete=true;
+    bool control_present=false,control_joined=true,control_complete=true,control_final_tick=true;
     int released = 0, held = 0;     // DInputProvider::ShutdownReport
     bool input_released = false;
     std::string provider_detail;
@@ -61,6 +61,7 @@ template<class RecorderType> class ProviderHost {
     std::thread worker_, release_, control_thread_;
     std::shared_ptr<ControlWorkerState> control_;
     bool latched_{};
+    bool control_close_requested_{},control_final_tick_{};
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
@@ -93,13 +94,22 @@ public:
     }
     ProviderHost(const ProviderHost&) = delete; ProviderHost& operator=(const ProviderHost&) = delete;
 
-    const dbce::shim::Frame& tick() { return w_->core->tick(); }   // input thread
+    const dbce::shim::Frame& tick() { // input thread; a close must reach Core before the final drain
+        const auto& frame=w_->core->tick();
+        if(control_close_requested_){
+            bool neutral=!latched_||(frame.suppress_native&&run_terminal(frame.run)&&frame.down==0);
+            if(latched_)for(const auto& action:frame.action)neutral=neutral&&action.value==0;
+            control_final_tick_=neutral;
+        }
+        return frame;
+    }
     std::vector<dbce::shim::DeviceReport> device_reports()const { return w_->core->device_reports(); } // input thread
     long long worker_passes() const { return w_->passes.load(); }
     RecorderType& recorder() { return *recorder_; } // input thread; the host owns its full lifetime
     void close_control_admission(){
         if(std::this_thread::get_id()!=input_)throw std::logic_error("close control on input thread");
         w_->core->close_control();
+        control_close_requested_=true;
     }
 
     // Input thread, once. I/O is performed only on the owned control worker.
@@ -142,7 +152,8 @@ public:
                  ",\"inputReleased\":" + (r->input_released ? "true" : "false") + ",\"elapsedUs\":" + std::to_string(r->elapsed_us) + ",\"unresolved\":[";
             for (size_t i = 0; i < r->unresolved.size(); ++i) t += (i ? ",\"" : "\"") + r->unresolved[i] + "\"";
             t += "],\"controlPresent\":"+std::string(r->control_present?"true":"false")+
-                 ",\"controlJoined\":"+(r->control_joined?"true":"false")+",\"controlComplete\":"+(r->control_complete?"true":"false");
+                 ",\"controlJoined\":"+(r->control_joined?"true":"false")+",\"controlComplete\":"+(r->control_complete?"true":"false")+
+                 ",\"controlFinalTick\":"+(r->control_final_tick?"true":"false");
         }
         t += "}";
         SetFilePointer(report_, 0, nullptr, FILE_BEGIN); DWORD n = 0;
@@ -157,11 +168,14 @@ public:
         Report r;
         write_report("stopping", nullptr);                                            // phase 0
         if (std::this_thread::get_id() != input_) r.unresolved.push_back("stop off the input thread");
-        // Caller already wrote its final neutral adapter frame and stopped input
-        // ticks. Close admission before waiting: a late file read cannot enqueue.
+        // Caller closes admission, then ticks/applies its final neutral adapter
+        // frame, then stops input ticks. Closing here alone cannot publish the
+        // Core's terminal event, so require that order whenever control exists.
         w_->core->close_control();
         if(control_){
             r.control_present=true;control_->stop=true;control_->cv.notify_all();
+            r.control_final_tick=control_final_tick_;
+            if(!r.control_final_tick)r.unresolved.push_back("control closure has no final input tick");
             const auto deadline=Clock::now()+std::chrono::milliseconds(b.control_ms);
             std::unique_lock<std::mutex> l(control_->m);
             const bool returned=control_->cv.wait_until(l,deadline,[&]{return control_->done;});

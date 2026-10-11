@@ -20,13 +20,16 @@ defence in depth. The control worker drains the final input events and calls
 detached as successful completion; only the unresolved host destructor has its
 documented non-waiting policy, covered by exact teardown audit entries.
 
-Seven child cases cover clean completion, failed append, failed sink finish,
+Eight child cases cover clean completion, failed append, failed sink finish,
 blocked read, blocked finish, a stuck FLS thread-exit callback and a read released
-after the deadline. The clean case requires normal exit 0, a consumed press and
+after the deadline, and shutdown without a tick after closing admission. The
+host reports the latter unresolved even when its journal and OS thread finish.
+The clean case requires normal exit 0, a consumed press and
 neutral release, its full final batch journal, and no force or use-after-release.
-All six fault cases refuse resolution and require externally observed shutdown.
-Three planted defects must fail: treating a returned function as a joined thread,
-ignoring failed journal completion, or skipping final journal drain.
+All seven fault cases refuse resolution and require externally observed shutdown.
+Four planted defects must fail: treating a returned function as a joined thread,
+ignoring failed journal completion, skipping final journal drain, or ignoring
+the missing closure tick. The healthy journal must contain the closure event.
 
 The no-capture test recorder acknowledges it has nothing to drain; this is not
 a sealed recording. The journal is a scripted memory sink. Persistent log
