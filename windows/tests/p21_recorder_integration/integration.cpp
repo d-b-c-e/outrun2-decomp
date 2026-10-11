@@ -133,8 +133,9 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
     std::wstring cmd = L"\"" + self + L"\" --child " + std::wstring(mode.begin(), mode.end()) + L" \"" + capture_dir.wstring() + L"\"";
     STARTUPINFOW si{}; si.cb = sizeof si; PROCESS_INFORMATION pi{};
     check(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi) != 0, "spawn child");
-    // Handles close on every path. A proof that fails with the child still alive ends it (best effort, never waits) so
-    // no parked child outlives the supervisor; that path writes no exit observation.
+    // Handles close on every path. A proof that fails with the child still alive requests its end (best effort, never
+    // waits). That cannot guarantee the child is gone, e.g. with I/O still pending (Astra 12222). What this path does
+    // guarantee: the proof fails and no exit observation is written.
     struct Owned {
         PROCESS_INFORMATION& p; bool observed = false;
         ~Owned() { if (!observed && WaitForSingleObject(p.hProcess, 0) == WAIT_TIMEOUT) TerminateProcess(p.hProcess, 0xDBCE0F0E); CloseHandle(p.hThread); CloseHandle(p.hProcess); }
@@ -150,9 +151,10 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
         const auto st = state_of(capture_dir);
         if (st == "unresolved" || p21::Clock::now() >= bound) {
             if (st == "unresolved") Sleep(300);      // a parked child must not have exited on its own meanwhile
-            if (!wait(0)) { check(TerminateProcess(pi.hProcess, 0xDBCE0F0F) != 0, "supervisor ended the child"); o.forced = true; }
+            // Whether a forced end is needed depends on timing, so only its failure counts (a deterministic check total).
+            if (!wait(0)) { if (!TerminateProcess(pi.hProcess, 0xDBCE0F0F)) check(false, "supervisor ended the child"); o.forced = true; }
             // Bounded: termination can wait on pending I/O. Still alive means no observation, and the proof fails.
-            check(wait(5000), "child ended within the bound after its forced end");
+            if (!wait(5000)) check(false, "child ended within the bound after its forced end");
             break;
         }
     }

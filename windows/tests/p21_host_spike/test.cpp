@@ -161,7 +161,7 @@ static Run supervise(const std::wstring& self, const std::string& mode, const st
     }
     if (!ok || !exited || !GetExitCodeProcess(pi.hProcess, &run.code) || run.code == STILL_ACTIVE) { run.state = "unobserved"; run.code = STILL_ACTIVE; }
     else run.state = host_report(dir).state;
-    if (!exited && WaitForSingleObject(pi.hProcess, 0) == WAIT_TIMEOUT) TerminateProcess(pi.hProcess, 0xDBCE0F0E);   // never leave a parked child
+    if (!exited && WaitForSingleObject(pi.hProcess, 0) == WAIT_TIMEOUT) TerminateProcess(pi.hProcess, 0xDBCE0F0E);   // best effort: requests the end, cannot guarantee it (pending I/O); the run already counts as unobserved
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return run;
 }
