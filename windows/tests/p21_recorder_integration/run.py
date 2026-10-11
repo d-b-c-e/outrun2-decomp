@@ -61,10 +61,12 @@ if args.mutations:
         if p.returncode == 0 or reasons[name] not in p.stderr: raise RuntimeError('Mutation not caught by intended check: ' + name)
         mutations.append(dict(name=name, detected=True, stage='supervised', exit=p.returncode, output=p.stdout + p.stderr))
     managed = {
-        'finalizer-ignores-host-state': ('Check(h.GetProperty("state").GetString()=="resolved","host shutdown resolved");', '',
+        'finalizer-ignores-host-state': ('Check(Str(h,"state")=="resolved","host shutdown resolved");', '',
                                          'a valid worker report beside an unresolved host and a forced exit never seals'),
-        'finalizer-ignores-exit-observation': ('Check(!e.GetProperty("forced").GetBoolean()&&e.GetProperty("exitCode").GetUInt32()==0,"normal exit observed, not forced");', '',
+        'finalizer-ignores-exit-observation': ('Check(!Bool(e,"forced")&&Num(e,"exitCode")==0,"normal exit observed, not forced");', '',
                                                'forced exit refused'),
+        'finalizer-accepts-zero-identity': ('Check(Num(h,"pid")!=0&&Num(h,"creationTime")!=0&&Num(e,"pid")!=0&&Num(e,"creationTime")!=0,"nonzero process identity in both reports");', '',
+                                            'matching zero identities refused'),
     }
     for name, (old, new, reason) in managed.items():
         src = result / 'mutations' / name; src.mkdir(parents=True)

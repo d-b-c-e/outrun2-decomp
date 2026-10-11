@@ -76,6 +76,8 @@ public:
         p21::Report r;
         write_report("stopping", nullptr, rs::Outcome::Open);
         if (std::this_thread::get_id() != input_) r.unresolved.push_back("stop off the input thread");
+        // The seal binds this report to the supervisor's observation by pid and creation time; without them it cannot.
+        if (GetCurrentProcessId() == 0 || creation_time(GetCurrentProcess()) == 0) r.unresolved.push_back("host identity unavailable");
         // Phase 4: the producer (this thread) ends the tape it produced, then a bounded drain and the thread's own join.
         producer_->finish(last_);
         const auto deadline = p21::Clock::now() + std::chrono::milliseconds(Budget.recorder_ms);
@@ -131,23 +133,37 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
     std::wstring cmd = L"\"" + self + L"\" --child " + std::wstring(mode.begin(), mode.end()) + L" \"" + capture_dir.wstring() + L"\"";
     STARTUPINFOW si{}; si.cb = sizeof si; PROCESS_INFORMATION pi{};
     check(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi) != 0, "spawn child");
-    const auto identity = creation_time(pi.hProcess);   // the supervisor's identity binding: this handle's process
+    // Handles close on every path. A proof that fails with the child still alive ends it (best effort, never waits) so
+    // no parked child outlives the supervisor; that path writes no exit observation.
+    struct Owned {
+        PROCESS_INFORMATION& p; bool observed = false;
+        ~Owned() { if (!observed && WaitForSingleObject(p.hProcess, 0) == WAIT_TIMEOUT) TerminateProcess(p.hProcess, 0xDBCE0F0E); CloseHandle(p.hThread); CloseHandle(p.hProcess); }
+    } owned{pi};
+    // The identity binding: this handle's process. A failed query is never a usable identity (Astra 12080).
+    const auto identity = creation_time(pi.hProcess);
+    check(pi.dwProcessId != 0 && identity != 0, "supervisor holds the child's nonzero identity");
     const auto bound = p21::Clock::now() + std::chrono::milliseconds(Budget.recorder_ms + Budget.leases_ms + Budget.workers_ms + 2000 + 2000);
+    // A failed wait throws (no observation). Only failures count, so the check total does not depend on poll timing.
+    auto wait = [&](DWORD ms) { const DWORD w = WaitForSingleObject(pi.hProcess, ms); if (w != WAIT_OBJECT_0 && w != WAIT_TIMEOUT) check(false, "supervisor wait did not fail"); return w == WAIT_OBJECT_0; };
     for (;;) {
-        if (WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) break;
+        if (wait(20)) break;
         const auto st = state_of(capture_dir);
         if (st == "unresolved" || p21::Clock::now() >= bound) {
-            Sleep(st == "unresolved" ? 300 : 0);
-            if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) { TerminateProcess(pi.hProcess, 0xDBCE0F0F); o.forced = true; }
-            WaitForSingleObject(pi.hProcess, INFINITE); break;
+            if (st == "unresolved") Sleep(300);      // a parked child must not have exited on its own meanwhile
+            if (!wait(0)) { check(TerminateProcess(pi.hProcess, 0xDBCE0F0F) != 0, "supervisor ended the child"); o.forced = true; }
+            // Bounded: termination can wait on pending I/O. Still alive means no observation, and the proof fails.
+            check(wait(5000), "child ended within the bound after its forced end");
+            break;
         }
     }
-    GetExitCodeProcess(pi.hProcess, &o.code); o.state = state_of(capture_dir);
-    if (fs::exists(capture_dir)) {
+    check(GetExitCodeProcess(pi.hProcess, &o.code) != 0 && o.code != STILL_ACTIVE, "supervisor observed the exit code");
+    o.state = state_of(capture_dir);
+    owned.observed = true;
+    if (fs::exists(capture_dir)) {   // written only after an exit this supervisor actually observed
         std::ofstream e(capture_dir / "exit.json", std::ios::binary);
         e << "{\"pid\":" << pi.dwProcessId << ",\"creationTime\":" << identity << ",\"exitCode\":" << o.code << ",\"forced\":" << (o.forced ? "true" : "false") << "}";
+        e.close(); check(bool(e), "exit observation written");
     }
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return o;
 }
 

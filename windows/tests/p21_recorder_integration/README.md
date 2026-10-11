@@ -29,14 +29,27 @@ The parent is the identity-bound supervisor. It runs four child host lifetimes, 
 
 The supervisor writes `exit.json` for each capture: the PID and creation time of the process it spawned, the exit code,
 and whether it forced the end.
+- It writes the file only after an exit it actually observed.
+- Every process wait is bounded, including a 5 s wait after `TerminateProcess`.
+- A failed wait, `TerminateProcess` or `GetExitCodeProcess` call fails the proof, as does a child still alive after
+  the bounded post-terminate wait. A failed run writes no exit observation and ends a still-running child without
+  waiting.
+- A zero PID or creation time (a failed `GetProcessTimes`) is refused. The host also does not resolve without its own
+  nonzero identity.
+
+**Its file I/O is not a hard bound.** Polling `host-shutdown.json` and writing `exit.json` are synchronous reads and
+writes, and either can block. In this proof, `run.py`'s per-command timeout (300 s) is the outer fixture guard.
 
 The finalizer (`managed/`) seals only with all three facts bound together:
 - the reviewed queued-frames validation, copied verbatim: worker report layout, nonce, closed bytes, profile, footer,
   382-channel schema and row bound;
 - the host report: `resolved`, the same nonce, recorder `Complete` and joined, nothing unresolved;
-- the supervisor's observation: the same PID and creation time as the host reported, exit 0, not forced.
+- the supervisor's observation: the same nonzero PID and creation time as the host reported, exit 0, not forced.
 
-All seven members go into `complete.tsv`. On copies of the resolved capture it refuses nine targeted mutations, each
+Each field is read with its type checked. A missing or mistyped field refuses with its name, never with a parser
+exception or a default value.
+
+All seven members go into `complete.tsv`. On copies of the resolved capture it refuses 13 targeted mutations, each
 for its own reason:
 - host unresolved;
 - recorder not joined;
@@ -46,13 +59,18 @@ for its own reason:
 - another process's exit;
 - missing exit observation;
 - missing host report;
-- a sealed exit observation changed after sealing.
+- a sealed exit observation changed after sealing;
+- zero PID and creation time in both reports, matching each other;
+- an exit observation without a creation time;
+- a host report without a PID;
+- a mistyped `forced` field.
 
-`run.py --mutations` adds four negative controls, each required to fail at its intended check:
+`run.py --mutations` adds five negative controls, each required to fail at its intended check:
 - a child that returns instead of parking;
 - a host that ignores the provider and the lease;
 - a finalizer that ignores the host state;
-- a finalizer that ignores the exit observation.
+- a finalizer that ignores the exit observation;
+- a finalizer that accepts matching zero identities.
 
 ## Not shown
 

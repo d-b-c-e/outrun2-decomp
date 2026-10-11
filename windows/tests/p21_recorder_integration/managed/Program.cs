@@ -69,19 +69,27 @@ static class Program {
         Check(data.Skip(1).Take(rows.Length).All(x=>(ulong)Encoding.UTF8.GetByteCount(x)+1<=bound),"every actual row fits declared bound");
         return rows;
     }
-    // The two P21 facts, bound to the worker report's nonce and to each other's process identity.
+    // Typed reads: a missing or mistyped field refuses with its name, never a parser exception or a default.
+    static JsonElement Prop(JsonElement o,string name,params JsonValueKind[] kinds){
+        ++checks;if(o.ValueKind!=JsonValueKind.Object||!o.TryGetProperty(name,out var v))throw new InvalidDataException("missing "+name);
+        Check(kinds.Contains(v.ValueKind),"wrong type: "+name);return v;}
+    static string Str(JsonElement o,string n)=>Prop(o,n,JsonValueKind.String).GetString()!;
+    static bool Bool(JsonElement o,string n)=>Prop(o,n,JsonValueKind.True,JsonValueKind.False).GetBoolean();
+    static ulong Num(JsonElement o,string n){var v=Prop(o,n,JsonValueKind.Number);Check(v.TryGetUInt64(out var x),"not an unsigned integer: "+n);return x;}
+    // The two P21 facts, bound to the worker report's nonce and to each other's nonzero process identity.
     static void ValidateHostAndExit(string dir){
         var nonce=File.ReadAllLines(Path.Combine(dir,"worker.tsv"))[0].Split('\t')[8];
-        using var host=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,"host-shutdown.json")));
-        using var exit=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,"exit.json")));
+        JsonDocument Parse(string name){try{return JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,name)));}catch(JsonException x){throw new InvalidDataException("unreadable "+name,x);}}
+        using var host=Parse("host-shutdown.json");using var exit=Parse("exit.json");
         var h=host.RootElement;var e=exit.RootElement;
-        Check(h.GetProperty("state").GetString()=="resolved","host shutdown resolved");
-        Check(h.GetProperty("nonce").GetString()==nonce,"host report names this capture");
-        Check(h.GetProperty("recorderJoined").GetBoolean()&&h.GetProperty("recorderOutcome").GetInt32()==2,"recorder complete and its worker joined");
-        Check(h.GetProperty("unresolved").GetArrayLength()==0,"nothing unresolved");
-        Check(e.GetProperty("pid").GetUInt32()==h.GetProperty("pid").GetUInt32()&&e.GetProperty("creationTime").GetUInt64()==h.GetProperty("creationTime").GetUInt64(),
-            "the supervisor observed the same process the host reported from");
-        Check(!e.GetProperty("forced").GetBoolean()&&e.GetProperty("exitCode").GetUInt32()==0,"normal exit observed, not forced");
+        Check(Str(h,"state")=="resolved","host shutdown resolved");
+        Check(Str(h,"nonce")==nonce,"host report names this capture");
+        Check(Bool(h,"recorderJoined")&&Num(h,"recorderOutcome")==2,"recorder complete and its worker joined");
+        Check(Prop(h,"unresolved",JsonValueKind.Array).GetArrayLength()==0,"nothing unresolved");
+        // A failed identity query yields 0 on both sides; equal zeros identify nothing (Astra 12080).
+        Check(Num(h,"pid")!=0&&Num(h,"creationTime")!=0&&Num(e,"pid")!=0&&Num(e,"creationTime")!=0,"nonzero process identity in both reports");
+        Check(Num(e,"pid")==Num(h,"pid")&&Num(e,"creationTime")==Num(h,"creationTime"),"the supervisor observed the same process the host reported from");
+        Check(!Bool(e,"forced")&&Num(e,"exitCode")==0,"normal exit observed, not forced");
     }
     static void Finalize(string dir){Check(!File.Exists(Path.Combine(dir,"complete.tsv")),"new seal only");var held=Freeze(dir,false);
         try{ValidateQueued(dir);ValidateHostAndExit(dir);ArtifactSeal.Complete(dir,Required);}finally{foreach(var f in held)f.Dispose();}}
@@ -117,7 +125,13 @@ static class Program {
         {var d=Copy();File.Delete(Path.Combine(d,"exit.json"));Check(Refused(()=>Finalize(d),"exit.json"),"missing exit observation refused");}
         {var d=Copy();File.Delete(Path.Combine(d,"host-shutdown.json"));Check(Refused(()=>Finalize(d),"host-shutdown.json"),"missing host report refused");}
         {var d=Copy();Finalize(d);Json(d,"exit.json","\"exitCode\":0","\"exitCode\":0 ");Check(Refused(()=>Read(d),"Capture changed"),"a sealed exit observation cannot change");}
-        Console.WriteLine($"PASS P21 finalizer: resolved capture sealed and read ({rows.Length} actual frames); 3 unresolved captures and 9 targeted mutations refused; {checks} checks");
+        // Identity controls (Astra 12080): matching zero identities, and missing identity fields.
+        void Node(string d,string file,Action<System.Text.Json.Nodes.JsonObject> edit){var p=Path.Combine(d,file);var o=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(p))!.AsObject();edit(o);File.WriteAllText(p,o.ToJsonString());}
+        {var d=Copy();foreach(var f in new[]{"host-shutdown.json","exit.json"})Node(d,f,o=>{o["pid"]=0;o["creationTime"]=0;});Check(Refused(()=>Finalize(d),"nonzero process identity"),"matching zero identities refused");}
+        {var d=Copy();Node(d,"exit.json",o=>o.Remove("creationTime"));Check(Refused(()=>Finalize(d),"missing creationTime"),"missing exit identity refused");}
+        {var d=Copy();Node(d,"host-shutdown.json",o=>o.Remove("pid"));Check(Refused(()=>Finalize(d),"missing pid"),"missing host identity refused");}
+        {var d=Copy();Node(d,"exit.json",o=>o["forced"]="no");Check(Refused(()=>Finalize(d),"wrong type: forced"),"mistyped exit field refused");}
+        Console.WriteLine($"PASS P21 finalizer: resolved capture sealed and read ({rows.Length} actual frames); 3 unresolved captures and 13 targeted mutations refused; {checks} checks");
         return 0;
     }catch(Exception e){Console.Error.WriteLine(e);return 1;}}
 }

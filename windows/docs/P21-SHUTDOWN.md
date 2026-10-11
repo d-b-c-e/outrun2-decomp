@@ -163,6 +163,15 @@ process** (H1, H9).
   - An ordinary process has **no hard exit-time guarantee** if the report write or an earlier phase hangs. The host
     bounds every wait it controls, but cannot bound a blocked synchronous `WriteFile`. This is recorded as a known
     limit, not claimed away.
+- **The supervisor's own file I/O is not a hard bound either** (Astra 12080).
+  - Synchronous reads (polling `host-shutdown.json`) and writes (`exit.json`) can block.
+  - The supervisor's process waits are all bounded, including the wait after `TerminateProcess`, which can itself
+    wait on pending I/O. Each Windows call is checked. A child still alive after the bounded post-terminate wait fails
+    the run explicitly, and no exit observation is written.
+  - In the offline proofs, the Python harness's per-command timeout is the outer guard.
+- **Identity.** A failed `GetProcessTimes` yields 0. The host does not resolve without its own nonzero pid and
+  creation time, the supervisor refuses a zero identity, and the seal requires nonzero, equal identities in both
+  reports. Two matching zeros identify nothing.
 
 **D5. No I/O cancellation, no closing handles from another thread, no `TerminateThread`** (P20 rule).
 - The budgets plus D4 cover file and driver hangs.

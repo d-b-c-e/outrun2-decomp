@@ -145,16 +145,23 @@ static Run supervise(const std::wstring& self, const std::string& mode, const st
     if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { run.state = "spawn failed"; return run; }
     // The supervisor owns the identity: this handle. Bound: the stop budget plus 2 s (question 4).
     const auto deadline = Clock::now() + std::chrono::milliseconds(Fast.recorder_ms + Fast.leases_ms + Fast.workers_ms + 2000);
+    // Every wait is bounded and every call checked (Astra 12080): termination can itself wait on pending I/O.
+    bool ok = true, exited = false;
     for (;;) {
-        if (WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) break;
+        const DWORD w = WaitForSingleObject(pi.hProcess, 20);
+        if (w == WAIT_FAILED) { ok = false; break; }
+        if (w == WAIT_OBJECT_0) { exited = true; break; }
         const auto st = host_report(dir).state;
         if (st == "unresolved" || Clock::now() >= deadline) {
-            Sleep(st == "unresolved" ? 300 : 0);      // a parked child must not have exited on its own meanwhile
-            if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) { TerminateProcess(pi.hProcess, 0xDBCE0F0F); run.forced_by_supervisor = true; }
-            WaitForSingleObject(pi.hProcess, INFINITE); break;
+            if (st == "unresolved") Sleep(300);       // a parked child must not have exited on its own meanwhile
+            if (WaitForSingleObject(pi.hProcess, 0) == WAIT_TIMEOUT) { ok = TerminateProcess(pi.hProcess, 0xDBCE0F0F) != 0; run.forced_by_supervisor = true; }
+            exited = ok && WaitForSingleObject(pi.hProcess, 5000) == WAIT_OBJECT_0;
+            break;
         }
     }
-    GetExitCodeProcess(pi.hProcess, &run.code); run.state = host_report(dir).state;
+    if (!ok || !exited || !GetExitCodeProcess(pi.hProcess, &run.code) || run.code == STILL_ACTIVE) { run.state = "unobserved"; run.code = STILL_ACTIVE; }
+    else run.state = host_report(dir).state;
+    if (!exited && WaitForSingleObject(pi.hProcess, 0) == WAIT_TIMEOUT) TerminateProcess(pi.hProcess, 0xDBCE0F0E);   // never leave a parked child
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     return run;
 }
