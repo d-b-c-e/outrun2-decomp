@@ -9,6 +9,7 @@
 #include "p21_host_spike/host.hpp"   // the reviewed spike's Clock, Recorder (fake writer), RecOutcome, ForcedExitCode
 #include <condition_variable>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -46,22 +47,27 @@ struct Report : p21_spike::Report {
     std::string provider_detail;
 };
 
-class ProviderHost {
+template<class RecorderType = Recorder> class BasicProviderHost {
     std::wstring folder_; std::string nonce_;
     std::thread::id input_;
     HANDLE report_ = INVALID_HANDLE_VALUE;   // pre-opened: the report never waits behind a stdio lock (D2)
-    Recorder recorder_;
+    std::unique_ptr<RecorderType> recorder_;
     std::shared_ptr<WorkerState> w_;
     std::thread worker_, release_;
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
-    ProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched)
+    BasicProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched)
+        : BasicProviderHost(folder, nonce, input, profile, latched,
+            std::make_unique<RecorderType>(folder + L"\\worker.tsv", nonce, std::make_shared<Gate>(), std::make_shared<Gate>())) {}
+    BasicProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched,
+        std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {})
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
-          recorder_(folder_ + L"\\worker.tsv", nonce_, std::make_shared<Gate>(), std::make_shared<Gate>()),
+          recorder_(std::move(recorder)),
           w_(std::make_shared<WorkerState>()) {
+        if (!recorder_) throw std::invalid_argument("recorder required");
         w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, nullptr);
-        dbce::shim::CoreConfig cfg; cfg.latched = latched;
+        dbce::shim::CoreConfig cfg; cfg.latched = latched; cfg.capability = capability;
         cfg.fresh_us = 10'000'000;   // real QPC time: a slow machine must not make samples stale (as test_dinput_provider)
         w_->core = std::make_shared<dbce::shim::Core>(*w_->provider, cfg);
         w_->core->set_profile(dbce::shim::read_profile(profile));
@@ -78,16 +84,22 @@ public:
             s->cv.notify_all();
         });
     }
-    ProviderHost(const ProviderHost&) = delete; ProviderHost& operator=(const ProviderHost&) = delete;
+    BasicProviderHost(const BasicProviderHost&) = delete; BasicProviderHost& operator=(const BasicProviderHost&) = delete;
 
     const dbce::shim::Frame& tick() { return w_->core->tick(); }   // input thread
     long long worker_passes() const { return w_->passes.load(); }
+    RecorderType& recorder() { return *recorder_; } // input thread; the host owns its full lifetime
 
     void write_report(const char* state, const Report* r) {
         if (report_ == INVALID_HANDLE_VALUE) return;
-        std::string t = std::string("{\"state\":\"") + state + "\",\"nonce\":\"" + nonce_ + "\"";
+        FILETIME created{}, exited{}, kernel{}, user{};
+        unsigned long long identity = 0;
+        if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
+            identity = (static_cast<unsigned long long>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+        std::string t = std::string("{\"state\":\"") + state + "\",\"nonce\":\"" + nonce_ + "\",\"pid\":" +
+            std::to_string(GetCurrentProcessId()) + ",\"creationTime\":" + std::to_string(identity);
         if (r) {
-            t += ",\"recorder\":\"" + std::string(p21_spike::name(r->recorder)) + "\",\"recorderJoined\":" + (r->recorder_joined ? "true" : "false") +
+            t += ",\"recorder\":\"" + std::string(p21_spike::name(r->recorder)) + "\",\"recorderOutcome\":" + std::to_string(int(r->recorder)) + ",\"recorderJoined\":" + (r->recorder_joined ? "true" : "false") +
                  ",\"released\":" + std::to_string(r->released) + ",\"held\":" + std::to_string(r->held) +
                  ",\"inputReleased\":" + (r->input_released ? "true" : "false") + ",\"elapsedUs\":" + std::to_string(r->elapsed_us) + ",\"unresolved\":[";
             for (size_t i = 0; i < r->unresolved.size(); ++i) t += (i ? ",\"" : "\"") + r->unresolved[i] + "\"";
@@ -106,8 +118,8 @@ public:
         Report r;
         write_report("stopping", nullptr);                                            // phase 0
         if (std::this_thread::get_id() != input_) r.unresolved.push_back("stop off the input thread");
-        recorder_.finish();                                                           // phase 4: off the producer thread a cancellation
-        const auto drained = recorder_.drain(Clock::now() + std::chrono::milliseconds(b.recorder_ms));
+        recorder_->finish();                                                           // phase 4: off the producer thread a cancellation
+        const auto drained = recorder_->drain(Clock::now() + std::chrono::milliseconds(b.recorder_ms));
         r.recorder = drained.outcome; r.recorder_joined = drained.joined;
         if (r.recorder != RecOutcome::Complete) r.unresolved.push_back(std::string("recorder: ") + p21_spike::name(r.recorder));
         if (!r.recorder_joined) r.unresolved.push_back("recorder: worker not joined");
@@ -154,7 +166,7 @@ public:
     [[noreturn]] void forced_exit() { TerminateProcess(GetCurrentProcess(), p21_spike::ForcedExitCode); for (;;) Sleep(INFINITE); }
 
     // D9: never stops, never waits. A worker that was never joined is detached; it keeps its own state alive.
-    ~ProviderHost() {
+    ~BasicProviderHost() {
         if (worker_.joinable()) worker_.detach();
         if (release_.joinable()) release_.detach();
         if (report_ != INVALID_HANDLE_VALUE) CloseHandle(report_);
@@ -167,4 +179,5 @@ private:
         l.unlock(); return p21_spike::join_by(worker_, deadline);   // done, but the thread may still be in its exit work
     }
 };
+using ProviderHost = BasicProviderHost<>;
 }

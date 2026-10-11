@@ -104,6 +104,16 @@ static class Program {
     static bool Refused(Action action,string because){string why;try{action();return false;}catch(InvalidDataException e){why=e.Message;}catch(IOException e){why=e.Message;}
         Console.WriteLine("   refused ("+because+"): "+why);return why.Contains(because,StringComparison.Ordinal);}
     static int Main(string[] args){try{
+        // Reuse the exact reviewed validator for a capture from the combined
+        // real-provider/recorder fixture. The export is outside the sealed bundle.
+        if(args.Length==3&&args[0]=="--seal-export"){
+            var dir=Path.GetFullPath(args[1]);Finalize(dir);var captured=Read(dir);
+            using var output=new StreamWriter(new FileStream(args[2],FileMode.CreateNew,FileAccess.Write));
+            foreach(var row in captured){output.WriteLine("ROW "+row.Channels.Count);
+                foreach(var value in row.Channels.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                    output.WriteLine(value.Key+" "+value.Value.ToString("R",CultureInfo.InvariantCulture));}
+            Console.WriteLine($"PASS validated export: {captured.Length} rows; {checks} checks");return 0;
+        }
         var root=args.Single();string Capture(string mode)=>Path.Combine(root,mode,"capture");
         // The resolved run seals and reads back all its actual frames.
         Finalize(Capture("resolved"));var rows=Read(Capture("resolved"));Check(rows.Length==16,"16 actual frames sealed and read");
