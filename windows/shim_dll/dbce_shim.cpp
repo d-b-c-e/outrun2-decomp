@@ -1,6 +1,8 @@
 // dbce_shim.h's implementation: the reviewed ProviderHost (windows/host) over the reviewed Core and DInputProvider
 // (windows/shim), unchanged, behind the C ABI. This file only validates, converts and owns handles.
+#ifndef DBCE_SHIM_BUILD
 #define DBCE_SHIM_BUILD
+#endif
 #include "dbce_shim_internal.hpp"
 #include "control_journal.hpp"
 #include "provider_host.hpp"
@@ -35,6 +37,7 @@ struct Shim {
     std::thread::id owner = std::this_thread::get_id();
     std::deque<std::string> reasons;   // the capability's text, alive as long as Core may read it
     std::unique_ptr<Host> host;
+    std::string profile_info;          // Core's parse of the profile, fixed at the open
     bool stopped = false;
 };
 std::mutex registry_lock;
@@ -112,9 +115,15 @@ int32_t dbce_shim_open_with_input(IDirectInput8W* input, const wchar_t* folder, 
         auto shell = std::make_unique<Shim>();
         sh::Capability caps; std::string text;
         if (!capability(unsupported, *shell, caps, text)) return refuse(DBCE_SHIM_BAD_ARGUMENT, text);
+        const std::string bytes(profile, std::size_t(profile_len));
+        {   // the same parser Core uses (read_profile), reported as read
+            const auto parsed = sh::read_profile(bytes);
+            shell->profile_info = std::string("ok=") + (parsed.ok ? "1" : "0") + "\nerror=" + parsed.error + "\nprofile=" + parsed.section.profile +
+                "\nrevision=" + parsed.section.revision + "\ntransmission=" + parsed.section.transmission + "\nsha256=" + sh::hex(parsed.file_hash) + "\n";
+        }
         // From here the host owns the DirectInput reference, also when its construction throws.
         auto* in = input; input = nullptr;
-        shell->host = std::make_unique<Host>(folder, nonce, in, std::string(profile, std::size_t(profile_len)), false,
+        shell->host = std::make_unique<Host>(folder, nonce, in, bytes, false,
                                              std::make_unique<NoCapture>(), caps, static_cast<HWND>(hwnd));
         { std::lock_guard<std::mutex> l(registry_lock); registry.insert(shell.get()); }
         *out = shell.release();
@@ -170,6 +179,12 @@ int32_t dbce_shim_device_reports(void* handle, char* text, int32_t len, int32_t*
     Shim* s = nullptr;
     if (const auto r = lookup(handle, s)) return r;
     try { return text_out(device_json(s->host->device_reports()), text, len, needed); } catch (...) { return DBCE_SHIM_REFUSED; }
+}
+
+int32_t dbce_shim_profile_info(void* handle, char* text, int32_t len, int32_t* needed) {
+    Shim* s = nullptr;
+    if (const auto r = lookup(handle, s)) return r;
+    return text_out(s->profile_info, text, len, needed);
 }
 
 int32_t dbce_shim_stop(void* handle, char* report, int32_t len, int32_t* needed) {

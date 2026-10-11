@@ -71,6 +71,9 @@ DBCE_SHIM_API int32_t dbce_shim_tick(void* handle, dbce_shim_frame* frame);
 /* The start report (line, then notes, one per line) and the device table (JSON array), as text. */
 DBCE_SHIM_API int32_t dbce_shim_start_report(void* handle, char* text, int32_t len, int32_t* needed);
 DBCE_SHIM_API int32_t dbce_shim_device_reports(void* handle, char* text, int32_t len, int32_t* needed);
+/* The profile as Core's own parser read it, "key=value" lines: ok (1/0), error, profile, revision, transmission and
+   the SHA-256 of the exact bytes. A game adapter takes its gearbox from transmission, never from its own parse. */
+DBCE_SHIM_API int32_t dbce_shim_profile_info(void* handle, char* text, int32_t len, int32_t* needed);
 /* The host's bounded stop. OK when resolved, DBCE_SHIM_UNRESOLVED otherwise; report receives the reasons. */
 DBCE_SHIM_API int32_t dbce_shim_stop(void* handle, char* report, int32_t len, int32_t* needed);
 

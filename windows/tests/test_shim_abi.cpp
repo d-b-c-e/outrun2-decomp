@@ -83,6 +83,10 @@ void test_lifecycle() {
     char four[4];
     check(dbce_shim_start_report(h, four, 4, &needed) == DBCE_SHIM_OK && std::strlen(four) == 3 && std::memcmp(four, report.data(), 3) == 0, "a truncated report stays terminated");
     check(dbce_shim_start_report(h, nullptr, 4, nullptr) == DBCE_SHIM_BAD_ARGUMENT, "a null buffer with a length refuses");
+    char info[1024] = {};
+    check(dbce_shim_profile_info(h, info, sizeof info, nullptr) == DBCE_SHIM_OK && std::string(info).find("ok=1") == 0 &&
+          std::string(info).find("transmission=Sequential") != std::string::npos && std::string(info).find("revision=r1") != std::string::npos,
+          "the profile as Core's parser read it, with its transmission");
     char devices[2048] = {};
     check(dbce_shim_device_reports(h, devices, sizeof devices, nullptr) == DBCE_SHIM_OK && std::string(devices).find(W) != std::string::npos &&
           std::string(devices).find("\"opened\":true") != std::string::npos, "the device table names the open wheel");
@@ -96,7 +100,7 @@ void test_lifecycle() {
 void test_dll(const std::wstring& path) {
     HMODULE m = LoadLibraryW(path.c_str()); check(m != nullptr, "the built DLL loads");
     for (const char* name : {"dbce_shim_abi_version", "dbce_shim_frame_size", "dbce_shim_action_name", "dbce_shim_open", "dbce_shim_tick",
-                             "dbce_shim_start_report", "dbce_shim_device_reports", "dbce_shim_stop"})
+                             "dbce_shim_start_report", "dbce_shim_device_reports", "dbce_shim_profile_info", "dbce_shim_stop"})
         check(GetProcAddress(m, name) != nullptr, std::string("export ") + name);
     auto proc = [&](const char* n) { return reinterpret_cast<void (*)()>(GetProcAddress(m, n)); };   // the usual FARPROC idiom
     auto version = reinterpret_cast<int32_t (*)()>(proc("dbce_shim_abi_version"));
