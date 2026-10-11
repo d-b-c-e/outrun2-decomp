@@ -210,6 +210,29 @@ void test_hpattern(){
     HPattern im;bool six[6]{};six[5]=true;t=0;
     for(int i=0;i<200;++i)im.step(six,true,true,5,t+=16000);
     check(im.state()==HPattern::State::Stopped,"gear 6 on a five-speed car: stopped after retries");
+    // Slice 2a review 1: a gear word that is not a gear 1-6 never causes a pulse, before the first pulse or mid-sequence.
+    for(std::uint32_t bad:{0u,7u,0xffffffffu}){
+        HPattern v;
+        check(v.step(g,true,true,bad,0)==0&&v.state()==HPattern::State::Unavailable,"gear word "+std::to_string(bad)+": unavailable, no pulse");
+    }
+    {HPattern v;t=0;
+     check(v.step(g,true,true,1,t)==1,"a valid gear: pulse");
+     check(v.step(g,true,true,0xffffffffu,t+=16000)==0&&v.state()==HPattern::State::Unavailable,"corrupt during release: no pulse");
+     for(int i=0;i<30;++i)check(v.step(g,true,true,0,t+=16000)==0,"missing gear during wait: never a pulse");
+     check(v.step(g,true,true,1,t+=16000)==1,"a valid gear again: the sequence resumes");}
+    // Slice 2a review 2: the tick after a pulse is released even when the gate or the direction changes.
+    {HPattern v;t=0;bool g4[6]{};g4[3]=true;
+     check(v.step(g,true,true,1,t)==1,"gate 3 from gear 1: up");
+     check(v.step(g4,true,true,1,t+=16000)==0,"gate 4 on the next tick: released first");
+     check(v.step(g4,true,true,1,t+=16000)==1,"then the new sequence's pulse");}
+    {HPattern v;t=0;bool g1[6]{};g1[0]=true;
+     check(v.step(g,true,true,2,t)==1,"gate 3 from gear 2: up");
+     check(v.step(g1,true,true,2,t+=16000)==0,"reversal to gate 1 on the next tick: released first");
+     check(v.step(g1,true,true,2,t+=16000)==-1,"then down");}
+    {HPattern v;t=0;bool none[6]{};
+     check(v.step(g,true,true,1,t)==1,"pulse");
+     check(v.step(none,true,true,1,t+=16000)==0,"gate released");
+     check(v.step(g,true,true,1,t+=16000)==1,"gate again after a released tick: pulse");}
     // Through the adapter: DS-8X gates from the core, pulses as shift bits and edges, reset on a scene change.
     Rig r(false,profile({sb("gear1",0),sb("gear2",1),sb("gear3",2)},"H-pattern"),true);
     r.view.mode=16;r.view.car=true;r.view.gear=1;
@@ -219,6 +242,19 @@ void test_hpattern(){
     check((out.pc_device.buttons_04&0x2u)&&out.shift_up,"gate 3 from gear 1: an up pulse with its edge");
     out=r.tick();
     check(!(out.pc_device.buttons_04&0x2u)&&!out.shift_up,"released on the next tick");
+    // A gate change right after a pulse through the adapter: the bit drops for a tick, then a new edge.
+    {Rig q(false,profile({sb("gear1",0),sb("gear2",1),sb("gear3",2),sb("gear4",3)},"H-pattern"),true);
+     q.view.mode=16;q.view.car=true;q.view.gear=1;
+     q.dev(q.s).state.buttons[2]=0x80;q.dev(q.s).state.buttons[3]=0x80;q.tick();
+     q.dev(q.s).state.buttons[2]=0;q.dev(q.s).state.buttons[3]=0;q.tick();   // rearm both gates
+     q.dev(q.s).state.buttons[2]=0x80;
+     auto o=q.tick();
+     check((o.pc_device.buttons_04&0x2u)&&o.shift_up,"gate 3: pulse");
+     q.dev(q.s).state.buttons[2]=0;q.dev(q.s).state.buttons[3]=0x80;
+     o=q.tick();
+     check(!(o.pc_device.buttons_04&0x2u)&&!o.shift_up,"gate 4 on the next tick: the bit drops");
+     o=q.tick();
+     check((o.pc_device.buttons_04&0x2u)&&o.shift_up,"then a new pulse with its own edge");}
     // A scene change between race modes (16 -> 18): no pulse on the change's tick, then a fresh sequence at once rather
     // than the old one's 250 ms wait.
     r.view.mode=18;out=r.tick();
