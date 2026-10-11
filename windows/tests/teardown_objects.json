@@ -1,0 +1,22 @@
+[
+  {
+    "file": "windows/tests/teardown_units/provider_host_instance.cpp",
+    "where": "?detach@thread@std@@QEAAXXZ in public: __cdecl dbce::shim::hosting::ProviderHost<struct audit_unit::LazyRecorder>::~ProviderHost<struct audit_unit::LazyRecorder>(void) x2",
+    "reason": "D9: the host destructor never stops or waits; it detaches exactly its two owned threads (worker_, release_), which keep their own state alive. Count-exact: a third detach here is a new finding."
+  },
+  {
+    "file": "windows/tests/teardown_units/provider_host_instance.cpp",
+    "where": "_Thrd_detach in public: void __cdecl std::thread::detach(void) x1",
+    "reason": "The standard library's own std::thread::detach wrapper; every call to it is counted per caller above, so this covers no other call site."
+  },
+  {
+    "file": "windows/tests/teardown_units/provider_host_instance.cpp",
+    "where": "__imp_TerminateProcess in public: void __cdecl dbce::shim::hosting::ProviderHost<struct audit_unit::LazyRecorder>::forced_exit(void) x1",
+    "reason": "D4: the host alone ends an ordinary process whose stop stayed unresolved (forced_exit, after the report is written)."
+  },
+  {
+    "file": "windows/tests/teardown_units/provider_host_instance.cpp",
+    "where": "atexit in class std::_Generic_error_category const & __cdecl std::_Immortalize_memcpy_image<class std::_Generic_error_category>(void) x1",
+    "reason": "MSVC STL internal: the immortal generic error category behind std::thread's system_error path; no host source line asks for it. A host atexit is attributed to its own function and fails."
+  }
+]

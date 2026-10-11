@@ -1,0 +1,20 @@
+[
+  {
+    "file": "windows/host/provider_host.hpp",
+    "line": "if (worker_.joinable()) worker_.detach();",
+    "count": 1,
+    "reason": "D9: the host destructor never stops or waits; it detaches its own provider worker, which keeps its own state alive."
+  },
+  {
+    "file": "windows/host/provider_host.hpp",
+    "line": "if (release_.joinable()) release_.detach();",
+    "count": 1,
+    "reason": "D9: the host destructor detaches its own release thread (a driver Unacquire/Release that did not return in its budget)."
+  },
+  {
+    "file": "windows/host/provider_host.hpp",
+    "line": "[[noreturn]] void forced_exit() { TerminateProcess(GetCurrentProcess(), ForcedExitCode); for (;;) Sleep(INFINITE); }",
+    "count": 1,
+    "reason": "D4: the host alone ends an ordinary process whose stop stayed unresolved, after its report is written."
+  }
+]
