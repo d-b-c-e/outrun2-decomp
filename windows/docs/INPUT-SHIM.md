@@ -1,6 +1,6 @@
 # Input shim: architecture
 
-**Draft r3, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). For review, not adopted.**
+**Draft r3.1, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). Accepted for the stage-1 source slice (Astra, r3 review); not adopted as a standard.**
 
 r3 closes Astra's r2 review (`dbce-project-mgmt/inbox/2026-10-10-romi-input-shim-r2-review.md`): eight findings,
 cited as R2-F1 to R2-F8, and the decisions on N1-N8. The r1 findings are cited as R1-F1 to R1-F10. Section 18 logs
@@ -151,8 +151,10 @@ Cooperating writers are serialized; an editor that does not cooperate is detecte
 7. **Recheck.** Re-read the target. Its hash must still be the base; otherwise `conflict`, the temporary file is
    deleted and the target is untouched.
 8. **Commit.**
-   - **Target exists:** `ReplaceFileW(target, temp, backup, REPLACEFILE_WRITE_THROUGH)`, where the backup is
-     `<file>.bak-<UTC>-<base hash prefix>` and holds the displaced bytes. Failures follow the documented codes:
+   - **Target exists:** `ReplaceFileW(target, temp, backup, 0)`. `REPLACEFILE_WRITE_THROUGH` is not supported (R3
+     review). Durability comes from flushing the temporary file in step 6, and nothing more is claimed. The backup is
+     named `<file>.bak-<UTC>-<base hash prefix>-<nonce>` and holds the displaced bytes. Failures follow the documented
+     codes:
      - `ERROR_UNABLE_TO_REMOVE_REPLACED` or `ERROR_UNABLE_TO_MOVE_REPLACEMENT`: the target is unchanged. Delete the
        temporary file and report the failure.
      - `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`: the original now sits at the backup name. Move it back without replacing
@@ -160,14 +162,16 @@ Cooperating writers are serialized; an editor that does not cooperate is detecte
    - **Target absent:** `MoveFileExW(temp, target, MOVEFILE_WRITE_THROUGH)` without `REPLACE_EXISTING`. If the file now
      exists, something else created it in the meantime, so the result is `conflict` and the temporary file is deleted.
 9. **Displacement check.** The backup's hash must equal the base. If it does not, an editor that ignores the lock wrote
-   between step 7 and step 8, so the result is `conflict`. Recovery never overwrites the unknown newer bytes:
-   - if the target still holds this writer's bytes, a fresh copy of the backup replaces it, and that replacement makes
-     its own backup of this writer's bytes;
-   - if the target holds anything else, nothing is touched and every file is reported;
-   - either way the edit is reported as not applied.
+   between step 7 and step 8, and the result is `conflict`.
+   - There is **no automatic rollback** (R3 review): a rollback would repeat the same check-then-replace race.
+   - Every file is kept: the target (now this writer's bytes), the backup (the other editor's bytes) and their hashes.
+   - Recovery is explicit, chosen by a person.
+   - The design does not claim that an editor ignoring the lock can never be overwritten for a moment. It claims
+     only that this is detected, reported, and that nothing is lost.
 10. **Verify** that the target bytes equal the new bytes.
-11. **Backups are kept.** The backup made in this transaction is never deleted by it. Older ones are pruned to the
-    newest five, under the lock. Then the lock is released.
+11. **Backups and temporary files are kept** unless their ownership and current hash are proven. An abandoned mutex
+    does not authorize deleting files that merely match a name pattern. Automatic pruning is deferred. Then the lock
+    is released.
 12. **Result:** one of `applied`, `conflict`, `busy` or `failed`, with the new hash and the names of the backups.
 
 The fixture vectors include:
@@ -231,8 +235,12 @@ handle, so the design never claims that it does.
      use.
    - If the acknowledgement never comes (the input thread is stuck or gone in an unknown state), the leases and their
      COM objects are deliberately leaked, process exit reclaims them, and shutdown reports `unresolved: input thread`.
-6. **Stop the workers.** Each is told to stop and joined with a bounded wait. A worker that does not stop is detached
-   and reported, never waited on forever.
+6. **Stop the workers.** Each is told to stop and joined with a bounded wait. A worker that does not stop is never
+   waited on forever, and never left pointing at freed state (R3 review):
+   - everything it can touch (queues, generations, log handles, adapter callbacks) is owned through a shared
+     reference the worker itself holds;
+   - module unload is refused until the worker is quiet;
+   - the report says `unresolved: worker <name>; process exit required`.
 7. **Release DirectInput** if every lease was released. Then report the shutdown result: `complete`, or `unresolved`
    naming the steps.
 
@@ -250,13 +258,17 @@ An unreadable or empty range makes the axis unqualified. Object counts are never
 Samples are rescaled from the range read back, and the injection range function returns the same values. This is
 configuration evidence, not proof of acquisition, a successful read or an observed action (R1-F8).
 
-**Read results are classified, not just compared with zero** (N2):
+**A read is two calls, classified separately** (N2, R3 review). `Poll` asks the device to update; it does not fill a
+state buffer. `GetDeviceState` fills it.
+- The buffer is initialized before the state read: axes 0, buttons up, POVs centred (`0xFFFFFFFF`).
+- A sample is admitted only when the complete state read succeeds.
+- Each call's own result is classified where it is made, and the sample records both results.
 
-| `GetDeviceState` / `Poll` result | Meaning | Action |
+| Result (of `Poll`, or of `GetDeviceState`) | Meaning | Action |
 |---|---|---|
-| any `SUCCEEDED` code (`DI_OK`, `S_FALSE`, `DI_NOEFFECT`, ...) | a valid sample | use it |
-| `DIERR_INPUTLOST`, `DIERR_NOTACQUIRED` | acquisition lost | end the usable epoch; neutral this frame; bounded reacquisition of the same verified handle (at most 3 tries over 100 ms); success opens a **new epoch** with rearm; otherwise close and rescan |
-| `DIERR_UNPLUGGED` and anything else | device gone or unknown | end the epoch; neutral; close; rescan by identity |
+| any `SUCCEEDED` code (`DI_OK`, `S_FALSE`, `DI_NOEFFECT`, ...) | that call succeeded | after `Poll`: go on to the state read; after `GetDeviceState`: admit the sample |
+| `DIERR_INPUTLOST`, `DIERR_NOTACQUIRED` | acquisition lost | no sample; end the usable epoch; neutral this frame; bounded reacquisition of the same verified handle (at most 3 tries over 100 ms); success opens a **new epoch** with rearm; otherwise close and rescan |
+| `DIERR_UNPLUGGED` and anything else | device gone or unknown | no sample; end the epoch; neutral; close; rescan by identity |
 
 **Epochs** (STD-035 item 7, R1-F5):
 - Ending an epoch neutralizes its owned actions in the same frame, with one up edge for each held digital action.
@@ -282,6 +294,17 @@ deliberately and reported with its threshold:
 | `clutch` | live on the first fresh valid read | absolute; a held clutch disengages drive (the safe direction) |
 
 Each action reports `rearming` until it is ready, with the condition it is waiting for.
+
+**Which source the rules read** (R3 review):
+- Rearm conditions and edge history read only **physical** values, and only in an **ordinary** process.
+- In a latched process, physical values are observed but feed no rearm or edge state. A physically held button can
+  never rearm or release an injected action.
+- Injected values are delivered without rearm masking. The test run starts from WAITING (neutral), so there is no held
+  state to mask.
+- Edges in a latched process are computed against the previously delivered action value, where `test-neutral` counts
+  as released or at rest.
+- Counterexamples: physically held with the injection neutral, and the converse, each across startup and across an
+  epoch loss. An epoch loss fails the run, and the injected hold is released with one up edge.
 
 **Hot-plug policy:** exact identity, bounded rescans, a new epoch, neutral rearm, no silent test continuation (R1 Q8).
 
@@ -430,9 +453,18 @@ including any the run has not injected into yet (R2-F4).
   4. `n` equal to the last accepted batch with different bytes, or `n` lower than it: FAILED.
   5. `n` higher: validate the whole batch against a scratch injection table built from the immutable profile and the
      device capabilities (grammar, bindings, objects, ranges, capacity).
-  6. Valid: the batch becomes an immutable command generation handed to the input thread. Any refusal: FAILED.
-- **Activation.** The input thread adopts the generation at the start of a tick, and from that tick it replaces every
-  running sample atomically. Per-object deadlines (`ms=`) count from activation.
+  6. Valid: the batch becomes an immutable command generation in a bounded first-in, first-out handoff of 8
+     generations. Any refusal, or a full handoff: FAILED.
+- **Activation.** The input thread activates at most one generation per tick, in order. From that tick it replaces
+  every running sample atomically. Per-object deadlines (`ms=`) count from activation.
+- **No generation disappears** (R3 review). Every accepted batch gets exactly one of three events:
+  - activated, at that tick;
+  - superseded before activation, which happens only when the run ends (FAILED, COMPLETED or EXPIRED) while it was
+    still queued;
+  - refused.
+
+  A single latest pointer is never used, so a short button press cannot be silently erased. A superseded or never
+  activated command never counts as delivered.
 - **Batch log.** Every accepted, duplicate and refused batch is written to the batch log, a `runtime.log` JSON line with
   `n`, the full hash, the command count and kinds, and the acceptance and activation times. The observer's ring may
   overwrite its entry; the log keeps the mapping.
@@ -480,8 +512,11 @@ kinds each batch used.
 **Owner-visible latch** (N4). A latched process shows an unmistakable in-game banner: "TEST MODE: wheel disabled,
 saves redirected; close the game and clear the test request in Wheelkit".
 - Wheelkit shows the same explanation, and offers an explicit **clear test request** action.
-- That action is available only while the game is closed, and only for a request whose owner receipt
-  (`owner=`/`receipt=` lines in `inject.on`, written by the harness) identifies it.
+- That action is available only while the game is closed, and only for a request that an owner receipt identifies.
+  - The receipt is a separate file, `inject.receipt`, written by the harness next to `inject.on`, with its hash pinned
+    in the harness's run record.
+  - `inject.on` itself stays strict: only `nonce=` and `expires=`, and unknown keys are still refused (R3 review). The
+    game never needs to read the receipt.
 - An unknown active request is never deleted automatically.
 
 **Observer v2:** `Local\Dbce<Product>InjectObserve-<nonce>`, created by this process or refused. Versioned; layout in
@@ -496,9 +531,16 @@ saves redirected; close the game and clear the test request in Wheelkit".
 
 How it is written (R2-F6):
 - The input thread is the only writer.
-- A seqlock: the sequence is a `std::atomic<std::uint32_t>` in the mapping, and payload words are written as
-  `std::atomic_ref<std::uint32_t>` relaxed stores between release and acquire fences. The writer never waits on
-  readers, so a reader dying cannot stall the game.
+- A seqlock, staying in C++17 (`std::atomic_ref` is C++20; R3 review):
+  - the sequence and every payload word are `std::atomic<std::uint32_t>` members of the mapped struct, with relaxed
+    payload stores between release and acquire fences;
+  - they are created by placement-new over the zeroed view once, by the creating process;
+  - each is checked at compile time to be lock-free and address-free (`is_always_lock_free`), 4-byte aligned, at fixed
+    offsets.
+- The sequence wraps modulo 2^32. Readers compare equal even values before and after a copy, so a wrap is harmless.
+- The mapping lives until the process ends. Readers never write.
+- The writer never waits on readers, so a reader dying cannot stall the game.
+- This is a deferred platform gate: the observer transport is reviewed separately before it is accepted.
 
 Proof required (section 17): a concurrent reader thread checks a payload checksum for torn reads, a reader process is
 killed mid-read, and the ring is overrun.
@@ -800,3 +842,5 @@ Each slice is written as tests and code, reviewed, and accepted before the next 
 | r2 | 2026-10-10 | zero | `6b89385`. Every r1 finding addressed; questions N1-N8 and a first proof matrix added. |
 | r2 review | 2026-10-10 | Astra | Eight findings plus answers to N1-N8 (`inbox/2026-10-10-romi-input-shim-r2-review.md`, hcom 9109). |
 | r3 | 2026-10-10 | zero | Closes the r2 findings: a cross-process writer lock with displacement check and kept backups (F1); a test request latched from file existence alone, with REFUSED before game init and a verified INERT state (F2); one RUNNING policy, `test-neutral` at the action layer with native input suppressed and observed (F3); a frame boundary over the admitted workload, the batch order of checks, the first-batch wait, per-object expiry and the batch log with full hashes (F4); a shutdown order that is safe first and writes to disk last, with a stopped input thread handled (F5); a control worker for file I/O and status, memory-model-correct handoffs and an observer seqlock with torn-read proof (F6); `live` needing a fresh read, per-action rearm rules and identity-pinned evidence (F7); the matrix staged into five slices with the additions requested (F8). N1-N8 adopted. |
+| r3 review | 2026-10-10 | Astra | Go-ahead for slice 1 (pure core and fake provider), with four corrections: a strict session file versus owner metadata; `Poll` versus the state read; no generation disappearing; physical versus injected rearm sources. Platform gates deferred: writer rollback race, the `ReplaceFileW` flag, observer atomics in C++17, detached-worker lifetime (`inbox/2026-10-10-romi-input-shim-r3-review.md`, hcom 9203). |
+| r3.1 | 2026-10-10 | zero | The four corrections and the deferred platform gates written into sections 5, 6 and 9. |
