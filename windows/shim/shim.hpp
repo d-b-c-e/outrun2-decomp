@@ -202,6 +202,13 @@ struct StatusChange {
     std::int32_t device{-1};
     std::uint32_t epoch{};
 };
+// One consistent cut of both queues and their counters, taken under one lock (CONTROL-JOURNAL.md section 4):
+// a status for an epoch is never drained ahead of that epoch's EpochBegin, which the input thread emits first.
+struct JournalCut {
+    std::vector<Event> events;
+    std::vector<StatusChange> status;
+    std::uint64_t status_dropped{},status_coalesced{},events_dropped{},control_events_dropped{};
+};
 
 // ---- the adapter's declaration (section 8, item 1): nullptr = supported, else why not
 struct Capability { std::array<const char*,ActionCount> unsupported{}; };
@@ -251,6 +258,7 @@ public:
     void close_control();                              // host stop gate; late I/O cannot enqueue or rearm
     std::vector<Event> drain_events();
     std::vector<StatusChange> drain_status();
+    JournalCut drain_journal();                          // the control worker's one drain: one lock, one cut
     std::uint64_t status_dropped()const;
     std::uint64_t status_coalesced()const;
     std::uint64_t events_dropped()const;

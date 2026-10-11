@@ -40,7 +40,8 @@ class Pump {
         state_=State::Failed;reason_=bounded_diagnostic(why);core_.fail_control(reason_);
     }
     bool closed(){if(core_.control_state().closed){state_=State::Closed;return true;}return false;}
-    Journal drain(){return {core_.drain_events(),core_.drain_status(),core_.status_dropped(),core_.status_coalesced(),core_.events_dropped(),core_.control_events_dropped(),batches_offered_,identical_skipped_};}
+    // One Core cut (one lock): separate drains could carry an epoch's status ahead of its EpochBegin.
+    Journal drain(){auto c=core_.drain_journal();return {std::move(c.events),std::move(c.status),c.status_dropped,c.status_coalesced,c.events_dropped,c.control_events_dropped,batches_offered_,identical_skipped_};}
     void start(){
         state_=State::Polling;
         if(!options_.latched)return; // ordinary play never opens either injection file

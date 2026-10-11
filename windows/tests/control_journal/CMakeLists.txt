@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(shim_control_journal CXX)
+set(WIN ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+add_executable(control_journal main.cpp ${WIN}/shim/core.cpp ${WIN}/shim/parse.cpp)
+target_include_directories(control_journal PRIVATE ${WIN}/host ${WIN}/shim ${WIN}/vendor/controls ${WIN}/tests)
+target_compile_features(control_journal PRIVATE cxx_std_17)
+target_compile_definitions(control_journal PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
+target_compile_options(control_journal PRIVATE /W4 /WX /EHsc)

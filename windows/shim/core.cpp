@@ -216,6 +216,14 @@ std::vector<StatusChange> Core::drain_status(){
     std::vector<StatusChange> out(status_q_.begin(),status_q_.end());status_q_.clear();
     return out;
 }
+JournalCut Core::drain_journal(){
+    std::lock_guard<std::mutex> l(m_);
+    JournalCut c;
+    c.events.assign(event_q_.begin(),event_q_.end());event_q_.clear();
+    c.status.assign(status_q_.begin(),status_q_.end());status_q_.clear();
+    c.status_dropped=status_dropped_;c.status_coalesced=status_coalesced_;c.events_dropped=events_dropped_;c.control_events_dropped=control_events_dropped_;
+    return c;
+}
 std::uint64_t Core::status_dropped()const{std::lock_guard<std::mutex> l(m_);return status_dropped_;}
 std::uint64_t Core::status_coalesced()const{std::lock_guard<std::mutex> l(m_);return status_coalesced_;}
 std::uint64_t Core::events_dropped()const{std::lock_guard<std::mutex> l(m_);return events_dropped_;}
