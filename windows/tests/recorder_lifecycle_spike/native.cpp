@@ -65,7 +65,10 @@ int main(int argc,char** argv){
             // For late: repeated drain only waits for cleanup; it cannot erase the timeout.
             auto r=c.drain(5s);
             if(!r.worker_done)throw std::runtime_error("worker has not released its writer");
-            reports<<mode<<'\t'<<int(r.outcome)<<'\t'<<r.may_seal()<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.sink_reason<<'\n';
+            reports<<mode<<'\t'<<int(r.outcome)<<'\t'<<r.may_seal()<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.sink_reason
+                <<'\t'<<r.producer_done<<'\t'<<r.worker_done<<'\t'<<r.capture_counts_final<<'\t'<<r.drain_timed_out
+                <<'\t'<<r.attempted<<'\t'<<r.queue_full<<'\t'<<r.invalid<<'\t'<<r.after_failure<<'\t'<<r.after_end
+                <<'\t'<<r.wrong_producer<<'\t'<<r.declared_last<<'\t'<<r.last_written<<'\t'<<r.first_rejected<<'\t'<<r.discarded<<'\n';
             const auto expected=mode=="normal"?Outcome::Complete:mode=="abandoned"?Outcome::QueueFull:mode=="limited"?Outcome::WriterLimit:Outcome::TimedOut;
             if(r.outcome!=expected)throw std::runtime_error("wrong native outcome: "+mode);
         }

@@ -15,7 +15,7 @@ def pin(root,scopes):
     if git(root,'status','--porcelain','--',*scopes): raise RuntimeError('Uncommitted input: '+str(root))
     files=git(root,'ls-files','--',*scopes).splitlines()
     return dict(commit=git(root,'rev-parse','HEAD'),sha256={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in files})
-toolkit_scopes=['native/session','dotnet/Dbce.Wheel.Recording','Directory.*','global.json','NuGet.Config']
+toolkit_scopes=['native/session','dotnet/Dbce.Wheel.Recording','dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs','Directory.*','global.json','NuGet.Config']
 before=dict(source=pin(repo,['.']),toolkit=pin(toolkit,toolkit_scopes))
 if before['toolkit']['sha256']['native/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
     raise RuntimeError('Native writer differs from reviewed pin.')
@@ -62,9 +62,34 @@ if args.mutations:
         p=run(name,[b/'Debug/recorder_lifecycle_test.exe'],expect=None)
         if p.returncode==0: raise RuntimeError('Mutation escaped: '+name)
         mutations.append(dict(name=name,detected=True,exit=p.returncode,output=p.stdout+p.stderr))
+    original=(here/'managed/CompletionBundle.cs').read_text()
+    variants={
+      'bundle-ignores-sealed-hashes': ([('ArtifactSeal.Verify(directory,Required);','/* omitted seal verification */')],
+                                    'Changed but still valid JSON metadata is refused by file hash'),
+      'bundle-trusts-inner-footer': ([
+        ('Require(p[1]=="2"&&p[2]=="1"&&p[5]=="stopped","Worker was not eligible to seal");','/* ignore terminal outcome */'),
+        ('Require(p[6]=="1"&&p[7]=="1"&&p[8]=="1"&&p[9]=="0","Worker/producer not quiescent or drain timed out");','/* ignore timeout */'),
+        ('Require(p[18]=="0","Ingress loss was recorded");','/* ignore ingress loss */')],
+                                    'Failed native worker cannot finalize: late'),
+    }
+    for name,(edits,expected_error) in variants.items():
+        source=result/'mutations'/name; source.mkdir(parents=True)
+        for file in (here/'managed').glob('*'):
+            if file.suffix in ['.cs','.csproj']: shutil.copyfile(file,source/file.name)
+        changed=original
+        for old,new in edits:
+            if changed.count(old)!=1: raise RuntimeError('Mutation anchor changed: '+name)
+            changed=changed.replace(old,new)
+        (source/'CompletionBundle.cs').write_text(changed)
+        b=source/'build'; c=source/'capture'
+        run(name+'-native',[build/'Debug/recorder_lifecycle_native.exe',c])
+        run(name+'-build',['dotnet','build',source/'LifecycleConformance.csproj','--configuration','Release','--artifacts-path',b,'-p:ToolkitRoot='+str(toolkit)])
+        p=run(name,['dotnet',b/'bin/LifecycleConformance/release/LifecycleConformance.dll',c],expect=None)
+        if p.returncode==0 or expected_error not in p.stderr: raise RuntimeError('Mutation not detected by its intended check: '+name)
+        mutations.append(dict(name=name,detected=True,exit=p.returncode,output=p.stdout+p.stderr))
 after=dict(source=pin(repo,['.']),toolkit=pin(toolkit,toolkit_scopes))
 if before!=after: raise RuntimeError('Inputs changed during the proof.')
-artifacts={str(p.relative_to(result)):hashlib.sha256(p.read_bytes()).hexdigest() for p in result.rglob('*') if p.is_file() and (p.suffix in ['.jsonl','.tsv','.log'] or p.name in ['recorder_lifecycle_test.exe','recorder_lifecycle_native.exe','LifecycleConformance.dll','Dbce.Wheel.Recording.dll'])}
+artifacts={str(p.relative_to(result)):hashlib.sha256(p.read_bytes()).hexdigest() for p in result.rglob('*') if p.is_file() and (p.suffix in ['.jsonl','.tsv','.meta','.log'] or p.name in ['recorder_lifecycle_test.exe','recorder_lifecycle_native.exe','LifecycleConformance.dll','Dbce.Wheel.Recording.dll'])}
 receipt=dict(sourceCommit=before['source']['commit'],toolkitCommit=before['toolkit']['commit'],sourceVerified=True,commands=commands,mutations=mutations,sha256=artifacts)
 (result/'receipt.json').write_text(json.dumps(receipt,indent=2))
 print((result/'lifecycle.log').read_text().strip())

@@ -137,12 +137,45 @@ The native bridge additionally exercises `durationLimit` and an actual native
 stop delayed past timeout. The latter creates a complete inner file which the
 production reader accepts, while the outer worker outcome stays ineligible.
 
-**Still outside this proof:** an actual atomic, hash-bound outer seal and its
-reader, seal-write failure handling, profile/caps/event/adapter bundle, maximum
-serialized byte preflight and per-input/physics clock joining. `may_seal` only
-reports worker eligibility; it does not write a seal or assert portable replay.
-The fixture's receipts hash the evidence for review, not as a runtime recording
-bundle. A production tape must end with the final neutral/run-end frame before
+## Completion-envelope follow-up (offline only)
+
+`managed/CompletionBundle.cs` consumes the actual native worker's quiescent
+report and JSONL, using the existing toolkit `ArtifactSeal` implementation and
+`SessionReader`. No new seal format or toolkit API is introduced. The required
+members are `bundle.meta`, `worker.tsv` and `source.jsonl`, bound by lengths and
+SHA-256 in `complete.tsv`. The fixture-only discriminator is
+`dbce.shim.worker-bundle-spike@1`; it must never qualify input or trajectory replay.
+The worker-report layout is exactly 20 TSV fields in this proof, with the
+prototype's Complete enum value 2. It is not an extensible production wire format.
+
+The finalizer requires a successful, finished producer and worker, consistent
+nonempty source counts/tail and no capture loss or timeout. The full production
+reader must accept the stream and agree with those counts and source sequences.
+For this native fixture only, it also checks all six channels against the known
+two-value packet workload; that is not a general-purpose Core frame decoder.
+Actual failed, limited and late-complete native captures cannot finalize, and
+remain refused even if a generic valid file seal is manually added to them.
+
+Read returns rows only after full seal and semantic validation. File handles deny
+ordinary write/delete sharing throughout validation/publication, and fixed paths
+plus all ancestors reject reparse points. An open writer prevents sealing.
+Complete uses the existing temporary-file plus non-overwriting rename behavior;
+existing seal/temp-file conflicts refuse and preserve their bytes. Tests leave
+all evidence intact, including failed publication artifacts. Hash checks reject
+changed but still valid JSON metadata; a second negative control deliberately
+trusts the late inner footer and is also caught by the native late-stop case.
+
+The proof assumes a new, recorder-owned directory and a trusted worker report.
+It does not authenticate capture authorship or defeat a hostile process rewriting
+the whole bundle or replacing ancestor directories concurrently. It neither
+asserts power-loss durability nor bounds synchronous hash/seal I/O. Choosing the
+runtime finalizer host, its deadline and P21 teardown behavior is still required.
+This managed finalizer is a conformance fixture, not code loaded into OutRun.
+
+**Still outside this proof:** the actual profile/caps/event/adapter bundle,
+maximum serialized byte preflight, recorded enum adoption and per-input/physics
+clock joining. Portable game replay remains unqualified. A production tape must
+end with the final neutral/run-end frame before
 producer finish; this generic packet fixture does not determine game neutrality.
 If the input thread is stuck, P21 cannot substitute a supervisor finish.
 

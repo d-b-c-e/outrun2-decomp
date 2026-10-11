@@ -5,7 +5,10 @@ using Dbce.Wheel.Recording;
 
 static class Program {
     static void Check(bool ok,string why) { if(!ok) throw new Exception(why); }
-    static void Main(string[] args) {
+    static int Main(string[] args) {
+        try{Run(args);return 0;}catch(Exception e){Console.Error.WriteLine(e);return 1;}
+    }
+    static void Run(string[] args) {
         var root=args.Single();
         var outcomes=File.ReadAllLines(Path.Combine(root,"outcomes.tsv")).Select(x=>x.Split('\t')).ToDictionary(x=>x[0]);
         var normal=SessionReader.Read(Path.Combine(root,"normal.jsonl")).ToArray();
@@ -23,5 +26,6 @@ static class Program {
         var late=SessionReader.Read(Path.Combine(root,"late.jsonl")).ToArray();
         Check(late.Last().Footer.Completed&&outcomes["late"][2]=="0","complete late inner footer remains outer-ineligible");
         Console.WriteLine("PASS production reader: exact normal rows, abandoned overflow refusal, native limit reason, late inner completion cannot qualify");
+        BundleChecks.Run(root);
     }
 }
