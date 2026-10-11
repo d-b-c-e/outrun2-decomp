@@ -596,10 +596,14 @@ R1-F8, Q11.
 
 - **Human start line,** once the provider has checked the devices:
   `controls: profile "<p>" revision <r> via shim-ini-controls-1: applied n (ids); unsupported m (ids); invalid k
-  (ids); unavailable u (ids)`. One line follows per non-live action, with its status and reason. The provider token
-  `shim-ini-controls-1` is new, and a reader that knows only `ini-controls-1` must treat it as unknown, which means
-  not configured. Astra tests this against Wheelkit's reader at its pinned commit: an unknown provider or status must
-  fail closed and never keep a green badge.
+  (ids); unavailable u (ids)`. One line follows per non-live action, with its status and reason. It is for people
+  reading the log. Wheelkit 0.6.15 (`b1197ce`) has **no** reader for controls start lines or runtime status (Astra P9,
+  `inbox/2026-10-10-romi-shim-wheelkit-p9.md`), so nothing in Wheelkit reads this line today, and no UI integration
+  is claimed from it.
+  - What is proven: the released Wheelkit writer refuses the new capability. With the released Core DLL, the
+    `shim-ini-controls-1` receipt yields zero targets and no configured badges, while the legacy OutRun receipt yields
+    26 targets.
+  - What remains: a reviewed, versioned runtime-status reader in Wheelkit (P9b).
 - **Structured status:** `controls-status {"v":1,...}` JSON lines in `runtime.log`, written at start and on every
   change. They carry:
   - per action: id, status, reason, device and epoch;
@@ -759,7 +763,7 @@ folder refuses admission.
 | N4 | Latch safely, with an unmistakable in-game banner and a Wheelkit explanation. The receipt-bound clear action works only while the game is closed. An unknown request is never deleted automatically. | section 9 |
 | N5 | Nonce, increasing `batch=<n>`, full SHA-256. An exact duplicate is ignored without extending TTLs. The same `n` with other bytes, or a regression, fails. First-file wait and per-object expiry are specified. | section 9 |
 | N6 | Bounded, queued JSON lines in `runtime.log`, with process, run, profile and build identity and gap counters. No extra status file yet. | section 12 |
-| N7 | `shim-ini-controls-1`. Astra tests real Wheelkit readers; the token is a hypothesis until that test passes. | section 12, slice 1 W |
+| N7 | `shim-ini-controls-1`. Astra checked Wheelkit: it has no runtime-status reader yet, and the released writer refuses the new receipt (P9a, proven). A versioned runtime-status reader is future work (P9b). | section 12 |
 | N8 | A verified, bounded copy of the owner's saves and options in an exclusively created run folder, with hashes pinned and no links. First-run is a separate case. | section 15 |
 
 **Constants reviewed with the code, not here:** the 100 ms freshness window, the 0.05 rest threshold, three
@@ -787,7 +791,8 @@ Each slice is written as tests and code, reviewed, and accepted before the next 
 | P6 | The worker never blocks the tick; close handoff and acknowledgement | fake slow enumeration and open; a close requested mid-tick | U |
 | P7 | Statuses, including `read-pending`, `read-failed` and `test-neutral`; start line after the device checks | a profile spanning every status | U |
 | P8 | Structured status: coalesced, bounded, identity-pinned; overflow counted with recording off | a status storm | U |
-| P9 | Old readers fail closed on `shim-ini-controls-1` and the new statuses | Wheelkit reader at its pinned commit | W |
+| P9a | The released Wheelkit writer refuses the shim capability | released 0.6.15 Core DLL: the `shim-ini-controls-1` receipt yields 0 targets and no configured badges (Astra, `artifacts/wheelkit-shim-p9`) | W, **proven** |
+| P9b | A versioned runtime-status reader joins process and run, profile revision, provider and installed build; unknown, missing or stale status clears runtime verification | fixtures: unavailable and rearming, a stale success from an earlier run, an unknown status or provider, a changed build or profile, missing observations | W, future integration |
 | P10 | Writer transaction: interleaved writers with barriers (lost-update counterexample), an editor that ignores the lock between recheck and commit, abandoned lock, timeout, aliases, missing-file race, replacement failure, preservation, BOM and CRLF | shared vectors and barrier tests, C++ (F6) and C# | U, W |
 | P11 | Import: explicit, preview, all-or-nothing, no-clobber, sources untouched | owner Redux vectors; an existing target; a failure midway | U |
 | P12 | Latch from `inject.on` existence alone; never cleared; failed-core and invalid-profile latched starts go INERT with every supported action neutral; a fence failure is REFUSED before game init | missing, stale, malformed and valid `inject.on`; core init failure; no profile | U |
@@ -845,3 +850,4 @@ Each slice is written as tests and code, reviewed, and accepted before the next 
 | r3 review | 2026-10-10 | Astra | Go-ahead for slice 1 (pure core and fake provider), with four corrections: a strict session file versus owner metadata; `Poll` versus the state read; no generation disappearing; physical versus injected rearm sources. Platform gates deferred: writer rollback race, the `ReplaceFileW` flag, observer atomics in C++17, detached-worker lifetime (`inbox/2026-10-10-romi-input-shim-r3-review.md`, hcom 9203). |
 | r3.1 | 2026-10-10 | zero | The four corrections and the deferred platform gates written into sections 5, 6 and 9. |
 | slice 1 | 2026-10-10 | zero | Pure core and fake provider: `windows/shim/` (`shim.hpp`, `parse.cpp`, `core.cpp`, `sha256.hpp`), tests `windows/tests/test_shim.cpp` with `shim_fake_provider.hpp`, 112 checks, clean at `/W4`. Covers P1-P8 and P12-P18 plus the four r3 corrections. Mutation check (`windows/tests/shim_mutations.py`): 15 of 17 single-rule breakages caught; the other 2 are unreachable guards kept as defence in depth (terminal finality, delivery outside RUNNING). Not in this slice: P9 (Astra), P10 and P11 (writer and import, platform gate), P19-P21 (observer, recorder, shutdown, platform gates). |
+| P9 result | 2026-10-10 | Astra | Wheelkit has no generic controls runtime-status reader. The released writer refuses the shim receipt (P9a, proven). P9b, a versioned reader with freshness, build and profile checks, is future integration. UI integration is not claimed from a log token (`inbox/2026-10-10-romi-shim-wheelkit-p9.md`, hcom 9351). |
