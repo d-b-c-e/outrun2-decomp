@@ -4,8 +4,8 @@
 # bound by the wheel toolkit's controls contract (vendor/controls). Built with
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
-    source/controls_store.cpp source/test_injection.cpp)
-target_include_directories(OutRunDesktop PRIVATE source vendor/controls)
+    source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp)
+target_include_directories(OutRunDesktop PRIVATE source shim vendor/controls)
 target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid)
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
@@ -33,3 +33,19 @@ target_include_directories(test_outrun_adapter PRIVATE shim tests source vendor/
 target_compile_features(test_outrun_adapter PRIVATE cxx_std_17)
 target_compile_options(test_outrun_adapter PRIVATE /W4)
 add_test(NAME outrun_adapter COMMAND test_outrun_adapter)
+
+# The test fence (source/test_fence), slice 2b: a temporary game tree, the real game-free writers (options, profiles,
+# the EXE setup, the log), success and fault paths, the complete game-tree inventory compared before and after.
+add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp shim/parse.cpp)
+target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_fence PRIVATE cxx_std_17)
+target_compile_options(test_fence PRIVATE /W4)
+target_compile_definitions(test_fence PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_fence PRIVATE outrun_native_runtime)
+add_test(NAME test_fence COMMAND test_fence)
+# The write and home() audit, and its own mutations.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    add_test(NAME write_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR})
+    add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
+endif()

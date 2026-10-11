@@ -6,6 +6,7 @@
 #include "native_window.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
+#include "test_fence.hpp"
 #include <windows.h>
 #include <shellapi.h>
 #include <winrt/base.h>
@@ -88,21 +89,44 @@ static LONG WINAPI crash_report(EXCEPTION_POINTERS* e){
 }
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     SetUnhandledExceptionFilter(crash_report);
+    // The test fence decides first, before anything writes (INPUT-SHIM.md section 15): a test-requested process gets
+    // its own run folder as home (saves, options, logs), the game folder only read, no OR2_ switches; or it refuses.
+    namespace fence=outrun::desktop::fence;
+    const auto folder=outrun::xbox_runtime::launch_folder();
+    const auto dbce=fence::dbce_folder();
+    fence::Plan plan;
+    std::vector<std::string> cleared;
+    if(fence::latch_requested(dbce)){
+        std::wstring game(folder.size(),L'\0');
+        game.resize(std::size_t(MultiByteToWideChar(CP_UTF8,0,folder.data(),int(folder.size()),game.data(),int(game.size()))));
+        plan=fence::prepare_run(dbce,game,GetCurrentProcessId());
+        if(!plan.refusal.empty()){fence::write_refusal(plan,GetCurrentProcessId());return 3;}
+        cleared=fence::clear_development_switches();
+        outrun::xbox_runtime::latched_home()=fence::utf8(plan.run_root);
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // real pixels for the borderless window
     winrt::init_apartment();   // Windows.Gaming.Input
-    const auto folder=outrun::xbox_runtime::launch_folder();
-    const auto log=folder+"/runtime.log";
+    const auto log=plan.latched?fence::utf8(fence::log_path(plan,{})):folder+"/runtime.log";   // the fixture tests log_path
     if(std::freopen(log.c_str(),"w",stdout))std::setvbuf(stdout,nullptr,_IONBF,0);
     if(std::freopen(log.c_str(),"a",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);
+    if(plan.latched){
+        std::printf("TEST PROCESS: inject.on was present at start. Wheel input is off; saves, options and logs are in %s; the game "
+                    "folder %s is only read; %zu OR2_ switch(es) cleared; %zu file(s) seeded (%llu bytes).\n",
+                    fence::utf8(plan.run_root).c_str(),folder.c_str(),cleared.size(),plan.seeded.size(),(unsigned long long)plan.seeded_bytes);
+    }
     std::vector<std::string> args;int count=0;
     if(wchar_t** argv=CommandLineToArgvW(GetCommandLineW(),&count)){
         for(int i=0;i<count;++i)args.push_back(outrun::xbox_runtime::utf8(argv[i]));LocalFree(argv);}
-    const auto settings=outrun::desktop::load_desktop_settings(folder);
+    const auto settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);   // a latched process creates nothing
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
-    outrun::desktop::wheel_input_configure(settings);
-    outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
+    // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
+    // the shim is wired (slice 3); the shim's own test path replaces it.
+    if(!plan.latched){
+        outrun::desktop::wheel_input_configure(settings);
+        outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
+    }
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::wheel_input_shutdown();

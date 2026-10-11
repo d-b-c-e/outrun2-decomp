@@ -59,6 +59,9 @@ std::string application_home(int argc,char** argv){
         for(const auto& path:candidates)if(!path.empty()&&outrun::platform::retail_asset_store_is_game_root(path)){retail_root=path;break;}
     }
     if(retail_root.empty())throw std::runtime_error("OutRun 2006 game folder not found (USB drive OutRun2006, LocalState\\OutRun2006 or next to the executable)");
+    // A latched (test) desktop process: the game folder is data only. Its write probe and SaveGame folder were made in
+    // the run folder by the entry point's fence, which also seeded the owner's saves there.
+    if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())return run;
     if(!writable(retail_root))throw std::runtime_error("the game folder is read-only: "+retail_root);
     std::error_code ec;
     std::filesystem::create_directories(retail_root+"/SaveGame",ec);

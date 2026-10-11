@@ -100,7 +100,30 @@ ADAPTER = [
      "if(latched)signals_.native_suppressed=suppress_native(out);", ""),
 ]
 
-SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER)}
+FENCE = [
+    ("run folder not exclusive", "source/test_fence.cpp",
+     "if(!CreateDirectoryW(plan.run_root.c_str(),nullptr)){", "if(!CreateDirectoryW(plan.run_root.c_str(),nullptr)&&GetLastError()!=ERROR_ALREADY_EXISTS){"),
+    ("links in the owner's state followed", "source/test_fence.cpp",
+     "if(d.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT){plan.refusal=", "if(false){plan.refusal="),
+    ("a linked test folder accepted", "source/test_fence.cpp",
+     "if(has_reparse_point_on_path(plan.dbce_folder)){", "if(false){"),
+    ("no file bound", "source/test_fence.cpp",
+     "if(plan.seeded.size()+1>limits.max_files){", "if(false){"),
+    ("no byte bound", "source/test_fence.cpp",
+     "if(plan.seeded_bytes+size>limits.max_bytes){", "if(false){"),
+    ("the CRT keeps OR2_ switches", "source/test_fence.cpp",
+     "_wputenv_s(n.c_str(),L\"\");", ""),
+    ("home stays the game folder when latched", "source/test_fence.cpp",
+     "return plan.latched&&plan.refusal.empty()?plan.run_root:normalize(game_root);", "return normalize(game_root);"),
+    ("the game folder's former cache migrated when read only", "../src/system/setup_screen.cpp",
+     "if(!game_dir_read_only)adopt_former_cache(root,cache,fallback);", "adopt_former_cache(root,cache,fallback);"),
+    ("options rename that cannot replace (the Windows bug)", "../src/enhancements/video.cpp",
+     "std::error_code ec;std::filesystem::rename(temp,path,ec);", "std::error_code ec;if(std::rename(temp.c_str(),path.c_str())!=0)ec=std::make_error_code(std::errc::file_exists);"),
+    ("seed copy not verified (no fixture produces a differing copy)", "source/test_fence.cpp",
+     "if(!ra||!rb||ha!=hb||a!=b){", "if(false){"),
+]
+
+SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER), "fence": ("test_fence", FENCE)}
 
 def run(target, mutations):
     build = ["cmake", "--build", str(repo / "build-xbox-pc"), "--config", "Release", "--target", target]

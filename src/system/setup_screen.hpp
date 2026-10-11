@@ -53,5 +53,8 @@ struct SetupPlatform {
 // is saved next to the game files, or in fallback_dir (the platform's own
 // folder, may be empty) when the game folder is read-only. Returns false with
 // *error when no usable EXE exists (the screen then shows what to do).
-bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_dir,const SetupPlatform& platform,std::string* error);
+// game_dir_read_only (a latched test process): the game folder is only read: no former-cache migration there, and
+// the prepared image goes to fallback_dir only.
+bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_dir,const SetupPlatform& platform,std::string* error,
+                       bool game_dir_read_only=false);
 }

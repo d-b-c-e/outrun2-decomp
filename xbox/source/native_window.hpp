@@ -11,6 +11,9 @@ namespace outrun::xbox_runtime {
 // Unset on the Xbox and in the PC test build.
 using InputFilter=void(*)(outrun::platform::NativeInputState&,const outrun::platform::NativeRuntimeContext* runtime);
 InputFilter& input_filter();
+// A latched (test) desktop process: home() is this run folder and the game folder is only read (data, the EXE image
+// cache). Empty in every other process. Set by the desktop entry point before or2_xbox_main.
+std::string& latched_home();
 struct NativeWindow {
     void* hwnd{};          // HWND (PC build)
     void* core_window{};   // ABI ICoreWindow* (UWP build)
