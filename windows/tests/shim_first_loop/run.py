@@ -105,13 +105,18 @@ def main():
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
-    receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[])
+    receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[],
+                   injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
+                             "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")
     nonce = "".join(random.choices(string.ascii_letters + string.digits, k=16))
     proc = None; run_root = None; leased = False
+    published = {}                               # only files this invocation wrote, with their last bytes
+    def publish(name, data):
+        replace_file(DBCE / name, data); published[name] = data
     try:
         lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
         DBCE.mkdir(parents=True, exist_ok=True)
-        replace_file(DBCE / "inject.on", ("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
+        publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
         receipt["pid"] = proc.pid
         run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
@@ -119,7 +124,7 @@ def main():
         def batch(commands):
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
-            replace_file(DBCE / "inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
+            publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
         phase = "menus"; phase_at = 0
         while time.time() < deadline and proc.poll() is None:
             time.sleep(0.2)
@@ -153,14 +158,25 @@ def main():
             try: proc.wait(timeout=30)
             except subprocess.TimeoutExpired: receipt["forced"] = True; proc.kill()
     finally:
-        for f in ("inject.on", "inject.txt"):
-            try: (DBCE / f).unlink()
-            except FileNotFoundError: pass
-            except OSError as e: receipt["errors"].append("cleanup %s: %r" % (f, e))
-        if run_root and run_root.exists(): shutil.copytree(run_root, out / "run", dirs_exist_ok=True)
-        if leased:
-            try: lease("Exit")
-            except Exception as e: receipt["errors"].append(repr(e))
+        try:
+            try:
+                # Only while our lease is held, and only the files this invocation published with exactly our bytes: a
+                # refused lease or another caller's files are never touched (Astra 16520).
+                if leased:
+                    for f, data in published.items():
+                        try:
+                            if (DBCE / f).read_bytes() == data: (DBCE / f).unlink()
+                            else: receipt["errors"].append("cleanup %s: not our bytes, left in place" % f)
+                        except FileNotFoundError: pass
+                        except OSError as e: receipt["errors"].append("cleanup %s: %r" % (f, e))
+            finally:
+                try:
+                    if run_root and run_root.exists(): shutil.copytree(run_root, out / "run", dirs_exist_ok=True)
+                except Exception as e: receipt["errors"].append("evidence copy: %r" % e)
+        finally:
+            if leased:
+                try: lease("Exit")
+                except Exception as e: receipt["errors"].append(repr(e))
         if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
         if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
         sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
