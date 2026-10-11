@@ -100,3 +100,16 @@ the local SDK's C++17 coroutine header refuses Clang; the Core remains C++17.
 This extension has built with warnings as errors. P30 live qualification and
 independent source review are pending; the earlier P29 evidence remains pinned
 to its original executable and source.
+
+`dinput_inventory --list-only <new folder>` supplies current instance/product
+GUIDs and names with one `EnumDevices(GAMECTRL, ATTACHEDONLY)`, bounded to 256
+entries. It never calls CreateDevice, acquires a device, opens a window, or
+requests a force. Do not substitute a Rewired hashed instance in a DirectInput
+profile. Record this discovery before preparing a new device binding.
+
+The process supervisor regression is now reproducible from a clone:
+`Test-Supervisor.ps1 -Toolkit <toolkit> -Result <new folder>`. It builds a fake
+single-file child and tests normal completion, nonzero exit, wrong PID/time,
+unresolved state/input/release, exact device counts and timeout, including
+retained stdout/stderr. 89 checks pass. Its lease is a private dummy file;
+no actual rig device, game or output is touched.
