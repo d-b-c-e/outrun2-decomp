@@ -569,6 +569,8 @@ void Core::track_status(std::int64_t now){
         const auto st=frame_.action[std::size_t(i)].status;
         std::string why;
         const int bi=bound_of_[std::size_t(i)];
+        const int device=bi<0?-1:bound_[std::size_t(bi)].device;
+        const auto epoch=device<0?0u:devs_[std::size_t(device)].epoch;
         if(bi<0)why=base_reason_[std::size_t(i)];
         else if(st==Status::ObjectMissing||st==Status::RangeUnqualified){
             const auto& k=bound_[std::size_t(bi)].binding;
@@ -579,14 +581,15 @@ void Core::track_status(std::int64_t now){
                                      device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
         else if(is_unavailable(st))why=device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
         else if(st==Status::Rearming)why=pedal_waits_for_rest(i)?"waiting for rest":"waiting for release";
-        if(st!=last_status_[std::size_t(i)]||why!=last_reason_[std::size_t(i)]){
+        if(st!=last_status_[std::size_t(i)]||why!=last_reason_[std::size_t(i)]||epoch!=last_status_epoch_[std::size_t(i)]){
             last_status_[std::size_t(i)]=st;last_reason_[std::size_t(i)]=why;
-            queue_status({now,StatusChange::Of::Action,i,status_name(st),why});
+            last_status_epoch_[std::size_t(i)]=epoch;
+            queue_status({now,StatusChange::Of::Action,i,status_name(st),why,device,epoch});
         }
     }
     for(std::size_t i=0;i<devs_.size();++i){
         const auto st=device_status(devs_[i])+" epoch "+std::to_string(devs_[i].epoch);
-        if(st!=last_dev_status_[i]){last_dev_status_[i]=st;queue_status({now,StatusChange::Of::Device,int(i),st,device_reason(devs_[i])});}
+        if(st!=last_dev_status_[i]){last_dev_status_[i]=st;queue_status({now,StatusChange::Of::Device,int(i),st,device_reason(devs_[i]),int(i),devs_[i].epoch});}
     }
 }
 

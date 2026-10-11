@@ -26,15 +26,23 @@ plans=[
     ('io-neutral','core.cpp','if((closed||failed)&&(run_==Run::Latched||run_==Run::Waiting||run_==Run::Running))','if((closed||failed)&&false&&(run_==Run::Latched||run_==Run::Waiting||run_==Run::Running))','bad or delayed session fails neutral'),
     ('terminal-journal','control_pump.hpp','if(!journal_failed_){const bool written','if(!journal_failed_&&state_!=State::Failed){const bool written','broken journal never retried; healthy sink receives terminal drain'),
 ]
-for name,rel,old,new,why in plans:
+core_plans=[
+    ('status-action-epoch','core.cpp','status_name(st),why,device,epoch','status_name(st),why,device,0','action status has typed wheel epoch'),
+    ('status-action-device','core.cpp','status_name(st),why,device,epoch','status_name(st),why,0,epoch','action status joins separate shifter'),
+    ('status-device-epoch','core.cpp','device_reason(devs_[i]),int(i),devs_[i].epoch','device_reason(devs_[i]),int(i),0','device status has typed epoch independent of text'),
+    ('status-epoch-change','core.cpp','||epoch!=last_status_epoch_[std::size_t(i)]','','epoch-only action change replaces the entire queued record'),
+]
+for name,rel,old,new,why in plans+core_plans:
     root=out/'mutations'/name
     for f in before['files']:
         dst=root/f;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(repo/f,dst)
     target=root/'windows/shim'/rel;text=target.read_text();assert text.count(old)==1
     target.write_text(text.replace(old,new))
-    candidate=build(name,root/'windows/tests/control_pump',root/'build');bad=run(name,[candidate],None)
+    candidate=build(name,root/'windows/tests/control_pump',root/'build')
+    target_exe=candidate.with_name('core_regression.exe') if name.startswith('status-') else candidate
+    bad=run(name,[target_exe],None)
     if bad.returncode==0 or why not in bad.stderr:raise RuntimeError(name+' not caught at its named assertion: '+bad.stderr)
     mutations.append(dict(name=name,caught=True,reason=bad.stderr.strip()))
 if pin()!=before:raise RuntimeError('Source changed during proof')
 (out/'receipt.json').write_text(json.dumps(dict(source=before,passed=True,proof=proof.stdout.strip(),regression=regression.stdout.strip(),mutations=mutations,commands=commands),indent=2))
-print(proof.stdout.strip());print(regression.stdout.strip());print('PASS six defect controls; '+str(out/'receipt.json'))
+print(proof.stdout.strip());print(regression.stdout.strip());print(f'PASS {len(mutations)} defect controls; '+str(out/'receipt.json'))
