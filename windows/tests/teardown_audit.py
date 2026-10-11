@@ -7,12 +7,14 @@
 #   R2 hold a static or thread_local object with a dynamic destructor: CRT exit runs it while a worker may still use it (H1);
 #   R3 detach a thread: only the host may leave a worker running, and it owns that worker's state (D1, D9);
 #   R4 end the process or a thread: ending is the host's D4 alone (exit, abort, ExitProcess, TerminateProcess, ...).
-# Textual and conservative, like write_audit: an exception needs an exact entry (file + normalized line) with a reason in
-# teardown_audit.json, and an entry that no longer matches anything fails. The P20 recorder worker joins the scope when it
-# is promoted from tests/ into windows/shim.
+# Textual and conservative, like write_audit: an exception needs an exact entry (file + normalized line + count) with a
+# reason in teardown_audit.json. Hits beyond an entry's count are findings, and an entry with fewer hits than its count
+# fails as stale, so a duplicate of an allowed line is caught. The P20 recorder worker joins the scope when it is promoted
+# from tests/ into windows/shim. windows/host (the production provider host) is in scope: it alone owns the destructor's
+# two detaches (D9) and forced_exit's TerminateProcess (D4), allowed exactly there and nowhere else (Astra 15507).
 import json, pathlib, re, shutil, subprocess, sys, tempfile
 
-SCOPE = ["windows/shim"]
+SCOPE = ["windows/shim", "windows/host"]
 SUFFIXES = {".cpp", ".hpp", ".h"}
 # R1: the console and every FILE-stream call (std:: or not). String formatting (snprintf, sscanf) touches no stream.
 STDIO = re.compile(r"(?<![\w.>])(?:std::)?(printf|fprintf|vprintf|vfprintf|wprintf|fwprintf|vwprintf|vfwprintf|scanf|fscanf|wscanf|fwscanf|"
@@ -90,10 +92,14 @@ def scan(root):
 
 def audit(root, allow_path):
     allow = json.loads(allow_path.read_text(encoding="utf-8")) if allow_path.exists() else []
-    keys = {(a["file"], a["line"]) for a in allow}
+    budget = {}
+    for a in allow: budget[(a["file"], a["line"])] = budget.get((a["file"], a["line"]), 0) + int(a.get("count", 1))
     hits = scan(root)
-    bad = [h for h in hits if (h[1], h[3]) not in keys]
-    stale = [a for a in allow if not any(h[1] == a["file"] and h[3] == a["line"] for h in hits)]
+    used, bad = {}, []
+    for h in hits:
+        key = (h[1], h[3]); used[key] = used.get(key, 0) + 1
+        if used[key] > budget.get(key, 0): bad.append(h)   # not allowed, or beyond its exact count
+    stale = [a for a in allow if used.get((a["file"], a["line"]), 0) < budget[(a["file"], a["line"])]]
     return hits, bad, stale
 
 SELF = [  # (snippet, flagged rule or None)
@@ -152,7 +158,14 @@ def mutations(root):
               ("R2 global with a dynamic destructor", "windows/shim/parse.cpp", "std::vector<int> g_lines;", None),
               ("R2 global with a dynamic destructor", "windows/shim/core.cpp", "namespace planted {\n    std::vector<int> g_indented;\n}", "std::vector<int> g_indented;"),
               ("R3 thread detach", "windows/shim/core.cpp", "std::thread([]{}).detach();", None),
-              ("R4 process or thread ending", "windows/shim/dinput_provider.cpp", "ExitProcess(1);", None)]
+              ("R4 process or thread ending", "windows/shim/dinput_provider.cpp", "ExitProcess(1);", None),
+              # The host's exceptions are exact: another detach or ending anywhere in windows/host, or one more copy of
+              # an allowed line (beyond its count), is a finding (Astra 15507).
+              ("R3 thread detach", "windows/host/provider_host.hpp", "inline void planted_detach() { std::thread([]{}).detach(); }", None),
+              ("R3 thread detach", "windows/host/provider_host.hpp", "if (worker_.joinable()) worker_.detach();", None),
+              ("R4 process or thread ending", "windows/host/provider_host.hpp", "inline void planted_end() { TerminateProcess(GetCurrentProcess(), 1); }", None),
+              ("R1 stdio", "windows/host/host_lifecycle.hpp", 'inline void planted_log() { std::fprintf(stderr, "x"); }', None),
+              ("R2 global with a dynamic destructor", "windows/host/host_lifecycle.hpp", "std::vector<int> g_host_slots;", None)]
     ok = True
     for rule, rel, text, line in plants:
         line = line or text

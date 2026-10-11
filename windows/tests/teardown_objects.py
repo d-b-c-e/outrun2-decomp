@@ -15,12 +15,21 @@
 # Undefined symbols are what the compiled code calls after macros, aliases and std:: spellings are resolved.
 # Out of scope, by design: fail-fast paths the compiler or library inserts and no source line asks for (std::terminate on
 # an exception escaping noexcept, _invoke_watson, _purecall); and code no shim translation unit compiles or includes,
-# which only the lexer sees. An exception needs an exact entry (file + symbol, or file + line for R2) with a reason in
-# teardown_objects.json; an entry that no longer matches fails.
+# which only the lexer sees. An exception needs an exact entry with a reason in teardown_objects.json, and an entry that no
+# longer matches fails. Symbol hits are attributed to the function whose code references them, with a count, from the
+# object's disassembly and relocations: an entry names "symbol in function xN", so an extra call in an allowed function,
+# or the same call anywhere else, is a new finding (Astra 15507). R2 compile hits stay file + line.
+#
+# windows/host (the production provider host) is in scope too. Its header-only template emits no code until it is
+# instantiated, so windows/tests/teardown_units/provider_host_instance.cpp instantiates it with a minimal lazy recorder.
+# The host alone owns two policies the workers may never use: the destructor's two detaches (D9) and forced_exit's
+# TerminateProcess (D4); those exact call sites, and the library wrappers they reach, are the only exceptions.
 import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
-SCOPE = "windows/shim"
-INCLUDES = ["windows/shim", "windows/vendor/controls"]
+SCOPES = ["windows/shim", "windows/host"]
+SCOPE = ", ".join(SCOPES)   # for the summary line
+EXTRA_UNITS = ["windows/tests/teardown_units/provider_host_instance.cpp"]   # instantiations of in-scope templates
+INCLUDES = ["windows/shim", "windows/host", "windows/vendor/controls"]
 DEFINES = ["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS", "UNICODE", "_UNICODE"]
 FLAGS = ["/nologo", "/std:c++17", "/EHsc", "/c", "-Wno-everything", "-Werror=exit-time-destructors"]
 EXIT_TIME = re.compile(r"^(.*?)\((\d+),\d+\):\s+error: declaration requires an exit-time destructor")
@@ -36,7 +45,7 @@ STREAM_PREFIX = ("__stdio_common_vf",)   # vfprintf(_s,_p), vfwprintf(...), vfsc
 STREAM_PART = ("?cout@std@@", "?cerr@std@@", "?clog@std@@", "?cin@std@@", "?wcout@std@@", "?wcerr@std@@", "?wclog@std@@",
                "?wcin@std@@", "?$basic_filebuf@", "_Fiopen")
 EXIT_TIME_SYMBOLS = {"atexit", "_onexit", "at_quick_exit", "__tlregdtor"}
-DETACH = {"_Thrd_detach"}
+DETACH = {"_Thrd_detach", "?detach@thread@std@@QEAAXXZ"}   # the runtime call, and std::thread::detach itself
 ENDING = {"exit", "_exit", "_Exit", "quick_exit", "abort", "_cexit", "_c_exit", "_endthread", "_endthreadex"} | {
     p + s for s in ("ExitProcess", "TerminateProcess", "ExitThread", "TerminateThread", "FatalExit", "FatalAppExitA",
                     "FatalAppExitW", "RaiseFailFastException", "RtlExitUserProcess", "RtlExitUserThread", "NtTerminateProcess")
@@ -64,10 +73,33 @@ def tools(explicit):
     raise SystemExit("teardown objects: no clang-cl with llvm-nm beside it (pass --clang-cl)")
 
 def units(tree):
-    """Each .cpp, and each header compiled on its own through a stub, as (reported file, source to compile)."""
-    for path in sorted((tree / SCOPE).rglob("*")):
-        if path.suffix == ".cpp": yield path, path
-        elif path.suffix in (".hpp", ".h"): yield path, None
+    """Each .cpp, and each header compiled on its own through a stub, as (reported file, source to compile); then the
+    instantiation units that make in-scope templates emit their code."""
+    for scope in SCOPES:
+        for path in sorted((tree / scope).rglob("*")):
+            if path.suffix == ".cpp": yield path, path
+            elif path.suffix in (".hpp", ".h"): yield path, None
+    for rel in EXTRA_UNITS:
+        if (tree / rel).exists(): yield tree / rel, tree / rel
+
+FUNCTION = re.compile(r"^[0-9a-f]+ <(.*)>:\s*$")
+def attribute(obj, nm_tool, undefined):
+    """{symbol: {function: count}} for every rule symbol a code relocation references, defined in this object or not
+    (an inline std::thread::detach is defined here, so nm -u alone would miss calls to it), from llvm-objdump's
+    disassembly with relocations. A flagged undefined symbol that no code relocation explains (a data reference, an
+    unexpected section) is reported under "<unattributed>"."""
+    objdump = nm_tool.with_name("llvm-objdump.exe")
+    out = subprocess.run([str(objdump), "-d", "-r", "-C", str(obj)], capture_output=True, text=True, check=True, encoding="utf-8", errors="replace").stdout
+    found, current = {}, "<no function>"
+    for line in out.splitlines():
+        m = FUNCTION.match(line)
+        if m: current = m.group(1); continue
+        if "IMAGE_REL_" in line:
+            sym = line.split()[-1]
+            if rule_of(sym): found.setdefault(sym, {}).setdefault(current, 0); found[sym][current] += 1
+    for sym in undefined:
+        if sym not in found: found[sym] = {"<unattributed>": 1}
+    return found
 
 def compile_and_scan(tree, clang, nm, only=None):
     """[(rule, file, where, text)]: where is a line (R2 compile) or a symbol. Raises on any other compile failure."""
@@ -93,9 +125,10 @@ def compile_and_scan(tree, clang, nm, only=None):
                 if hits: continue   # the diagnostics are the finding; there is no object to scan
                 raise RuntimeError("compile failed for %s:\n%s" % (rel, (r.stdout + r.stderr)[-2000:]))
             syms = subprocess.run([str(nm), "-u", str(obj)], capture_output=True, text=True, check=True).stdout.split()
-            for s in sorted({s for s in syms if s != "U"}):
-                rule = rule_of(s)
-                if rule: found.append((rule, rel, s, s))
+            flagged = sorted({s for s in syms if s != "U" and rule_of(s)})
+            for s, functions in sorted(attribute(obj, nm, flagged).items()):
+                for function, count in sorted(functions.items()):
+                    found.append((rule_of(s), rel, "%s in %s x%d" % (s, function, count), s))
     return found
 
 def audit(tree, clang, nm, allow_path, only=None):
@@ -132,19 +165,38 @@ CLEAN = ("#include <atomic>\n#include <mutex>\n#include <cstdio>\n#include <thre
          "int planted_parse(const char* t) { int v = 0; return std::sscanf(t, \"%d\", &v); }\n"
          "void planted_join() { std::thread w([] {}); w.join(); }\n")
 
+# Host plants (Astra 15507): the production host's exceptions are exact call sites. (rule, planted file, text, what
+# must be flagged, anchor inside the class, the instantiation unit that is compiled.)
+HOST_UNIT = "windows/tests/teardown_units/provider_host_instance.cpp"
+HOST_ANCHOR = "    [[noreturn]] void forced_exit()"
+HOST_PLANTS = [
+    ("R3 thread detach", "windows/host/provider_host.hpp", "    void planted_detach() { std::thread([] {}).detach(); }", "planted_detach", HOST_ANCHOR, HOST_UNIT),
+    ("R3 thread detach", "windows/host/provider_host.hpp", "    void planted_more() { if (worker_.joinable()) worker_.detach(); }", "planted_more", HOST_ANCHOR, HOST_UNIT),
+    ("R4 process or thread ending", "windows/host/provider_host.hpp", "    void planted_end() { TerminateProcess(GetCurrentProcess(), 1); }", "planted_end", HOST_ANCHOR, HOST_UNIT),
+    ("R1 stdio", "windows/host/provider_host.hpp", "    void planted_log() { std::fprintf(stderr, \"x\"); }", "__stdio_common_vfprintf", HOST_ANCHOR, HOST_UNIT),
+    ("R2 exit-time destructor registration", "windows/host/provider_host.hpp", "    void planted_reg() { std::atexit([] {}); }", "planted_reg", HOST_ANCHOR, HOST_UNIT),
+    # One more detach inside the allowed destructor: the count changes, so the exact entry no longer covers it.
+    ("R3 thread detach", "windows/host/provider_host.hpp", "        if (worker_.joinable()) worker_.detach();", " x3", "        if (release_.joinable()) release_.detach();", HOST_UNIT),
+]
+
 def mutations(root, clang, nm):
     ok = True
     def scratch(tmp):
         copy = pathlib.Path(tmp)
-        for d in [SCOPE] + INCLUDES:
+        for d in SCOPES + INCLUDES + [str(pathlib.PurePosixPath(u).parent) for u in EXTRA_UNITS]:
             if not (copy / d).exists(): shutil.copytree(root / d, copy / d)
         return copy
-    for rule, rel, text, want in PLANTS:
+    for rule, rel, text, want, *extra in PLANTS + HOST_PLANTS:
+        anchor, unit = (extra + [None, None])[:2]
         with tempfile.TemporaryDirectory() as tmp:
-            copy = scratch(tmp); target = copy / rel
-            target.write_text(target.read_text(encoding="utf-8") + "\n" + text + "\n", encoding="utf-8")
-            _, bad, _ = audit(copy, clang, nm, root / "windows/tests/teardown_objects.json", only=rel)
-            caught = any(b[0] == rule and b[1] == rel and (b[3] == want or (isinstance(b[2], str) and want in b[2])) for b in bad)
+            copy = scratch(tmp); target = copy / rel; body = target.read_text(encoding="utf-8")
+            if anchor:   # inside the host class, before an existing member, so the instantiation emits it
+                if body.count(anchor) != 1: raise RuntimeError("host plant anchor changed: " + anchor)
+                body = body.replace(anchor, text + "\n" + anchor)
+            else: body = body + "\n" + text + "\n"
+            target.write_text(body, encoding="utf-8")
+            _, bad, _ = audit(copy, clang, nm, root / "windows/tests/teardown_objects.json", only=unit or rel)
+            caught = any(b[0] == rule and b[1] == (unit or rel) and (b[3] == want or (isinstance(b[2], str) and want in b[2])) for b in bad)
             print("mutation %-56s %s" % ("%s (%s) in %s" % (rule, want if len(want) < 24 else want[:21] + "...", rel), "caught" if caught else "MISSED: %r" % bad))
             ok &= caught
     with tempfile.TemporaryDirectory() as tmp:
