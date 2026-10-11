@@ -81,11 +81,12 @@ def main():
     a.add_argument("--game", type=pathlib.Path, default=pathlib.Path(r"E:\Games\OutRunShimTest"))
     a.add_argument("--candidate", type=pathlib.Path, required=True)
     a.add_argument("--prepare-from", type=pathlib.Path, help="build --game as a copy of this game folder first")
-    a.add_argument("--result", type=pathlib.Path, required=True)
+    a.add_argument("--result", type=pathlib.Path, help="a fresh result folder (runs and preflight)")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     o = a.parse_args()
     if o.prepare_from: prepare(o.prepare_from, o.game, o.candidate); return
+    if not o.result: a.error("--result is required for a run or a preflight")
     out = o.result.resolve()
     problems = []
     if out.exists(): problems.append("result folder exists")
