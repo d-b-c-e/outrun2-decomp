@@ -33,9 +33,15 @@ namespace recorder_spike {
 // library: one helper joins the thread, and is detached at once (its own exit could wait behind the same work). The
 // thread object lives in a shared holder, so a failed helper creation cannot destroy a joinable thread (terminate); the
 // end then stays unproven, and a later call retries.
+// No live thread before its owner (Astra 14071): construct a ThreadEnd first (every allocation it needs happens here),
+// then start() move-assigns the new thread into the holder, which cannot allocate or throw after the launch.
 class ThreadEnd {
 public:
-    explicit ThreadEnd(std::thread t):thread_(std::make_shared<std::thread>(std::move(t))){}
+    ThreadEnd():thread_(std::make_shared<std::thread>()){}
+    template<class F,class... A> void start(F&& f,A&&... args){
+        if(thread_->joinable())throw std::logic_error("ThreadEnd already started");
+        *thread_=std::thread(std::forward<F>(f),std::forward<A>(args)...);   // a failed launch leaves no thread
+    }
     ThreadEnd(const ThreadEnd&)=delete;
     ThreadEnd& operator=(const ThreadEnd&)=delete;
     bool wait_until(std::chrono::steady_clock::time_point deadline){
@@ -271,7 +277,8 @@ public:
             throw std::invalid_argument("recorder preflight");
         s_=std::make_shared<State>(capacity,width,first,std::move(hooks));
         if(s_->ring.capacity()>payload_budget/sizeof(Packet))throw std::invalid_argument("allocated payload budget");
-        worker_=std::make_unique<ThreadEnd>(std::thread(run,s_,std::move(sink)));
+        worker_=std::make_unique<ThreadEnd>();       // the owner first: all allocation before the worker exists
+        worker_->start(run,s_,std::move(sink));
     }
     Controller(const Controller&)=delete;
     Controller& operator=(const Controller&)=delete;

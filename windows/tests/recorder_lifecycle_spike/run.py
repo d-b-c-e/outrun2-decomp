@@ -51,6 +51,8 @@ if args.mutations:
       # r2.3 (Astra 13816): the old join, unbounded once worker_done is published; a thread-exit tail holds it.
       'join-ignores-thread-exit': [('if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0)return false;','(void)ms;')],
       # Astra 13978: detaching on a timeout makes a later call claim an end it never proved.
+      # Astra 14071: a live worker before its owner; a failed owner allocation destroys a joinable thread (terminate).
+      'launch-before-owner': [('        worker_=std::make_unique<ThreadEnd>();       // the owner first: all allocation before the worker exists','        std::thread launched(run,s_,std::move(sink)); worker_=std::make_unique<ThreadEnd>(); launched.detach();'),('        worker_->start(run,s_,std::move(sink));','')],
       'join-detaches-on-timeout': [('if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0)return false;','if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0){thread_->detach();return false;}')],
     }
     for name,edits in variants.items():

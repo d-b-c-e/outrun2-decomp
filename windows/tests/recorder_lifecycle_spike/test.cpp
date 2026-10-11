@@ -3,8 +3,21 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <cstdlib>
+#include <new>
 using namespace recorder_spike;
 using namespace std::chrono_literals;
+// Allocation-failure injection for the calling thread only (Astra 14071): the Nth allocation from now throws bad_alloc.
+// Other threads (the worker, helpers) allocate normally.
+thread_local long fail_allocation_after=-1;
+void* operator new(std::size_t n){
+    if(fail_allocation_after==0){fail_allocation_after=-1;throw std::bad_alloc();}
+    if(fail_allocation_after>0)--fail_allocation_after;
+    if(void* p=std::malloc(n?n:1))return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p)noexcept{std::free(p);}
+void operator delete(void* p,std::size_t)noexcept{std::free(p);}
 namespace {
 int checks=0;
 void check(bool ok,const char* name){++checks;if(!ok)throw std::runtime_error(name);}
@@ -165,6 +178,26 @@ void producer_disappears(){
     auto t=trace();auto c=controller(t);{auto p=c->producer();p.push(packet(1));}
     const auto r=c->drain(2s);check(r.outcome==Outcome::ProducerAbandoned&&!r.may_seal()&&t->stops==0,"abandoned producer cannot complete");reconcile(r);
 }
+// Astra 14071: no live worker before its owner. Every allocation in Controller construction is made to fail in turn: none
+// may destroy a joinable thread (std::terminate would end this test), and a failed construction never started the worker.
+void allocation_failures(){
+    int failed=0;bool built=false;
+    for(long k=0;k<64&&!built;++k){
+        auto t=trace();
+        fail_allocation_after=k;
+        try{
+            auto c=controller(t);
+            fail_allocation_after=-1;built=true;
+            {auto p=c->producer();}   // abandoned: the worker ends
+            c->drain(2s);
+            check(c->join_until(std::chrono::steady_clock::now()+2s),"the first construction that succeeds runs and ends normally");
+        }catch(const std::bad_alloc&){
+            fail_allocation_after=-1;++failed;
+            check(t->opens==0,"a failed construction never started the worker");
+        }
+    }
+    check(built&&failed>=4,"every allocation before the launch was failed in turn (sink, controller, state, owner, launch)");
+}
 // r2.3: the worker publishes Complete and worker_done, then its thread still runs exit work. join_until waits for the
 // thread itself against the same deadline: a short tail is waited for, a long or endless one makes it false in time.
 void thread_tail(int tail_ms,bool joined){
@@ -192,7 +225,7 @@ void thread_tail(int tail_ms,bool joined){
 }
 int main(){
     try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
-        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);}
+        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);allocation_failures();}
     catch(const std::exception& e){for(auto& w:traces)if(auto t=w.lock())t->release();std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"Recorder lifecycle: "<<checks<<" checks passed\n";
 }
