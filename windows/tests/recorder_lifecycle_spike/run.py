@@ -33,6 +33,11 @@ run('configure',['cmake','-S',here,'-B',build,'-G','Visual Studio 17 2022','-T',
 run('build',['cmake','--build',build,'--config','Debug'])
 run('lifecycle',[build/'Debug/recorder_lifecycle_test.exe'])
 run('lifecycle-portable',[build/'Debug/recorder_lifecycle_test_portable.exe'])   # r2.3: the bounded join without a platform handle
+# The whole-construction allocation sweep runs only in Release (Debug proxies allocate in noexcept code, Astra 14144).
+run('build-release',['cmake','--build',build,'--config','Release','--target','recorder_lifecycle_test','recorder_lifecycle_test_portable'])
+for name in ['recorder_lifecycle_test','recorder_lifecycle_test_portable']:
+    p=run(name.replace('recorder_lifecycle_test','lifecycle')+'-release',[build/'Release'/(name+'.exe')])
+    if '(allocation sweep run)' not in p.stdout: raise RuntimeError('Release lifecycle did not run the allocation sweep: '+name)
 run('native',[build/'Debug/recorder_lifecycle_native.exe',capture])
 run('managed-build',['dotnet','build',here/'managed/LifecycleConformance.csproj','--configuration','Release','--artifacts-path',managed,'-p:ToolkitRoot='+str(toolkit)])
 run('reader',['dotnet',managed/'bin/LifecycleConformance/release/LifecycleConformance.dll',capture])
@@ -55,6 +60,7 @@ if args.mutations:
       'launch-before-owner': [('        worker_=std::make_unique<ThreadEnd>();       // the owner first: all allocation before the worker exists','        std::thread launched(run,s_,std::move(sink)); worker_=std::make_unique<ThreadEnd>(); launched.detach();'),('        worker_->start(run,s_,std::move(sink));','')],
       'join-detaches-on-timeout': [('if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0)return false;','if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0){thread_->detach();return false;}')],
     }
+    release_only={'launch-before-owner'}
     for name,edits in variants.items():
         source=result/'mutations'/name; source.mkdir(parents=True)
         changed=original
@@ -65,8 +71,9 @@ if args.mutations:
         for file in ['test.cpp','CMakeLists.txt']: shutil.copyfile(here/file,source/file)
         b=source/'build'
         run(name+'-configure',['cmake','-S',source,'-B',b,'-G','Visual Studio 17 2022','-T','ClangCL','-A','x64'])
-        run(name+'-build',['cmake','--build',b,'--config','Debug'])
-        p=run(name,[b/'Debug/recorder_lifecycle_test.exe'],expect=None)
+        config='Release' if name in release_only else 'Debug'   # launch-before-owner is seen by the Release-only sweep
+        run(name+'-build',['cmake','--build',b,'--config',config,'--target','recorder_lifecycle_test'])
+        p=run(name,[b/config/'recorder_lifecycle_test.exe'],expect=None)
         if p.returncode==0: raise RuntimeError('Mutation escaped: '+name)
         mutations.append(dict(name=name,detected=True,exit=p.returncode,output=p.stdout+p.stderr))
     original=(here/'managed/CompletionBundle.cs').read_text()

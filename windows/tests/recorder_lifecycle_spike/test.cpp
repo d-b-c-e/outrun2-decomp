@@ -180,6 +180,13 @@ void producer_disappears(){
     auto t=trace();auto c=controller(t);{auto p=c->producer();p.push(packet(1));}
     const auto r=c->drain(2s);check(r.outcome==Outcome::ProducerAbandoned&&!r.may_seal()&&t->stops==0,"abandoned producer cannot complete");reconcile(r);
 }
+// The whole-construction allocation sweep is a Release check (Astra 14144): MSVC's Debug iterator debugging allocates
+// container proxies inside noexcept constructors (State's empty strings), where an injected bad_alloc terminates by rule.
+#if defined(_DEBUG) || (defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL > 0)
+constexpr bool allocation_sweep=false;
+#else
+constexpr bool allocation_sweep=true;
+#endif
 // Astra 14071: no live worker before its owner. Every allocation in Controller construction is made to fail in turn: none
 // may destroy a joinable thread (std::terminate would end this test), and a failed construction never started the worker.
 void allocation_failures(){
@@ -229,7 +236,7 @@ int main(){
     // A destroyed joinable thread calls std::terminate: report it and exit 3, never a crash dialog (Astra 14097).
     std::set_terminate([]{std::fputs("FAIL: std::terminate (a joinable thread was destroyed or an exception escaped)\n",stderr);std::_Exit(3);});
     try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
-        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);allocation_failures();}
+        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);if(allocation_sweep)allocation_failures();}
     catch(const std::exception& e){for(auto& w:traces)if(auto t=w.lock())t->release();std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
-    std::cout<<"Recorder lifecycle: "<<checks<<" checks passed\n";
+    std::cout<<"Recorder lifecycle: "<<checks<<" checks passed"<<(allocation_sweep?" (allocation sweep run)":" (allocation sweep: Release only, skipped in this Debug build)")<<"\n";
 }
