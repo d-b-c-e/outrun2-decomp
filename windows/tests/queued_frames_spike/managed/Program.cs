@@ -10,7 +10,7 @@ using Dbce.Wheel.Recording;
 
 static class Program {
     static readonly string[] Required={"bundle.meta","profile.ini","worker.tsv","source.jsonl","budget.tsv"};
-    const string Contract="dbce.shim.queued-frames-spike@1\n", InputContract="shim-frame-audit-2-pending-unadopted";
+    const string Contract="dbce.shim.queued-frames-spike@2\n", InputContract="shim-frame-audit-2-pending-unadopted";
     static int checks;
     static void Check(bool ok,string why){++checks;if(!ok)throw new InvalidDataException(why);}
     static ulong U(string s){Check(ulong.TryParse(s,NumberStyles.None,CultureInfo.InvariantCulture,out var n),"unsigned decimal");return n;}
@@ -46,7 +46,7 @@ static class Program {
             count.LimitCount==0&&count.ErrorCount==0&&count.AcceptedMarkers==0&&count.WrittenMarkers==0,"inner worker accounting");
         Check(records.All(x=>x.Marker==null),"fixture has no event journal");
         var rows=records.Where(x=>x.Sample!=null).Select(x=>x.Sample).ToArray();Check((ulong)rows.Length==written,"complete rows");
-        var names=rows[0].Channels.Keys.OrderBy(x=>x,StringComparer.Ordinal).ToArray();Check(names.Length==375,"complete two-device plus adapter schema");
+        var names=rows[0].Channels.Keys.OrderBy(x=>x,StringComparer.Ordinal).ToArray();Check(names.Length==382,"complete two-device plus adapter schema and inputs");
         for(int i=0;i<rows.Length;++i){var row=rows[i];var c=row.Channels;var seq=Wide(c,"frame");var tick=Wide(c,"tickUs");
             Check(c.Keys.OrderBy(x=>x,StringComparer.Ordinal).SequenceEqual(names),"fixed complete schema");
             Check(seq==first+(ulong)i&&Wide(c,"adapter.frame")==seq&&tick>=origin&&row.ElapsedSeconds==(tick-origin)/1e6,"source sequence/time/adapter join");
@@ -55,7 +55,7 @@ static class Program {
             }
         }
         var budget=File.ReadAllText(Path.Combine(dir,"budget.tsv")).TrimEnd('\r','\n').Split('\t');
-        Check(budget.Length==3&&U(budget[0])==375&&U(budget[2])<=4*1024*1024,"declared schema and queue bytes");
+        Check(budget.Length==3&&U(budget[0])==382&&U(budget[2])<=4*1024*1024,"declared schema and queue bytes");
         // Native preflight counts exact ASCII key escaping + 32-byte finite binary64 + fixed JSON reserve.
         var bound=192UL+names.Aggregate(0UL,(sum,n)=>sum+(ulong)System.Text.Json.JsonSerializer.Serialize(n).Length+34UL);
         Check(U(budget[1])==bound,"independent worst-case row bound");

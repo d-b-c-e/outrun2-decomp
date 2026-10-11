@@ -43,7 +43,7 @@ if args.mutations:
             '/* omitted owned copy */','record','eligible actual worker result'),
         'old-enum-refuses-pending':('frame_codec.hpp','int(Call::Pending)','int(Call::NotCalled)','replay','invalid integer: sample.1.poll'),
         'wrong-adapter-record-word':('native.cpp','return writer.sample(double(p.source_us-origin)/1e6,c);',
-            'c["adapter.recordSteer"]+=1;return writer.sample(double(p.source_us-origin)/1e6,c);','replay','every original frame and adapter channel preserved'),
+            'c["adapter.recordSteer"]+=1;return writer.sample(double(p.source_us-origin)/1e6,c);','replay','export matches the original producer snapshots'),
     }
     for name,(file,old,new,stage,reason) in variants.items():
         src=result/'mutations'/name;src.mkdir(parents=True)

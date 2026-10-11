@@ -5,7 +5,7 @@
 #include <functional>
 namespace rs=recorder_spike;
 using namespace std::chrono_literals;
-constexpr const char* Contract="dbce.shim.queued-frames-spike@1\n";
+constexpr const char* Contract="dbce.shim.queued-frames-spike@2\n";
 constexpr const char* InputContract="shim-frame-audit-2-pending-unadopted";
 std::string fixture_profile(){return profile({Steer,Throttle,Brake,sb("shiftUp",11),wb("camera",5),wb("navLeft",7)});}
 struct Snapshot {Frame frame;Signals signals;NativeInputState sink;GameView view;};
@@ -17,8 +17,21 @@ Channels signal_channels(const Signals& s){
     c["adapter.recordButtons"]=s.record_buttons;c["adapter.nativeSuppressed"]=s.native_suppressed;c["adapter.gearbox"]=int(s.gearbox);
     return c;
 }
-Channels channels(const Snapshot& s){auto c=encode(s.frame);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());return c;}
-Channels frame_channels(const Channels& all){Channels c;for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0)c.insert(v);return c;}
+Channels channels(const Snapshot& s){auto c=encode(s.frame);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
+    c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
+    c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;return c;}
+Channels frame_channels(const Channels& all){Channels c;for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0)c.insert(v);return c;}
+GameView decoded_view(const Channels& c){
+    GameView v;v.mode=std::uint32_t(number(c,"gameInput.mode",0,UINT32_MAX));v.car=number(c,"gameInput.car",0,1)!=0;
+    v.gear=std::uint32_t(number(c,"gameInput.gear",0,UINT32_MAX));v.speed=float(c.at("gameInput.speed"));check(std::isfinite(v.speed),"finite input speed");
+    v.consumed_steer=std::int32_t(number(c,"gameInput.consumedSteer",INT32_MIN,INT32_MAX));
+    v.consumed_accel=std::int32_t(number(c,"gameInput.consumedAccel",INT32_MIN,INT32_MAX));
+    v.consumed_brake=std::int32_t(number(c,"gameInput.consumedBrake",INT32_MIN,INT32_MAX));return v;
+}
+void same_view(const GameView& a,const GameView& b){
+    auto fields=[](const GameView& v){return std::tie(v.mode,v.car,v.gear,v.speed,v.consumed_steer,v.consumed_accel,v.consumed_brake);};
+    check(fields(a)==fields(b),"typed adapter input GameView round trip");
+}
 Signals decoded_signals(const Channels& c){
     Signals s;s.frame_seq=u64(c,"adapter.frame");s.mode=std::uint32_t(number(c,"adapter.mode",0,UINT32_MAX));
     s.in_gameplay=number(c,"adapter.inGame",0,1)!=0;s.gear=std::uint32_t(number(c,"adapter.gear",0,UINT32_MAX));
@@ -62,6 +75,7 @@ std::vector<Snapshot> capture(const std::function<void(const Snapshot&)>& emit={
         if(t==6)s.script.push_back({Call::Ok,Call::Pending});
         if(t==8)s.script.push_back({Call::Gone,Call::NotCalled});
         r.view.mode=t>=11&&t<=12?3:16;
+        r.view.car=t!=13;
         r.view.speed=float(t*2);r.view.consumed_steer=t-8;r.view.consumed_accel=t*10;r.view.consumed_brake=t==6?255:0;
         auto out=r.tick();rows.push_back({*r.frame,r.adapter->signals(),out,r.view});
         if(emit)emit(rows.back()); // Caller must copy: the next tick changes both Core and Adapter storage.
@@ -83,8 +97,14 @@ std::size_t row_bound(const std::vector<std::string>& names){
     // 192 covers the fixed JSON syntax, uint64 sequence, elapsed binary64 and newline.
     std::size_t bytes=192;for(const auto& name:names)bytes+=dbce::session::quote(name).size()+34;return bytes;
 }
-void preflight(const std::vector<std::string>& names,std::uint64_t frames,dbce::session::Limits limits={}){
-    if(names.empty()||names.size()>1024||!frames)throw std::invalid_argument("schema/frame bound");
+void preflight(const std::vector<std::string>& names,double hz,double seconds,dbce::session::Limits limits={}){
+    if(names.empty()||names.size()>1024||!std::isfinite(hz)||hz<=0||!std::isfinite(seconds)||seconds<=0||
+       !std::isfinite(limits.seconds)||limits.seconds<=0||limits.seconds>86400||seconds>limits.seconds||
+       limits.bytes<16384||limits.bytes>1024ull*1024*1024||limits.recordBytes<1024||limits.recordBytes>1024*1024)
+        throw std::invalid_argument("schema/rate/duration/limits bound");
+    const long double frame_count=std::ceil(static_cast<long double>(hz)*seconds)+1;
+    if(frame_count>=static_cast<long double>(UINT64_MAX))throw std::invalid_argument("frame bound overflow");
+    const auto frames=static_cast<std::uint64_t>(frame_count);
     const auto row=row_bound(names);
     // Fixture metadata is separately bounded below 8192, plus writer's 8192 footer reserve.
     if(row>limits.recordBytes||limits.bytes<16384||frames>(limits.bytes-16384)/row)
@@ -147,10 +167,15 @@ void report(const fs::path& root,const rs::Report& r,const Identity& id,std::uin
 }
 void record(const fs::path& root,bool window){
     check(fs::create_directory(root),"new capture directory");
-    const auto expected=capture();const auto names=schema(channels(expected[0]));preflight(names,16);
-    check(names.size()==375,"full two-device schema plus every adapter signal");
-    bool short_budget=false;try{preflight(names,600*60);}catch(const std::invalid_argument&){short_budget=true;}
+    const auto expected=capture();const auto names=schema(channels(expected[0]));preflight(names,62.5,.24);
+    check(names.size()==382,"full two-device schema plus every adapter signal and input");
+    bool short_budget=false;try{preflight(names,60,600);}catch(const std::invalid_argument&){short_budget=true;}
     check(short_budget,"600 seconds at 60Hz refused before any writer under default budget");
+    bool too_long=false;try{preflight(names,0.01,601);}catch(const std::invalid_argument&){too_long=true;}
+    check(too_long,"low-rate duration over writer limit refused before opening");
+    for(const auto rate:{0.0,-1.0,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}){
+        bool refused=false;try{preflight(names,rate,1);}catch(const std::invalid_argument&){refused=true;}check(refused,"invalid rate refused");}
+    check(4*1024*1024/sizeof(rs::Packet)==510,"fixed-slot production capacity obeys both upper bounds");
     auto wide=expected[0];while(wide.frame.samples.size()<8)wide.frame.samples.push_back(wide.frame.samples[0]);
     bool too_wide=false;try{schema(channels(wide));}catch(const std::invalid_argument&){too_wide=true;}
     check(too_wide,"adapter signals count toward complete channel preflight");
@@ -169,6 +194,9 @@ void record(const fs::path& root,bool window){
     producer.finish(actual.back().frame.seq);id->resume=true;const auto r=c.drain(2s);
     check(r.worker_done&&id->owner_calls==0,"all native writer I/O off the input producer");
     report(root,r,*id,first,origin);
+    auto pushed=dbce::session::jsonStream();
+    for(std::size_t i=start;i<actual.size();++i){const auto row=channels(actual[i]);pushed<<"ROW "<<row.size()<<'\n';for(const auto& v:row)pushed<<v.first<<' '<<v.second<<'\n';}
+    write_new(root.parent_path()/(root.filename().string()+".producer.tsv"),pushed.str());
     write_new(root/"profile.ini",fixture_profile());write_new(root/"bundle.meta",Contract);
     auto b=dbce::session::jsonStream();b<<names.size()<<'\t'<<row_bound(names)<<'\t'<<sizeof(rs::Packet)*16<<'\n';write_new(root/"budget.tsv",b.str());
     std::cout<<"Recorded "<<r.written<<" actual frames; first="<<first<<", channels="<<names.size()<<", owned ring="<<r.ring_bytes<<" bytes\n";
@@ -179,30 +207,34 @@ std::vector<Channels> read_export(const fs::path& path){
         for(std::size_t k=0;k<n;++k){std::string key;double v;check(bool(in>>key>>v),"numeric channel");check(c.emplace(key,v).second,"no duplicate channel");}result.push_back(std::move(c));}return result;
 }
 void replay(const fs::path& root,bool window){
-    const auto expected=capture();const auto rows=read_export(root/"frames.tsv");const std::size_t start=window?6:0;
+    const auto expected=capture();const auto rows=read_export(root/"frames.tsv");
+    const auto pushed=read_export(root.parent_path()/(root.filename().string()+".producer.tsv"));const std::size_t start=window?6:0;
     check(rows.size()==expected.size()-start,"all queued samples returned");
+    check(rows==pushed,"export matches the original producer snapshots, not only regenerated fakes");
     Rig r(false,fixture_profile(),true);Adapter adapter("Sequential");
     // Window mode only proves sequence/count framing, not mid-session resolver or adapter restoration.
     for(std::size_t k=0;k<rows.size();++k){
         const auto& want=expected[k+start];check(rows[k]==channels(want),"every original frame and adapter channel preserved");
         const Frame f=decode(frame_channels(rows[k]));same_frame(f,want.frame);same_signals(decoded_signals(rows[k]),want.signals);
+        const GameView view=decoded_view(rows[k]);same_view(view,want.view);
         if(window)continue;
-        r.view=want.view;
+        r.view=view;
         for(const auto& s:f.samples){auto& d=r.dev(s.device);d.state=s.physical;d.script.push_back({s.poll,s.state});}
         const auto out=r.tick(f.tick_us-r.p.clock);check(encode(*r.frame)==encode(f),"raw replay uses real resolver and preserves Pending/rearm/epoch");
         same_sink(out,want.sink);same_signals(r.adapter->signals(),want.signals);
-        NativeInputState action_out;adapter.apply(f,want.view,action_out);same_sink(action_out,want.sink);same_signals(adapter.signals(),want.signals);
+        NativeInputState action_out;adapter.apply(f,view,action_out);same_sink(action_out,want.sink);same_signals(adapter.signals(),want.signals);
     }
     auto corrupt=frame_channels(rows[0]);corrupt["sample.0.poll"]=5;bool bad=false;try{decode(corrupt);}catch(const std::exception&){bad=true;}check(bad,"future Call enum refused");
     if(!window){
         for(bool wrong_shift:{false,true}){
             auto prof=profile({wrong_shift?Steer:Steer+" inverted",Throttle,Brake,sb("shiftUp",wrong_shift?10:11),wb("camera",5),wb("navLeft",7)});
-            Rig wrong(false,prof,true);unsigned mismatches=0;
-            for(std::size_t k=0;k<rows.size();++k){const auto f=decode(frame_channels(rows[k]));wrong.view=expected[k].view;
+            Rig wrong(false,prof,true);std::vector<std::size_t> mismatches;
+            for(std::size_t k=0;k<rows.size();++k){const auto f=decode(frame_channels(rows[k]));wrong.view=decoded_view(rows[k]);
                 for(const auto& s:f.samples){auto& d=wrong.dev(s.device);d.state=s.physical;d.script.push_back({s.poll,s.state});}
                 wrong.tick(f.tick_us-wrong.p.clock);const auto a=action_index(wrong_shift?"shiftUp":"steer");
-                if(wrong.frame->action[a].value!=f.action[a].value)++mismatches;}
-            check(mismatches>0,"wrong applied profile changes raw replay");std::cout<<"Wrong "<<(wrong_shift?"shift":"steering")<<" profile detected on "<<mismatches<<" frames\n";
+                if(wrong.frame->action[a].value!=f.action[a].value)mismatches.push_back(k);}
+            const std::vector<std::size_t> wanted=wrong_shift?std::vector<std::size_t>{2,3,11}:std::vector<std::size_t>{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+            check(mismatches==wanted,"wrong applied profile changes exactly the expected frames");std::cout<<"Wrong "<<(wrong_shift?"shift":"steering")<<" profile detected on "<<mismatches.size()<<" frames\n";
         }
     }
     std::cout<<"PASS "<<(window?"non-one source sequence window only":"queued raw/action Core and OutRun adapter replay")<<": "<<rows.size()<<" frames, "<<checks<<" checks\n";

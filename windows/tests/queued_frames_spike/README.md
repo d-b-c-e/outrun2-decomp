@@ -19,11 +19,15 @@ Native and managed builds treat warnings as errors. Mutations use private copies
 
 ## What this establishes
 
-- Sixteen actual two-device Core frames, each with all 360 prior frame channels
-  and all 15 numeric OutRun adapter channels, enter the worker as owned packets.
+- Sixteen actual two-device Core frames, each with all 360 prior frame channels,
+  all 15 numeric OutRun adapter channels and seven GameView input channels,
+  enter the worker as owned packets (382 channels).
   The native writer is held on its first row while the producer finishes every
   tick. Producer packet storage is overwritten after each push; every original
   value must survive. The bounded ring contains 16 packets / 131456 payload bytes.
+  The design's 1024-row and 4-MiB limits are simultaneous upper bounds: this
+  fixed 8216-byte slot allows at most 510 slots under 4 MiB. A width-sized slot
+  is a possible later optimization; 1024 such fixed slots are never promised.
 - Poll Pending, State Pending, failure, reopen, held-button rearm, fresh press,
   navigation and a race/menu transition are exercised. This fixture explicitly
   adopts Call::Pending=4 under `shim-frame-audit-2-pending-unadopted`. Unknown Call
@@ -37,11 +41,18 @@ Native and managed builds treat warnings as errors. Mutations use private copies
 - Raw replay passes recorded physical states and call outcomes to a fresh Core
   using the fixture's known identities/caps and deterministic clock. Its actions,
   epochs, edges and provenance must match. Action replay applies decoded frames
-  through a fresh OutRun adapter using the original scripted GameView. Typed
+  through a fresh OutRun adapter using its recorded GameView inputs, including
+  the car-present flag (a no-car frame is included), independently of signals. Typed
   comparisons check every Frame/DeviceSample/ActionValue field, NativeInputState
-  field and adapter signal independently of the serialized channel comparison.
-- Inverted steering and a wrong shift button change raw replay, so the resolver
-  is exercised. A deliberately wrong adapter output word is detected too.
+  field, every GameView input and adapter signal independently of the serialized
+  channel comparison. The post-capture original snapshots are also retained in
+  `<capture>/full.producer.tsv` and `window.producer.tsv` and compared with the
+  exported rows. These separate test-oracle artifacts are receipt-hashed; they
+  are not replay inputs or members of the portable contract. Regenerated fakes
+  remain a second semantic check because this fixture is deterministic.
+- Inverted steering and a wrong shift button change raw replay on exactly the
+  expected frame indices (all 16; and 2, 3, 11), so the resolver is exercised.
+  A deliberately wrong adapter output word is detected too.
 - A separate ten-frame source window begins at sequence 7. It validates
   `tail - first + 1 == written`, exact times, hashes and typed snapshots only.
   It does **not** claim mid-session resolver/adapter state restoration.
@@ -50,7 +61,10 @@ Native and managed builds treat warnings as errors. Mutations use private copies
   known schema has a conservative row bound using exact escaped key lengths,
   32 bytes per finite binary64 value and fixed JSON/sequence/time reserves.
   Metadata and footer each have an 8192-byte reserve. The requested frame bound
-  is checked by division to avoid overflow. Six hundred seconds at 60 Hz does
+  is calculated as `ceil(rate * seconds) + 1` and checked by division to avoid
+  overflow. Invalid rates/durations/limits and durations beyond the writer's
+  limit are refused before opening; a low-rate 601-second case tests the latter.
+  Six hundred seconds at 60 Hz does
   not fit the default 64 MiB and is refused before opening the writer. The
   managed proof independently recalculates the bound and checks actual rows.
 
@@ -63,17 +77,22 @@ reviewed `a1e964e`; this composition does not replace it.
 
 ## Remaining production work
 
-This is `dbce.shim.queued-frames-spike@1`, **not a portable replay bundle**. The
+This is `dbce.shim.queued-frames-spike@2`, **not a portable replay bundle**. The
 profile is exact, but device-slot/caps/epoch histories, full event/batch journals,
-the rearm policy and game context are still fixture knowledge. EventKind::ReadPending
+the rearm policy and Core clock/device lifecycle are still fixture knowledge.
+The adapter's GameView is now recorded; arbitrary game/physics state and adapter
+checkpoints are not. EventKind::ReadPending
 is not yet serialized as an event journal. Mid-session state, source/replay clock
 semantics, final neutral consumption and recording control-surface integration
 remain open. There is no second-game reuse result and no trajectory replay.
 
 The producer's channel map allocation is bounded by this fixture's known schema,
 but the current snapshot encoding is not a real-time allocation-free API. The
-production host must preflight rate/duration, profile/metadata and worst-case
-variable device/adapter schemas together; this fixed schema is only a demonstrator.
+production host must preflight profile/metadata and worst-case variable
+device/adapter schemas together with the requested rate/duration; this fixed
+schema is only a demonstrator. A live device/clock comparison must retain the
+actual producer observations and replay context; regenerating this deterministic
+fixture is not a substitute for that evidence.
 The native identity helper and managed envelope here are fixture-local until a
 production snapshot contract is selected; no stable API is being duplicated.
 
