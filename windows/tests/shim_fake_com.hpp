@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -39,6 +40,12 @@ struct DeviceScript {
     bool fill_on_failure=false;                    // GetDeviceState writes the state even when it returns a failure
     bool pending_first_read=false;                 // each new device object's first GetDeviceState returns E_PENDING
     int state_delay_ms=0;
+    // P21k (opt-in, off by default): one Acquire after `acquire_armed` is set, normally the worker's reacquisition, stays
+    // inside the "driver": it signals `acquire_entered`, then waits `acquire_delay_ms` (a bounded slow call) or, when the
+    // delay is negative, on `acquire_release` for ever (an event-backed call that never returns unless the test sets it).
+    std::shared_ptr<std::atomic<bool>> acquire_armed;
+    int acquire_delay_ms=0;
+    HANDLE acquire_entered{},acquire_release{};
     DeviceScript(){for(int a=0;a<8;++a){native_min[a]=0;native_max[a]=65535;}std::memset(&state,0,sizeof state);for(auto& p:state.rgdwPOV)p=0xFFFFFFFFu;}
 };
 
@@ -53,7 +60,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID,void**)override{return E_NOINTERFACE;}
     ULONG STDMETHODCALLTYPE AddRef()override{return ULONG(++refs_);}
     ULONG STDMETHODCALLTYPE Release()override{
-        if(in_read_.load())++c_.release_during_read;
+        if(in_read_.load()||in_call_.load()>0)++c_.release_during_read;   // a read or an Acquire still inside this object
         const int r=--refs_;
         if(r==0){released_=true;++c_.releases;}
         else if(r<0)++c_.after_release;
@@ -81,6 +88,14 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Acquire()override{
         check();++c_.acquires;
+        if(s_.acquire_armed&&s_.acquire_armed->exchange(false)){
+            ++in_call_;
+            if(s_.acquire_entered)SetEvent(s_.acquire_entered);
+            if(s_.acquire_delay_ms>=0)std::this_thread::sleep_for(std::chrono::milliseconds(s_.acquire_delay_ms));
+            else WaitForSingleObject(s_.acquire_release,INFINITE);
+            --in_call_;
+            check();   // a Release while it waited would show here as a call after release
+        }
         std::lock_guard<std::mutex> l(m_);
         if(s_.acquires.empty())return DI_OK;
         const auto hr=s_.acquires.front();s_.acquires.pop_front();return hr;
@@ -143,6 +158,7 @@ private:
     DeviceScript& s_;Counters& c_;std::mutex& m_;
     std::atomic<int> refs_{1};
     std::atomic<bool> released_{false},in_read_{false};
+    std::atomic<int> in_call_{0};
     bool ranged_=false,first_read_done_=false;
     HRESULT pending_state_=DI_OK;
     void check(){if(released_.load())++c_.after_release;}
@@ -156,6 +172,10 @@ public:
     std::vector<Device*> made;
     Counters counters;
     int enumerate_delay_ms=0,create_delay_ms=0;
+    // P21k (opt-in): one EnumDevices after `enumerate_armed` signals `enumerate_entered` and waits on `enumerate_release`
+    // for ever (a listing that never returns) unless the test sets it.
+    std::shared_ptr<std::atomic<bool>> enumerate_armed;
+    HANDLE enumerate_entered{},enumerate_release{};
     std::atomic<int> refs{1},enumerations{0};
     // Add every device before the first open: devices keep references to their scripts (a std::deque would also do).
     std::size_t add(DeviceScript s){s.opened_instance=s.instance;s.opened_product=s.product;scripts.push_back(s);attached.push_back(true);return scripts.size()-1;}
@@ -172,6 +192,10 @@ public:
     }
     HRESULT STDMETHODCALLTYPE EnumDevices(DWORD,LPDIENUMDEVICESCALLBACKW cb,LPVOID user,DWORD)override{
         if(enumerate_delay_ms)std::this_thread::sleep_for(std::chrono::milliseconds(enumerate_delay_ms));
+        if(enumerate_armed&&enumerate_armed->exchange(false)){
+            if(enumerate_entered)SetEvent(enumerate_entered);
+            WaitForSingleObject(enumerate_release,INFINITE);
+        }
         std::vector<DIDEVICEINSTANCEW> list;
         {std::lock_guard<std::mutex> l(m);++enumerations;
          for(std::size_t i=0;i<scripts.size();++i)if(attached[i]){
