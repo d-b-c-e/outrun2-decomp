@@ -36,11 +36,11 @@ if args.mutations:
     # Each breaks one rule of the host in a scratch copy and must make a named mode's check fail.
     plan = {
         'host-ignores-held-devices': ('        if (rep.held) r.unresolved.push_back("lease leaked: " + std::to_string(rep.held) + " device(s) still inside a call");\n',
-                                      '', 'P21k never: an event-backed reacquisition'),
+                                      '', 'P21k never: names its unresolved causes'),
         'host-ignores-worker-join': ('        if (!join_worker_until(Clock::now() + std::chrono::milliseconds(b.workers_ms))) r.unresolved.push_back("worker provider");\n',
-                                     '        (void)join_worker_until(Clock::now() + std::chrono::milliseconds(b.workers_ms));\n', 'P21k listing-never'),
+                                     '        (void)join_worker_until(Clock::now() + std::chrono::milliseconds(b.workers_ms));\n', 'P21k listing-never: names its unresolved causes'),
         'host-ignores-directinput': ('        if (!rep.input_released) r.unresolved.push_back("DirectInput not released: a call may still use it");\n',
-                                     '', 'P21k listing-never'),
+                                     '', 'P21k listing-never: names its unresolved causes'),
     }
     for name, (old, new, reason) in plan.items():
         src = result / 'mutations' / name; shutil.copytree(here, src)

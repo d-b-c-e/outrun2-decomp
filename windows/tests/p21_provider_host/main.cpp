@@ -129,7 +129,8 @@ bool sealed(const std::wstring& dir, const std::string& mode, const Run& run) {
     return p21_spike::may_seal("p21k-" + mode, wr, hr, e);
 }
 
-void expect(const std::wstring& self, const std::wstring& root, const std::string& mode, bool resolved, DWORD code, bool forced, const std::string& why) {
+void expect(const std::wstring& self, const std::wstring& root, const std::string& mode, bool resolved, DWORD code, bool forced, const std::string& why,
+            const std::vector<std::string>& causes = {}) {
     const auto dir = root + L"\\" + std::wstring(mode.begin(), mode.end());
     const auto r = supervise(self, mode, dir);
     const auto& h = r.host; const auto& c = r.counters;
@@ -141,6 +142,9 @@ void expect(const std::wstring& self, const std::wstring& root, const std::strin
     if (mode == "resolved" || mode.find("slow") != std::string::npos) check(field(c, "live") == "true", "P21k " + mode + ": the wheel was read through the real provider first (a valid sample, the scripted axis)");
     check(sealed(dir, mode, r) == resolved, "P21k " + mode + ": " + (resolved ? "seals: worker Complete, host resolved, normal exit" : "never seals"));
     if (resolved) check(field(h, "inputReleased") == "true" && field(h, "held") == "0", "P21k " + mode + ": devices and DirectInput released (" + h + ")");
+    // Each unresolved cause is named on its own: one cause hiding behind another is not proof (the host mutations).
+    bool named = true; for (const auto& cause : causes) named = named && h.find(cause) != std::string::npos;
+    if (!causes.empty()) check(named, "P21k " + mode + ": names its unresolved causes (" + h + ")");
 }
 }
 
@@ -153,11 +157,12 @@ int wmain(int argc, wchar_t** argv) {
     const DWORD Forced = 0xDBCE0F0F;
     expect(self, root, "resolved", true, 0, false, "the real provider and core shut down within budget; normal CRT teardown, exit 0");
     expect(self, root, "slow-within", true, 0, false, "a 120 ms reacquisition inside the 200 ms lease wait is waited for, then released: recovered");
-    expect(self, root, "slow-beyond", false, Forced, true, "a 600 ms reacquisition past every budget: held, worker unjoined, parked; a later return cannot resolve it");
-    expect(self, root, "never", false, Forced, true, "an event-backed reacquisition that never returns: held, never released under it, parked, ended only by the supervisor");
-    expect(self, root, "ordinary-never", false, p21_spike::ForcedExitCode, false, "an ordinary process with the same call ends itself, labelled forced (0xDBCE0021)");
-    expect(self, root, "listing-never", false, Forced, true, "a listing that never returns: DirectInput kept for it, worker unjoined, parked");
-    expect(self, root, "never-off-thread", false, Forced, true, "stop off the input thread: refused as unresolved, the recorder cancelled, parked");
+    const std::vector<std::string> heldCall{"lease leaked: 1 device", "worker provider", "DirectInput not released"};
+    expect(self, root, "slow-beyond", false, Forced, true, "a 600 ms reacquisition past every budget: held, worker unjoined, parked; a later return cannot resolve it", heldCall);
+    expect(self, root, "never", false, Forced, true, "an event-backed reacquisition that never returns: held, never released under it, parked, ended only by the supervisor", heldCall);
+    expect(self, root, "ordinary-never", false, p21_spike::ForcedExitCode, false, "an ordinary process with the same call ends itself, labelled forced (0xDBCE0021)", heldCall);
+    expect(self, root, "listing-never", false, Forced, true, "a listing that never returns: DirectInput kept for it, worker unjoined, parked", {"worker provider", "DirectInput not released"});
+    expect(self, root, "never-off-thread", false, Forced, true, "stop off the input thread: refused as unresolved, the recorder cancelled, parked", {"stop off the input thread", "recorder: Cancelled"});
     std::printf("%s %d P21k checks (%d failed): real Core and DInputProvider over fake COM, supervised children; no device, game or launch.\n",
                 failures ? "FAIL" : "PASS", checks, failures);
     std::fflush(stdout);
