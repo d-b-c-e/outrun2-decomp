@@ -24,6 +24,7 @@ struct Io {
     // The concrete sink adds immutable process/nonce/build/profile identity.
     // An accepted write means these entire records were accepted, never partial.
     virtual bool append(const Journal&)=0;
+    virtual bool finish()=0;        // flush/close on worker, completion requires acknowledgment
 };
 struct Options { bool latched{},fences_verified{},force_absent{}; std::string expected_nonce; };
 enum class State { New, Polling, Failed, Closed };
@@ -33,11 +34,13 @@ class Pump {
     State state_{State::New}; std::string reason_;
     bool have_bytes_{}; std::string last_bytes_;
     std::uint64_t batches_offered_{},identical_skipped_{},journal_writes_{};
+    bool finished_{},complete_{};
     void fail(const std::string& why){
         if(state_==State::Failed||state_==State::Closed)return;
         state_=State::Failed;reason_=why.substr(0,512);core_.fail_control(reason_);
     }
     bool closed(){if(core_.control_state().closed){state_=State::Closed;return true;}return false;}
+    Journal drain(){return {core_.drain_events(),core_.drain_status(),core_.status_dropped(),core_.status_coalesced(),core_.events_dropped(),core_.control_events_dropped(),batches_offered_,identical_skipped_};}
     void start(){
         state_=State::Polling;
         if(!options_.latched)return; // ordinary play never opens either injection file
@@ -78,7 +81,7 @@ public:
                 }
             }
             if(closed())return;
-            Journal journal{core_.drain_events(),core_.drain_status(),core_.status_dropped(),core_.status_coalesced(),core_.events_dropped(),core_.control_events_dropped(),batches_offered_,identical_skipped_};
+            Journal journal=drain();
             // Counts remain observable in every journal, including an otherwise
             // empty pass. A failed append is terminal, never silently retried as
             // if the drained evidence had been persisted.
@@ -86,6 +89,20 @@ public:
             ++journal_writes_;
         }catch(const std::exception& e){fail(std::string("control operation threw: ")+e.what());}
          catch(...){fail("control operation threw");}
+    }
+    // Host has stopped input ticks and closed the gate. Unlike pass(), this
+    // drains the final input-thread records even after closure, then finishes
+    // the sink. Always attempt sink cleanup, including after an earlier fault.
+    bool finish(){
+        if(finished_)return complete_;
+        if(worker_!=std::thread::id{}&&worker_!=std::this_thread::get_id())throw std::logic_error("control finish on wrong worker");
+        if(!core_.control_state().closed)throw std::logic_error("close control admission before final drain");
+        finished_=true;bool ok=state_!=State::Failed;
+        try{if(ok){ok=io_.append(drain());if(ok)++journal_writes_;}}catch(...){ok=false;}
+        try{if(!io_.finish())ok=false;}catch(...){ok=false;}
+        complete_=ok;state_=ok?State::Closed:State::Failed;
+        if(!ok&&reason_.empty())reason_="control final drain or sink close failed";
+        return complete_;
     }
     State state()const{return state_;}
     const std::string& reason()const{return reason_;}

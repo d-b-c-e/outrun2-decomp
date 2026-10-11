@@ -176,7 +176,7 @@ HOST_PLANTS = [
     ("R1 stdio", "windows/host/provider_host.hpp", "    void planted_log() { std::fprintf(stderr, \"x\"); }", "__stdio_common_vfprintf", HOST_ANCHOR, HOST_UNIT),
     ("R2 exit-time destructor registration", "windows/host/provider_host.hpp", "    void planted_reg() { std::atexit([] {}); }", "planted_reg", HOST_ANCHOR, HOST_UNIT),
     # One more detach inside the allowed destructor: the count changes, so the exact entry no longer covers it.
-    ("R3 thread detach", "windows/host/provider_host.hpp", "        if (worker_.joinable()) worker_.detach();", " x3", "        if (release_.joinable()) release_.detach();", HOST_UNIT),
+    ("R3 thread detach", "windows/host/provider_host.hpp", "        if (worker_.joinable()) worker_.detach();", " x4", "        if (release_.joinable()) release_.detach();", HOST_UNIT),
 ]
 
 def mutations(root, clang, nm):

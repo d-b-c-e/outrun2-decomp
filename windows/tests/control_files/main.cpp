@@ -48,6 +48,7 @@ struct FileIo final:c::Io {
     c::Read read_batch()override{++batches;return c::read_snapshot((root/L"inject.txt").wstring(),MaxBatchBytes);}
     std::uint64_t unix_seconds()override{return 1000;}
     bool append(const c::Journal& j)override{++logs;journal.push_back(j);return true;}
+    bool finish()override{return true;}
 };
 void integrated(const fs::path& root){
     const std::string dev="{11111111-1111-1111-1111-111111111111}",prod="{22222222-2222-2222-2222-222222222222}";

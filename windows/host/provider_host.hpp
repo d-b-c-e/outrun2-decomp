@@ -6,6 +6,7 @@
 #include "dinput_provider.hpp"
 #include "shim.hpp"
 #include "host_lifecycle.hpp"
+#include "control_pump.hpp"
 #include <condition_variable>
 #include <memory>
 #include <stdexcept>
@@ -27,7 +28,15 @@ struct WorkerState {
 
 // The spike's budgets, plus release_ms (Astra 13277): the provider's shutdown releases idle devices (Unacquire, Release)
 // and DirectInput itself synchronously, driver calls with no bound of their own, so that phase gets its own budget.
-struct Budget { int recorder_ms = 1000, leases_ms = 200, release_ms = 200, workers_ms = 200; };
+struct Budget { int recorder_ms = 1000, leases_ms = 200, release_ms = 200, workers_ms = 200, control_ms = 200; };
+
+struct ControlWorkerState {
+    std::shared_ptr<WorkerState> owner;           // Core AND its referenced provider outlive late I/O
+    std::shared_ptr<control::Io> io;
+    control::Options options;
+    std::atomic<bool> stop{false};
+    std::mutex m; std::condition_variable cv; bool done=false,complete=false;
+};
 
 // The release phase's own state: a release still inside a driver call keeps the provider alive (D1).
 struct ReleaseState {
@@ -37,6 +46,7 @@ struct ReleaseState {
 };
 
 struct Report : LifetimeReport {
+    bool control_present=false,control_joined=true,control_complete=true;
     int released = 0, held = 0;     // DInputProvider::ShutdownReport
     bool input_released = false;
     std::string provider_detail;
@@ -48,7 +58,9 @@ template<class RecorderType> class ProviderHost {
     HANDLE report_ = INVALID_HANDLE_VALUE;   // pre-opened: the report never waits behind a stdio lock (D2)
     std::unique_ptr<RecorderType> recorder_;
     std::shared_ptr<WorkerState> w_;
-    std::thread worker_, release_;
+    std::thread worker_, release_, control_thread_;
+    std::shared_ptr<ControlWorkerState> control_;
+    bool latched_{};
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
@@ -59,7 +71,7 @@ public:
         std::int64_t freshness_us = 100'000)
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
           recorder_(std::move(recorder)),
-          w_(std::make_shared<WorkerState>()) {
+          w_(std::make_shared<WorkerState>()),latched_(latched) {
         if (!recorder_) throw std::invalid_argument("recorder required");
         w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, window);
         dbce::shim::CoreConfig cfg; cfg.latched = latched; cfg.capability = capability;
@@ -85,6 +97,36 @@ public:
     std::vector<dbce::shim::DeviceReport> device_reports()const { return w_->core->device_reports(); } // input thread
     long long worker_passes() const { return w_->passes.load(); }
     RecorderType& recorder() { return *recorder_; } // input thread; the host owns its full lifetime
+    void close_control_admission(){
+        if(std::this_thread::get_id()!=input_)throw std::logic_error("close control on input thread");
+        w_->core->close_control();
+    }
+
+    // Input thread, once. I/O is performed only on the owned control worker.
+    // The desktop entry point supplies the already verified immutable fences.
+    void start_control(std::shared_ptr<control::Io> io,control::Options options){
+        if(std::this_thread::get_id()!=input_||stopped_||control_||!io)throw std::logic_error("invalid control worker start");
+        if(options.latched!=latched_||(latched_&&options.expected_nonce!=nonce_))throw std::logic_error("control worker fence identity differs from host");
+        auto s=std::make_shared<ControlWorkerState>();s->owner=w_;s->io=std::move(io);s->options=std::move(options);
+        control_=s;
+        control_thread_=std::thread([s]{
+            bool complete=false;
+            try{
+                control::Pump pump(*s->owner->core,*s->io,s->options);
+                while(!s->stop.load()){
+                    pump.pass();
+                    std::unique_lock<std::mutex> l(s->m);
+                    s->cv.wait_for(l,std::chrono::milliseconds(25),[&]{return s->stop.load();});
+                }
+                complete=pump.finish();
+            }catch(...){
+                s->owner->core->fail_control("control worker threw");
+                try{(void)s->io->finish();}catch(...){}
+            }
+            {std::lock_guard<std::mutex> l(s->m);s->complete=complete;s->done=true;}
+            s->cv.notify_all();
+        });
+    }
 
     void write_report(const char* state, const Report* r) {
         if (report_ == INVALID_HANDLE_VALUE) return;
@@ -99,7 +141,8 @@ public:
                  ",\"released\":" + std::to_string(r->released) + ",\"held\":" + std::to_string(r->held) +
                  ",\"inputReleased\":" + (r->input_released ? "true" : "false") + ",\"elapsedUs\":" + std::to_string(r->elapsed_us) + ",\"unresolved\":[";
             for (size_t i = 0; i < r->unresolved.size(); ++i) t += (i ? ",\"" : "\"") + r->unresolved[i] + "\"";
-            t += "]";
+            t += "],\"controlPresent\":"+std::string(r->control_present?"true":"false")+
+                 ",\"controlJoined\":"+(r->control_joined?"true":"false")+",\"controlComplete\":"+(r->control_complete?"true":"false");
         }
         t += "}";
         SetFilePointer(report_, 0, nullptr, FILE_BEGIN); DWORD n = 0;
@@ -114,6 +157,19 @@ public:
         Report r;
         write_report("stopping", nullptr);                                            // phase 0
         if (std::this_thread::get_id() != input_) r.unresolved.push_back("stop off the input thread");
+        // Caller already wrote its final neutral adapter frame and stopped input
+        // ticks. Close admission before waiting: a late file read cannot enqueue.
+        w_->core->close_control();
+        if(control_){
+            r.control_present=true;control_->stop=true;control_->cv.notify_all();
+            const auto deadline=Clock::now()+std::chrono::milliseconds(b.control_ms);
+            std::unique_lock<std::mutex> l(control_->m);
+            const bool returned=control_->cv.wait_until(l,deadline,[&]{return control_->done;});
+            r.control_complete=returned&&control_->complete;l.unlock();
+            r.control_joined=returned&&join_by(control_thread_,deadline);
+            if(!r.control_complete)r.unresolved.push_back("control journal incomplete");
+            if(!r.control_joined)r.unresolved.push_back("worker control");
+        }
         recorder_->finish();                                                           // phase 4: off the producer thread a cancellation
         const auto drained = recorder_->drain(Clock::now() + std::chrono::milliseconds(b.recorder_ms));
         r.recorder = drained.outcome; r.recorder_joined = drained.joined;
@@ -165,6 +221,7 @@ public:
     ~ProviderHost() {
         if (worker_.joinable()) worker_.detach();
         if (release_.joinable()) release_.detach();
+        if (control_thread_.joinable()) control_thread_.detach();
         if (report_ != INVALID_HANDLE_VALUE) CloseHandle(report_);
     }
 

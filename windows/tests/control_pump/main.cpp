@@ -22,6 +22,7 @@ struct Io final:c::Io {
     c::Read read_batch()override{++batch_reads;if(on_batch)on_batch();if(throws)throw std::runtime_error("read fault");return input;}
     std::uint64_t unix_seconds()override{return now;}
     bool append(const c::Journal& j)override{++appends;if(on_append)on_append();if(write_ok)journal.push_back(j);return write_ok;}
+    bool finish()override{return true;}
 };
 struct Rig {
     fake::Provider provider;Core core;Io io;c::Pump pump;

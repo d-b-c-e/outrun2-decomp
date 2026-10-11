@@ -1,6 +1,12 @@
 [
   {
     "file": "windows/host/provider_host.hpp",
+    "line": "if (control_thread_.joinable()) control_thread_.detach();",
+    "count": 1,
+    "reason": "D9: the host retains the control worker's Core/provider/Io shared state when it cannot join; this destructor never waits. Unresolved processes use the existing supervised park/forced-exit policy."
+  },
+  {
+    "file": "windows/host/provider_host.hpp",
     "line": "if (worker_.joinable()) worker_.detach();",
     "count": 1,
     "reason": "D9: the host destructor never stops or waits; it detaches its own provider worker, which keeps its own state alive."

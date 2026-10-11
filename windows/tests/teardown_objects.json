@@ -1,8 +1,8 @@
 [
   {
     "file": "windows/tests/teardown_units/provider_host_instance.cpp",
-    "where": "?detach@thread@std@@QEAAXXZ in public: __cdecl dbce::shim::hosting::ProviderHost<struct audit_unit::LazyRecorder>::~ProviderHost<struct audit_unit::LazyRecorder>(void) x2",
-    "reason": "D9: the host destructor never stops or waits; it detaches exactly its two owned threads (worker_, release_), which keep their own state alive. Count-exact: a third detach here is a new finding."
+    "where": "?detach@thread@std@@QEAAXXZ in public: __cdecl dbce::shim::hosting::ProviderHost<struct audit_unit::LazyRecorder>::~ProviderHost<struct audit_unit::LazyRecorder>(void) x3",
+    "reason": "D9: the host destructor never stops or waits; it detaches exactly its three owned threads (worker_, release_, control_thread_), which keep their own state alive. Count-exact: a fourth detach here is a new finding."
   },
   {
     "file": "windows/tests/teardown_units/provider_host_instance.cpp",
