@@ -197,6 +197,10 @@ struct StatusChange {
     enum class Of : std::uint8_t { Action,Device,Run } of{};
     int index{};
     std::string status,reason;
+    // Input-thread decision-time identity, never looked up by a later drain.
+    // Joins the immutable profile device table; -1/0 means no device/epoch.
+    std::int32_t device{-1};
+    std::uint32_t epoch{};
 };
 
 // ---- the adapter's declaration (section 8, item 1): nullptr = supported, else why not
@@ -343,6 +347,7 @@ private:
     std::uint64_t prev_digital_{};
     std::array<Status,ActionCount> last_status_{};
     std::array<std::string,ActionCount> last_reason_{};
+    std::array<std::uint32_t,ActionCount> last_status_epoch_{};
     std::vector<std::string> last_dev_status_;
     std::array<Event,EventRingSize> ring_{};
     std::uint64_t event_seq_{};

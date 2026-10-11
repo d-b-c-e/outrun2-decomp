@@ -624,7 +624,9 @@ R1-F8, Q11.
   These are bounded, queued and coalesced lines written by the control worker. There is no second persistent status
   file until a consumer needs one (N6). Each line carries the process id and start time, the run nonce (when
   latched), the profile file hash and the build (core and adapter versions, and the executable's SHA-256). Each line
-  also carries gap counters: status lines coalesced or dropped, and recorder and observer overruns.
+    also carries gap counters: status lines coalesced or dropped and recorder overruns. The journal records the
+    observer's published sequence; the observer reader reports its own missed snapshots/events. A seqlock writer
+    cannot know what any particular reader missed. Qualification joins those separate reports.
 - **Evidence stays apart** (STD-033 item 4, R2-F7):
   - verified objects are configuration evidence;
   - `live` is current availability;

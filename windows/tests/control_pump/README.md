@@ -38,3 +38,16 @@ qualifying evidence. Diagnostics truncate at a UTF-8 code-point boundary.
 `ProviderHost` catches the control thread's exceptions, including API misuse.
 Ordinary-play status logging is intentional (INPUT-SHIM section 12); the future
 persistent sink still needs bounded/coalesced writes and an explicit policy.
+
+Status records now carry typed device index and epoch at the input-thread
+decision. Actions with no device and run records use -1/0; a later journal
+drain cannot relabel a failed epoch with a reopened handle's identity. An
+epoch-only action change is a status change even if its status/reason match.
+Coalescing replaces the whole record and remains counted: it does not claim
+intermediate statuses survived. Ordered EpochBegin/End events retain that
+transition evidence, subject to their explicit gap counters.
+
+The sink still owes immutable process/build/profile/version metadata, device
+table, serialization and bounded storage. These typed fields alone are not
+the complete section-12 runtime journal. Observer gaps belong to the reader;
+the writer can report its published sequence, not invent reader-overrun counts.

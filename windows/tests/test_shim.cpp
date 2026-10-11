@@ -581,12 +581,59 @@ void test_device_reports(){
     check(!lost[0].opened&&lost[0].epoch==1&&!lost[0].caps.axis[0]&&lost[0].caps.button.none(),"lost epoch clears advertised capabilities without inventing a new epoch");
 }
 
+void test_status_identity(){
+    auto find=[](const std::vector<StatusChange>& rows,StatusChange::Of of,int index){
+        for(const auto& c:rows)if(c.of==of&&c.index==index)return c;
+        throw std::runtime_error("expected typed status row absent");
+    };
+    Rig r(false,profile({"steer = "+axis(0,32768),shifter("shiftUp = button 0")}),true);
+    r.step();
+    const auto initial=r.core->drain_status();
+    const auto wheel_live=find(initial,StatusChange::Of::Action,A("steer"));
+    const auto shifter_live=find(initial,StatusChange::Of::Action,A("shiftUp"));
+    check(wheel_live.device==0&&wheel_live.epoch==1,"action status has typed wheel epoch");
+    check(shifter_live.device==1&&shifter_live.epoch==1,"action status joins separate shifter");
+    const auto device=find(initial,StatusChange::Of::Device,0);
+    check(device.device==0&&device.epoch==1,"device status has typed epoch independent of text");
+    const auto unsupported=find(initial,StatusChange::Of::Action,A("horn"));
+    check(unsupported.device==-1&&unsupported.epoch==0,"unbound unsupported status has no fabricated device");
+
+    r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
+    // The provider has reopened the handle but the input thread has not adopted
+    // it. Drain must retain the old decision identity, not look up a new epoch.
+    r.core->service_devices();
+    const auto old=find(r.core->drain_status(),StatusChange::Of::Action,A("steer"));
+    check(old.status=="read-failed"&&old.device==0&&old.epoch==1,"delayed drain preserves failed decision epoch");
+    r.p.advance(1000);r.core->tick();
+    const auto reopened=find(r.core->drain_status(),StatusChange::Of::Action,A("steer"));
+    check(reopened.status=="live"&&reopened.epoch==2,"reopened action carries new adopted epoch");
+    check(old.epoch==1&&wheel_live.epoch==1,"retained status copies never relabel old epochs");
+
+    // Two successive failed epochs have the same action status and reason.
+    // Their typed epoch still changes and the whole surviving record coalesces.
+    r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
+    const auto coalesced_before=r.core->status_coalesced();
+    r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
+    const auto merged=find(r.core->drain_status(),StatusChange::Of::Action,A("steer"));
+    check(merged.status=="read-failed"&&merged.device==0&&merged.epoch==3,"epoch-only action change replaces the entire queued record");
+    check(r.core->status_coalesced()>coalesced_before,"coalesced epoch transition explicitly counted");
+    r.step();
+    const auto fresh=find(r.core->drain_status(),StatusChange::Of::Action,A("steer"));
+    check(fresh.epoch==4&&fresh.status=="live","later reopen does not reuse coalesced epoch");
+    check(r.core->device_reports()[1].epoch==1,"wheel epochs never alter separate shifter identity");
+
+    Rig test(true,profile({wheel("confirm = button 0")}));test.admit();test.step();
+    const auto admission=test.core->drain_status();
+    const auto run=find(admission,StatusChange::Of::Run,0);
+    check(run.device==-1&&run.epoch==0,"run status does not fabricate a device epoch");
+}
+
 int main(){
     try{
         test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
-        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();
+        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();test_status_identity();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim slice 1: "<<checks<<" checks passed\n";
     return 0;
