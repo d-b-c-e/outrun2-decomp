@@ -131,9 +131,12 @@ static std::string state_of(const fs::path& capture_dir) {
     const auto t = read_text(capture_dir / "host-shutdown.json"); const auto k = t.find("\"state\":\"");
     return k == std::string::npos ? std::string() : t.substr(k + 9, t.find('"', k + 9) - k - 9);
 }
-static Observed supervise(const std::wstring& self, const std::string& mode, const fs::path& run_dir) {
+// `desktop`: the OutRunDesktop layout. The host reports in the run folder and the recorder creates the capture; after the
+// observed exit the supervisor copies the final host report into the capture, as the desktop runner does.
+static Observed supervise(const std::wstring& self, const std::string& mode, const fs::path& run_dir, bool desktop = false) {
     Observed o; check(fs::create_directory(run_dir), "new run folder");
     const auto capture_dir = run_dir / "capture";
+    const auto report_dir = desktop ? run_dir : capture_dir;
     std::wstring cmd = L"\"" + self + L"\" --child " + std::wstring(mode.begin(), mode.end()) + L" \"" + capture_dir.wstring() + L"\"";
     STARTUPINFOW si{}; si.cb = sizeof si; PROCESS_INFORMATION pi{};
     check(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi) != 0, "spawn child");
@@ -152,7 +155,7 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
     auto wait = [&](DWORD ms) { const DWORD w = WaitForSingleObject(pi.hProcess, ms); if (w != WAIT_OBJECT_0 && w != WAIT_TIMEOUT) check(false, "supervisor wait did not fail"); return w == WAIT_OBJECT_0; };
     for (;;) {
         if (wait(20)) break;
-        const auto st = state_of(capture_dir);
+        const auto st = state_of(report_dir);
         if (st == "unresolved" || p21::Clock::now() >= bound) {
             if (st == "unresolved") Sleep(300);      // a parked child must not have exited on its own meanwhile
             // Whether a forced end is needed depends on timing, so only its failure counts (a deterministic check total).
@@ -163,9 +166,10 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
         }
     }
     check(GetExitCodeProcess(pi.hProcess, &o.code) != 0 && o.code != STILL_ACTIVE, "supervisor observed the exit code");
-    o.state = state_of(capture_dir);
+    o.state = state_of(report_dir);
     owned.observed = true;
     if (fs::exists(capture_dir)) {   // written only after an exit this supervisor actually observed
+        if (desktop) check(CopyFileW((run_dir / "host-shutdown.json").c_str(), (capture_dir / "host-shutdown.json").c_str(), TRUE) != 0, "final host report copied into the capture");
         std::ofstream e(capture_dir / "exit.json", std::ios::binary);
         e << "{\"pid\":" << pi.dwProcessId << ",\"creationTime\":" << identity << ",\"exitCode\":" << o.code << ",\"forced\":" << (o.forced ? "true" : "false") << "}";
         e.close(); check(bool(e), "exit observation written");

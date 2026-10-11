@@ -11,6 +11,6 @@ target_compile_features(p21_combined PRIVATE cxx_std_17)
 target_compile_definitions(p21_combined PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
 target_include_directories(p21_combined PRIVATE ${ROOT}/windows/source ${ROOT}/windows/shim ${ROOT}/windows/host
   ${ROOT}/windows/tests ${ROOT}/windows/vendor/controls ${ROOT}/src
-  ${TOOLKIT_ROOT}/native/session ${ROOT}/windows/tests/recorder_lifecycle_spike)
+  ${ROOT}/windows/vendor/session ${ROOT}/windows/host/recorder)
 target_link_libraries(p21_combined PRIVATE bcrypt dinput8 dxguid)
 target_compile_options(p21_combined PRIVATE /W4 /WX)

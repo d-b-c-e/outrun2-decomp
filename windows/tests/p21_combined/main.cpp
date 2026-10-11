@@ -1,4 +1,5 @@
-// Offline composition: the SAME reviewed provider host owns the real recorder.
+// Offline composition: the SAME reviewed provider host owns the production desktop recorder (ShimRecorder) in the
+// desktop layout: the host reports in the run folder, the recorder creates the capture inside it.
 // Reuse the prior fixture's codec, writer and identity-bound supervisor verbatim.
 // Omit only its entry points; never rename identifiers in included SDK headers.
 #define P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
@@ -6,54 +7,12 @@
 #undef P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
 #include "p21_provider_host/host.hpp"
 #include "shim_fake_com.hpp"
+#include "outrun_recorder.hpp"   // the production desktop recorder (R1b): no fixture recorder
 
-class ActualRecorder {
-    fs::path dir_;
-    std::shared_ptr<Identity> id_;
-    std::vector<std::string> names_;
-    std::unique_ptr<rs::Controller> controller_;
-    std::optional<rs::Producer> producer_;
-    std::uint64_t first_{}, last_{};
-    std::int64_t origin_{};
-public:
-    ActualRecorder(fs::path dir, std::shared_ptr<Identity> id, bool stuck) : dir_(std::move(dir)), id_(std::move(id)) {
-        id_->resume = !stuck;
-    }
-    void push(const Snapshot& s) {
-        if (!controller_) {
-            names_ = schema(channels(s));
-            check(names_.size() == 382, "real provider has the complete two-device schema");
-            preflight(names_, 62.5, .24);
-            first_ = s.frame.seq; origin_ = s.frame.tick_us;
-            controller_ = std::make_unique<rs::Controller>(16, std::uint32_t(names_.size()), 16 * sizeof(rs::Packet),
-                std::make_unique<QueuedSink>(dir_ / "source.jsonl", names_, id_, origin_), first_);
-            producer_.emplace(controller_->producer());
-        }
-        check(producer_->push(packet(s, names_)), "real-provider frame accepted by actual recorder");
-        last_ = s.frame.seq;
-    }
-    void finish() { if (producer_) producer_->finish(last_); }
-    p21::Recorder::Drained drain(p21::Clock::time_point deadline) {
-        if (!controller_) return {p21::RecOutcome::Cancelled, true};
-        const auto result = controller_->drain(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - p21::Clock::now()));
-        const bool joined = controller_->join_until(deadline);
-        const bool eligible = result.may_seal() && result.capture_counts_final && !result.first_rejected && result.wrong_producer == 0;
-        if (eligible && joined) {
-            report(dir_, result, *id_, first_, origin_);
-            write_new(dir_ / "profile.ini", fixture_profile());
-            write_new(dir_ / "bundle.meta", Contract);
-            auto b = dbce::session::jsonStream(); b << names_.size() << '\t' << row_bound(names_) << '\t' << sizeof(rs::Packet) * 16 << '\n';
-            write_new(dir_ / "budget.tsv", b.str());
-        }
-        return {eligible ? p21::RecOutcome::Complete : result.outcome == rs::Outcome::TimedOut ? p21::RecOutcome::TimedOut : p21::RecOutcome::Cancelled, joined};
-    }
-};
-
-using CombinedHost = p21k::BasicProviderHost<ActualRecorder>;
+using CombinedHost = p21k::BasicProviderHost<outrun::desktop::ShimRecorder>;
 static const p21k::Budget CombinedBudget{1000, 200, 200, 200};
 
 static int combined_child(const std::string& mode, const fs::path& dir) {
-    check(fs::create_directory(dir), "new combined capture");
     auto* input = new fakecom::Input; // owns fake storage until process exit, including unresolved driver calls
     fakecom::DeviceScript wheel, shifter;
     check(guid_parse(W, wheel.instance) && guid_parse(WP, wheel.product) &&
@@ -70,11 +29,15 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
     wheel.unacquire_delay_ms = mode == "release-within" ? 100 : -1;
     check(wheel.acquire_entered && wheel.acquire_release && wheel.unacquire_entered && wheel.unacquire_release, "driver barriers created");
     const auto wi = input->add(wheel), si = input->add(shifter);
-    auto id = std::make_shared<Identity>();
-    auto recorder = std::make_unique<ActualRecorder>(dir, id, mode == "writer-stuck");
+    // The fence's run nonce form (letters/digits); the finalizer binds the host report to it through the capture metadata.
+    const std::string run_nonce = "p21combined" + std::to_string(GetCurrentProcessId());
+    auto barrier = std::make_shared<Barrier>(); barrier->resume = mode != "writer-stuck";   // a blocked writer never returns
+    outrun::desktop::CaptureSettings settings;
+    settings.folder = dir; settings.profile = fixture_profile(); settings.run_nonce = run_nonce;
+    settings.adapter_version = "p21_combined fixture"; settings.before_write = [barrier] { barrier->hold(); };
     // Ordinary physical reads over FAKE COM, no injection admission or real device.
-    auto host = std::make_unique<CombinedHost>(dir.wstring(), id->nonce, input, fixture_profile(), false,
-        std::move(recorder), outrun_capability());
+    auto host = std::make_unique<CombinedHost>(dir.parent_path().wstring(), run_nonce, input, fixture_profile(), false,
+        std::make_unique<outrun::desktop::ShimRecorder>(settings), outrun_capability());
     bool ready = false;
     for (int n = 0; n < 400 && !ready; ++n) {
         const auto& f = host->tick();
@@ -82,6 +45,7 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
         if (!ready) Sleep(5);
     }
     check(ready, "both devices opened and sampled through the real provider");
+    host->recorder().set_devices(host->device_reports());
     Adapter adapter("Sequential");
     std::vector<Snapshot> original;
     for (int t = 0; t < 16; ++t) {
@@ -104,6 +68,7 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
         original.push_back({frame, adapter.signals(), sink, view});
         host->recorder().push(original.back());
     }
+    check(host->recorder().pushed() == 16 && host->recorder().refusal().empty(), "production recorder accepted every real-provider frame");
     check(original[4].frame.samples[1].poll == Call::Pending && original[6].frame.samples[1].state == Call::Pending,
         "real provider Pending survives into the recorder's original snapshots");
     check(original[5].frame.action[action_index("shiftUp")].status == Status::Rearming,
@@ -122,6 +87,7 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
         check(WaitForSingleObject(wheel.acquire_entered, 0) == WAIT_OBJECT_0, "real provider is inside blocked reacquisition");
     }
     if (mode == "release-stuck" || mode == "release-within") wheel.unacquire_armed->store(true);
+    host->recorder().set_devices(host->device_reports());   // the desktop's final device table, before the stop
     const auto r = host->stop(CombinedBudget);
     check(r.elapsed_us < 2'000'000, "combined shutdown returns inside phase budgets and report allowance");
     if (mode == "release-stuck" || mode == "release-within")
@@ -148,6 +114,7 @@ int wmain(int argc, wchar_t** argv) {
             const auto rows = read_export(dir.parent_path() / "validated.tsv");
             const auto producer = read_export(dir.parent_path() / "producer.tsv");
             check(rows.size() == 16 && rows == producer, "recorded bytes preserve every real-provider producer channel");
+            check(rows[0].size() == 382, "real provider has the complete two-device schema");
             Adapter adapter("Sequential");
             for (const auto& row : rows) {
                 const auto f = decode(frame_channels(row));
@@ -164,7 +131,7 @@ int wmain(int argc, wchar_t** argv) {
         const fs::path root(argv[1]); check(fs::create_directory(root), "new combined result folder");
         wchar_t self[MAX_PATH]; check(GetModuleFileNameW(nullptr, self, MAX_PATH) > 0, "own executable known");
         for (const std::string mode : {"resolved", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"}) {
-            const auto r = supervise(self, mode, root / mode);
+            const auto r = supervise(self, mode, root / mode, true);
             if (mode == "resolved" || mode == "release-within") check(r.code == 0 && !r.forced && r.state == "resolved", "combined resolved host normal exit");
             else if (mode == "ordinary-provider-stuck") check(r.code == p21::ForcedExitCode && !r.forced && r.state == "unresolved", "combined ordinary unresolved forced exit");
             else check(r.forced && r.state == "unresolved", "combined unresolved host stays parked for its supervisor");

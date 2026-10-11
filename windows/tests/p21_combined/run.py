@@ -40,6 +40,8 @@ before = {"source": pin(repo, ["."]), "toolkit": pin(toolkit, tk_scopes)}
 writer_pin = verify_writer((toolkit / "native/session/session_writer.h").read_bytes())
 if before["toolkit"]["sha256"]["native/session/session_writer.h"] != writer_pin["rawSha256"]:
     raise RuntimeError("Native writer changed during preflight")
+if before["source"]["sha256"]["windows/vendor/session/session_writer.h"] != "a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db":
+    raise RuntimeError("Unreviewed vendored native writer")   # the build compiles the vendored copy (R1a)
 result.mkdir(parents=True)
 (result / "writer-pin.json").write_text(json.dumps(writer_pin, indent=2))
 (result / "source-before.json").write_text(json.dumps(before, indent=2))

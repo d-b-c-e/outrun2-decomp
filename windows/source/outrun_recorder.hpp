@@ -23,6 +23,7 @@ struct CaptureSettings {
     double hz=60,seconds=300;                  // the worst-case preflight: 60 Hz for 300 s
     dbce::session::Limits limits{512ull*1024*1024,256*1024,300};
     std::size_t slots=510;                     // 510 fixed slots of 8216 bytes stay under 4 MiB
+    std::function<void()> before_write;        // test seam (QueuedSink's): empty in the desktop
 };
 
 class ShimRecorder {
@@ -83,7 +84,7 @@ public:
                     {"runNonce",cfg_.run_nonce},{"context","OutRunDesktop latched shim run; devices.json carries the device table and caps"},
                     {"adapterConsumedOffset","previous tick; adapter record fields are this tick"}};
                 controller_=std::make_unique<rec::Controller>(cfg_.slots,std::uint32_t(names_.size()),cfg_.slots*sizeof(rec::Packet),
-                    std::make_unique<rec::QueuedSink>(cfg_.folder/"source.jsonl",names_,id_,origin_,std::move(m),cfg_.limits),first_);
+                    std::make_unique<rec::QueuedSink>(cfg_.folder/"source.jsonl",names_,id_,origin_,std::move(m),cfg_.limits,cfg_.before_write),first_);
                 producer_.emplace(controller_->producer());
             }
             if(producer_->push(packet(s,names_))){last_=s.frame.seq;++pushed_;}else ++rejected_;

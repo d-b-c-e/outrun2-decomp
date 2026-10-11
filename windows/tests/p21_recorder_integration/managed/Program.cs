@@ -84,9 +84,12 @@ static class Program {
     static string Str(JsonElement o,string n)=>Prop(o,n,JsonValueKind.String).GetString()!;
     static bool Bool(JsonElement o,string n)=>Prop(o,n,JsonValueKind.True,JsonValueKind.False).GetBoolean();
     static ulong Num(JsonElement o,string n){var v=Prop(o,n,JsonValueKind.Number);Check(v.TryGetUInt64(out var x),"not an unsigned integer: "+n);return x;}
-    // The two P21 facts, bound to the worker report's nonce and to each other's nonzero process identity.
+    // The two P21 facts, bound to the worker report's nonce and to each other's nonzero process identity. A desktop host
+    // reports the fence run nonce (its control worker requires it), which the capture records in its hashed metadata
+    // (runNonce); the worker report binds that metadata to the capture nonce.
     static void ValidateHostAndExit(string dir){
         var nonce=File.ReadAllLines(Path.Combine(dir,"worker.tsv"))[0].Split('\t')[8];
+        if(Desktop(dir)){nonce=SessionReader.Read(Path.Combine(dir,"source.jsonl")).First().Metadata.Properties["runNonce"];Check(nonce.Length>=8,"recorded run nonce");}
         JsonDocument Parse(string name){try{return JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,name)));}catch(JsonException x){throw new InvalidDataException("unreadable "+name,x);}}
         using var host=Parse("host-shutdown.json");using var exit=Parse("exit.json");
         var h=host.RootElement;var e=exit.RootElement;
