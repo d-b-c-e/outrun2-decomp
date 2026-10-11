@@ -93,9 +93,19 @@ P20 leaves P21 these requirements (recorder lifecycle README, `24e27bd`):
   own handle. Workers never use `stdout`.
 - The host writes its shutdown report through its own pre-opened handle with `WriteFile`. It never calls `printf` or
   `fflush` on a path that might block behind a worker.
-- A teardown audit, an extension of zero's whole-file lexer in `write_audit`, refuses three things in worker-reachable
-  shim code: stdio; function-local `static` and namespace-scope objects with dynamic destructors; `std::thread::detach`
-  outside the host.
+- A teardown audit in two halves refuses, in worker-reachable shim code (`windows/shim`): stdio; any static,
+  thread_local or namespace-scope object with a dynamic destructor; `std::thread::detach`; ending the process or a
+  thread (P21g).
+  - **The lexer** (`teardown_audit.py`, a sibling of `write_audit`) reads every file, headers included, line by line,
+    with namespace scope tracked by braces. It knows only the spellings and standard types it lists.
+  - **The compiler** (`teardown_objects.py`, Astra 13114) decides what the lexer cannot. clang-cl compiles every shim
+    translation unit, and every header on its own, with `-Werror=exit-time-destructors`, so an object of any type,
+    a custom one included, fails however it is nested. The objects' undefined symbols then show the console and
+    FILE-stream calls, `atexit` and `__tlregdtor` registrations, `_Thrd_detach` and the ending calls, after macros,
+    aliases and function pointers are resolved.
+  - **The claim is bounded.** It covers code the shim's translation units compile or include. Fail-fast paths that
+    the compiler or library inserts, and no source line asks for, are out of scope: `std::terminate` on an exception
+    escaping `noexcept`, `_invoke_watson`, `_purecall`.
 
 **D3. `stop()` runs on the input thread, once, with budgets** (H3, H5, H7). It is called after `or2_xbox_main`
 returns, on the main thread, which is the producer and input thread. It is idempotent: a second call returns the
@@ -122,14 +132,22 @@ first report. Phases and budgets:
    - The worker can publish `Complete` and then block writing its own report. A `Complete` outcome is not a
      finished worker, and the first-terminal rule keeps `Complete` even after the deadline.
    - So "worker not joined" is reported and makes the host `unresolved` on its own.
-5. **Leases, at most 200 ms.** `DInputProvider::shutdown(200)` stops admission and releases idle devices. No tick is
-   in flight: the input thread is the caller.
+5. **Leases and release, at most 200 + 200 ms** (r2.2, Astra 13277). `DInputProvider::shutdown(200)` stops admission
+   and waits at most 200 ms for calls in progress. It then releases each idle device (`Unacquire`, `Release`) and,
+   last, DirectInput. No tick is in flight, because the input thread is out of `tick()`.
+   - The releases are driver calls with no bound of their own: a 1.2 s `Unacquire` kept r2's stop waiting 1.2 s.
+     So `shutdown` runs on a release thread the host owns, and the input thread waits at most `leases_ms + release_ms`.
+   - A release still inside a driver is left running, holding the provider it uses (D1). The report gains
+     `DirectInput release did not return`, and stop goes on to D4.
 6. **Workers, one shared 200 ms deadline.** The provider and control workers are told to stop and joined. The
    control worker closes `shim-status.jsonl` before it exits.
 7. **DirectInput** is released only when no lease and no worker is unresolved. Otherwise it is leaked.
 8. **Report.** Rewrite `host-shutdown.json` with `{state: "resolved" | "unresolved", nonce, steps, workers, recorder
    outcome, elapsed}`.
-- The total is at most about 1.45 s plus the report writes. Every phase starts even when an earlier one timed out.
+- The total is at most about 1.65 s (1000 + 200 + 200 + 200 ms) plus the report writes, whatever a driver call does.
+  Every phase starts even when an earlier one timed out.
+- What remains unqualified is the real drivers, not the bound. P21k shows the bound over fake COM; whether a real
+  wheel's `Unacquire` or `Release` ever stalls is slice 4's question.
 
 **D4. Exit (r2): a resolved shutdown returns normally; an unresolved one is tainted and never ends itself in a test
 process** (H1, H9).
@@ -230,7 +248,7 @@ budget.
 ## 5. API sketch (for review, not code)
 
 ```cpp
-struct StopBudget { int recorder_ms = 1000, leases_ms = 200, workers_ms = 200; };
+struct StopBudget { int recorder_ms = 1000, leases_ms = 200, release_ms = 200, workers_ms = 200; };
 enum class StopReason : std::uint8_t { GameReturned, ExitCalled, SessionEnd };
 enum class Resolution : std::uint8_t { Resolved, Unresolved };
 struct StopReport {
@@ -278,13 +296,13 @@ return result;
 | P21d | No supervisor finish: `stop()` off the producer thread gives `Cancelled`, never `Complete` | same |
 | P21e | The supervisor (separate processes): a latched child with a stuck worker writes `unresolved` and parks. The parent ends it by its own handle and records `forced`. An ordinary child exits with `0xDBCE0021`. A resolved child exits 0 through normal CRT teardown | child EXE plus parent supervisor |
 | P21f | `exit()` inside the game: the hook runs `stop()` once, a second stop returns the first report, and D4 applies | child EXE |
-| P21g | Teardown audit: no stdio, no dynamic-destructor statics, no `detach` outside the host in worker-reachable code. Mutations are caught | `write_audit` extension |
+| P21g | Teardown audit: no stdio, no dynamic-destructor statics, no `detach` outside the host in worker-reachable code. Mutations are caught | `write_audit` extension, plus the compiler's half (below) |
 | P21h | The seal rule: of the 8 combinations of worker `Complete` x host `resolved` x normal external exit, only all-three seals. A swapped nonce in either report refuses | finalizer rule fixture |
 | P21i | Destruction without `stop()` returns at once (no wait), and the shutdown file never reads `resolved` | prototype host |
 
 | P21j | Integration with the reviewed P20 recorder (`windows/tests/p21_recorder_integration`): actual Core/Adapter frames, the real native writer and closed-file seal, the worker thread joined, supervised child processes, and the out-of-process finalizer sealing only the resolved capture | `run.py --mutations` |
-| P21k | P28's P21 half (`windows/tests/p21_provider_host`). The host around zero's real Core and DInputProvider over fake COM, the provider worker on its own thread. A bounded slow reacquisition inside the lease wait recovers. One past every budget, or an event-backed one that never returns, leaves the device held and DirectInput kept: parked, supervisor-forced, never sealed, never released under the call. So do an ordinary process (`0xDBCE0021`), a listing that never returns, and a stop off the input thread | `run.py --mutations` |
-| P21g | Teardown audit (`windows/tests/teardown_audit.py`, a sibling of write_audit) over `windows/shim`: no stdio, no static/thread_local/namespace-scope object with a dynamic destructor, no detach, no process or thread ending. Clean; one planted violation per rule is caught | `teardown_audit.py --mutations` |
+| P21k | P28's P21 half (`windows/tests/p21_provider_host`). The host around zero's real Core and DInputProvider over fake COM, the provider worker on its own thread. A bounded slow reacquisition inside the lease wait recovers. One past every budget, or an event-backed one that never returns, leaves the device held and DirectInput kept: parked, supervisor-forced, never sealed, never released under the call. So do an ordinary process (`0xDBCE0021`), a listing that never returns, and a stop off the input thread. The release boundary (r2.2): an `Unacquire` inside the release budget recovers; one past it (1.5 s), one that never returns (latched or ordinary), and a release of DirectInput that never returns all leave stop within its budgets, unresolved with "DirectInput release did not return". Every mode's stop returns within the summed budgets | `run.py --mutations` |
+| P21g | Teardown audit over `windows/shim`: no stdio, no static/thread_local/namespace-scope object with a dynamic destructor, no detach, no process or thread ending. The lexer (`teardown_audit.py`): namespace scope by braces, unbalanced braces fail closed; one planted violation per rule is caught, an indented-namespace global and `std::fopen` included. The compiler (`teardown_objects.py`): clang-cl with `-Werror=exit-time-destructors` plus the objects' undefined symbols; twelve plants are caught (a custom `OwnedDevice` in an indented namespace, an inline namespace, thread_local, a function-local static, an explicit `atexit`, `std::fopen`, `&std::fwrite` with no call, `fputs` through a macro, `std::cout`, detach, `std::exit`, `TerminateProcess`), and allowed patterns stay clean | `teardown_audit.py --mutations`, `teardown_objects.py --mutations` |
 
 P28's rerun of P21 through the real provider over fake COM objects stays as written.
 

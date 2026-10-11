@@ -51,6 +51,11 @@ if(Python3_FOUND)
     # P21g: the teardown audit of the worker-reachable shim code, and its mutations.
     add_test(NAME teardown_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME teardown_audit_mutations COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR} --mutations)
+    # The compiler's half (clang-cl: exit-time destructors by type, and what the compiled objects call).
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        add_test(NAME teardown_objects COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_objects.py ${PROJECT_SOURCE_DIR} --clang-cl ${CMAKE_CXX_COMPILER})
+        add_test(NAME teardown_objects_mutations COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_objects.py ${PROJECT_SOURCE_DIR} --clang-cl ${CMAKE_CXX_COMPILER} --mutations)
+    endif()
 endif()
 
 # The DirectInput provider (shim/dinput_provider), slice 3: through the core, over fake COM devices.

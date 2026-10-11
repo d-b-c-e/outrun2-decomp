@@ -1,5 +1,5 @@
 """P21k: pin clean source, build (ClangCL), run the P21 host over the real Core and DInputProvider on fake COM in supervised
-children, zero's own provider tests against the extended fake, and the P21g teardown audit with its mutations; optional host
+children, zero's own provider tests against the extended fake, and the P21g teardown audits (lexer and compiler) with their mutations; optional host
 mutations, each required to fail its intended check; write a receipt. No device, game, installation or launch."""
 import argparse, hashlib, json, pathlib, shutil, subprocess, sys
 
@@ -14,7 +14,8 @@ def pin():
     if git('status', '--porcelain'): raise RuntimeError('Uncommitted or untracked source; commit first.')
     return dict(commit=git('rev-parse', 'HEAD'), sha256={p: hashlib.sha256((repo / p).read_bytes()).hexdigest()
                 for p in git('ls-files', '--', 'windows/shim', 'windows/tests/shim_fake_com.hpp', 'windows/tests/test_dinput_provider.cpp',
-                             'windows/tests/p21_host_spike/host.hpp', 'windows/tests/p21_provider_host', 'windows/tests/teardown_audit.py').splitlines()})
+                             'windows/tests/p21_host_spike/host.hpp', 'windows/tests/p21_provider_host', 'windows/tests/teardown_audit.py',
+                             'windows/tests/teardown_objects.py', 'windows/vendor/controls').splitlines()})
 before = pin(); result.mkdir(parents=True); commands = []
 def run(name, cmd, expected=0, cwd=repo):
     p = subprocess.run([str(x) for x in cmd], cwd=cwd, capture_output=True, text=True, timeout=600)
@@ -31,6 +32,9 @@ proof = run('p21k', [bins / 'p21_provider_host.exe', result / 'runs'])
 zero = run('zero-provider-tests', [bins / 'test_dinput_provider.exe'])
 audit = run('teardown-audit', [sys.executable, '-I', repo / 'windows/tests/teardown_audit.py', repo])
 audit_m = run('teardown-audit-mutations', [sys.executable, '-I', repo / 'windows/tests/teardown_audit.py', repo, '--mutations'])
+# The compiler's half: clang-cl decides which objects have exit-time destructors, and the objects' symbols show the calls.
+objects = run('teardown-objects', [sys.executable, '-I', repo / 'windows/tests/teardown_objects.py', repo])
+objects_m = run('teardown-objects-mutations', [sys.executable, '-I', repo / 'windows/tests/teardown_objects.py', repo, '--mutations'])
 mutations = []
 if args.mutations:
     # Each breaks one rule of the host in a scratch copy and must make a named mode's check fail.
@@ -41,6 +45,9 @@ if args.mutations:
                                      '        (void)join_worker_until(Clock::now() + std::chrono::milliseconds(b.workers_ms));\n', 'P21k listing-never: names its unresolved causes'),
         'host-ignores-directinput': ('        if (!rep.input_released) r.unresolved.push_back("DirectInput not released: a call may still use it");\n',
                                      '', 'P21k listing-never: names its unresolved causes'),
+        # Astra 13277: the old host, which waited for the provider's releases without a bound.
+        'host-waits-for-release': ('            returned = rs->cv.wait_until(l, Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms), [&] { return rs->done; });\n',
+                                   '            rs->cv.wait(l, [&] { return rs->done; }); returned = true;\n', 'P21k unacquire-beyond: stop returns within its budgets'),
     }
     for name, (old, new, reason) in plan.items():
         src = result / 'mutations' / name; shutil.copytree(here, src)
@@ -62,7 +69,8 @@ if before != after: raise RuntimeError('Source changed during the proof.')
 receipt = dict(sourceCommit=before['commit'], sourceVerified=True,
     scope='offline: the P21 host over zero\'s real Core and DInputProvider on fake COM objects, supervised children; no device, game, installation or launch',
     results=dict(p21k=proof.stdout.strip().splitlines()[-1], zeroProviderTests=zero.stdout.strip().splitlines()[-1],
-                 teardownAudit=audit.stdout.strip().splitlines()[-1], teardownAuditMutations=[l for l in audit_m.stdout.splitlines() if l.startswith('mutation') or 'selftest' in l]),
+                 teardownAudit=audit.stdout.strip().splitlines()[-1], teardownAuditMutations=[l for l in audit_m.stdout.splitlines() if l.startswith('mutation') or 'selftest' in l],
+                 teardownObjects=objects.stdout.strip().splitlines()[-1], teardownObjectsMutations=[l for l in objects_m.stdout.splitlines() if l.startswith('mutation')]),
     commands=commands, mutations=mutations, pins=before['sha256'])
 (result / 'receipt.json').write_text(json.dumps(receipt, indent=2))
 for k, v in receipt['results'].items(): print(k + ':', v if isinstance(v, str) else '; '.join(v))

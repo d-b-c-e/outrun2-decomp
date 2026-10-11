@@ -6,14 +6,13 @@
 // and not host adoption: no device, no game, no launch.
 #include "dinput_provider.hpp"
 #include "shim.hpp"
-#include "p21_host_spike/host.hpp"   // the reviewed spike's Clock, Budget, Recorder (fake writer), RecOutcome, ForcedExitCode
+#include "p21_host_spike/host.hpp"   // the reviewed spike's Clock, Recorder (fake writer), RecOutcome, ForcedExitCode
 #include <condition_variable>
 #include <memory>
 #include <string>
 #include <thread>
 
 namespace p21k {
-using p21_spike::Budget;
 using p21_spike::Clock;
 using p21_spike::Gate;
 using p21_spike::RecOutcome;
@@ -30,6 +29,17 @@ struct WorkerState {
     std::atomic<long long> passes{0};
 };
 
+// The spike's budgets, plus release_ms (Astra 13277): the provider's shutdown releases idle devices (Unacquire, Release)
+// and DirectInput itself synchronously, driver calls with no bound of their own, so that phase gets its own budget.
+struct Budget { int recorder_ms = 1000, leases_ms = 200, release_ms = 200, workers_ms = 200; };
+
+// The release phase's own state: a release still inside a driver call keeps the provider alive (D1).
+struct ReleaseState {
+    std::shared_ptr<dbce::shim::DInputProvider> provider;
+    std::mutex m; std::condition_variable cv; bool done = false;
+    dbce::shim::DInputProvider::ShutdownReport rep;
+};
+
 struct Report : p21_spike::Report {
     int released = 0, held = 0;     // DInputProvider::ShutdownReport
     bool input_released = false;
@@ -42,7 +52,7 @@ class ProviderHost {
     HANDLE report_ = INVALID_HANDLE_VALUE;   // pre-opened: the report never waits behind a stdio lock (D2)
     Recorder recorder_;
     std::shared_ptr<WorkerState> w_;
-    std::thread worker_;
+    std::thread worker_, release_;
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
@@ -101,10 +111,28 @@ public:
         r.recorder = drained.outcome; r.recorder_joined = drained.joined;
         if (r.recorder != RecOutcome::Complete) r.unresolved.push_back(std::string("recorder: ") + p21_spike::name(r.recorder));
         if (!r.recorder_joined) r.unresolved.push_back("recorder: worker not joined");
-        // Phase 5, leases. This thread is out of tick() (it is running stop). The real provider stops admitting, releases
-        // what is idle and waits for calls in progress at most leases_ms. A device still inside a call is leaked to that
-        // call, never released under it; DirectInput is released only when no call can still use it.
-        const auto rep = w_->provider->shutdown(b.leases_ms);
+        // Phase 5, leases and release. This thread is out of tick() (it is running stop). The real provider stops admitting,
+        // releases what is idle and waits for calls in progress at most leases_ms. A device still inside a call is leaked
+        // to that call, never released under it; DirectInput is released only when no call can still use it. Those
+        // releases are driver calls with no bound of their own (Astra 13277), so the provider's shutdown runs on a release
+        // thread of the host's, waited for at most leases_ms + release_ms. A release still inside the driver is left
+        // running with the provider it holds (D1), its report unknown, and stop goes on towards D4.
+        auto rs = std::make_shared<ReleaseState>(); rs->provider = w_->provider;
+        const int leases = b.leases_ms;
+        release_ = std::thread([rs, leases] {
+            dbce::shim::DInputProvider::ShutdownReport rep;
+            try { rep = rs->provider->shutdown(leases); } catch (...) { rep.detail = "the provider's shutdown threw"; }
+            { std::lock_guard<std::mutex> l(rs->m); rs->rep = std::move(rep); rs->done = true; }
+            rs->cv.notify_all();
+        });
+        dbce::shim::DInputProvider::ShutdownReport rep; bool returned = false;
+        {
+            std::unique_lock<std::mutex> l(rs->m);
+            returned = rs->cv.wait_until(l, Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms), [&] { return rs->done; });
+            if (returned) rep = rs->rep;
+        }
+        if (returned) release_.join(); else release_.detach();
+        if (!returned) r.unresolved.push_back("DirectInput release did not return: a driver call is still inside the provider's shutdown");
         r.released = rep.released; r.held = rep.held; r.input_released = rep.input_released; r.provider_detail = rep.detail;
         if (rep.held) r.unresolved.push_back("lease leaked: " + std::to_string(rep.held) + " device(s) still inside a call");
         // Phase 6, workers: one deadline. A worker still inside a driver call is left running; it owns its state.
@@ -127,6 +155,7 @@ public:
     // D9: never stops, never waits. A worker that was never joined is detached; it keeps its own state alive.
     ~ProviderHost() {
         if (worker_.joinable()) worker_.detach();
+        if (release_.joinable()) release_.detach();
         if (report_ != INVALID_HANDLE_VALUE) CloseHandle(report_);
     }
 

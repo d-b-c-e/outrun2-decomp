@@ -2,7 +2,8 @@
 // Each child is one OutRun wWinMain shape: the provider worker on its own thread, the input thread ticking the core, the
 // game loop returning, then stop() on the input thread and the reviewed D4 exit. Astra 12465: a bounded slow driver call
 // shows deterministic recovery within the budget; an event-backed call that never returns shows the unresolved park and
-// the supervisor's forced end, with nothing released under the call and nothing sealed. No device, game or launch.
+// the supervisor's forced end, with nothing released under the call and nothing sealed. Astra 13277: the same for the
+// release phase (a device's Unacquire, DirectInput's Release), which now has its own budget. No device, game or launch.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -16,7 +17,10 @@ using namespace dbce::shim;
 namespace {
 int checks = 0, failures = 0;
 void check(bool ok, const std::string& what) { ++checks; if (!ok) { ++failures; std::printf("FAIL %s\n", what.c_str()); } }
-const p21k::Budget Fast{300, 200, 200};
+const p21k::Budget Fast{300, 200, 200, 200};   // recorder, leases, release, workers
+// A stop returns within its phases' budgets, whatever a driver call does (D3); 250 ms covers scheduling and the report.
+const long long StopBoundUs = (Fast.recorder_ms + Fast.leases_ms + Fast.release_ms + Fast.workers_ms + 250) * 1000LL;
+bool release_mode(const std::string& mode) { return mode.find("unacquire") != std::string::npos || mode.find("input-release") != std::string::npos; }
 const GUID WI = fakecom::make_guid(0xd71b8350u, 0x61b7), WP = fakecom::make_guid(0x0006346eu, 0x0000);
 
 std::string profile() {
@@ -50,7 +54,18 @@ int child(const std::string& mode, const std::wstring& dir) {
     if (mode.find("slow-within") != std::string::npos) script.acquire_delay_ms = 120;   // inside the 200 ms lease wait
     else if (mode.find("slow-beyond") != std::string::npos) script.acquire_delay_ms = 600;   // past every budget, returns later
     else script.acquire_delay_ms = -1;
+    // The release boundary: the provider's shutdown meets a slow or stuck Unacquire, or a stuck release of DirectInput.
+    script.unacquire_armed = std::make_shared<std::atomic<bool>>(false);
+    script.unacquire_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    script.unacquire_release = CreateEventW(nullptr, TRUE, FALSE, nullptr);   // never set
+    script.unacquire_delay_ms = mode.find("unacquire-within") != std::string::npos ? 100     // inside the 200 ms release budget
+                              : mode.find("unacquire-beyond") != std::string::npos ? 1500   // past it (Astra's 1200 ms repro, wider)
+                              : -1;
     const auto index = in->add(script);
+    in->release_armed = std::make_shared<std::atomic<bool>>(false);
+    in->release_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    in->release_release = CreateEventW(nullptr, TRUE, FALSE, nullptr);   // never set
+    in->release_delay_ms = -1;
     in->enumerate_armed = std::make_shared<std::atomic<bool>>(mode.find("listing") != std::string::npos);
     in->enumerate_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     in->enumerate_release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -65,17 +80,20 @@ int child(const std::string& mode, const std::wstring& dir) {
         Sleep(5);
     }
     if (mode.find("listing") != std::string::npos) WaitForSingleObject(in->enumerate_entered, 2000);   // the first listing is inside the "driver"
-    else if (mode != "resolved") {
+    else if (mode != "resolved" && !release_mode(mode)) {
         // Lose acquisition on the next read; the worker's reacquisition then sits inside Acquire.
         { std::lock_guard<std::mutex> l(in->m); in->scripts[index].reads.push_back({DI_OK, DIERR_INPUTLOST}); }
         script.acquire_armed->store(true);
         for (int i = 0; i < 400 && WaitForSingleObject(script.acquire_entered, 0) != WAIT_OBJECT_0; ++i) { host->tick(); Sleep(5); }
     }
-    const bool entered = mode == "resolved" || WaitForSingleObject(mode.find("listing") != std::string::npos ? in->enumerate_entered : script.acquire_entered, 0) == WAIT_OBJECT_0;
+    bool entered = mode == "resolved" || WaitForSingleObject(mode.find("listing") != std::string::npos ? in->enumerate_entered : script.acquire_entered, 0) == WAIT_OBJECT_0;
+    if (mode.find("unacquire") != std::string::npos) script.unacquire_armed->store(true);   // the shutdown's release of the idle device
+    if (mode.find("input-release") != std::string::npos) in->release_armed->store(true);   // its release of DirectInput
 
     p21k::Report r;
     if (mode.find("off-thread") != std::string::npos) { std::thread t([&] { r = host->stop(Fast); }); t.join(); }
     else r = host->stop(Fast);    // or2_xbox_main returned
+    if (release_mode(mode)) entered = WaitForSingleObject(mode.find("unacquire") != std::string::npos ? script.unacquire_entered : in->release_entered, 0) == WAIT_OBJECT_0;
 
     // The fake's own accounting, written before the D4 exit so the supervisor can read it from a parked child too.
     const auto& c = in->counters;
@@ -97,7 +115,7 @@ Run supervise(const std::wstring& self, const std::string& mode, const std::wstr
     std::wstring cmd = L"\"" + self + L"\" --child " + std::wstring(mode.begin(), mode.end()) + L" \"" + dir + L"\"";
     STARTUPINFOW si{}; si.cb = sizeof si; PROCESS_INFORMATION pi{};
     if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { run.state = "spawn failed"; return run; }
-    const auto deadline = p21k::Clock::now() + std::chrono::milliseconds(Fast.recorder_ms + Fast.leases_ms + Fast.workers_ms + 2000 + 4000);
+    const auto deadline = p21k::Clock::now() + std::chrono::milliseconds(Fast.recorder_ms + Fast.leases_ms + Fast.release_ms + Fast.workers_ms + 2000 + 4000);
     bool ok = true, exited = false;
     for (;;) {
         const DWORD w = WaitForSingleObject(pi.hProcess, 20);
@@ -139,7 +157,10 @@ void expect(const std::wstring& self, const std::wstring& root, const std::strin
     check(field(c, "releaseDuringCall") == "0" && field(c, "afterRelease") == "0" && field(c, "forceCalls") == "0",
           "P21k " + mode + ": nothing released under a call, nothing used after its release, no force call (" + c + ")");
     check(field(c, "entered") == "true", "P21k " + mode + ": the stop met the call where it was meant to (" + c + ")");
-    if (mode == "resolved" || mode.find("slow") != std::string::npos) check(field(c, "live") == "true", "P21k " + mode + ": the wheel was read through the real provider first (a valid sample, the scripted axis)");
+    if (mode == "resolved" || mode.find("slow") != std::string::npos || release_mode(mode)) check(field(c, "live") == "true", "P21k " + mode + ": the wheel was read through the real provider first (a valid sample, the scripted axis)");
+    // D3 for every mode: the stop itself returned within its budgets, whatever the driver call did (Astra 13277).
+    const auto us = field(h, "elapsedUs");
+    check(!us.empty() && std::stoll(us) <= StopBoundUs, "P21k " + mode + ": stop returns within its budgets (" + us + " us, bound " + std::to_string(StopBoundUs) + ")");
     check(sealed(dir, mode, r) == resolved, "P21k " + mode + ": " + (resolved ? "seals: worker Complete, host resolved, normal exit" : "never seals"));
     if (resolved) check(field(h, "inputReleased") == "true" && field(h, "held") == "0", "P21k " + mode + ": devices and DirectInput released (" + h + ")");
     // Each unresolved cause is named on its own: one cause hiding behind another is not proof (the host mutations).
@@ -163,6 +184,13 @@ int wmain(int argc, wchar_t** argv) {
     expect(self, root, "ordinary-never", false, p21_spike::ForcedExitCode, false, "an ordinary process with the same call ends itself, labelled forced (0xDBCE0021)", heldCall);
     expect(self, root, "listing-never", false, Forced, true, "a listing that never returns: DirectInput kept for it, worker unjoined, parked", {"worker provider", "DirectInput not released"});
     expect(self, root, "never-off-thread", false, Forced, true, "stop off the input thread: refused as unresolved, the recorder cancelled, parked", {"stop off the input thread", "recorder: Cancelled"});
+    // The release boundary (Astra 13277): the provider's own releases are driver calls too.
+    expect(self, root, "unacquire-within", true, 0, false, "a 100 ms Unacquire inside the 200 ms release budget is waited for: released, resolved");
+    const std::vector<std::string> stuckRelease{"DirectInput release did not return", "DirectInput not released"};
+    expect(self, root, "unacquire-beyond", false, Forced, true, "a 1500 ms Unacquire past the release budget: stop does not wait for it; unresolved, parked", stuckRelease);
+    expect(self, root, "unacquire-never", false, Forced, true, "an event-backed Unacquire that never returns: unresolved, parked, ended only by the supervisor", stuckRelease);
+    expect(self, root, "ordinary-unacquire-never", false, p21_spike::ForcedExitCode, false, "an ordinary process with the same Unacquire ends itself, labelled forced (0xDBCE0021)", stuckRelease);
+    expect(self, root, "input-release-never", false, Forced, true, "a release of DirectInput that never returns: unresolved, parked", stuckRelease);
     std::printf("%s %d P21k checks (%d failed): real Core and DInputProvider over fake COM, supervised children; no device, game or launch.\n",
                 failures ? "FAIL" : "PASS", checks, failures);
     std::fflush(stdout);

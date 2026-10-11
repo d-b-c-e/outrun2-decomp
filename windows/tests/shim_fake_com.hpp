@@ -46,6 +46,12 @@ struct DeviceScript {
     std::shared_ptr<std::atomic<bool>> acquire_armed;
     int acquire_delay_ms=0;
     HANDLE acquire_entered{},acquire_release{};
+    // P21k release boundary (Astra 13277; opt-in, off by default): one Unacquire after `unacquire_armed` is set, normally
+    // the provider's shutdown releasing an idle device, stays inside the "driver" the same way: `unacquire_entered`, then
+    // `unacquire_delay_ms`, or for ever on `unacquire_release` when the delay is negative.
+    std::shared_ptr<std::atomic<bool>> unacquire_armed;
+    int unacquire_delay_ms=0;
+    HANDLE unacquire_entered{},unacquire_release{};
     DeviceScript(){for(int a=0;a<8;++a){native_min[a]=0;native_max[a]=65535;}std::memset(&state,0,sizeof state);for(auto& p:state.rgdwPOV)p=0xFFFFFFFFu;}
 };
 
@@ -100,7 +106,18 @@ public:
         if(s_.acquires.empty())return DI_OK;
         const auto hr=s_.acquires.front();s_.acquires.pop_front();return hr;
     }
-    HRESULT STDMETHODCALLTYPE Unacquire()override{check();return DI_OK;}
+    HRESULT STDMETHODCALLTYPE Unacquire()override{
+        check();
+        if(s_.unacquire_armed&&s_.unacquire_armed->exchange(false)){
+            ++in_call_;
+            if(s_.unacquire_entered)SetEvent(s_.unacquire_entered);
+            if(s_.unacquire_delay_ms>=0)std::this_thread::sleep_for(std::chrono::milliseconds(s_.unacquire_delay_ms));
+            else WaitForSingleObject(s_.unacquire_release,INFINITE);
+            --in_call_;
+            check();
+        }
+        return DI_OK;
+    }
     HRESULT STDMETHODCALLTYPE GetDeviceState(DWORD size,LPVOID data)override{
         check();++c_.state_reads;
         in_read_=true;
@@ -176,13 +193,25 @@ public:
     // for ever (a listing that never returns) unless the test sets it.
     std::shared_ptr<std::atomic<bool>> enumerate_armed;
     HANDLE enumerate_entered{},enumerate_release{};
+    // P21k release boundary (opt-in): one Release after `release_armed` is set, normally the provider's final release of
+    // DirectInput, signals `release_entered` and waits `release_delay_ms`, or for ever on `release_release` when negative.
+    std::shared_ptr<std::atomic<bool>> release_armed;
+    int release_delay_ms=0;
+    HANDLE release_entered{},release_release{};
     std::atomic<int> refs{1},enumerations{0};
     // Add every device before the first open: devices keep references to their scripts (a std::deque would also do).
     std::size_t add(DeviceScript s){s.opened_instance=s.instance;s.opened_product=s.product;scripts.push_back(s);attached.push_back(true);return scripts.size()-1;}
     ~Input(){for(auto* d:made)delete d;}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID,void**)override{return E_NOINTERFACE;}
     ULONG STDMETHODCALLTYPE AddRef()override{return ULONG(++refs);}
-    ULONG STDMETHODCALLTYPE Release()override{return ULONG(--refs);}
+    ULONG STDMETHODCALLTYPE Release()override{
+        if(release_armed&&release_armed->exchange(false)){
+            if(release_entered)SetEvent(release_entered);
+            if(release_delay_ms>=0)std::this_thread::sleep_for(std::chrono::milliseconds(release_delay_ms));
+            else WaitForSingleObject(release_release,INFINITE);
+        }
+        return ULONG(--refs);
+    }
     HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID g,LPDIRECTINPUTDEVICE8W* out,LPUNKNOWN)override{
         if(create_delay_ms)std::this_thread::sleep_for(std::chrono::milliseconds(create_delay_ms));
         std::lock_guard<std::mutex> l(m);
