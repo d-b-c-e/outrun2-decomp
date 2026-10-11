@@ -43,7 +43,12 @@ struct ObjectCaps {
 struct DeviceInfo { std::string dev,prod,name; };           // GUID text, lower case
 
 // ---- the device provider: the single owner of device handles (section 6). The core never opens a device itself.
-enum class Call : std::uint8_t { Ok, AcquisitionLost, Gone, NotCalled };   // one API call, classified where it was made
+// One API call, classified where it was made. The numeric values are part of the observer and recorder contract:
+// append only, never renumber (slice 3 review). Pending (E_PENDING, data not yet available) is transient: the device
+// stays open and is retried, within CoreConfig::pending_limit_us.
+enum class Call : std::uint8_t { Ok=0,AcquisitionLost=1,Gone=2,NotCalled=3,Pending=4 };
+static_assert(int(Call::Ok)==0&&int(Call::AcquisitionLost)==1&&int(Call::Gone)==2&&int(Call::NotCalled)==3&&int(Call::Pending)==4,
+              "Call values are a published contract");
 using Handle=std::uint64_t;                                   // provider-defined; 0 = none
 struct OpenResult { bool ok{}; std::string why; DeviceInfo opened; ObjectCaps caps; Handle handle{}; };
 class Provider {
@@ -161,9 +166,12 @@ struct Frame {
 };
 
 // ---- events (section 9): one writer (the input thread); the control worker's events are handed to it
+// Numeric values are part of the observer and recorder contract: append only.
 enum class EventKind : std::uint8_t {
-    EpochBegin,EpochEnd,BatchAccepted,BatchDuplicate,BatchRefused,BatchActivated,BatchSuperseded,ObjectExpired,RunChanged
+    EpochBegin=0,EpochEnd=1,BatchAccepted=2,BatchDuplicate=3,BatchRefused=4,BatchActivated=5,BatchSuperseded=6,ObjectExpired=7,
+    RunChanged=8,ReadPending=9
 };
+static_assert(int(EventKind::RunChanged)==8&&int(EventKind::ReadPending)==9,"EventKind values are a published contract");
 const char* event_name(EventKind);
 struct Event {
     std::uint64_t seq{};
@@ -195,6 +203,7 @@ struct CoreConfig {
     std::int64_t wait_first_us=120000000;     // WAITING: first batch
     std::int64_t admission_us=10000000;       // LATCHED: devices ready for admission
     int reacquire_tries=3;
+    std::int64_t pending_limit_us=1000000;    // continuous E_PENDING for longer ends the epoch (reacquisition)
     int max_opens_per_pass=4;
     std::size_t status_queue=256,event_queue=1024,generation_queue=8,control_event_queue=64;
 };
@@ -247,6 +256,7 @@ private:
         std::uint32_t epoch{};
         std::uint64_t seq{};
         bool fresh_seen{};        // a valid read in this epoch
+        std::int64_t pending_since_us{};   // the start of the current run of pending reads, 0 none
         std::int64_t last_valid_us{};
         int sample{-1};           // this frame's sample index
     };

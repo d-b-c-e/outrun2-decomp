@@ -6,22 +6,31 @@
 // - enumerate: game controllers attached now, by instance and product GUID text (lower case).
 // - open: CreateDevice by instance, c_dfDIJoystick2, background + non-exclusive, the 0..65535 range and zero dead
 //   zone requested, then every object checked by its DIJOYSTATE2 offset (GetObjectInfo) and each axis's range read
-//   back (GetProperty, by offset); the opened identity is read back from the new handle (GetDeviceInfo), so the core
-//   can compare it with the listing. No force-feedback call is ever made.
-// - poll / state: Poll and GetDeviceState are separate calls, each classified where it is made; the state buffer is
-//   initialized and copied out only when the whole read succeeded.
-// - close: refused while a read of that handle is in progress (a per-slot atomic: readers in, or closing), so a handle
-//   is never released under a reader; the refusal is counted.
-// - shutdown: releases every device not being read, waits a bounded time for reads in progress, and deliberately leaks
-//   (never releases) a device still being read; the report says what was left.
+//   back (GetProperty, by offset); the opened identity is read back from the new handle (GetDeviceInfo). Any failure
+//   after CreateDevice releases the handle. No force-feedback call is ever made.
+// - poll / state: Poll and GetDeviceState are separate calls, each classified where it is made (E_PENDING, "data not
+//   yet available", is Call::Pending: transient, not a lost device); nothing is copied from a failed read.
+//
+// Admission (slice 3 review, findings 1 and 3). Each slot has one 64-bit atomic word: the generation in the high half,
+// and in the low half a CLOSED bit, a RESERVED bit and the reader count. A read is admitted by one compare-exchange
+// that checks the handle's generation, that the slot is open, and adds a reader, so a stale handle can never be
+// admitted to a reused slot. A slot is published (its generation advanced and CLOSED cleared) only after its device is
+// stored. close() is one compare-exchange from "open, no readers" to "closing". After shutdown(), nothing new is
+// admitted: reads, opens, listings and reacquisitions are refused.
+//
+// Lifetime (finding 2). All mutable state lives in a shared State; every call holds a reference to it for its whole
+// duration. Destroying the provider drops only the provider's reference: a read still inside a driver call keeps the
+// State alive, and whatever shutdown could not release (a device being read, DirectInput while an open or listing is
+// in flight) is released by the State's destructor once the last call has left. The owner must not destroy the
+// provider while one of its threads may still START a call (the core's own shutdown gate); calls already started are
+// covered here. The code module is the game executable (never unloaded).
 #include "shim.hpp"
 #ifndef DIRECTINPUT_VERSION
 #define DIRECTINPUT_VERSION 0x0800
 #endif
 #include <windows.h>
 #include <dinput.h>
-#include <array>
-#include <atomic>
+#include <memory>
 #include <string>
 namespace dbce::shim {
 std::string guid_text(const GUID&);
@@ -41,26 +50,26 @@ public:
     Call state(Handle,RawState& out) override;
     std::int64_t now_us() override;
 
-    struct ShutdownReport { int released{},leaked{}; bool input_released{}; std::string detail; };
-    ShutdownReport shutdown(int wait_ms);
-    int misuse()const{return misuse_.load();}
-    static Call classify(HRESULT);
-private:
-    // A handle is (generation << 8) | (slot + 1): a slot is reused after its close, and a stale handle from an earlier
-    // open never reaches the new device.
-    struct Slot {
-        IDirectInputDevice8W* device{};
-        std::atomic<int> state{0};       // > 0: readers inside; 0: idle; -1: closing or closed
-        std::atomic<bool> used{false};
-        std::atomic<std::uint32_t> generation{0};
+    struct ShutdownReport {
+        int released{};           // devices released now
+        int held{};               // devices still being read: released later, by the last call to leave
+        bool input_released{};    // DirectInput released now (false: an open/listing was in flight, or a device is held)
+        std::string detail;
     };
-    IDirectInput8W* input_;
-    HWND window_;
-    std::array<Slot,MaxSlots> slots_;
-    std::atomic<int> misuse_{0};
+    // Stops admission at once, releases what is idle, waits at most wait_ms for calls in progress. Never releases
+    // anything a call is using; what remains is released when the last call leaves (see Lifetime above).
+    ShutdownReport shutdown(int wait_ms);
+    int misuse()const;            // stale handles, closes refused during a read
+    int refused_after_stop()const;
+    static Call classify(HRESULT);
+
+    // Tests only: called inside admission between reading a slot's word and the compare-exchange (null in production),
+    // to schedule a close / reopen exactly there.
+    using AdmissionHook=void(*)(void* user);
+    static void set_admission_hook_for_tests(AdmissionHook,void* user);
+private:
+    struct State;
+    std::shared_ptr<State> state_;
     bool shut_{};
-    Slot* slot(Handle)const;
-    static bool enter(Slot&);
-    static void leave(Slot&);
 };
 }

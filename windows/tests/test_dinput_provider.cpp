@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -189,7 +190,7 @@ void test_close_and_stale_handles(){
     delete in;
 }
 
-// Shutdown: a device still being read is left unreleased; nothing is released under a reader.
+// Shutdown: nothing is released under a reader; what a read still holds is released when that read leaves.
 void test_shutdown(){
     auto* in=new fakecom::Input;
     auto a=in->add(wheel());in->add(shifter());
@@ -200,17 +201,158 @@ void test_shutdown(){
      std::thread reader([&]{RawState st;(void)p.state(o1.handle,st);});
      std::this_thread::sleep_for(std::chrono::milliseconds(50));
      const auto rep=p.shutdown(50);
-     check(rep.released==1&&rep.leaked==1&&!rep.input_released&&rep.detail.find("still being read")!=std::string::npos,"shutdown leaves the device being read, reports it");
+     check(rep.released==1&&rep.held==1&&!rep.input_released&&rep.detail.find("still being read")!=std::string::npos,"shutdown keeps the device being read, reports it");
      check(in->made[1]->released()&&!in->made[0]->released()&&in->counters.release_during_read==0,"only the idle device was released");
      reader.join();
      (void)o2;}
-    check(!in->made[0]->released()&&in->refs.load()==1,"the leaked device and DirectInput stay unreleased after the read (process exit reclaims them)");
+    check(in->made[0]->released()&&in->refs.load()==0&&in->counters.release_during_read==0,"after the read left and the provider went: the held device and DirectInput released, never during the read");
     auto* in2=new fakecom::Input;in2->add(wheel());
     {DInputProvider p(in2,nullptr);(void)p.open(p.enumerate()[0]);
      const auto rep=p.shutdown(50);
-     check(rep.released==1&&rep.leaked==0&&rep.input_released&&in2->refs.load()==0,"an idle shutdown releases every device and DirectInput");}
+     check(rep.released==1&&rep.held==0&&rep.input_released&&in2->refs.load()==0,"an idle shutdown releases every device and DirectInput");}
     check(in->counters.force_calls==0&&in2->counters.force_calls==0,"no force-feedback call");
     delete in2;delete in;
+}
+
+// Slice 3 review, finding 2: the provider destroyed (and its memory fenced) while a read is inside the driver call.
+// The read keeps the shared state alive; its device is released when it leaves.
+void test_destroyed_during_a_read(){
+    auto* in=new fakecom::Input;
+    auto a=in->add(wheel());in->scripts[a].state_delay_ms=300;
+    SYSTEM_INFO si;GetSystemInfo(&si);
+    void* mem=VirtualAlloc(nullptr,si.dwPageSize,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+    check(mem&&sizeof(DInputProvider)<=si.dwPageSize,"a page for the provider");
+    auto* p=new(mem) DInputProvider(in,nullptr);
+    const auto o=p->open(p->enumerate()[0]);
+    std::atomic<int> result{-1};
+    std::thread reader([&]{RawState st;result=int(p->state(o.handle,st));});
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    (void)p->shutdown(10);
+    p->~DInputProvider();
+    DWORD old=0;
+    check(VirtualProtect(mem,si.dwPageSize,PAGE_NOACCESS,&old)!=0,"the provider's page is fenced");
+    reader.join();   // resumes after the driver call: touches only the shared state
+    check(result==int(Call::Ok),"the read finished normally after the provider was gone");
+    check(in->made[0]->released()&&in->refs.load()==0&&in->counters.release_during_read==0,"its device and DirectInput were released as it left");
+    VirtualFree(mem,0,MEM_RELEASE);
+    delete in;
+}
+
+// Slice 3 review, finding 3: after shutdown nothing new is admitted, even once a timed-out read has left.
+void test_stop_is_terminal(){
+    auto* in=new fakecom::Input;
+    auto a=in->add(wheel());in->add(shifter());
+    in->scripts[a].state_delay_ms=150;
+    {DInputProvider p(in,nullptr);
+     const auto list=p.enumerate();
+     const auto o=p.open(list[0]);
+     std::thread reader([&]{RawState st;(void)p.state(o.handle,st);});
+     std::this_thread::sleep_for(std::chrono::milliseconds(30));
+     (void)p.shutdown(0);
+     reader.join();
+     const auto again=p.open(list[1]);
+     check(!again.ok,"no open after shutdown");
+     check(p.poll(o.handle)==Call::Gone&&p.enumerate().empty(),"no read and no listing after shutdown");
+     check(p.refused_after_stop()>=3,"refusals counted ("+std::to_string(p.refused_after_stop())+")");}
+    delete in;
+}
+
+// Finding 3: shutdown racing an open that is inside CreateDevice: DirectInput is kept for it; the open sees the stop,
+// releases its new device and fails.
+void test_shutdown_races_an_open(){
+    auto* in=new fakecom::Input;in->add(wheel());
+    in->create_delay_ms=200;
+    {DInputProvider p(in,nullptr);
+     const auto list=p.enumerate();
+     OpenResult r;
+     std::thread opener([&]{r=p.open(list[0]);});
+     std::this_thread::sleep_for(std::chrono::milliseconds(50));
+     const auto rep=p.shutdown(20);
+     check(!rep.input_released&&rep.detail.find("last call leaves")!=std::string::npos,"DirectInput kept while an open is in flight");
+     opener.join();
+     check(!r.ok&&in->made.size()==1&&in->made[0]->released(),"the open saw the stop and released its device");}
+    check(in->refs.load()==0,"DirectInput released when the provider went");
+    delete in;
+}
+
+// Finding 1: a stale handle paused between reading the slot and the compare-exchange, while the slot is closed and
+// reopened for another device, is never admitted to the new device.
+namespace aba {
+std::atomic<bool> armed{false},paused{false},resume{false};
+void hook(void*){
+    bool expected=true;
+    if(armed.compare_exchange_strong(expected,false)){paused=true;while(!resume.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+}
+}
+void test_stale_handle_admission_race(){
+    auto* in=new fakecom::Input;in->add(wheel());in->add(shifter());
+    {DInputProvider p(in,nullptr);
+     const auto list=p.enumerate();
+     const auto old=p.open(list[0]);
+     DInputProvider::set_admission_hook_for_tests(aba::hook,nullptr);
+     aba::armed=true;aba::paused=false;aba::resume=false;
+     std::atomic<int> result{-1};
+     std::thread reader([&]{result=int(p.poll(old.handle));});
+     while(!aba::paused.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));
+     p.close(old.handle);                                   // no reader admitted yet: the close succeeds
+     const auto fresh=p.open(list[1]);                      // the same slot, the next generation
+     check(fresh.ok&&(fresh.handle&0xffu)==(old.handle&0xffu)&&fresh.handle!=old.handle,"the slot reused for another device");
+     const int polls=in->counters.polls.load();
+     aba::resume=true;
+     reader.join();
+     DInputProvider::set_admission_hook_for_tests(nullptr,nullptr);
+     check(result==int(Call::Gone)&&in->counters.polls==polls,"the paused stale handle was refused, the new device untouched");
+     check(p.poll(fresh.handle)==Call::Ok,"the new handle works");}
+    delete in;
+}
+
+// Finding 4: E_PENDING keeps the device open and is retried, within a bound.
+void test_pending_reads(){
+    {// The first read of every new device object is pending: one device object, not one per tick.
+     Rig r(profile({"steer = axis 0 dev="+W()+" prod="+WP()+" range=0..65535 rest=32768 travel=+1"}));
+     auto& s=r.in->scripts[r.in->add(wheel())];
+     s.pending_first_read=true;s.state.lX=65535;
+     int valid=0;
+     for(int i=0;i<10;++i){const auto& f=r.step();if(!f.samples.empty()&&f.samples[0].valid)++valid;}
+     check(r.in->counters.creates==1&&r.in->counters.releases==0&&valid==9,"pending: one device object, retried ("+std::to_string(valid)+" valid of 10)");}
+    {// A held button across a pending frame never returns as a new press.
+     Rig r(profile({"confirm = button 3 dev="+W()+" prod="+WP()}));
+     auto& s=r.in->scripts[r.in->add(wheel())];
+     r.step();s.state.rgbButtons[3]=0x80;
+     auto f=r.step();
+     check(f.action[std::size_t(A("confirm"))].value==1,"pressed");
+     s.reads.push_back({DI_OK,E_PENDING});
+     f=r.step();
+     check(f.action[std::size_t(A("confirm"))].status==Status::ReadPending&&f.action[std::size_t(A("confirm"))].value==0&&f.samples[0].state==Call::Pending,"a pending frame: neutral, read-pending");
+     f=r.step();
+     check(f.action[std::size_t(A("confirm"))].status==Status::Rearming&&f.down==0,"the held button is masked: no new press");
+     s.state.rgbButtons[3]=0;r.step();s.state.rgbButtons[3]=0x80;
+     f=r.step();
+     check(((f.down>>A("confirm"))&1)&&r.in->counters.creates==1,"a real press after release, same device object");}
+    {// Pending for longer than the limit ends the epoch (reacquisition of the same handle).
+     auto* in=new fakecom::Input;
+     auto p=std::make_unique<DInputProvider>(in,nullptr);
+     CoreConfig cfg;cfg.fresh_us=10'000'000;cfg.pending_limit_us=50'000;
+     auto core=std::make_unique<Core>(*p,cfg);
+     core->set_profile(read_profile(profile({"confirm = button 0 dev="+W()+" prod="+WP()})));
+     auto& s=in->scripts[in->add(wheel())];
+     core->service_devices();core->tick();
+     for(int i=0;i<4;++i)s.reads.push_back({DI_OK,E_PENDING});
+     core->service_devices();(void)core->tick();
+     std::this_thread::sleep_for(std::chrono::milliseconds(80));
+     core->service_devices();(void)core->tick();          // pending past the limit: the epoch ends
+     core->service_devices();const auto& f=core->tick();
+     check(f.samples[0].epoch==2&&in->counters.creates==1,"pending past the limit: epoch 2 by reacquisition, same device object");
+     core.reset();p->shutdown(100);p.reset();delete in;}
+    {// In a test run a pending read of a workload device fails the run (strict freshness).
+     Rig r(profile({"confirm = button 0 dev="+W()+" prod="+WP()}),true);
+     auto& s=r.in->scripts[r.in->add(wheel())];
+     r.core->request_admission(Session{"abcdefgh12345678",2000000000ull},1999999000ull,true,true);
+     r.step();
+     check(r.core->run()==Run::Waiting,"admitted");
+     s.reads.push_back({DI_OK,E_PENDING});
+     r.step();
+     check(r.core->run()==Run::Failed,"a pending read fails a test run");}
 }
 
 // P6 with the real provider: slow listing and creation on the worker never block the tick.
@@ -235,7 +377,9 @@ void test_worker_never_blocks_tick(){
 }
 
 int main(){
-    try{test_classify_and_guids();test_open_caps();test_core_end_to_end();test_identity_change();test_two_devices();test_close_and_stale_handles();test_shutdown();test_worker_never_blocks_tick();}
+    try{test_classify_and_guids();test_open_caps();test_core_end_to_end();test_identity_change();test_two_devices();test_close_and_stale_handles();test_shutdown();
+        test_destroyed_during_a_read();test_stop_is_terminal();test_shutdown_races_an_open();test_stale_handle_admission_race();test_pending_reads();
+        test_worker_never_blocks_tick();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"dinput provider: "<<checks<<" checks passed\n";
     return 0;

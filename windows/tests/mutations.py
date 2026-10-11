@@ -124,13 +124,32 @@ FENCE = [
 ]
 
 DINPUT = [
-    ("close allowed during a read", "shim/dinput_provider.cpp",
-     "if(!s->state.compare_exchange_strong(idle,-1)){++misuse_;return;}   // a read is in progress (or already closed)",
-     "s->state.store(-1);"),
-    ("stale handle accepted (no generation check)", "shim/dinput_provider.cpp",
-     "return s->used.load()&&s->generation.load()==std::uint32_t(h>>8)?s:nullptr;", "return s->used.load()?s:nullptr;"),
+    ("generation not checked at admission", "shim/dinput_provider.cpp",
+     "if(generation_of(w)!=generation||(low_of(w)&(Closed|Reserved))){++misuse;return nullptr;}",
+     "if(low_of(w)&(Closed|Reserved)){++misuse;return nullptr;}"),
+    ("admission not one compare-exchange (check, then add)", "shim/dinput_provider.cpp",
+     "if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;", "s.word.fetch_add(1);break;"),
+    ("no stop check at admission (the check before and the back-out after the compare-exchange)", "shim/dinput_provider.cpp",
+     "            if(stopped.load()){++refused;return nullptr;}\n            if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;\n        }\n        if(stopped.load()){leave(s);++refused;return nullptr;}   // the stop raced this admission: back out",
+     "            if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;\n        }"),
+    ("opens and listings admitted after stop", "shim/dinput_provider.cpp",
+     "if(stopped.load()){worker_ops.fetch_sub(1);++refused;return false;}", ""),
+    ("DirectInput released under an open in flight", "shim/dinput_provider.cpp",
+     "if(!rep.held&&st->worker_ops.load()==0&&st->input){", "if(!rep.held&&st->input){"),
+    ("a read holds the provider's storage, not the shared state", "shim/dinput_provider.cpp",
+     "    const auto st=state_;   // keeps everything this read touches alive, even if the provider is destroyed meanwhile",
+     "    auto& st=state_;"),
+    ("shutdown releases a device being read", "shim/dinput_provider.cpp",
+     "if((low_of(w)&(Closed|Reserved|Readers))!=0)return false;", "if((low_of(w)&(Closed|Reserved))!=0)return false;"),
+    ("E_PENDING treated as a gone device", "shim/dinput_provider.cpp",
+     "    if(hr==E_PENDING)return Call::Pending;   // \"data not yet available\": transient, the device is not lost\n", ""),
+    ("no rearm after a pending frame", "shim/core.cpp",
+     "                emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);\n                for(const auto& b:bound_)if(b.device==int(i)){",
+     "                emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);\n                for(const auto& b:bound_)if(false){"),
+    ("pending retried forever", "shim/core.cpp",
+     "}else if(pending&&(!d.pending_since_us||now-d.pending_since_us<cfg_.pending_limit_us)){", "}else if(pending){"),
     ("state copied out of a failed read", "shim/dinput_provider.cpp",
-     "if(c!=Call::Ok)return c;   // nothing is copied from a failed read", ""),
+     "if(c!=Call::Ok)return c;   // nothing is copied from a failed or pending read", ""),
     ("requested range assumed, not read back", "shim/dinput_provider.cpp",
      "if(SUCCEEDED(d->GetProperty(DIPROP_RANGE,&back.diph))&&back.lMax>back.lMin){",
      "back.lMin=0;back.lMax=65535;if(true){"),
@@ -138,8 +157,6 @@ DINPUT = [
      "r.caps.axis[i]=has(AxisOffsets[a]);", "r.caps.axis[i]=true;"),
     ("identity taken from the listing, not the handle", "shim/dinput_provider.cpp",
      "r.opened={guid_text(di.guidInstance),guid_text(di.guidProduct),narrow(di.tszProductName)};", "r.opened=listed;"),
-    ("shutdown releases a device being read", "shim/dinput_provider.cpp",
-     "if(s.state.compare_exchange_strong(idle,-1)){s.device->Unacquire();", "if(s.state.exchange(-1),true){s.device->Unacquire();"),
     ("acquisition loss classified as gone", "shim/dinput_provider.cpp",
      "if(hr==DIERR_INPUTLOST||hr==DIERR_NOTACQUIRED)return Call::AcquisitionLost;", ""),
     ("a refused open handle not released", "shim/dinput_provider.cpp",
@@ -158,6 +175,8 @@ def run(target, mutations):
         path = repo / "windows" / rel
         original = path.read_bytes()
         text = original.decode("utf-8")
+        eol = "\r\n" if "\r\n" in text else "\n"           # patterns are written with \n; match the file's line ends
+        old, new = old.replace("\n", eol), new.replace("\n", eol)
         if text.count(old) != 1:
             results.append((name, f"PATTERN NOT FOUND ({text.count(old)})"))
             continue

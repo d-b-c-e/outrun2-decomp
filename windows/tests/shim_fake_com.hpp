@@ -37,6 +37,7 @@ struct DeviceScript {
     std::deque<std::pair<HRESULT,HRESULT>> reads;  // the next (Poll, GetDeviceState) results; empty: (S_OK, S_OK)
     std::deque<HRESULT> acquires;                  // the next Acquire results; empty: S_OK
     bool fill_on_failure=false;                    // GetDeviceState writes the state even when it returns a failure
+    bool pending_first_read=false;                 // each new device object's first GetDeviceState returns E_PENDING
     int state_delay_ms=0;
     DeviceScript(){for(int a=0;a<8;++a){native_min[a]=0;native_max[a]=65535;}std::memset(&state,0,sizeof state);for(auto& p:state.rgdwPOV)p=0xFFFFFFFFu;}
 };
@@ -91,6 +92,7 @@ public:
         if(s_.state_delay_ms)std::this_thread::sleep_for(std::chrono::milliseconds(s_.state_delay_ms));
         HRESULT hr=DI_OK;
         {std::lock_guard<std::mutex> l(m_);hr=pending_state_;pending_state_=DI_OK;
+         if(s_.pending_first_read&&!first_read_done_){first_read_done_=true;hr=E_PENDING;}
          if(SUCCEEDED(hr)||s_.fill_on_failure){if(size==sizeof(DIJOYSTATE2))std::memcpy(data,&s_.state,size);}}
         in_read_=false;
         return hr;
@@ -141,7 +143,7 @@ private:
     DeviceScript& s_;Counters& c_;std::mutex& m_;
     std::atomic<int> refs_{1};
     std::atomic<bool> released_{false},in_read_{false};
-    bool ranged_=false;
+    bool ranged_=false,first_read_done_=false;
     HRESULT pending_state_=DI_OK;
     void check(){if(released_.load())++c_.after_release;}
 };

@@ -54,6 +54,7 @@ const char* event_name(EventKind k){
     case EventKind::BatchRefused:return "batch-refused";case EventKind::BatchActivated:return "batch-activated";
     case EventKind::BatchSuperseded:return "batch-superseded";case EventKind::ObjectExpired:return "object-expired";
     case EventKind::RunChanged:return "run-changed";
+    case EventKind::ReadPending:return "read-pending";
     }
     return "?";
 }
