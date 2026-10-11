@@ -1,6 +1,6 @@
 # Read-only provider probe (P29)
 
-Source candidate only. Build with CMake / ClangCL in Release. The executable
+Qualified read-only scope below. Build with CMake / ClangCL in Release. The executable
 requires an explicit `--read-only-device-probe <profile.ini> <new result>`.
 Do not run it without the shared rig lease and owner-idle gate.
 
@@ -35,3 +35,39 @@ with its source pin intact before that edit.
 
 The host constructor now accepts an owned HWND and freshness bound; existing
 offline callers keep their prior defaults. This does not change production code.
+
+## October 11 live evidence
+
+Source `2750b86`, executable SHA-256
+`101e50f4742a16c2e3df6f97893420e8a11eef40756bd3d8fc1516ac647f3cb4`,
+passed at the rig under the shared lease and owner-idle gate. No game was open,
+and no injection or force implementation is linked. The same host opened on its
+worker and read on the main input thread. The hidden window stayed hidden.
+
+| Device | Fresh reads | First/last Core frame | Median/P95/max read microseconds |
+|---|---:|---|---|
+| R12 | 295 | 6/300 | 4 / 43 / 524 |
+| DS-8X | 295 | 6/300 | 1 / 1 / 3 |
+
+There were 300 ticks with 31 action rows each, no failed or stale observed
+sample, and maximum read ages of 4/1 microseconds. Shutdown resolved in
+9.241 ms, released both devices and DirectInput, held none, and the process
+exited zero. These are at-rest observations at the probe's sleep-paced rate,
+not high-rate or gameplay performance acceptance.
+
+Private hub evidence: `artifacts/readonly-provider-live-02`,
+`readonly-provider-live-plan-02`, `readonly-provider-live-02-independent.json`
+and `analyze_readonly_provider.py`. Exact executable/profile copies are retained.
+Peer source review nene14953 passed; the clean host regression has 129 host,
+84 provider checks and all six host mutations. The supervisor also passes 40
+fake-child checks (normal, nonzero, wrong PID/time, unresolved input/release,
+and a forced timeout); that private fixture uses a disjoint dummy lease.
+
+The first live attempt is retained failed: its profile reused the fake-COM
+fixture's synthetic DS-8X product GUID. The provider reported product-mismatch
+and opened only the R12, then shut down normally. The second uses the DS-8X
+product observed in the contemporaneous game inventory. Its synthetic shifter
+binding still names raw button index 11, which does not exist on this device;
+the resolver correctly reports object-missing. P29 establishes device reads,
+not this binding. P30 must inventory all three devices' actual objects/ranges
+and WGI paths before any game-input qualification.

@@ -333,9 +333,14 @@ remains green: 26 supervised checks, 5,257 finalizer checks and five mutations.
 Receipts: `artifacts/p21-combined-provider-regression/receipt.json` and
 `artifacts/p21-combined-recorder-regression/receipt.json` in the hub.
 
-Independent review is pending. Desktop adoption, real COM/device qualification,
-portable replay and WM_ENDSESSION remain separate boundaries. Synchronous
-report I/O still relies on the external fixture deadline.
+Independent review of `8997568` passed (nene14866): both sealed originals replay
+exactly and all four unresolved cases plus the changed-channel control refuse.
+The generic recorder slot's lazy-construction contract is now explicit. The
+macro-based fixture entry point and LF-specific writer pin are low follow-ups.
+Desktop adoption, portable replay and WM_ENDSESSION remain separate boundaries.
+Synchronous report I/O still relies on the external fixture deadline. The later
+P29 read-only device result is documented in `tests/readonly_provider/README.md`;
+it does not qualify recording from actual devices or a production game host.
 
 ## 7. Questions for Astra
 
