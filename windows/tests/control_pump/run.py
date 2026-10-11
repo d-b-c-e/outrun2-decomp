@@ -24,6 +24,7 @@ plans=[
     ('write-loss','control_pump.hpp','if(!io_.append(journal))','if(!io_.append(journal)&&false)','read or journal failure releases held input'),
     ('close-gate','core.cpp','control_closed_=true;','control_closed_=false;','preclosed gate never touches files'),
     ('io-neutral','core.cpp','if((closed||failed)&&(run_==Run::Latched||run_==Run::Waiting||run_==Run::Running))','if((closed||failed)&&false&&(run_==Run::Latched||run_==Run::Waiting||run_==Run::Running))','bad or delayed session fails neutral'),
+    ('terminal-journal','control_pump.hpp','if(!journal_failed_){const bool written','if(!journal_failed_&&state_!=State::Failed){const bool written','broken journal never retried; healthy sink receives terminal drain'),
 ]
 for name,rel,old,new,why in plans:
     root=out/'mutations'/name
@@ -36,4 +37,4 @@ for name,rel,old,new,why in plans:
     mutations.append(dict(name=name,caught=True,reason=bad.stderr.strip()))
 if pin()!=before:raise RuntimeError('Source changed during proof')
 (out/'receipt.json').write_text(json.dumps(dict(source=before,passed=True,proof=proof.stdout.strip(),regression=regression.stdout.strip(),mutations=mutations,commands=commands),indent=2))
-print(proof.stdout.strip());print(regression.stdout.strip());print('PASS five defect controls; '+str(out/'receipt.json'))
+print(proof.stdout.strip());print(regression.stdout.strip());print('PASS six defect controls; '+str(out/'receipt.json'))

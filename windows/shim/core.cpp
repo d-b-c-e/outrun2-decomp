@@ -156,7 +156,7 @@ Core::ControlState Core::control_state()const{
 }
 void Core::fail_control(const std::string& why){
     std::lock_guard<std::mutex> l(m_);
-    if(!control_closed_&&!control_failed_){control_failed_=true;control_failure_=why.substr(0,512);}
+    if(!control_closed_&&!control_failed_){control_failed_=true;control_failure_=bounded_diagnostic(why);}
 }
 void Core::close_control(){std::lock_guard<std::mutex> l(m_);control_closed_=true;}
 BatchResult Core::offer_batch(const std::string& bytes){

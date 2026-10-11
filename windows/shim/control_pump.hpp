@@ -34,10 +34,10 @@ class Pump {
     State state_{State::New}; std::string reason_;
     bool have_bytes_{}; std::string last_bytes_;
     std::uint64_t batches_offered_{},identical_skipped_{},journal_writes_{};
-    bool finished_{},complete_{};
+    bool finished_{},complete_{},journal_failed_{};
     void fail(const std::string& why){
         if(state_==State::Failed||state_==State::Closed)return;
-        state_=State::Failed;reason_=why.substr(0,512);core_.fail_control(reason_);
+        state_=State::Failed;reason_=bounded_diagnostic(why);core_.fail_control(reason_);
     }
     bool closed(){if(core_.control_state().closed){state_=State::Closed;return true;}return false;}
     Journal drain(){return {core_.drain_events(),core_.drain_status(),core_.status_dropped(),core_.status_coalesced(),core_.events_dropped(),core_.control_events_dropped(),batches_offered_,identical_skipped_};}
@@ -58,10 +58,13 @@ public:
     // Exactly one worker calls pass/status. Host closes Core's gate before
     // stopping/waiting for that worker; it must retain Core/provider/Io until
     // the worker's OS thread has actually ended (including exit callbacks).
+    // The owning thread entry point must catch exceptions, including misuse of
+    // this single-worker API (ProviderHost does so); never let them escape it.
     void pass(){
         if(worker_==std::thread::id{})worker_=std::this_thread::get_id();
         if(worker_!=std::this_thread::get_id())throw std::logic_error("control pump has one worker");
         if(state_==State::Failed||state_==State::Closed||closed())return;
+        bool writing=false;
         try {
             if(state_==State::New)start();
             if(state_!=State::Polling||closed())return;
@@ -85,10 +88,12 @@ public:
             // Counts remain observable in every journal, including an otherwise
             // empty pass. A failed append is terminal, never silently retried as
             // if the drained evidence had been persisted.
-            if(!io_.append(journal)){fail("runtime journal append failed");return;}
+            writing=true;
+            if(!io_.append(journal)){journal_failed_=true;fail("runtime journal append failed");return;}
+            writing=false;
             ++journal_writes_;
-        }catch(const std::exception& e){fail(std::string("control operation threw: ")+e.what());}
-         catch(...){fail("control operation threw");}
+        }catch(const std::exception& e){if(writing)journal_failed_=true;fail(std::string("control operation threw: ")+e.what());}
+         catch(...){if(writing)journal_failed_=true;fail("control operation threw");}
     }
     // Host has stopped input ticks and closed the gate. Unlike pass(), this
     // drains the final input-thread records even after closure, then finishes
@@ -98,7 +103,10 @@ public:
         if(worker_!=std::thread::id{}&&worker_!=std::this_thread::get_id())throw std::logic_error("control finish on wrong worker");
         if(!core_.control_state().closed)throw std::logic_error("close control admission before final drain");
         finished_=true;bool ok=state_!=State::Failed;
-        try{if(ok){ok=io_.append(drain());if(ok)++journal_writes_;}}catch(...){ok=false;}
+        // A read/parse fault still needs its next-tick terminal event journaled.
+        // A broken journal is never retried or represented as gap-free.
+        try{if(!journal_failed_){const bool written=io_.append(drain());if(written)++journal_writes_;else ok=false;}
+            else ok=false;}catch(...){ok=false;}
         try{if(!io_.finish())ok=false;}catch(...){ok=false;}
         complete_=ok;state_=ok?State::Closed:State::Failed;
         if(!ok&&reason_.empty())reason_="control final drain or sink close failed";

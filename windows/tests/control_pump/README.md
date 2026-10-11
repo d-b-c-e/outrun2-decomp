@@ -28,3 +28,13 @@ ownership, final journal drain, capture qualification and desktop wiring remain
 integration work. A blocked write cannot stall the input thread, but can lose
 log evidence; a qualified capture must refuse a failed/unjoined control worker
 or any unexplained journal gap. No live game or installed input path changes.
+
+Follow-up host integration supplies an explicit `finish`: after the input thread
+has emitted its terminal neutral tick and closed admission, the worker drains
+the remaining terminal status/event and closes its sink. Read/parse failures
+still drain into a healthy journal, while the outcome remains Failed. A broken
+journal is never retried, and any reader must require the terminal reason before
+qualifying evidence. Diagnostics truncate at a UTF-8 code-point boundary.
+`ProviderHost` catches the control thread's exceptions, including API misuse.
+Ordinary-play status logging is intentional (INPUT-SHIM section 12); the future
+persistent sink still needs bounded/coalesced writes and an explicit policy.

@@ -14,7 +14,7 @@ std::string batch(int n,const std::string& command=""){
 }
 struct Io final:c::Io {
     c::Read session{c::ReadState::Bytes,"nonce="+N+"\nexpires=2000\n",{}},input;
-    int session_reads{},batch_reads{},appends{};bool write_ok=true,throws=false;
+    int session_reads{},batch_reads{},appends{},finishes{};bool write_ok=true,throws=false;
     std::uint64_t now=1000;
     std::vector<c::Journal> journal;
     std::function<void()> on_session,on_batch,on_append;
@@ -22,7 +22,7 @@ struct Io final:c::Io {
     c::Read read_batch()override{++batch_reads;if(on_batch)on_batch();if(throws)throw std::runtime_error("read fault");return input;}
     std::uint64_t unix_seconds()override{return now;}
     bool append(const c::Journal& j)override{++appends;if(on_append)on_append();if(write_ok)journal.push_back(j);return write_ok;}
-    bool finish()override{return true;}
+    bool finish()override{++finishes;return true;}
 };
 struct Rig {
     fake::Provider provider;Core core;Io io;c::Pump pump;
@@ -87,5 +87,24 @@ void shutdown(){
      {std::lock_guard<std::mutex> l(m);release=true;}cv.notify_all();worker.join();
      check(r.io.batch_reads==0&&r.pump.state()==c::State::Closed,"late blocked read cannot admit");}
 }
+void final_evidence(){
+    for(int mode=0;mode<3;++mode){Rig r;r.start();
+        if(mode==0)r.io.input={c::ReadState::Error,{},"read failed"};
+        if(mode==1)r.io.input.bytes=std::string(MaxBatchBytes+1,'x');
+        if(mode==2)r.io.write_ok=false;
+        r.pump.pass();r.tick();const int before=r.io.appends;r.core.close_control();
+        check(!r.pump.finish(),"fault remains failed after final drain");
+        check(r.io.finishes==1,"sink finished after fault");
+        check(r.io.appends==before+(mode==2?0:1),"broken journal never retried; healthy sink receives terminal drain");
+        bool status=false,event=false;
+        for(const auto& j:r.io.journal){for(const auto& s:j.status)if(s.of==StatusChange::Of::Run&&s.status=="failed")status=true;
+            for(const auto& e:j.events)if(e.kind==EventKind::RunChanged&&e.detail.find("failed:")!=std::string::npos)event=true;}
+        check(mode==2||status,"read failure terminal status journaled");check(mode==2||event,"read failure terminal event journaled");
+        check(!r.pump.finish()&&r.io.finishes==1,"final outcome immutable and close exactly once");
+    }
+    auto text=std::string(510,'a')+"\xe2\x82\xac"+"tail";
+    check(bounded_diagnostic(text)==std::string(510,'a')&&strict_utf8(bounded_diagnostic(text)),"diagnostic truncates at UTF8 codepoint");
+    check(strict_utf8(bounded_diagnostic("bad\xff")),"invalid diagnostic replaced by valid text");
 }
-int main(){try{basics();failures();shutdown();std::cout<<"PASS "<<checks<<" control-pump checks\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{basics();failures();shutdown();final_evidence();std::cout<<"PASS "<<checks<<" control-pump checks\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

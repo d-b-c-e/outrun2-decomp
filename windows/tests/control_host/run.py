@@ -47,7 +47,7 @@ mutations=[]
 plans=[
     ('thread-tail','windows/host/provider_host.hpp','r.control_joined=returned&&join_by(control_thread_,deadline);','r.control_joined=returned;','thread-tail','fault cannot qualify host'),
     ('journal-failure','windows/host/provider_host.hpp','if(!r.control_complete)r.unresolved.push_back("control journal incomplete");','if(!r.control_complete){}','write-failed','fault cannot qualify host'),
-    ('final-drain','windows/shim/control_pump.hpp','ok=io_.append(drain());','ok=true;','resolved','final journal and sink close observed'),
+    ('final-drain','windows/shim/control_pump.hpp','const bool written=io_.append(drain());','const bool written=true;','resolved','final journal and sink close observed'),
 ]
 for name,rel,old,new,mode,why in plans:
     root=out/'mutations'/name

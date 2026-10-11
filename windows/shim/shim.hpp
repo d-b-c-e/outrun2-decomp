@@ -90,6 +90,13 @@ constexpr std::size_t MaxProfileBytes=64*1024;
 struct Session { std::string nonce; std::uint64_t expires_unix{}; };
 bool parse_session(const std::string& bytes,std::uint64_t now_unix,Session& out,std::string& why);
 bool strict_utf8(const std::string& bytes);
+inline std::string bounded_diagnostic(const std::string& text,std::size_t limit=512){
+    if(!strict_utf8(text))return "diagnostic contained non-UTF-8 bytes";
+    if(text.size()<=limit)return text;
+    auto end=limit;
+    while(end>0&&(static_cast<unsigned char>(text[end])&0xc0)==0x80)--end;
+    return text.substr(0,end);
+}
 
 // ---- batches (section 9)
 struct Command {
