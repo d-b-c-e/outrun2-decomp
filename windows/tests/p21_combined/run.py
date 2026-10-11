@@ -64,6 +64,7 @@ run("finalizer-build", ["dotnet", "build", here.parent / "p21_recorder_integrati
 exe = result / "build/Release/p21_combined.exe"
 dll = result / "managed/bin/P21Finalizer/release/P21Finalizer.dll"
 run("supervised", [exe, result / "runs"])
+shutil.copytree(result / "runs", result / "runs-unsealed")   # as the supervisor left them, for the negative control
 accepted = []
 refused = []
 for mode in ["resolved", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"]:
@@ -101,12 +102,22 @@ mutant = run("changed-channel", [exe, "--replay", mutation / "capture"], None)
 if mutant.returncode == 0 or "preserve every real-provider producer channel" not in mutant.stderr:
     raise RuntimeError("Changed channel was not detected")
 
+# A desktop host report naming another run never seals (the runNonce binding).
+other = result / "other-run-host"
+shutil.copytree(result / "runs-unsealed/resolved", other)
+report = other / "capture/host-shutdown.json"
+run_nonce = json.loads(report.read_text())["nonce"]
+report.write_text(report.read_text().replace('"nonce":"%s"' % run_nonce, '"nonce":"p21otherrun0"', 1))
+foreign = run("other-run-host", ["dotnet", dll, "--seal-export", other / "capture", other / "validated.tsv"], None)
+if foreign.returncode == 0 or "host report names this capture" not in foreign.stderr:
+    raise RuntimeError("Host report from another run was not refused")
+
 after = {"source": pin(repo, ["."]), "toolkit": pin(toolkit, tk_scopes)}
 if before != after:
     raise RuntimeError("Source changed during proof")
 receipt = {"sourceCommit": before["source"]["commit"], "toolkitCommit": before["toolkit"]["commit"], "sourceVerified": True,
     "scope": "offline: same P21 host, real DInputProvider/Core/OutRun adapter and real recorder/session writer over fake COM; no actual game, devices, force or install",
-    "sealedAndReplayed": accepted, "unresolvedRefused": refused, "changedChannelRefused": True, "commands": commands,
+    "sealedAndReplayed": accepted, "unresolvedRefused": refused, "changedChannelRefused": True, "otherRunHostRefused": True, "commands": commands,
     "sha256": {str(p.relative_to(result)): sha(p) for p in (result / "runs").rglob("*") if p.is_file()}}
 (result / "receipt.json").write_text(json.dumps(receipt, indent=2))
-print("PASS: two sealed real-provider/recorder originals and action replays; four unresolved refusals; exact channel mutation;", result / "receipt.json")
+print("PASS: two sealed real-provider/recorder originals and action replays; four unresolved refusals; exact channel mutation; another run's host report refused;", result / "receipt.json")

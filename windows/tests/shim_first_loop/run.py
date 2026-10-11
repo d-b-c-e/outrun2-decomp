@@ -9,7 +9,9 @@ window. inject.on / inject.txt are removed on every exit path.
 
 Workload: confirm/start presses until the game reaches a race (mode 16/18, read from the shim's runtime.log lines),
 then steer and throttle holds, then `end`. Evidence: the run folder's runtime.log (the shim's record/consumed lines),
-controls-journal.jsonl (the strict reader) and host-shutdown.json.
+controls-journal.jsonl (the strict reader) and host-shutdown.json. The capture (the run folder's capture subfolder) is sealed in the
+evidence copy by the reviewed P21 finalizer (--finalizer): the final host report is copied into it and this runner writes
+exit.json only for an exit it observed, with the process identity it held from the spawn.
 """
 import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, random, re, shutil, string, subprocess, sys, time
 
@@ -61,6 +63,26 @@ def windows_of(pid):
     return found
 
 
+def creation_time(handle):
+    times = [wt.FILETIME() for _ in range(4)]
+    if not kernel32.GetProcessTimes(wt.HANDLE(handle), *[ctypes.byref(t) for t in times]): return 0
+    return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+
+def seal(out, proc, created, receipt, finalizer):
+    """P21: the worker's report (in the capture), the host's final report and an observed normal exit by the same
+    process. A missing capture or an exit this runner did not observe is reported, never sealed."""
+    cap = out / "run" / "capture"
+    if not cap.exists(): receipt["seal"] = "no capture"; return
+    if proc is None or proc.poll() is None or not created: receipt["seal"] = "no observed exit"; return
+    host = (out / "run" / "host-shutdown.json").read_bytes()
+    with open(cap / "host-shutdown.json", "xb") as f: f.write(host)
+    with open(cap / "exit.json", "xb") as f:
+        f.write(json.dumps(dict(pid=proc.pid, creationTime=created, exitCode=proc.returncode & 0xFFFFFFFF, forced=receipt["forced"])).encode())
+    q = subprocess.run(["dotnet", str(finalizer), "--seal-export", str(cap), str(out / "validated.tsv")], capture_output=True, text=True, timeout=300)
+    receipt["seal"] = dict(exit=q.returncode, output=(q.stdout + q.stderr).strip()[-600:])
+
+
 def lease(action, purpose=""):
     cmd = ["pwsh", "-NoProfile", "-File", str(HUB_LEASE), "-" + action]
     if action == "Enter": cmd += ["-Purpose", purpose, "-IdleMinutes", "5"]
@@ -82,6 +104,7 @@ def main():
     a.add_argument("--candidate", type=pathlib.Path, required=True)
     a.add_argument("--prepare-from", type=pathlib.Path, help="build --game as a copy of this game folder first")
     a.add_argument("--result", type=pathlib.Path, help="a fresh result folder (runs and preflight)")
+    a.add_argument("--finalizer", type=pathlib.Path, help="the reviewed P21Finalizer.dll (p21_recorder_integration/managed)")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     o = a.parse_args()
@@ -96,11 +119,13 @@ def main():
     ini = o.game / "OutRunDesktop.ini"
     if not ini.exists() or ini.read_text(encoding="utf-8") != PROFILE:
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
+    if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
     if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
     plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
+                finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
@@ -109,7 +134,7 @@ def main():
                    injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
                              "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")
     nonce = "".join(random.choices(string.ascii_letters + string.digits, k=16))
-    proc = None; run_root = None; leased = False
+    proc = None; run_root = None; leased = False; created = 0
     published = {}                               # only files this invocation wrote, with their last bytes
     def publish(name, data):
         replace_file(DBCE / name, data); published[name] = data
@@ -118,7 +143,7 @@ def main():
         DBCE.mkdir(parents=True, exist_ok=True)
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
-        receipt["pid"] = proc.pid
+        receipt["pid"] = proc.pid; created = creation_time(int(proc._handle)); receipt["creationTime"] = created
         run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
         deadline = time.time() + o.seconds; seen = 0; mode = None; race = False; n = 0; last_press = 0; lines = []
         def batch(commands):
@@ -177,6 +202,8 @@ def main():
             if leased:
                 try: lease("Exit")
                 except Exception as e: receipt["errors"].append(repr(e))
+        try: seal(out, proc, created, receipt, o.finalizer)
+        except Exception as e: receipt["errors"].append("seal: %r" % e)
         if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
         if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
         sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
@@ -187,7 +214,7 @@ def main():
         receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
         print(json.dumps({k: receipt.get(k) for k in ("pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer", "maxConsumedSteer",
-                                                     "maxConsumedAccel", "errors")}, indent=1))
+                                                     "maxConsumedAccel", "seal", "errors")}, indent=1))
 
 
 if __name__ == "__main__":
