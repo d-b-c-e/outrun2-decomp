@@ -51,6 +51,7 @@ struct State {
     std::chrono::steady_clock::time_point start;
     std::uint32_t last_gear{},gear_stalls{},gear_target{};
     bool gear_release{};
+    bool keyboard_drives{};std::int32_t keyboard_anchor{};   // the race follows the keyboard (see wheel_input_filter)
     std::array<LONG,8> logged_axes{};
 };
 State g;
@@ -316,10 +317,15 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
         steer=std::int32_t(std::lround(n*32767.0));
         accel=std::uint32_t(std::lround(value("throttle")*255.0));
         brake=std::uint32_t(std::lround(value("brake")*255.0));
-        // The PC layer stays on for the keyboard (its own device and key tables): this frame's race input is the
-        // wheel, unless the wheel is idle while a key is held, when the layer's record is read instead.
+        // The PC layer stays on for the keyboard (its own device and key tables). The last device used drives the
+        // race: a key pressed while the pedals and wheel buttons are at rest hands it to the layer's record, until
+        // the wheel turns 3% from where it was then, a pedal is pressed or a wheel button is held. Without force
+        // feedback nothing centres the wheel, so its resting position is not a test of idleness.
+        const bool wheel_pressed=accel>=3u||brake>=3u||(held&~keys)!=0u;
+        if(!g.keyboard_drives&&outrun::desktop::desktop_any_key()&&!wheel_pressed){g.keyboard_drives=true;g.keyboard_anchor=steer;}
+        else if(g.keyboard_drives&&(wheel_pressed||std::abs(steer-g.keyboard_anchor)>983))g.keyboard_drives=false;
         out.pc_overlay=true;
-        out.pc_overlay_yield=std::abs(steer)<656&&accel<3u&&brake<3u&&(held&~keys)==0u&&outrun::desktop::desktop_any_key();
+        out.pc_overlay_yield=g.keyboard_drives;
         out.steering=std::clamp(steer/256,-128,127);
         out.accelerator=std::max(out.accelerator,accel);
         out.brake=std::max(out.brake,brake);
