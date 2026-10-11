@@ -900,9 +900,9 @@
   "reason": "dbce::session::Writer::open: CREATE_NEW at the path the recorder gives it (the capture folder in the run folder)"
  },
  {
-  "file": "windows/source/outrun_recorder.hpp",
-  "line": "if(!CreateDirectoryW(cfg_.folder.c_str(),nullptr))throw std::runtime_error(\"capture folder exists or cannot be created\");",
+  "file": "windows/host/recorder/frame_recorder.hpp",
+  "line": "if (!CreateDirectoryW(cfg_.folder.c_str(), nullptr)) throw std::runtime_error(\"capture folder exists or cannot be created\");",
   "class": "entry-redirected",
-  "reason": "ShimRecorder: the capture folder, created new by the first push; the latched entry (shim_input.cpp) passes the fence run folder plus 'capture', so it exists only inside a verified run folder"
+  "reason": "FrameRecorder (shared, OutRunDesktop's ShimRecorder and dbce_shim.dll): the capture folder, created new by the first push; its callers pass a folder inside a verified run folder (the desktop: the fence run folder plus 'capture'; the DLL: its caller's capture_folder)"
  }
 ]

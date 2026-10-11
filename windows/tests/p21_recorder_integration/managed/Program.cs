@@ -18,7 +18,18 @@ static class Program {
     // The OutRunDesktop latched capture (Astra 16553, R1): the same reviewed checks, with its own contract, its declared
     // schema size (the fixture's is 382), every recorded device, real-session file bounds and the devices.json member.
     const string DesktopContract="dbce.shim.outrun-capture@1\n";
-    static bool Desktop(string dir)=>File.ReadAllText(Path.Combine(dir,"bundle.meta"))==DesktopContract;
+    // Any game's capture from the shared frame recorder (Astra 18002): this line, then exactly "game=<id>\n", where the
+    // id is a lower-case [a-z0-9.-] name that the metadata's game must equal. The OutRun contract above stays as it was.
+    const string GenericContract="dbce.shim.frame-capture@1\n";
+    static string GenericGame(string dir){   // null: not the generic contract; "": a malformed one
+        var meta=File.ReadAllText(Path.Combine(dir,"bundle.meta"));
+        if(!meta.StartsWith(GenericContract,StringComparison.Ordinal))return null;
+        var rest=meta.Substring(GenericContract.Length);
+        if(!rest.StartsWith("game=",StringComparison.Ordinal)||!rest.EndsWith("\n",StringComparison.Ordinal))return "";
+        var id=rest.Substring(5,rest.Length-6);
+        return id.Length is >0 and <=64&&id.All(ch=>ch is >='a' and <='z' or >='0' and <='9' or '.' or '-')&&!id.Contains('\n')?id:"";
+    }
+    static bool Desktop(string dir)=>File.ReadAllText(Path.Combine(dir,"bundle.meta"))==DesktopContract||GenericGame(dir)!=null;
     static string[] RequiredFor(string dir)=>Desktop(dir)?Required.Concat(new[]{"devices.json"}).ToArray():Required;
     static int checks;
     static void Check(bool ok,string why){++checks;if(!ok)throw new InvalidDataException(why);}
@@ -48,7 +59,9 @@ static class Program {
         Check(first>0&&tail>=first&&tail!=ulong.MaxValue&&accepted>0&&accepted==written&&attempted==accepted&&tail==last&&written==tail-first+1,"first/tail/count accounting");
         var records=SessionReader.Read(Path.Combine(dir,"source.jsonl")).ToArray();
         var m=records[0].Metadata;var footer=records.Last().Footer;
-        Check(m.Game==(desktop?"outrun2006-decomp-desktop":"outrun-queued-frames-fixture")&&m.Properties["inputContract"]==InputContract,"known frame contract");
+        var generic=GenericGame(dir);
+        Check(generic!="","well-formed generic capture contract");
+        Check(m.Game==(generic??(desktop?"outrun2006-decomp-desktop":"outrun-queued-frames-fixture"))&&m.Properties["inputContract"]==InputContract,"known frame contract");
         Check(p[8].Length==32&&p[8].All(c=>"0123456789abcdef".Contains(c))&&m.Properties["captureNonce"]==p[8],"same capture nonce");
         Check((ulong)new FileInfo(Path.Combine(dir,"source.jsonl")).Length==U(p[9])&&ArtifactSeal.Hash(Path.Combine(dir,"source.jsonl"))==p[10],"worker-closed source bytes");
         Check(m.Properties["profileSha256"]==ArtifactSeal.Hash(Path.Combine(dir,"profile.ini")),"exact profile bytes");
@@ -62,7 +75,8 @@ static class Program {
         var names=rows[0].Channels.Keys.OrderBy(x=>x,StringComparer.Ordinal).ToArray();Check((ulong)names.Length==declared,"complete two-device plus adapter schema and inputs");
         for(int i=0;i<rows.Length;++i){var row=rows[i];var c=row.Channels;var seq=Wide(c,"frame");var tick=Wide(c,"tickUs");
             Check(c.Keys.OrderBy(x=>x,StringComparer.Ordinal).SequenceEqual(names),"fixed complete schema");
-            Check(seq==first+(ulong)i&&Wide(c,"adapter.frame")==seq&&tick>=origin&&row.ElapsedSeconds==(tick-origin)/1e6,"source sequence/time/adapter join");
+            // OutRun's own captures carry the adapter's frame join; a generic capture's game channels are its game's.
+            Check(seq==first+(ulong)i&&(generic!=null||Wide(c,"adapter.frame")==seq)&&tick>=origin&&row.ElapsedSeconds==(tick-origin)/1e6,"source sequence/time/adapter join");
             var devices=desktop?(int)c["sampleCount"]:2;
             for(int device=0;device<devices;++device)foreach(var call in new[]{"poll","state"}){
                 var v=c[$"sample.{device}.{call}"];Check(v>=0&&v<=4&&v==Math.Floor(v),"known Call enum including Pending");
