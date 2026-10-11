@@ -73,7 +73,9 @@ for mode in ["resolved", "release-within", "writer-stuck", "provider-stuck", "or
         run("replay-" + mode, [exe, "--replay", directory / "capture"])
         accepted.append(mode)
     else:
-        reason = "worker.tsv" if mode == "writer-stuck" else "host shutdown resolved"
+        reason = "bundle.meta" if mode == "writer-stuck" else "host shutdown resolved"
+        if mode == "writer-stuck" and (directory / "capture/worker.tsv").exists():
+            raise RuntimeError("Timed-out writer published a quiescent worker report")
         if not outcome.returncode or reason not in outcome.stderr or (directory / "capture/complete.tsv").exists():
             raise RuntimeError("Unresolved capture not refused at its intended boundary: " + mode)
         refused.append(mode)
