@@ -18,10 +18,13 @@ CORE = [
      "s.valid=s.poll==Call::Ok&&s.state==Call::Ok;", "s.valid=s.poll==Call::Ok;"),
     ("duplicate batch re-accepted (TTL extended)", "shim/parse.cpp",
      "if(g.hash==ctx.last_hash){r.verdict=BatchVerdict::Duplicate;", "if(false){r.verdict=BatchVerdict::Duplicate;"),
+    # At the epoch start (the pending branch has its own rearm, and its own mutation in the provider set).
     ("no digital rearm after an epoch start", "shim/core.cpp",
-     "r.need_release=is_digital(b.action);", "r.need_release=false;"),
+     "if(b.device==o.device){\n            auto& r=rearm_[std::size_t(b.action)];\n            r.need_release=is_digital(b.action);",
+     "if(b.device==o.device){\n            auto& r=rearm_[std::size_t(b.action)];\n            r.need_release=false;"),
     ("throttle rearm dropped", "shim/core.cpp",
-     "r.need_rest=pedal_waits_for_rest(b.action);", "r.need_rest=false;"),
+     "            r.need_release=is_digital(b.action);\n            r.need_rest=pedal_waits_for_rest(b.action);",
+     "            r.need_release=is_digital(b.action);\n            r.need_rest=false;"),
     ("terminal state not final (unreachable guard)", "shim/core.cpp",
      "if(run_==r||run_terminal(run_))return;", "if(run_==r)return;"),
     ("refused batch does not fail the run", "shim/core.cpp",
@@ -58,6 +61,9 @@ CORE = [
      "++duplicates_pending_;duplicate_last_n_=r.generation.n;", "push_control_event({0,now,EventKind::BatchDuplicate,-1,0,r.generation.n,\"\"});"),
     ("control overflow not a failure", "shim/core.cpp",
      "if(overflow&&(run_==Run::Waiting||run_==Run::Running))", "if(false)"),
+    ("a 0 timestamp as the no-pending sentinel (Astra 10429)", "shim/core.cpp",
+     "}else if(pending&&(!d.pending||now-d.pending_since_us<cfg_.pending_limit_us)){",
+     "}else if(pending&&(!d.pending_since_us||now-d.pending_since_us<cfg_.pending_limit_us)){"),
 ]
 
 ADAPTER = [
@@ -139,7 +145,56 @@ FENCE = [
      "if(!ra||!rb||ha!=hb||a!=b){", "if(false){"),
 ]
 
-SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER), "fence": ("test_fence", FENCE)}
+DINPUT = [
+    ("generation not checked at admission", "shim/dinput_provider.cpp",
+     "if(generation_of(w)!=generation||(low_of(w)&(Closed|Reserved))){++misuse;return nullptr;}",
+     "if(low_of(w)&(Closed|Reserved)){++misuse;return nullptr;}"),
+    ("admission not one compare-exchange (check, then add)", "shim/dinput_provider.cpp",
+     "if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;", "s.word.fetch_add(1);break;"),
+    ("no stop check at admission (the check before and the back-out after the compare-exchange)", "shim/dinput_provider.cpp",
+     "            if(stopped.load()){++refused;return nullptr;}\n            if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;\n        }\n        if(stopped.load()){leave(s);++refused;return nullptr;}   // the stop raced this admission: back out",
+     "            if(s.word.compare_exchange_weak(w,w+1,std::memory_order_acq_rel))break;\n        }"),
+    ("opens and listings admitted after stop", "shim/dinput_provider.cpp",
+     "if(stopped.load()){worker_ops.fetch_sub(1);++refused;return false;}", ""),
+    ("DirectInput released under an open in flight", "shim/dinput_provider.cpp",
+     "if(!rep.held&&st->worker_ops.load()==0&&st->input){", "if(!rep.held&&st->input){"),
+    ("a read holds the provider's storage, not the shared state", "shim/dinput_provider.cpp",
+     "    const auto st=state_;   // keeps everything this read touches alive, even if the provider is destroyed meanwhile",
+     "    auto& st=state_;"),
+    ("shutdown releases a device being read", "shim/dinput_provider.cpp",
+     "if((low_of(w)&(Closed|Reserved|Readers))!=0)return false;", "if((low_of(w)&(Closed|Reserved))!=0)return false;"),
+    ("E_PENDING treated as a gone device", "shim/dinput_provider.cpp",
+     "    if(hr==E_PENDING)return Call::Pending;   // \"data not yet available\": transient, the device is not lost\n", ""),
+    ("no rearm after a pending frame", "shim/core.cpp",
+     "                emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);\n                for(const auto& b:bound_)if(b.device==int(i)){",
+     "                emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);\n                for(const auto& b:bound_)if(false){"),
+    ("pending retried forever", "shim/core.cpp",
+     "}else if(pending&&(!d.pending||now-d.pending_since_us<cfg_.pending_limit_us)){", "}else if(pending){"),
+    ("handle bits above the generation accepted (nene 10389)", "shim/dinput_provider.cpp",
+     "if(slot<1||slot>Handle(MaxSlots)||(h>>40)!=0)return false;", "if(slot<1||slot>Handle(MaxSlots))return false;"),
+    ("no stop check after the publication (nene 10389)", "shim/dinput_provider.cpp",
+     "        if(st->stopped.load()){\n            // Take the slot back,", "        if(false){\n            // Take the slot back,"),
+    ("an open's device released twice when shutdown closed it first", "shim/dinput_provider.cpp",
+     "                if(generation_of(w2)!=generation||(low_of(w2)&(Closed|Reserved))){\n                    r=OpenResult{};",
+     "                if(generation_of(w2)!=generation||(low_of(w2)&(Closed|Reserved))){\n                    return fail(\"x\");r=OpenResult{};"),
+    ("state copied out of a failed read", "shim/dinput_provider.cpp",
+     "if(c!=Call::Ok)return c;   // nothing is copied from a failed or pending read", ""),
+    ("requested range assumed, not read back", "shim/dinput_provider.cpp",
+     "if(SUCCEEDED(d->GetProperty(DIPROP_RANGE,&back.diph))&&back.lMax>back.lMin){",
+     "back.lMin=0;back.lMax=65535;if(true){"),
+    ("objects assumed, not checked by offset", "shim/dinput_provider.cpp",
+     "r.caps.axis[i]=has(AxisOffsets[a]);", "r.caps.axis[i]=true;"),
+    ("identity taken from the listing, not the handle", "shim/dinput_provider.cpp",
+     "r.opened={guid_text(di.guidInstance),guid_text(di.guidProduct),narrow(di.tszProductName)};", "r.opened=listed;"),
+    ("acquisition loss classified as gone", "shim/dinput_provider.cpp",
+     "if(hr==DIERR_INPUTLOST||hr==DIERR_NOTACQUIRED)return Call::AcquisitionLost;", ""),
+    ("a refused open handle not released", "shim/dinput_provider.cpp",
+     "auto fail=[&](const std::string& why){d->Release();r=OpenResult{};r.why=why;return r;};",
+     "auto fail=[&](const std::string& why){r=OpenResult{};r.why=why;return r;};"),
+]
+
+SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER), "fence": ("test_fence", FENCE),
+        "dinput": ("test_dinput_provider", DINPUT)}
 
 def run(target, mutations):
     build = ["cmake", "--build", str(repo / "build-xbox-pc"), "--config", "Release", "--target", target]
@@ -149,6 +204,8 @@ def run(target, mutations):
         path = repo / "windows" / rel
         original = path.read_bytes()
         text = original.decode("utf-8")
+        eol = "\r\n" if "\r\n" in text else "\n"           # patterns are written with \n; match the file's line ends
+        old, new = old.replace("\n", eol), new.replace("\n", eol)
         if text.count(old) != 1:
             results.append((name, f"PATTERN NOT FOUND ({text.count(old)})"))
             continue

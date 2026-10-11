@@ -792,6 +792,12 @@
   "reason": "the provider's device open"
  },
  {
+  "file": "windows/shim/dinput_provider.hpp",
+  "line": "OpenResult open(const DeviceInfo& listed) override;",
+  "class": "not-a-file",
+  "reason": "the DirectInput provider's device open (CreateDevice; no file)"
+ },
+ {
   "file": "windows/shim/shim.hpp",
   "line": "virtual OpenResult open(const DeviceInfo& listed)=0; // `opened` is the identity read back from the new handle",
   "class": "not-a-file",

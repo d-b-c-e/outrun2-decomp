@@ -7,7 +7,7 @@ namespace {
 bool pedal_waits_for_rest(int action){const std::string a=action_name(action);return a=="throttle"||a=="handbrake";}
 long pov_raw(std::uint32_t v){return v==0xFFFFFFFFu||(v&0xFFFFu)==0xFFFFu?-1L:long(v);}
 const char* call_name(Call c){
-    switch(c){case Call::Ok:return "ok";case Call::AcquisitionLost:return "acquisition lost";case Call::Gone:return "device gone";case Call::NotCalled:return "not called";}
+    switch(c){case Call::Ok:return "ok";case Call::AcquisitionLost:return "acquisition lost";case Call::Gone:return "device gone";case Call::NotCalled:return "not called";case Call::Pending:return "data not yet available";}
     return "?";
 }
 }
@@ -261,7 +261,7 @@ void Core::adopt_worker_changes(std::int64_t now){
     if(duplicates)emit(EventKind::BatchDuplicate,now,-1,0,duplicate_n,std::to_string(duplicates)+" exact duplicate(s), ignored");
     for(const auto& o:op){
         auto& d=devs_[std::size_t(o.device)];
-        d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.reason.clear();
+        d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.pending=false;d.reason.clear();
         emit(EventKind::EpochBegin,now,o.device,o.epoch,0,d.id.dev);
         // Rearm (section 6): physical values in an ordinary process only.
         for(const auto& b:bound_)if(b.device==o.device){
@@ -285,11 +285,26 @@ void Core::read_devices(std::int64_t now){
         if(s.poll==Call::Ok)s.state=p_.state(d.handle,st);   // Poll fills nothing; only a complete state read counts
         s.read_end_us=p_.now_us();
         s.valid=s.poll==Call::Ok&&s.state==Call::Ok;
+        const bool pending=s.poll==Call::Pending||s.state==Call::Pending;
         if(s.valid){
             s.physical=st;s.delivered=st;
-            d.fresh_seen=true;d.last_valid_us=s.read_end_us;
+            d.fresh_seen=true;d.last_valid_us=s.read_end_us;d.pending=false;
+        }else if(pending&&(!d.pending||now-d.pending_since_us<cfg_.pending_limit_us)){
+            // Data not yet available (E_PENDING): no sample, the epoch stays open and is read again next tick. The
+            // device's actions are neutral this frame and rearm, so a held button never returns as a new press.
+            if(!d.pending){
+                d.pending=true;d.pending_since_us=now;
+                emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);
+                for(const auto& b:bound_)if(b.device==int(i)){
+                    auto& r=rearm_[std::size_t(b.action)];
+                    r.need_release=is_digital(b.action);
+                    r.need_rest=pedal_waits_for_rest(b.action);
+                }
+            }
         }else{
-            const Call why=s.poll!=Call::Ok?s.poll:s.state;
+            // A lost or gone device, or pending for longer than pending_limit_us (then: reacquire the same handle).
+            const Call why=pending?Call::AcquisitionLost:s.poll!=Call::Ok?s.poll:s.state;
+            d.pending=false;
             emit(EventKind::EpochEnd,now,int(i),d.epoch,0,std::string("read failed: ")+call_name(why));
             {std::lock_guard<std::mutex> l(m_);
              returned_.push_back({int(i),d.handle,why,d.epoch});
@@ -450,7 +465,7 @@ void Core::resolve(std::int64_t now){
         case DevState::ReadFailed:a.status=Status::ReadFailed;continue;
         case DevState::Open:break;
         }
-        if(!d.fresh_seen||d.sample<0){a.status=Status::ReadPending;continue;}
+        if(!d.fresh_seen||d.sample<0||!frame_.samples[std::size_t(d.sample)].valid){a.status=Status::ReadPending;continue;}
         if(frame_.samples[std::size_t(d.sample)].stale||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::Stale;continue;}
         const auto& k=b.binding;const auto idx=std::size_t(k.index);
         if(k.kind==ctl::Kind::Axis){
