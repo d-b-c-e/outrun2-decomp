@@ -97,9 +97,9 @@ VID/PID corroborates products; it does not prove a DirectInput instance join or
 the future game's pre-consumer exclusion. C++/WinRT is compiled as C++20 because
 the local SDK's C++17 coroutine header refuses Clang; the Core remains C++17.
 
-This extension has built with warnings as errors. P30 live qualification and
-independent source review are pending; the earlier P29 evidence remains pinned
-to its original executable and source.
+This extension built with warnings as errors and passed independent review
+(nene15179, `b409d0d`): all four targets, 146 Core checks and 89 supervisor checks.
+The earlier P29 evidence remains pinned to its original executable and source.
 
 `dinput_inventory --list-only <new folder>` supplies current instance/product
 GUIDs and names with one `EnumDevices(GAMECTRL, ATTACHEDONLY)`, bounded to 256
@@ -113,3 +113,34 @@ single-file child and tests normal completion, nonzero exit, wrong PID/time,
 unresolved state/input/release, exact device counts and timeout, including
 retained stdout/stderr. 89 checks pass. Its lease is a private dummy file;
 no actual rig device, game or output is touched.
+
+## P30 rig result, October 11
+
+`b409d0d` passed a separate metadata inventory and a three-device read-only run
+under the shared lease and 300-second owner-idle gate. The R12, DS-8X and stalk
+each delivered 295 fresh successful samples across 300 Core ticks. Their copied
+capabilities share the samples' adopted epoch: R12 axes 0-7, all with readable
+0..65535 ranges, buttons 0-127 and POV 0; DS-8X buttons 0-10; stalk buttons 0-31.
+The deliberately corrected DS-8X raw button 10 resolves live. No one exercised
+any control, and no game, injection, vibration or physical force was involved.
+
+Normal exit 0, resolved shutdown in 8,277 microseconds, exactly three devices
+released, none held. The exact executable and profile are retained, along with
+all source hashes. The private plan derives its expected device count from the
+prepared profile and passes that same count to the supervisor. The public
+supervisor still takes an explicit count; callers must keep them consistent.
+
+The separate WGI listing initially had no controllers. Snapshots 1 and 2 then
+agreed: three RawGameControllers with corresponding product IDs/counts, none
+convertible to Gamepad and an empty Gamepads list. This records asynchronous
+discovery, not a stable result from snapshot 0 or a DirectInput instance join.
+NonRoamableId and actual hardware identity artifacts stay private.
+
+Private hub evidence: `artifacts/shim-device-inventory-01`,
+`readonly-provider-live-plan-03`, `readonly-provider-live-03`, and
+`readonly-provider-live-03-independent.json`. The latter independently checks
+300 contiguous ticks, 31 actions per tick, sample sequence/freshness, exact
+process exit and source inputs, all 420 capability rows and adopted epochs.
+Source review lows still open: duplicated GUID formatting, empty product-name
+encoding, and the public supervisor's explicit expected count. P31/game input,
+Wheelkit write-through, real button travel, hotplug and recording are separate.
