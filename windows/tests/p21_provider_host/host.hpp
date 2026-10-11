@@ -126,13 +126,14 @@ public:
             rs->cv.notify_all();
         });
         dbce::shim::DInputProvider::ShutdownReport rep; bool returned = false;
+        const auto release_deadline = Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms);
         {
             std::unique_lock<std::mutex> l(rs->m);
-            returned = rs->cv.wait_until(l, Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms), [&] { return rs->done; });
+            returned = rs->cv.wait_until(l, release_deadline, [&] { return rs->done; });
             if (returned) rep = rs->rep;
         }
-        if (returned) release_.join(); else release_.detach();
-        if (!returned) r.unresolved.push_back("DirectInput release did not return: a driver call is still inside the provider's shutdown");
+        if (!returned) { release_.detach(); r.unresolved.push_back("DirectInput release did not return: a driver call is still inside the provider's shutdown"); }
+        else if (!p21_spike::join_by(release_, release_deadline)) r.unresolved.push_back("release thread did not end: its exit work (a driver's thread-exit callback) is still running");
         r.released = rep.released; r.held = rep.held; r.input_released = rep.input_released; r.provider_detail = rep.detail;
         if (rep.held) r.unresolved.push_back("lease leaked: " + std::to_string(rep.held) + " device(s) still inside a call");
         // Phase 6, workers: one deadline. A worker still inside a driver call is left running; it owns its state.
@@ -163,7 +164,7 @@ private:
     bool join_worker_until(Clock::time_point deadline) {
         std::unique_lock<std::mutex> l(w_->m);
         if (!w_->cv.wait_until(l, deadline, [&] { return w_->done; })) { l.unlock(); if (worker_.joinable()) worker_.detach(); return false; }
-        l.unlock(); if (worker_.joinable()) worker_.join(); return true;
+        l.unlock(); return p21_spike::join_by(worker_, deadline);   // done, but the thread may still be in its exit work
     }
 };
 }

@@ -18,6 +18,18 @@
 
 namespace p21_spike {
 using Clock = std::chrono::steady_clock;
+
+// A worker's "done" precedes its thread's end: thread-exit work (thread_local and FLS destructors, DLL thread-detach
+// code) runs after the function returns, and std::thread::join waits for all of it without a bound (Astra 13545). So
+// the thread object itself is waited for against the same absolute deadline; then join, which returns at once, or
+// detach, leaving the thread its own state.
+inline bool join_by(std::thread& t, Clock::time_point deadline) {
+    if (!t.joinable()) return true;
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+    const DWORD ms = left <= 0 ? 0 : left >= 0x7FFFFFFE ? 0x7FFFFFFE : DWORD(left);
+    if (WaitForSingleObject(static_cast<HANDLE>(t.native_handle()), ms) == WAIT_OBJECT_0) { t.join(); return true; }
+    t.detach(); return false;
+}
 constexpr DWORD ForcedExitCode = 0xDBCE0021;   // ordinary process, unresolved stop (D4)
 
 // A gate a fake call blocks on until the test opens it (a driver call or a write that does not return).
@@ -61,7 +73,7 @@ public:
     bool join_until(Clock::time_point deadline) {
         std::unique_lock<std::mutex> l(s_->m);
         if (!s_->cv.wait_until(l, deadline, [&] { return s_->done; })) { l.unlock(); if (t_.joinable()) t_.detach(); return false; }
-        l.unlock(); if (t_.joinable()) t_.join(); return true;
+        l.unlock(); return join_by(t_, deadline);   // done, but the thread may still be in its exit work
     }
     const std::string& name() const { return s_->name; }
     std::shared_ptr<WorkerState> state() const { return s_; }
@@ -130,7 +142,7 @@ public:
     Drained drain(Clock::time_point deadline) {
         std::unique_lock<std::mutex> l(s_->m);
         if (!s_->cv.wait_until(l, deadline, [&] { return s_->worker_done; })) { l.unlock(); s_->fail(RecOutcome::TimedOut); return {s_->outcome.load(), false}; }
-        l.unlock(); if (t_.joinable()) t_.join(); return {s_->outcome.load(), true};
+        l.unlock(); return {s_->outcome.load(), join_by(t_, deadline)};   // done, but the thread may still be in its exit work
     }
     bool worker_done() { std::lock_guard<std::mutex> l(s_->m); return s_->worker_done; }
     std::shared_ptr<RecorderState> state() const { return s_; }

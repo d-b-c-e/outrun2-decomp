@@ -24,6 +24,15 @@ namespace fakecom {
 inline GUID make_guid(std::uint32_t d1,std::uint16_t d2){GUID g{};g.Data1=d1;g.Data2=d2;g.Data3=0x11f1;g.Data4[0]=0x80;g.Data4[7]=0x42;return g;}
 constexpr DWORD AxisOffsets[8]{DIJOFS_X,DIJOFS_Y,DIJOFS_Z,DIJOFS_RX,DIJOFS_RY,DIJOFS_RZ,DIJOFS_SLIDER(0),DIJOFS_SLIDER(1)};
 
+// P21k thread tails (Astra 13545; opt-in): an armed call registers exit work on the calling thread and returns at once,
+// as a driver's thread-exit callback would. The thread's function can then report done while its thread still runs
+// that work at exit: `ms` (a bounded tail) or, when negative, on `release` for ever.
+struct ThreadTail {
+    int ms=0;HANDLE release=nullptr;bool armed=false;
+    ~ThreadTail(){if(!armed)return;if(ms>=0)Sleep(DWORD(ms));else WaitForSingleObject(release,INFINITE);}
+};
+inline void add_thread_tail(int ms,HANDLE release){static thread_local ThreadTail tail;tail.ms=ms;tail.release=release;tail.armed=true;}
+
 struct DeviceScript {
     GUID instance{},product{};
     std::wstring name=L"Fake Wheel";
@@ -52,6 +61,11 @@ struct DeviceScript {
     std::shared_ptr<std::atomic<bool>> unacquire_armed;
     int unacquire_delay_ms=0;
     HANDLE unacquire_entered{},unacquire_release{};
+    // Thread tails: the next Acquire (the worker's reacquisition) or Unacquire (the shutdown's release) after its flag is
+    // set adds a tail of `tail_ms` (or for ever on `tail_release`) to the calling thread, signals `tail_entered`, returns.
+    std::shared_ptr<std::atomic<bool>> acquire_tail_armed,unacquire_tail_armed;
+    int tail_ms=0;
+    HANDLE tail_entered{},tail_release{};
     DeviceScript(){for(int a=0;a<8;++a){native_min[a]=0;native_max[a]=65535;}std::memset(&state,0,sizeof state);for(auto& p:state.rgdwPOV)p=0xFFFFFFFFu;}
 };
 
@@ -94,6 +108,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Acquire()override{
         check();++c_.acquires;
+        if(s_.acquire_tail_armed&&s_.acquire_tail_armed->exchange(false)){add_thread_tail(s_.tail_ms,s_.tail_release);if(s_.tail_entered)SetEvent(s_.tail_entered);}
         if(s_.acquire_armed&&s_.acquire_armed->exchange(false)){
             ++in_call_;
             if(s_.acquire_entered)SetEvent(s_.acquire_entered);
@@ -108,6 +123,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Unacquire()override{
         check();
+        if(s_.unacquire_tail_armed&&s_.unacquire_tail_armed->exchange(false)){add_thread_tail(s_.tail_ms,s_.tail_release);if(s_.tail_entered)SetEvent(s_.tail_entered);}
         if(s_.unacquire_armed&&s_.unacquire_armed->exchange(false)){
             ++in_call_;
             if(s_.unacquire_entered)SetEvent(s_.unacquire_entered);

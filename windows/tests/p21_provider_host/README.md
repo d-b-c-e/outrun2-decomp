@@ -35,6 +35,17 @@ py -3 -I -B windows/tests/p21_provider_host/run.py <new result folder> --mutatio
 | `unacquire-never` | `Unacquire` waiting on an event nobody sets | the same; never seals |
 | `ordinary-unacquire-never` | the same, in an ordinary process | ends itself, labelled forced (`0xDBCE0021`) |
 | `input-release-never` | the release of DirectInput waiting on an event | "DirectInput release did not return": parked, forced |
+| `release-tail-within` | the release thread's `Unacquire` adds a 100 ms thread-exit tail, then returns normally | the thread's end is waited for: resolved, **seals** |
+| `release-tail-beyond` | the same tail for 1800 ms (Astra 13545's shape) | "release thread did not end"; stop within its budgets; parked, forced |
+| `release-tail-never` | a tail waiting on an event nobody sets | the same |
+| `ordinary-release-tail-never` | the same, in an ordinary process | ends itself, labelled forced (`0xDBCE0021`) |
+| `worker-tail-within` | the worker's reacquisition adds a 100 ms tail to the worker thread | waited for within the 200 ms join: resolved, **seals** |
+| `worker-tail-beyond` | the same for 1800 ms | "worker provider": unjoined, parked, forced |
+| `worker-tail-never` | a tail that never ends | the same |
+
+**Thread ends, not only done flags** (Astra 13545). A thread's function can report done while its thread still runs exit work: thread_local and FLS destructors, DLL thread-detach code. `std::thread::join` waits for all of that without a bound. So the spike's `join_by` waits for the thread handle itself against the same absolute deadline, then joins (at once) or detaches. The recorder drain, the spike's workers, the release thread and the provider worker all use it.
+
+A stuck exit tail also stops every other thread from ending. Exit callbacks run under the loader lock, so with the release thread's tail stuck, the worker cannot finish its own exit: the release-tail modes also report "worker provider". That is real Windows behaviour, and one more reason D4 ends a tainted process with `TerminateProcess`, which runs no exit code.
 
 For every mode, the fake's own counters, written before the D4 exit, must show no release during a call, no use after release and no force call. Every mode's stop must return within the summed budgets (300 + 200 + 200 + 200 ms, plus 250 ms for scheduling and the report): about 0.4 s measured for every unresolved mode. The seal rule (D8) holds only for `resolved`, `slow-within` and `unacquire-within`.
 
@@ -85,4 +96,4 @@ The P20 recorder worker joins the scope when it is promoted from `tests/` into `
 - Real COM or devices (slice 4).
 - `WM_ENDSESSION`.
 - The recorder path through the real writer (P21j covers it).
-- Whether a real driver's `Unacquire` or `Release` stalls: the bound holds whatever they do, but only fakes are shown.
+- Whether a real driver's `Unacquire` or `Release` stalls, or registers thread-exit work: the bound holds whatever they do, but only fakes are shown.

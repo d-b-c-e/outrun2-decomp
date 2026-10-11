@@ -144,8 +144,13 @@ first report. Phases and budgets:
 7. **DirectInput** is released only when no lease and no worker is unresolved. Otherwise it is leaked.
 8. **Report.** Rewrite `host-shutdown.json` with `{state: "resolved" | "unresolved", nonce, steps, workers, recorder
    outcome, elapsed}`.
-- The total is at most about 1.65 s (1000 + 200 + 200 + 200 ms) plus the report writes, whatever a driver call does.
-  Every phase starts even when an earlier one timed out.
+- **Thread ends, not done flags** (r2.3, Astra 13545). A worker's "done" precedes its thread's end, because exit work
+  (thread_local and FLS destructors, DLL thread-detach code) runs after the function returns, and `join` waits for it
+  without a bound. Every join, recorder and workers included, first waits for the thread handle against the phase's
+  own absolute deadline, then joins or detaches. An exit tail that never ends also blocks every other thread's exit
+  (the loader lock), so it shows as an unjoined worker too, and only `TerminateProcess` ends such a process (D4).
+- The total is at most about 1.65 s (1000 + 200 + 200 + 200 ms) plus the report writes, whatever a driver call or a
+  thread's exit work does. Every phase starts even when an earlier one timed out.
 - What remains unqualified is the real drivers, not the bound. P21k shows the bound over fake COM; whether a real
   wheel's `Unacquire` or `Release` ever stalls is slice 4's question.
 
@@ -301,7 +306,7 @@ return result;
 | P21i | Destruction without `stop()` returns at once (no wait), and the shutdown file never reads `resolved` | prototype host |
 
 | P21j | Integration with the reviewed P20 recorder (`windows/tests/p21_recorder_integration`): actual Core/Adapter frames, the real native writer and closed-file seal, the worker thread joined, supervised child processes, and the out-of-process finalizer sealing only the resolved capture | `run.py --mutations` |
-| P21k | P28's P21 half (`windows/tests/p21_provider_host`). The host around zero's real Core and DInputProvider over fake COM, the provider worker on its own thread. A bounded slow reacquisition inside the lease wait recovers. One past every budget, or an event-backed one that never returns, leaves the device held and DirectInput kept: parked, supervisor-forced, never sealed, never released under the call. So do an ordinary process (`0xDBCE0021`), a listing that never returns, and a stop off the input thread. The release boundary (r2.2): an `Unacquire` inside the release budget recovers; one past it (1.5 s), one that never returns (latched or ordinary), and a release of DirectInput that never returns all leave stop within its budgets, unresolved with "DirectInput release did not return". Every mode's stop returns within the summed budgets | `run.py --mutations` |
+| P21k | P28's P21 half (`windows/tests/p21_provider_host`). The host around zero's real Core and DInputProvider over fake COM, the provider worker on its own thread. A bounded slow reacquisition inside the lease wait recovers. One past every budget, or an event-backed one that never returns, leaves the device held and DirectInput kept: parked, supervisor-forced, never sealed, never released under the call. So do an ordinary process (`0xDBCE0021`), a listing that never returns, and a stop off the input thread. The release boundary (r2.2): an `Unacquire` inside the release budget recovers; one past it (1.5 s), one that never returns (latched or ordinary), and a release of DirectInput that never returns all leave stop within its budgets, unresolved with "DirectInput release did not return". Thread-exit tails (r2.3) on the release thread and the provider worker: within budget they are waited for and resolve; past it or for ever, stop still returns within its budgets, unresolved ("release thread did not end", "worker provider"). Every mode's stop returns within the summed budgets | `run.py --mutations` |
 | P21g | Teardown audit over `windows/shim`: no stdio, no static/thread_local/namespace-scope object with a dynamic destructor, no detach, no process or thread ending. The lexer (`teardown_audit.py`): namespace scope by braces, unbalanced braces fail closed; one planted violation per rule is caught, an indented-namespace global and `std::fopen` included. The compiler (`teardown_objects.py`): clang-cl with `-Werror=exit-time-destructors` plus the objects' undefined symbols; twelve plants are caught (a custom `OwnedDevice` in an indented namespace, an inline namespace, thread_local, a function-local static, an explicit `atexit`, `std::fopen`, `&std::fwrite` with no call, `fputs` through a macro, `std::cout`, detach, `std::exit`, `TerminateProcess`), and allowed patterns stay clean | `teardown_audit.py --mutations`, `teardown_objects.py --mutations` |
 
 P28's rerun of P21 through the real provider over fake COM objects stays as written.

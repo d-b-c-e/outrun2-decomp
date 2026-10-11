@@ -61,6 +61,14 @@ int child(const std::string& mode, const std::wstring& dir) {
     script.unacquire_delay_ms = mode.find("unacquire-within") != std::string::npos ? 100     // inside the 200 ms release budget
                               : mode.find("unacquire-beyond") != std::string::npos ? 1500   // past it (Astra's 1200 ms repro, wider)
                               : -1;
+    // Thread tails (Astra 13545): exit work on the release thread (from its Unacquire) or on the provider worker (from its
+    // reacquisition) runs after the thread's function has reported done.
+    const bool tail = mode.find("tail") != std::string::npos;
+    script.acquire_tail_armed = std::make_shared<std::atomic<bool>>(false);
+    script.unacquire_tail_armed = std::make_shared<std::atomic<bool>>(false);
+    script.tail_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    script.tail_release = CreateEventW(nullptr, TRUE, FALSE, nullptr);   // never set
+    script.tail_ms = mode.find("tail-within") != std::string::npos ? 100 : mode.find("tail-beyond") != std::string::npos ? 1800 : -1;
     const auto index = in->add(script);
     in->release_armed = std::make_shared<std::atomic<bool>>(false);
     in->release_entered = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -80,13 +88,20 @@ int child(const std::string& mode, const std::wstring& dir) {
         Sleep(5);
     }
     if (mode.find("listing") != std::string::npos) WaitForSingleObject(in->enumerate_entered, 2000);   // the first listing is inside the "driver"
-    else if (mode != "resolved" && !release_mode(mode)) {
+    else if (mode.find("worker-tail") != std::string::npos) {
+        // Lose acquisition; the worker's reacquisition adds the tail to the worker thread and returns normally.
+        { std::lock_guard<std::mutex> l(in->m); in->scripts[index].reads.push_back({DI_OK, DIERR_INPUTLOST}); }
+        script.acquire_tail_armed->store(true);
+        for (int i = 0; i < 400 && WaitForSingleObject(script.tail_entered, 0) != WAIT_OBJECT_0; ++i) { host->tick(); Sleep(5); }
+    }
+    else if (mode != "resolved" && !release_mode(mode) && !tail) {
         // Lose acquisition on the next read; the worker's reacquisition then sits inside Acquire.
         { std::lock_guard<std::mutex> l(in->m); in->scripts[index].reads.push_back({DI_OK, DIERR_INPUTLOST}); }
         script.acquire_armed->store(true);
         for (int i = 0; i < 400 && WaitForSingleObject(script.acquire_entered, 0) != WAIT_OBJECT_0; ++i) { host->tick(); Sleep(5); }
     }
-    bool entered = mode == "resolved" || WaitForSingleObject(mode.find("listing") != std::string::npos ? in->enumerate_entered : script.acquire_entered, 0) == WAIT_OBJECT_0;
+    bool entered = mode == "resolved" || WaitForSingleObject(mode.find("listing") != std::string::npos ? in->enumerate_entered : tail ? script.tail_entered : script.acquire_entered, 0) == WAIT_OBJECT_0;
+    if (mode.find("release-tail") != std::string::npos) script.unacquire_tail_armed->store(true);   // the shutdown's release of the idle device
     if (mode.find("unacquire") != std::string::npos) script.unacquire_armed->store(true);   // the shutdown's release of the idle device
     if (mode.find("input-release") != std::string::npos) in->release_armed->store(true);   // its release of DirectInput
 
@@ -94,6 +109,7 @@ int child(const std::string& mode, const std::wstring& dir) {
     if (mode.find("off-thread") != std::string::npos) { std::thread t([&] { r = host->stop(Fast); }); t.join(); }
     else r = host->stop(Fast);    // or2_xbox_main returned
     if (release_mode(mode)) entered = WaitForSingleObject(mode.find("unacquire") != std::string::npos ? script.unacquire_entered : in->release_entered, 0) == WAIT_OBJECT_0;
+    if (mode.find("release-tail") != std::string::npos) entered = WaitForSingleObject(script.tail_entered, 0) == WAIT_OBJECT_0;
 
     // The fake's own accounting, written before the D4 exit so the supervisor can read it from a parked child too.
     const auto& c = in->counters;
@@ -157,7 +173,7 @@ void expect(const std::wstring& self, const std::wstring& root, const std::strin
     check(field(c, "releaseDuringCall") == "0" && field(c, "afterRelease") == "0" && field(c, "forceCalls") == "0",
           "P21k " + mode + ": nothing released under a call, nothing used after its release, no force call (" + c + ")");
     check(field(c, "entered") == "true", "P21k " + mode + ": the stop met the call where it was meant to (" + c + ")");
-    if (mode == "resolved" || mode.find("slow") != std::string::npos || release_mode(mode)) check(field(c, "live") == "true", "P21k " + mode + ": the wheel was read through the real provider first (a valid sample, the scripted axis)");
+    if (mode == "resolved" || mode.find("slow") != std::string::npos || release_mode(mode) || mode.find("tail") != std::string::npos) check(field(c, "live") == "true", "P21k " + mode + ": the wheel was read through the real provider first (a valid sample, the scripted axis)");
     // D3 for every mode: the stop itself returned within its budgets, whatever the driver call did (Astra 13277).
     const auto us = field(h, "elapsedUs");
     check(!us.empty() && std::stoll(us) <= StopBoundUs, "P21k " + mode + ": stop returns within its budgets (" + us + " us, bound " + std::to_string(StopBoundUs) + ")");
@@ -191,6 +207,14 @@ int wmain(int argc, wchar_t** argv) {
     expect(self, root, "unacquire-never", false, Forced, true, "an event-backed Unacquire that never returns: unresolved, parked, ended only by the supervisor", stuckRelease);
     expect(self, root, "ordinary-unacquire-never", false, p21_spike::ForcedExitCode, false, "an ordinary process with the same Unacquire ends itself, labelled forced (0xDBCE0021)", stuckRelease);
     expect(self, root, "input-release-never", false, Forced, true, "a release of DirectInput that never returns: unresolved, parked", stuckRelease);
+    // Thread tails (Astra 13545): "done" precedes a thread's end, so each thread is waited for by its handle, same deadline.
+    expect(self, root, "release-tail-within", true, 0, false, "a 100 ms exit tail on the release thread, inside its budget, is waited for: resolved");
+    expect(self, root, "release-tail-beyond", false, Forced, true, "an 1800 ms exit tail on the release thread (Astra's shape): stop does not wait for it; unresolved, parked", {"release thread did not end"});
+    expect(self, root, "release-tail-never", false, Forced, true, "an exit tail on the release thread that never ends: unresolved, parked", {"release thread did not end"});
+    expect(self, root, "ordinary-release-tail-never", false, p21_spike::ForcedExitCode, false, "the same in an ordinary process ends itself, labelled forced (0xDBCE0021)", {"release thread did not end"});
+    expect(self, root, "worker-tail-within", true, 0, false, "a 100 ms exit tail on the provider worker, inside the 200 ms join, is waited for: resolved");
+    expect(self, root, "worker-tail-beyond", false, Forced, true, "an 1800 ms exit tail on the provider worker after its loop ended: unjoined, parked", {"worker provider"});
+    expect(self, root, "worker-tail-never", false, Forced, true, "an exit tail on the provider worker that never ends: unjoined, parked", {"worker provider"});
     std::printf("%s %d P21k checks (%d failed): real Core and DInputProvider over fake COM, supervised children; no device, game or launch.\n",
                 failures ? "FAIL" : "PASS", checks, failures);
     std::fflush(stdout);

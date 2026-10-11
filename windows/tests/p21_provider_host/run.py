@@ -46,8 +46,13 @@ if args.mutations:
         'host-ignores-directinput': ('        if (!rep.input_released) r.unresolved.push_back("DirectInput not released: a call may still use it");\n',
                                      '', 'P21k listing-never: names its unresolved causes'),
         # Astra 13277: the old host, which waited for the provider's releases without a bound.
-        'host-waits-for-release': ('            returned = rs->cv.wait_until(l, Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms), [&] { return rs->done; });\n',
+        'host-waits-for-release': ('            returned = rs->cv.wait_until(l, release_deadline, [&] { return rs->done; });\n',
                                    '            rs->cv.wait(l, [&] { return rs->done; }); returned = true;\n', 'P21k unacquire-beyond: stop returns within its budgets'),
+        # Astra 13545: joining a thread whose function reported done, without a bound.
+        'host-joins-release-thread': ('        else if (!p21_spike::join_by(release_, release_deadline)) r.unresolved.push_back("release thread did not end: its exit work (a driver\'s thread-exit callback) is still running");\n',
+                                      '        else release_.join();\n', 'P21k release-tail-beyond: stop returns within its budgets'),
+        'host-joins-worker-thread': ('        l.unlock(); return p21_spike::join_by(worker_, deadline);   // done, but the thread may still be in its exit work\n',
+                                     '        l.unlock(); worker_.join(); return true;\n', 'P21k worker-tail-beyond: stop returns within its budgets'),
     }
     for name, (old, new, reason) in plan.items():
         src = result / 'mutations' / name; shutil.copytree(here, src)
