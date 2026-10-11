@@ -38,13 +38,16 @@ namespace recorder_spike {
 class ThreadEnd {
 public:
     ThreadEnd():thread_(std::make_shared<std::thread>()){}
+    // One start per ThreadEnd (Astra 14122): a second start is refused even after the first thread ended and was joined.
     template<class F,class... A> void start(F&& f,A&&... args){
-        if(thread_->joinable())throw std::logic_error("ThreadEnd already started");
-        *thread_=std::thread(std::forward<F>(f),std::forward<A>(args)...);   // a failed launch leaves no thread
+        if(started_)throw std::logic_error("ThreadEnd already started");
+        *thread_=std::thread(std::forward<F>(f),std::forward<A>(args)...);   // a failed launch leaves no thread, nothing started
+        started_=true;
     }
     ThreadEnd(const ThreadEnd&)=delete;
     ThreadEnd& operator=(const ThreadEnd&)=delete;
     bool wait_until(std::chrono::steady_clock::time_point deadline){
+        if(!started_)return false;   // nothing started is nothing proven (Astra 14122)
         if(ended_)return true;
 #if defined(_WIN32) && !defined(RECORDER_SPIKE_PORTABLE_JOIN)
         if(!thread_->joinable()){ended_=true;return true;}
@@ -74,7 +77,7 @@ private:
     struct Joined{std::mutex m;std::condition_variable cv;bool done=false;};
     std::shared_ptr<std::thread> thread_;
     std::shared_ptr<Joined> joined_=std::make_shared<Joined>();
-    bool helper_=false,ended_=false;
+    bool started_=false,helper_=false,ended_=false;
 };
 constexpr std::size_t MaxValues=1024;
 struct Packet {

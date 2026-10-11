@@ -207,6 +207,16 @@ void allocation_failures(){
     }
     check(built&&failed>=4,"every allocation before the launch was failed in turn (sink, controller, state, owner, launch)");
 }
+// ThreadEnd's own contract (Astra 14122): nothing started proves nothing; one start only, even after a joined end.
+void thread_end_api(){
+    ThreadEnd idle;
+    check(!idle.wait_until(std::chrono::steady_clock::now()),"a ThreadEnd never started is not an ended thread");
+    ThreadEnd once;once.start([]{});
+    check(once.wait_until(std::chrono::steady_clock::now()+2s),"a started, finished thread is proven ended");
+    bool refused=false;try{once.start([]{});}catch(const std::logic_error&){refused=true;}
+    check(refused,"a second start is refused after the first thread ended and was joined");
+    check(once.wait_until(std::chrono::steady_clock::now()),"the first end stays proven");
+}
 // r2.3: the worker publishes Complete and worker_done, then its thread still runs exit work. join_until waits for the
 // thread itself against the same deadline: a short tail is waited for, a long or endless one makes it false in time.
 void thread_tail(int tail_ms,bool joined){
@@ -235,8 +245,10 @@ void thread_tail(int tail_ms,bool joined){
 int main(){
     // A destroyed joinable thread calls std::terminate: report it and exit 3, never a crash dialog (Astra 14097).
     std::set_terminate([]{std::fputs("FAIL: std::terminate (a joinable thread was destroyed or an exception escaped)\n",stderr);std::_Exit(3);});
-    try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
-        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);if(allocation_sweep)allocation_failures();}
+    try{
+        if(allocation_sweep)allocation_failures();   // first: a launch-before-owner defect must meet this sweep, nothing else
+        normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
+        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);thread_end_api();}
     catch(const std::exception& e){for(auto& w:traces)if(auto t=w.lock())t->release();std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"Recorder lifecycle: "<<checks<<" checks passed"<<(allocation_sweep?" (allocation sweep run)":" (allocation sweep: Release only, skipped in this Debug build)")<<"\n";
 }

@@ -58,6 +58,9 @@ if args.mutations:
       # Astra 13978: detaching on a timeout makes a later call claim an end it never proved.
       # Astra 14071: a live worker before its owner; a failed owner allocation destroys a joinable thread (terminate).
       'launch-before-owner': [('        worker_=std::make_unique<ThreadEnd>();       // the owner first: all allocation before the worker exists','        std::thread launched(run,s_,std::move(sink)); worker_=std::make_unique<ThreadEnd>(); launched.detach();'),('        worker_->start(run,s_,std::move(sink));','')],
+      # Astra 14122: nothing started proves nothing; one start only.
+      'end-without-start': [('        if(!started_)return false;   // nothing started is nothing proven (Astra 14122)','')],
+      'restart-after-join': [('        if(started_)throw std::logic_error("ThreadEnd already started");','')],
       'join-detaches-on-timeout': [('if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0)return false;','if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0){thread_->detach();return false;}')],
     }
     release_only={'launch-before-owner'}
@@ -75,6 +78,7 @@ if args.mutations:
         run(name+'-build',['cmake','--build',b,'--config',config,'--target','recorder_lifecycle_test'])
         p=run(name,[b/config/'recorder_lifecycle_test.exe'],expect=None)
         if p.returncode==0: raise RuntimeError('Mutation escaped: '+name)
+        if name in release_only and 'std::terminate' not in p.stdout+p.stderr: raise RuntimeError('Mutation not detected by the allocation sweep: '+name)
         mutations.append(dict(name=name,detected=True,exit=p.returncode,output=p.stdout+p.stderr))
     original=(here/'managed/CompletionBundle.cs').read_text()
     variants={
