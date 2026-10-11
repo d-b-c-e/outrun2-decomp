@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(shim_observer_domain CXX)
+set(WIN ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+add_executable(observer_domain main.cpp ${WIN}/shim/core.cpp ${WIN}/shim/parse.cpp)
+target_include_directories(observer_domain PRIVATE ${WIN}/shim ${WIN}/vendor/controls ${WIN}/tests)
+target_compile_features(observer_domain PRIVATE cxx_std_17)
+target_compile_definitions(observer_domain PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(observer_domain PRIVATE /W4 /WX /EHsc)
