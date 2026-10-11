@@ -13,10 +13,10 @@ add_executable(queued_frames_spike native.cpp
   ${ROOT}/windows/shim/parse.cpp ${ROOT}/src/input/dual_sense.cpp)
 target_compile_features(queued_frames_spike PRIVATE cxx_std_17)
 target_compile_definitions(queued_frames_spike PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_include_directories(queued_frames_spike PRIVATE
+target_include_directories(queued_frames_spike PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
   ${ROOT}/windows/source ${ROOT}/windows/shim ${ROOT}/windows/tests
-  ${ROOT}/windows/vendor/controls ${ROOT}/src ${TOOLKIT_ROOT}/native/session
-  ${ROOT}/windows/tests/recorder_lifecycle_spike)
+  ${ROOT}/windows/vendor/controls ${ROOT}/src ${ROOT}/windows/vendor/session
+  ${ROOT}/windows/host/recorder ${ROOT}/windows/host)
 target_link_libraries(queued_frames_spike PRIVATE bcrypt)
 if(MSVC)
   target_compile_options(queued_frames_spike PRIVATE /W4 /WX)

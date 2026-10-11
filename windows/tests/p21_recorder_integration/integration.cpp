@@ -24,7 +24,8 @@ static unsigned long long creation_time(HANDLE process) {
 // The host for one capture: the input (producer) thread owns stop(); every phase is bounded and attempted.
 class IntegratedHost {
     fs::path dir_;
-    std::shared_ptr<Identity> id_;
+    std::shared_ptr<rs::Identity> id_;
+    std::shared_ptr<Barrier> barrier_ = std::make_shared<Barrier>();
     std::vector<std::string> names_;
     std::uint64_t first_{}, last_{};
     std::int64_t origin_{};
@@ -56,10 +57,11 @@ public:
         check(fs::create_directory(dir_), "new capture directory");
         const auto expected = capture(); names_ = schema(channels(expected[0])); preflight(names_, 62.5, .24);   // reviewed bounds, unchanged
         first_ = expected[0].frame.seq; origin_ = expected[0].frame.tick_us;
-        id_ = std::make_shared<Identity>();             // this thread is the producer; the writer refuses to run here
-        id_->resume = !writer_blocks;                   // a blocked writer never returns from its first write
+        id_ = std::make_shared<rs::Identity>();         // this thread is the producer; the writer refuses to run here
+        barrier_->resume = !writer_blocks;              // a blocked writer never returns from its first write
         controller_ = std::make_unique<rs::Controller>(16, std::uint32_t(names_.size()), 16 * sizeof(rs::Packet),
-            std::make_unique<QueuedSink>(dir_ / "source.jsonl", names_, id_, origin_), first_);
+            std::make_unique<rs::QueuedSink>(dir_ / "source.jsonl", names_, id_, origin_, fixture_metadata(), dbce::session::Limits{},
+                [b = barrier_] { b->hold(); }), first_);
         producer_.emplace(controller_->producer());
         report_ = CreateFileW((dir_ / "host-shutdown.json").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         check(report_ != INVALID_HANDLE_VALUE, "host report opened at start");

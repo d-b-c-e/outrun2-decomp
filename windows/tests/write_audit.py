@@ -22,7 +22,7 @@
 import bisect, json, pathlib, re, sys
 
 # Everything linked into OutRunDesktop.exe: all of src (conservative), the Xbox core's sources and headers, windows/.
-ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host"]
+ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host", "windows/vendor/session"]
 # Not linked into OutRunDesktop.exe: the offline tools, and the Xbox build's own UWP / Win32 entry points (the desktop
 # build has its own, windows/source/window_desktop.cpp). ps5/source is not scanned: its library (outrun_ps5_platform)
 # compiles only src/input, which is scanned under src.

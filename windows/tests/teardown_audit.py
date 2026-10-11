@@ -28,7 +28,7 @@ STATIC = re.compile(r"^\s*(?:inline\s+)?(?:static|thread_local)\b[^(;]*\bstd::" 
 # Applied only at namespace scope (tracked by braces, at any indentation): a definition of a standard type with a
 # destructor. User types (a custom OwnedDevice) are beyond a lexer; teardown_objects.py has the compiler decide.
 GLOBAL = re.compile(r"^(?:inline\s+)?(?:const\s+)?std::" + DTOR_TYPES + r"\b[^(;=]*\s\w+\s*(?:=|\{|;)")
-DETACH = re.compile(r"\.\s*detach\s*\(")
+DETACH = re.compile(r"(?:\.|->)\s*detach\s*\(")   # a member call through an object or a pointer
 ENDING = re.compile(r"(?<![\w.>:])(?:std::)?(exit|_exit|_Exit|quick_exit|abort|ExitProcess|TerminateProcess|ExitThread|TerminateThread)\s*\(")
 RULES = [("R1 stdio", STDIO), ("R2 static with a dynamic destructor", STATIC), ("R2 global with a dynamic destructor", GLOBAL),
          ("R3 thread detach", DETACH), ("R4 process or thread ending", ENDING)]
@@ -111,7 +111,7 @@ SELF = [  # (snippet, flagged rule or None)
     ('std::atomic<void*> g_hook_user{nullptr};', None), ('std::string narrow(const wchar_t* w){return {};}', None),
     ('std::string g_name="x";', "R2 global with a dynamic destructor"), ('std::vector<int> g_slots;', "R2 global with a dynamic destructor"),
     ('inline std::vector<int> g_inline;', "R2 global with a dynamic destructor"),
-    ('worker.detach();', "R3 thread detach"), ('t_ . detach ();', "R3 thread detach"),
+    ('worker.detach();', "R3 thread detach"), ('t_ . detach ();', "R3 thread detach"), ('thread_->detach();', "R3 thread detach"),
     ('std::exit(3);', "R4 process or thread ending"), ('abort();', "R4 process or thread ending"), ('ExitProcess(0);', "R4 process or thread ending"),
     ('TerminateProcess(GetCurrentProcess(),1);', "R4 process or thread ending"), ('r.exit_code=0;', None), ('on_exit(x);', None), ('obj.abort();', None),
     # Astra 13114: FILE streams under any spelling; string formatting stays allowed.

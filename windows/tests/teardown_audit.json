@@ -22,5 +22,17 @@
     "line": "[[noreturn]] void forced_exit() { TerminateProcess(GetCurrentProcess(), ForcedExitCode); for (;;) Sleep(INFINITE); }",
     "count": 1,
     "reason": "D4: the host alone ends an ordinary process whose stop stayed unresolved, after its report is written."
+  },
+  {
+    "file": "windows/host/recorder/worker.hpp",
+    "line": "if(!helper_&&thread_->joinable())thread_->detach();",
+    "count": 1,
+    "reason": "D9: the recorder worker's ThreadEnd destructor never waits; it detaches a worker thread that still runs (its state is shared-owned)."
+  },
+  {
+    "file": "windows/host/recorder/worker.hpp",
+    "line": "helper.detach();helper_=true;",
+    "count": 1,
+    "reason": "r2.3 portable bounded join only (non-Windows or RECORDER_SPIKE_PORTABLE_JOIN): its one join helper is detached at once by design; the Windows build waits on the thread handle."
   }
 ]

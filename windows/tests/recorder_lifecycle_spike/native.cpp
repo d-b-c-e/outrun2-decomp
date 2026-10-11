@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-using namespace recorder_spike;
+using namespace dbce::shim::recorder;
 using namespace std::chrono_literals;
 namespace fs=std::filesystem;
 struct Gate {std::atomic<bool> entered{false},resume{false};};

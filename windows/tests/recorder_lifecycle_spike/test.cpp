@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <exception>
 #include <new>
-using namespace recorder_spike;
+using namespace dbce::shim::recorder;
 using namespace std::chrono_literals;
 // Allocation-failure injection for the calling thread only (Astra 14071): the Nth allocation from now throws bad_alloc.
 // Other threads (the worker, helpers) allocate normally.

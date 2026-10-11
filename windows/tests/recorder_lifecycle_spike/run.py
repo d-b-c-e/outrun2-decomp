@@ -17,7 +17,7 @@ def pin(root,scopes):
     return dict(commit=git(root,'rev-parse','HEAD'),sha256={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in files})
 toolkit_scopes=['native/session','dotnet/Dbce.Wheel.Recording','dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs','Directory.*','global.json','NuGet.Config']
 before=dict(source=pin(repo,['.']),toolkit=pin(toolkit,toolkit_scopes))
-if before['toolkit']['sha256']['native/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
+if before['toolkit']['sha256']['native/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or \n   before['source']['sha256']['windows/vendor/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
     raise RuntimeError('Native writer differs from reviewed pin.')
 result.mkdir(parents=True)
 (result/'source-before.json').write_text(json.dumps(before,indent=2))
@@ -43,7 +43,7 @@ run('managed-build',['dotnet','build',here/'managed/LifecycleConformance.csproj'
 run('reader',['dotnet',managed/'bin/LifecycleConformance/release/LifecycleConformance.dll',capture])
 mutations=[]
 if args.mutations:
-    original=(here/'worker.hpp').read_text()
+    original=(here.parents[1]/'host/recorder/worker.hpp').read_text()   # the production worker (Astra 16553)
     variants={
       'late-completion-overwrites-timeout': [('s->outcome.compare_exchange_strong(draining,Outcome::Complete);','s->outcome.store(Outcome::Complete);(void)draining;')],
       'overflow-not-sticky': [('s_->fail(Outcome::QueueFull);','/* dropped without latching failure */')],

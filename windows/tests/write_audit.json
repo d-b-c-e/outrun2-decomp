@@ -844,5 +844,59 @@
   "line": "WriteFile(report_, t.data(), DWORD(t.size()), &n, nullptr); SetEndOfFile(report_);",
   "class": "entry-redirected",
   "reason": "ProviderHost::write_report: the pre-opened host-shutdown.json in the run folder"
+ },
+ {
+  "file": "windows/host/recorder/capture.hpp",
+  "line": "CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};",
+  "class": "not-a-file",
+  "reason": "Identity::closed: GENERIC_READ, OPEN_EXISTING: reads the closed capture back for its size and SHA-256; writes nothing"
+ },
+ {
+  "file": "windows/host/recorder/capture.hpp",
+  "line": "bool open()override{id->worker();meta.properties.emplace(\"captureNonce\",id->nonce);return writer.open(path.wstring(),meta,limits);}",
+  "class": "entry-redirected",
+  "reason": "QueuedSink::open: the session writer opens its source.jsonl in the capture folder; the latched entry gives it plan.run_root"
+ },
+ {
+  "file": "windows/host/recorder/capture.hpp",
+  "line": "HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "entry-redirected",
+  "reason": "write_new: a capture member, CREATE_NEW, in the capture folder (the latched run folder)"
+ },
+ {
+  "file": "windows/host/recorder/capture.hpp",
+  "line": "DWORD n=0;const bool ok=WriteFile(h,text.data(),DWORD(text.size()),&n,nullptr)&&n==text.size();",
+  "class": "entry-redirected",
+  "reason": "write_new: the member just created new in the capture folder"
+ },
+ {
+  "file": "windows/host/recorder/worker.hpp",
+  "line": "virtual bool open()=0;",
+  "class": "definition",
+  "reason": "Sink::open: the recorder sink interface declaration; its implementation (QueuedSink) is audited"
+ },
+ {
+  "file": "windows/host/recorder/worker.hpp",
+  "line": "if(!sink->open())s->fail(Outcome::OpenFailure);",
+  "class": "entry-redirected",
+  "reason": "the worker opens its sink (QueuedSink: the capture folder, the latched run folder)"
+ },
+ {
+  "file": "windows/vendor/session/session_writer.h",
+  "line": "if (!WriteFile(file_, data.data(), DWORD(data.size()), &written, nullptr) || written != data.size()) {",
+  "class": "entry-redirected",
+  "reason": "dbce::session::Writer: appends to the file it created new; the recorder gives it the capture folder in the run folder"
+ },
+ {
+  "file": "windows/vendor/session/session_writer.h",
+  "line": "bool open(const std::wstring& path, const Metadata& m, Limits limits = {}) {",
+  "class": "definition",
+  "reason": "dbce::session::Writer::open declaration; its caller (QueuedSink::open) is audited"
+ },
+ {
+  "file": "windows/vendor/session/session_writer.h",
+  "line": "file_ = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);",
+  "class": "entry-redirected",
+  "reason": "dbce::session::Writer::open: CREATE_NEW at the path the recorder gives it (the capture folder in the run folder)"
  }
 ]

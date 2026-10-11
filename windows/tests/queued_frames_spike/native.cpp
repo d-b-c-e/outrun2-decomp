@@ -1,50 +1,18 @@
-// P20 composition proof only. Real Core/Adapter, fake devices/game, reviewed worker and real session Writer.
+// P20 composition proof. Real Core/Adapter, fake devices/game, the reviewed worker and the real session Writer. The
+// composition is production code now (windows/host/recorder/capture.hpp, windows/source/outrun_capture.hpp; Astra
+// 16553); this fixture keeps its scripted capture, the writer barrier, the comparators and the replay.
 #include "frame_codec.hpp"
-#include "worker.hpp"
-#include <bcrypt.h>
+#include "outrun_capture.hpp"
 #include <functional>
-namespace rs=recorder_spike;
+namespace rs=dbce::shim::recorder;
+using rs::schema;using rs::row_bound;using rs::preflight;using rs::write_new;using rs::report;
 using namespace std::chrono_literals;
 constexpr const char* Contract="dbce.shim.queued-frames-spike@2\n";
 constexpr const char* InputContract="shim-frame-audit-2-pending-unadopted";
 std::string fixture_profile(){return profile({Steer,Throttle,Brake,sb("shiftUp",11),wb("camera",5),wb("navLeft",7)});}
-struct Snapshot {Frame frame;Signals signals;NativeInputState sink;GameView view;};
-Channels signal_channels(const Signals& s){
-    Channels c;u64(c,"adapter.frame",s.frame_seq);
-    c["adapter.mode"]=s.mode;c["adapter.inGame"]=s.in_gameplay;c["adapter.speed"]=s.speed;c["adapter.gear"]=s.gear;
-    c["adapter.consumedSteer"]=s.consumed_steer;c["adapter.consumedAccel"]=s.consumed_accel;c["adapter.consumedBrake"]=s.consumed_brake;
-    c["adapter.recordSteer"]=s.record_steer;c["adapter.recordAccel"]=s.record_accel;c["adapter.recordBrake"]=s.record_brake;
-    c["adapter.recordButtons"]=s.record_buttons;c["adapter.nativeSuppressed"]=s.native_suppressed;c["adapter.gearbox"]=int(s.gearbox);
-    return c;
-}
-Channels channels(const Snapshot& s){auto c=encode(s.frame);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
-    c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
-    c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;return c;}
-Channels frame_channels(const Channels& all){Channels c;for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0)c.insert(v);return c;}
-GameView decoded_view(const Channels& c){
-    GameView v;v.mode=std::uint32_t(number(c,"gameInput.mode",0,UINT32_MAX));v.car=number(c,"gameInput.car",0,1)!=0;
-    v.gear=std::uint32_t(number(c,"gameInput.gear",0,UINT32_MAX));v.speed=float(c.at("gameInput.speed"));check(std::isfinite(v.speed),"finite input speed");
-    v.consumed_steer=std::int32_t(number(c,"gameInput.consumedSteer",INT32_MIN,INT32_MAX));
-    v.consumed_accel=std::int32_t(number(c,"gameInput.consumedAccel",INT32_MIN,INT32_MAX));
-    v.consumed_brake=std::int32_t(number(c,"gameInput.consumedBrake",INT32_MIN,INT32_MAX));return v;
-}
 void same_view(const GameView& a,const GameView& b){
     auto fields=[](const GameView& v){return std::tie(v.mode,v.car,v.gear,v.speed,v.consumed_steer,v.consumed_accel,v.consumed_brake);};
     check(fields(a)==fields(b),"typed adapter input GameView round trip");
-}
-Signals decoded_signals(const Channels& c){
-    Signals s;s.frame_seq=u64(c,"adapter.frame");s.mode=std::uint32_t(number(c,"adapter.mode",0,UINT32_MAX));
-    s.in_gameplay=number(c,"adapter.inGame",0,1)!=0;s.gear=std::uint32_t(number(c,"adapter.gear",0,UINT32_MAX));
-    s.speed=float(c.at("adapter.speed"));check(std::isfinite(s.speed),"finite adapter speed");
-    s.consumed_steer=std::int32_t(number(c,"adapter.consumedSteer",INT32_MIN,INT32_MAX));
-    s.consumed_accel=std::int32_t(number(c,"adapter.consumedAccel",INT32_MIN,INT32_MAX));
-    s.consumed_brake=std::int32_t(number(c,"adapter.consumedBrake",INT32_MIN,INT32_MAX));
-    s.record_steer=std::int32_t(number(c,"adapter.recordSteer",INT32_MIN,INT32_MAX));
-    s.record_accel=std::int32_t(number(c,"adapter.recordAccel",INT32_MIN,INT32_MAX));
-    s.record_brake=std::int32_t(number(c,"adapter.recordBrake",INT32_MIN,INT32_MAX));
-    s.record_buttons=std::uint32_t(number(c,"adapter.recordButtons",0,UINT32_MAX));
-    s.native_suppressed=std::uint32_t(number(c,"adapter.nativeSuppressed",0,UINT32_MAX));
-    s.gearbox=HPattern::State(number(c,"adapter.gearbox",0,int(HPattern::State::AtTarget)));return s;
 }
 void same_frame(const Frame& a,const Frame& b){
     auto head=[](const Frame& f){return std::tie(f.seq,f.tick_us,f.boundary_us,f.event_seq,f.run,f.latched,f.suppress_native,f.down,f.up);};
@@ -88,82 +56,19 @@ std::vector<Snapshot> capture(const std::function<void(const Snapshot&)>& emit={
     check(rows[9].frame.action[action_index("shiftUp")].status==Status::Rearming,"held shift rearms after reopen");
     return rows;
 }
-std::vector<std::string> schema(const Channels& c){
-    if(c.empty()||c.size()>rs::MaxValues)throw std::invalid_argument("complete schema exceeds channel budget");
-    std::vector<std::string> names;for(const auto& v:c){if(!dbce::session::ascii(v.first,256,true))throw std::invalid_argument("channel name");names.push_back(v.first);}return names;
-}
-std::size_t row_bound(const std::vector<std::string>& names){
-    // Writer uses precision 17 and defaultfloat: finite binary64 needs fewer than 32 ASCII bytes.
-    // 192 covers the fixed JSON syntax, uint64 sequence, elapsed binary64 and newline.
-    std::size_t bytes=192;for(const auto& name:names)bytes+=dbce::session::quote(name).size()+34;return bytes;
-}
-void preflight(const std::vector<std::string>& names,double hz,double seconds,dbce::session::Limits limits={}){
-    if(names.empty()||names.size()>1024||!std::isfinite(hz)||hz<=0||!std::isfinite(seconds)||seconds<=0||
-       !std::isfinite(limits.seconds)||limits.seconds<=0||limits.seconds>86400||seconds>limits.seconds||
-       limits.bytes<16384||limits.bytes>1024ull*1024*1024||limits.recordBytes<1024||limits.recordBytes>1024*1024)
-        throw std::invalid_argument("schema/rate/duration/limits bound");
-    const long double frame_count=std::ceil(static_cast<long double>(hz)*seconds)+1;
-    if(frame_count>=static_cast<long double>(UINT64_MAX))throw std::invalid_argument("frame bound overflow");
-    const auto frames=static_cast<std::uint64_t>(frame_count);
-    const auto row=row_bound(names);
-    // Fixture metadata is separately bounded below 8192, plus writer's 8192 footer reserve.
-    if(row>limits.recordBytes||limits.bytes<16384||frames>(limits.bytes-16384)/row)
-        throw std::invalid_argument("requested capture exceeds worst-case file budget");
-}
-rs::Packet packet(const Snapshot& s,const std::vector<std::string>& names){
-    auto c=channels(s);check(c.size()==names.size(),"one complete fixed schema per capture");
-    rs::Packet p;p.sequence=s.frame.seq;p.source_us=s.frame.tick_us;p.width=std::uint32_t(names.size());
-    for(std::size_t i=0;i<names.size();++i)p.values[i]=c.at(names[i]);return p;
-}
-struct Identity {
-    std::string nonce,sha;std::uint64_t bytes{};std::atomic<bool> entered{false},resume{false};
-    const std::thread::id producer=std::this_thread::get_id();std::atomic<unsigned> owner_calls{0};
-    Identity(){std::array<std::uint8_t,16> n{};if(BCryptGenRandom(nullptr,n.data(),ULONG(n.size()),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0)throw std::runtime_error("nonce failed");nonce=hex(n.data(),n.size());}
-    void worker(){if(std::this_thread::get_id()==producer){++owner_calls;throw std::runtime_error("writer called on producer");}}
-    void closed(const fs::path& p){
-        worker();struct File{HANDLE h;~File(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}} f{
-            CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};
-        LARGE_INTEGER n{};
-        if(f.h==INVALID_HANDLE_VALUE||!GetFileSizeEx(f.h,&n)||n.QuadPart<=0||n.QuadPart>64*1024*1024)throw std::runtime_error("closed source size");
-        std::vector<std::uint8_t> b(std::size_t(n.QuadPart));DWORD got{};
-        if(!ReadFile(f.h,b.data(),DWORD(b.size()),&got,nullptr)||got!=b.size())throw std::runtime_error("closed source read");
-        sha=hex(sha256(b.data(),b.size()));bytes=b.size();
-    }
-};
-struct QueuedSink final:rs::Sink {
-    dbce::session::Writer writer;fs::path path;std::vector<std::string> names;std::shared_ptr<Identity> id;std::int64_t origin;
-    QueuedSink(fs::path p,std::vector<std::string> n,std::shared_ptr<Identity> i,std::int64_t o):path(std::move(p)),names(std::move(n)),id(std::move(i)),origin(o){}
-    bool open()override{
-        id->worker();dbce::session::Metadata m{"outrun-queued-frames-fixture","offline-only","native-session-1",{}, {}};
-        m.properties={{"captureNonce",id->nonce},{"inputContract",InputContract},{"profileSha256",hex(sha256(fixture_profile()))},
-            {"context","known two-device fixture only; no epoch/caps journal or portable replay"},
-            {"adapterConsumedOffset","previous tick; adapter record fields are this tick"}};
-        return writer.open(path.wstring(),m);
-    }
-    bool write(const rs::Packet& p)override{
-        id->worker();id->entered=true;while(!id->resume)std::this_thread::yield();
-        Channels c;for(std::size_t i=0;i<names.size();++i)c[names[i]]=p.values[i];
-        return writer.sample(double(p.source_us-origin)/1e6,c);
-    }
-    bool stop()override{id->worker();if(!writer.stop())return false;id->closed(path);return true;}
-    bool stopped_at_limit()const override{return !writer.active()&&(writer.reason()=="durationLimit"||writer.reason()=="fileSizeLimit"||writer.reason()=="recordSizeLimit");}
-    void abandon()noexcept override{writer.abandon();}
-    std::string reason()const override{return writer.reason();}
-};
-void wait_entered(const std::shared_ptr<Identity>& id){
+// The fixture's writer barrier: the worker is held on its first row while the producer finishes every tick.
+struct Barrier {std::atomic<bool> entered{false},resume{false};void hold(){entered=true;while(!resume)std::this_thread::yield();}};
+void wait_entered(const std::shared_ptr<Barrier>& b){
     const auto until=std::chrono::steady_clock::now()+2s;
-    while(!id->entered){if(std::chrono::steady_clock::now()>until)throw std::runtime_error("worker barrier");std::this_thread::yield();}
+    while(!b->entered){if(std::chrono::steady_clock::now()>until)throw std::runtime_error("worker barrier");std::this_thread::yield();}
 }
-struct ResumeOnExit {std::shared_ptr<Identity> id;~ResumeOnExit(){id->resume=true;}};
-void write_new(const fs::path& path,const std::string& text){check(!fs::exists(path),"new output required");std::ofstream f(path,std::ios::binary);f<<text;f.close();check(bool(f),"output write");}
-void report(const fs::path& root,const rs::Report& r,const Identity& id,std::uint64_t first,std::int64_t origin){
-    check(r.may_seal()&&r.capture_counts_final&&!r.first_rejected&&r.wrong_producer==0,"eligible actual worker result");
-    auto s=dbce::session::jsonStream();
-    s<<int(r.outcome)<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.attempted<<'\t'<<r.declared_last<<'\t'<<r.last_written
-     <<'\t'<<first<<'\t'<<origin<<'\t'<<id.nonce<<'\t'<<id.bytes<<'\t'<<id.sha<<'\t'<<r.producer_done<<'\t'<<r.worker_done
-     <<'\t'<<r.drain_timed_out<<'\t'<<r.queue_full<<'\t'<<r.invalid<<'\t'<<r.after_failure<<'\t'<<r.wrong_producer
-     <<'\t'<<r.after_end<<'\t'<<r.after_end_wrong_producer<<'\t'<<r.discarded<<'\t'<<r.first_rejected<<'\t'<<r.sink_reason<<'\n';
-    write_new(root/"worker.tsv",s.str());
+struct ResumeOnExit {std::shared_ptr<Barrier> b;~ResumeOnExit(){b->resume=true;}};
+dbce::session::Metadata fixture_metadata(){   // the sink adds captureNonce
+    dbce::session::Metadata m{"outrun-queued-frames-fixture","offline-only","native-session-1",{}, {}};
+    m.properties={{"inputContract",InputContract},{"profileSha256",hex(sha256(fixture_profile()))},
+        {"context","known two-device fixture only; no epoch/caps journal or portable replay"},
+        {"adapterConsumedOffset","previous tick; adapter record fields are this tick"}};
+    return m;
 }
 void record(const fs::path& root,bool window){
     check(fs::create_directory(root),"new capture directory");
@@ -180,18 +85,19 @@ void record(const fs::path& root,bool window){
     bool too_wide=false;try{schema(channels(wide));}catch(const std::invalid_argument&){too_wide=true;}
     check(too_wide,"adapter signals count toward complete channel preflight");
     const std::size_t start=window?6:0;const auto first=expected[start].frame.seq;const auto origin=expected[start].frame.tick_us;
-    auto id=std::make_shared<Identity>();ResumeOnExit release{id};
-    rs::Controller c(16,std::uint32_t(names.size()),16*sizeof(rs::Packet),std::make_unique<QueuedSink>(root/"source.jsonl",names,id,origin),first);
+    auto id=std::make_shared<rs::Identity>();auto barrier=std::make_shared<Barrier>();ResumeOnExit release{barrier};
+    rs::Controller c(16,std::uint32_t(names.size()),16*sizeof(rs::Packet),
+        std::make_unique<rs::QueuedSink>(root/"source.jsonl",names,id,origin,fixture_metadata(),dbce::session::Limits{},[barrier]{barrier->hold();}),first);
     auto producer=c.producer();std::size_t ordinal=0;
     const auto actual=capture([&](const Snapshot& s){
         if(ordinal++<start)return;
         auto p=packet(s,names);check(producer.push(p),"actual Core/Adapter snapshot queued");
-        if(s.frame.seq==first)wait_entered(id);
+        if(s.frame.seq==first)wait_entered(barrier);
         // Overwrite producer storage while the worker is held: the owned queued copy must survive.
         p.values.fill(-999);
     });
-    check(!id->resume&&producer.report().accepted==actual.size()-start,"producer completes all ticks while writer is blocked");
-    producer.finish(actual.back().frame.seq);id->resume=true;const auto r=c.drain(2s);
+    check(!barrier->resume&&producer.report().accepted==actual.size()-start,"producer completes all ticks while writer is blocked");
+    producer.finish(actual.back().frame.seq);barrier->resume=true;const auto r=c.drain(2s);
     check(r.worker_done&&id->owner_calls==0,"all native writer I/O off the input producer");
     report(root,r,*id,first,origin);
     auto pushed=dbce::session::jsonStream();

@@ -1,5 +1,7 @@
 #pragma once
-// Executable design proof only; not a production recorder or unload-safe DLL worker.
+// The reviewed P20 recorder worker, moved from tests/recorder_lifecycle_spike (Astra 16553): one producer, one worker
+// thread owning the synchronous sink, a preallocated bounded ring. Not an unload-safe DLL worker (the desktop process
+// links it; a DLL host needs the P21 DLL rules first).
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -23,7 +25,7 @@
 #include <windows.h>
 #endif
 
-namespace recorder_spike {
+namespace dbce::shim::recorder {
 // P21 r2.3 (Astra 13545/13816/13978): proof that a thread has ENDED, not only that its function reported done.
 // Thread-exit work (thread_local, FLS and pthread-key destructors, DLL thread-detach code) runs after the function
 // returns, and std::thread::join waits for it without a bound. wait_until waits for the thread itself against the

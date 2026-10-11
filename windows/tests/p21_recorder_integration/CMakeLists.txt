@@ -16,8 +16,8 @@ target_compile_features(p21_recorder_integration PRIVATE cxx_std_17)
 target_compile_definitions(p21_recorder_integration PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_include_directories(p21_recorder_integration PRIVATE
   ${ROOT}/windows/source ${ROOT}/windows/shim ${ROOT}/windows/tests
-  ${ROOT}/windows/vendor/controls ${ROOT}/src ${TOOLKIT_ROOT}/native/session
-  ${ROOT}/windows/tests/recorder_lifecycle_spike)
+  ${ROOT}/windows/vendor/controls ${ROOT}/src ${ROOT}/windows/vendor/session
+  ${ROOT}/windows/host/recorder ${ROOT}/windows/host)
 target_link_libraries(p21_recorder_integration PRIVATE bcrypt)
 if(MSVC)
   target_compile_options(p21_recorder_integration PRIVATE /W4 /WX)

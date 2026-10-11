@@ -14,7 +14,7 @@ def pin(root,scopes):
     return dict(commit=git(root,'rev-parse','HEAD'),sha256={p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in git(root,'ls-files','--',*scopes).splitlines()})
 tk_scopes=['native/session','dotnet/Dbce.Wheel.Recording','dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs','Directory.*','global.json','NuGet.Config']
 before=dict(source=pin(repo,['.']),toolkit=pin(toolkit,tk_scopes))
-if before['toolkit']['sha256']['native/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
+if before['toolkit']['sha256']['native/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or    before['source']['sha256']['windows/vendor/session/session_writer.h']!='a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
     raise RuntimeError('Unreviewed native writer.')
 result.mkdir(parents=True);(result/'source-before.json').write_text(json.dumps(before,indent=2));commands=[]
 def run(name,cmd,expected=0):
@@ -41,16 +41,18 @@ if args.mutations:
     variants={
         'queue-loses-owned-snapshot':('worker.hpp','s_->ring[std::size_t(write%s_->ring.size())]=p;',
             '/* omitted owned copy */','record','eligible actual worker result'),
-        'old-enum-refuses-pending':('frame_codec.hpp','int(Call::Pending)','int(Call::NotCalled)','replay','invalid integer: sample.1.poll'),
-        'wrong-adapter-record-word':('native.cpp','return writer.sample(double(p.source_us-origin)/1e6,c);',
+        'old-enum-refuses-pending':('frame_channels.hpp','int(Call::Pending)','int(Call::NotCalled)','replay','invalid integer: sample.1.poll'),
+        'wrong-adapter-record-word':('capture.hpp','return writer.sample(double(p.source_us-origin)/1e6,c);',
             'c["adapter.recordSteer"]+=1;return writer.sample(double(p.source_us-origin)/1e6,c);','replay','export matches the original producer snapshots'),
     }
     for name,(file,old,new,stage,reason) in variants.items():
         src=result/'mutations'/name;src.mkdir(parents=True)
         for f in ['CMakeLists.txt','native.cpp','frame_codec.hpp']:shutil.copyfile(here/f,src/f)
-        if file=='worker.hpp':shutil.copyfile(here.parent/'recorder_lifecycle_spike/worker.hpp',src/file)
+        # The production composition (Astra 16553): copies beside the fixture are found first, so the mutated one builds.
+        for f in ['worker.hpp','frame_channels.hpp','capture.hpp']:shutil.copyfile(repo/'windows/host/recorder'/f,src/f)
+        shutil.copyfile(repo/'windows/source/outrun_capture.hpp',src/'outrun_capture.hpp')
         s=(src/file).read_text();count=s.count(old)
-        if count!=(2 if file=='frame_codec.hpp' else 1):raise RuntimeError('Mutation anchor changed: '+name)
+        if count!=(2 if file=='frame_channels.hpp' else 1):raise RuntimeError('Mutation anchor changed: '+name)
         (src/file).write_text(s.replace(old,new))
         mx=native_build(src,src/'build',name);mc=src/'capture';mc.mkdir()
         if stage=='record':

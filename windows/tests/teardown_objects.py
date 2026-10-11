@@ -28,8 +28,8 @@ import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 SCOPES = ["windows/shim", "windows/host"]
 SCOPE = ", ".join(SCOPES)   # for the summary line
-EXTRA_UNITS = ["windows/tests/teardown_units/provider_host_instance.cpp"]   # instantiations of in-scope templates
-INCLUDES = ["windows/shim", "windows/host", "windows/vendor/controls"]
+EXTRA_UNITS = ["windows/tests/teardown_units/provider_host_instance.cpp", "windows/tests/teardown_units/recorder_instance.cpp"]   # instantiations of in-scope templates
+INCLUDES = ["windows/shim", "windows/host", "windows/host/recorder", "windows/vendor/controls", "windows/vendor/session"]
 DEFINES = ["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS", "UNICODE", "_UNICODE"]
 FLAGS = ["/nologo", "/std:c++17", "/EHsc", "/c", "-Wno-everything", "-Werror=exit-time-destructors"]
 EXIT_TIME = re.compile(r"^(.*?)\((\d+),\d+\):\s+error: declaration requires an exit-time destructor")

@@ -18,5 +18,30 @@
     "file": "windows/tests/teardown_units/provider_host_instance.cpp",
     "where": "atexit in class std::_Generic_error_category const & __cdecl std::_Immortalize_memcpy_image<class std::_Generic_error_category>(void) x1",
     "reason": "MSVC STL internal: the immortal generic error category behind std::thread's system_error path; no host source line asks for it. A host atexit is attributed to its own function and fails."
+  },
+  {
+    "file": "windows/tests/teardown_units/recorder_instance.cpp",
+    "where": "?detach@thread@std@@QEAAXXZ in public: __cdecl dbce::shim::recorder::ThreadEnd::~ThreadEnd(void) x1",
+    "reason": "D9: the recorder worker's thread end never waits; its destructor detaches a worker thread still running (its state is shared-owned). Count-exact: another detach here is a new finding."
+  },
+  {
+    "file": "windows/tests/teardown_units/recorder_instance.cpp",
+    "where": "_Thrd_detach in public: void __cdecl std::thread::detach(void) x1",
+    "reason": "the runtime call inside std::thread::detach itself, reached only from the allowed destructor detach above"
+  },
+  {
+    "file": "windows/tests/teardown_units/recorder_instance.cpp",
+    "where": "atexit in class std::_Generic_error_category const & __cdecl std::_Immortalize_memcpy_image<class std::_Generic_error_category>(void) x1",
+    "reason": "MSVC STL's immortal error-category singleton (std::system_error / std::generic_category), as for the host; not a destructor of ours"
+  },
+  {
+    "file": "windows/tests/teardown_units/recorder_instance.cpp",
+    "where": "atexit in class std::_Iostream_error_category2 const & __cdecl std::_Immortalize_memcpy_image<class std::_Iostream_error_category2>(void) x1",
+    "reason": "MSVC STL's immortal iostream error-category singleton, reached through the session writer's std::ostringstream (jsonStream); not a destructor of ours"
+  },
+  {
+    "file": "windows/tests/teardown_units/recorder_instance.cpp",
+    "where": "atexit in class std::_System_error_category const & __cdecl std::_Immortalize_memcpy_image<class std::_System_error_category>(void) x1",
+    "reason": "MSVC STL's immortal system error-category singleton (std::system_category); not a destructor of ours"
   }
 ]
