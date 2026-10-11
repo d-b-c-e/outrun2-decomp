@@ -19,5 +19,19 @@ No driving, controls acceptance, reconnect, game integration or full P30
 object/WGI inventory is established. The provider's nonexclusive per-open range
 and deadzone requests use the same existing code as the fake-COM qualification.
 
+`Run-Probe.ps1` is that supervisor. Its caller owns the rig lease and idle gate;
+pass the reviewed executable/profile SHA-256 values and the lease path/token.
+It retains the exact executable and profile before launch, checks the child's PID
+and creation time against its normal-shutdown report, and saves `receipt.json`.
+An unresolved close keeps the receipt failed and requires retaining the lease.
+The host's recorder slot is deliberately lazy; its no-capture completion field
+means nothing was queued, not that a recording was made.
+
+The first host regression on `9e8b727` completed its cases and mutations but
+refused its final source pin because this supervisor was added during that run.
+That result is retained as an invalid whole-run receipt; re-run from a clean
+commit before using the candidate. The combined recorder regression completed
+with its source pin intact before that edit.
+
 The host constructor now accepts an owned HWND and freshness bound; existing
 offline callers keep their prior defaults. This does not change production code.

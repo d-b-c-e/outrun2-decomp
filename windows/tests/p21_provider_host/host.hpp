@@ -57,6 +57,8 @@ template<class RecorderType = Recorder> class BasicProviderHost {
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
+    // RecorderType must be lazy: no worker or write begins before the first push. Construction may still throw before
+    // this host can stop it. The fake recorder, the real P21 recorder and NoCapture all satisfy this contract.
     BasicProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched)
         : BasicProviderHost(folder, nonce, input, profile, latched,
             std::make_unique<RecorderType>(folder + L"\\worker.tsv", nonce, std::make_shared<Gate>(), std::make_shared<Gate>())) {}
