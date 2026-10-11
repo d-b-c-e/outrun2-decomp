@@ -45,7 +45,11 @@
 #include <string>
 #include "native_window.hpp"
 
-namespace outrun::xbox_runtime { InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;} }
+namespace outrun::xbox_runtime {
+InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}
+std::string& latched_home(){static std::string home;return home;}
+std::string& latched_game_root(){static std::string root;return root;}
+}
 
 namespace {
 namespace rt=outrun::runtime;
@@ -165,9 +169,12 @@ int or2_xbox_main(int argc,char** argv){
     std::string backend_error;
     if(!application_initialize(backend_error)){std::fprintf(stderr,"Xbox platform: %s\n",backend_error.c_str());return 1;}
     std::atexit(application_shutdown);
-    outrun::platform::native_network_set_platform(outrun::platform::pc_network_bsd_platform());
+    // A latched (test) process stays offline: no LAN platform at all (INPUT-SHIM.md section 15).
+    if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(outrun::platform::pc_network_bsd_platform());
     consoleInit(nullptr);
     rt::product()={"OutRunXbox","OutRunXbox.log"};
+    // A latched process: home() is the run folder before anything can write (crash.txt included).
+    if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())rt::home()=run;
     // An uncaught exception or abort: crash.txt in the launch folder names it and the
     // last scene display / leaf (the result log is only written at a normal exit).
     std::set_terminate([]{
@@ -253,7 +260,7 @@ int or2_xbox_main(int argc,char** argv){
     {outrun::xbox_runtime::SetupDisplay display;
      auto setup=display.platform();
      setup.wait_for_exit=[&pad]{wait_for_plus(pad);};
-     const bool ready=outrun::platform::exe_setup_prepare(retail_root,rt::home(),setup,&error);
+     const bool ready=outrun::platform::exe_setup_prepare(retail_root,rt::home(),setup,&error,!outrun::xbox_runtime::latched_home().empty());
      display.close();
      if(!ready){
         std::printf("OR2006C2C.EXE: %s\n",error.c_str());

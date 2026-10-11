@@ -1,0 +1,806 @@
+[
+ {
+  "file": "src/enhancements/gpu_backend.cpp",
+  "line": "if(!path_.empty())write_options(path_,{{\"widescreen\",settings_.widescreen?\"1\":\"0\"}, {\"resolution\",resolution_key(settings_.resolution)},{\"antialiasing\",antialiasing_key(settings_.antialiasing)}, {\"framerate\",std::to_string(settings_.frame_rate)}});",
+  "class": "redirected",
+  "reason": "path_ = home()/options.ini (xbox main.cpp: GpuVideoBackend video(rt::home()+\"/options.ini\"))"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "bool write_options(const std::string& path,const std::vector<std::pair<std::string,std::string>>& values){",
+  "class": "definition",
+  "reason": "write_options: callers audited"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "{std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f)return false;f<<out.str();if(!f.flush())return false;}",
+  "class": "redirected",
+  "reason": "write_options body: temp beside its path argument (home()/options.ini at its only caller)"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "std::error_code ec;std::filesystem::rename(temp,path,ec);const bool moved=!ec;",
+  "class": "redirected",
+  "reason": "write_options body (Windows): temp -> path (home()/options.ini), replacing it"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "const bool moved=std::rename(temp.c_str(),path.c_str())==0; // POSIX rename replaces the destination",
+  "class": "redirected",
+  "reason": "write_options body (POSIX): temp -> path"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "if(!moved){std::remove(temp.c_str());return false;}",
+  "class": "redirected",
+  "reason": "write_options body: removes its own temp"
+ },
+ {
+  "file": "src/enhancements/video.hpp",
+  "line": "bool write_options(const std::string& path,const std::vector<std::pair<std::string,std::string>>& values);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "template<std::size_t N> int write_checked(const std::string& path,const std::array<std::uint8_t,N>& data){",
+  "class": "definition",
+  "reason": "write_checked: callers audited (dir = save folder)"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "auto* file=std::fopen(temporary.c_str(),\"wb\");if(!file)return errno?errno:EIO;",
+  "class": "redirected",
+  "reason": "write_checked body: path.new beside a save-folder path"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(!ok){std::remove(temporary.c_str());return EIO;}",
+  "class": "redirected",
+  "reason": "write_checked body: removes its own .new"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(std::rename(path.c_str(),backup.c_str())==0)had_original=true;",
+  "class": "redirected",
+  "reason": "write_checked body: path -> path.bak in the save folder"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "else if(errno!=ENOENT){const int error=errno;std::remove(temporary.c_str());return error;}",
+  "class": "redirected",
+  "reason": "write_checked body: removes its own .new"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(std::rename(temporary.c_str(),path.c_str())!=0){",
+  "class": "redirected",
+  "reason": "write_checked body: .new -> path in the save folder"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(had_original)std::rename(backup.c_str(),path.c_str());",
+  "class": "redirected",
+  "reason": "write_checked body: restores .bak in the save folder"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(had_original&&std::remove(backup.c_str())!=0)return errno?errno:EIO;",
+  "class": "redirected",
+  "reason": "write_checked body: removes .bak in the save folder"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "result.error=result.common_error=write_checked(dir+\"/common.dat\",p.common);",
+  "class": "redirected",
+  "reason": "dir = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "result.license_error=write_checked(dir+\"/License\"+std::to_string(p.selected+1)+\".dat\",p.active);",
+  "class": "redirected",
+  "reason": "dir = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "if(std::remove(path.c_str())!=0&&errno!=ENOENT){error=errno?errno:EIO;return false;}",
+  "class": "redirected",
+  "reason": "a licence file under the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/menu_audio.hpp",
+  "line": "bool play_music(std::vector<std::uint8_t> file,bool loop,std::string& error){return music_.open(std::move(file),loop,error);}",
+  "class": "not-a-file",
+  "reason": "MusicStream::open: decodes music bytes already in memory"
+ },
+ {
+  "file": "src/platform/music_stream.hpp",
+  "line": "bool open(std::vector<std::uint8_t> file,bool loop,std::string& error);",
+  "class": "not-a-file",
+  "reason": "MusicStream::open declaration (in-memory bytes)"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "if(include_16b)open(0x16bu,0x39u);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "open(0x18au,0x3cu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "open(0x16cu,0x3bu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "if(include_190)open(0x190u,0x1fu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/pc_soft_d3d9.cpp",
+  "line": "bool PcSoftD3D9Device::write_png(const std::string& path)const{",
+  "class": "definition",
+  "reason": "write_png: no call site in the audited code; any new call is flagged"
+ },
+ {
+  "file": "src/platform/pc_soft_d3d9.cpp",
+  "line": "std::ofstream f(path,std::ios::binary);if(!f)return false;",
+  "class": "unreferenced",
+  "reason": "PcSoftD3D9Device::write_png: no call site in the audited code (write_png is a watched wrapper)"
+ },
+ {
+  "file": "src/platform/pc_soft_d3d9.hpp",
+  "line": "bool write_png(const std::string& path)const;",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/platform/race_area_services.cpp",
+  "line": "open(user,id,function);",
+  "class": "not-a-file",
+  "reason": "a race-area service callback (opens a game object, not a file)"
+ },
+ {
+  "file": "src/platform/race_area_services.cpp",
+  "line": "open(user,event,m.u32(0x5da068u+type*4u));",
+  "class": "not-a-file",
+  "reason": "a race-area service callback"
+ },
+ {
+  "file": "src/platform/race_end_runtime.cpp",
+  "line": "if(std::FILE* f=std::fopen((dir+\"/rankings.dat\").c_str(),\"wb\")){ // 406C50: u32 length, then the payload",
+  "class": "redirected",
+  "reason": "dir = c.event_function36.frontend_save_directory = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/race_ghosts_runtime.cpp",
+  "line": "auto* f=std::fopen(path.c_str(),\"wb\");if(!f)return 1u;",
+  "class": "redirected",
+  "reason": "path under g.save_directory = frontend_save_directory = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/race_manager.cpp",
+  "line": "if((w.open(std::uint32_t(id))&3u)!=2u)continue;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open(id): a state query"
+ },
+ {
+  "file": "src/platform/race_manager.cpp",
+  "line": "if((w.open(std::uint32_t(id))&3u)!=2u)continue;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open(id): a state query"
+ },
+ {
+  "file": "src/platform/race_manager.hpp",
+  "line": "std::uint8_t open(std::uint32_t id) const;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open declaration: a state query"
+ },
+ {
+  "file": "src/platform/race_traffic_heart_meter.inc",
+  "line": "open(0x5b,0x69);break;",
+  "class": "not-a-file",
+  "reason": "a local lambda opening a HUD element"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::string& home(){static std::string h=\".\";return h;}",
+  "class": "home-definition",
+  "reason": "home() itself"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "void set_home(int argc,char** argv){",
+  "class": "definition",
+  "reason": "set_home: the Switch build's setter; no call site in the desktop build (set_home is watched)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "if(argc>0&&argv&&argv[0]){const auto exe=parent_dir(argv[0]);if(!exe.empty())home()=exe;}",
+  "class": "home-definition",
+  "reason": "inside set_home (never called in the desktop build)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "for(int i=1;i<argc;++i)if(argv[i]&&std::string(argv[i]).rfind(\"home=\",0)==0)home()=std::string(argv[i]).substr(5);",
+  "class": "home-definition",
+  "reason": "inside set_home (never called in the desktop build)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "loaded=true;std::FILE* f=std::fopen((home()+\"/autoplay.txt\").c_str(),\"rb\");if(!f)return;",
+  "class": "dev-hook",
+  "reason": "autoplay.txt is never seeded into the run folder"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "else if(l.rfind(\"trace=1\",0)==0)trace=std::fopen((home()+\"/trace.txt\").c_str(),\"wb\");",
+  "class": "dev-hook",
+  "reason": "only when home()/autoplay.txt says trace=1; autoplay.txt is never seeded into the run folder"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::FILE* f=std::fopen((home()+\"/replay.txt\").c_str(),\"rb\");if(!f)return;",
+  "class": "dev-hook",
+  "reason": "replay.txt is never seeded into the run folder"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "const std::string path=home()+\"/\"+(name.empty()?std::string(\"replay.bin\"):name);",
+  "class": "dev-hook",
+  "reason": "only with replay.txt (never seeded)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "if(what==\"record\"){file=std::fopen(path.c_str(),\"wb\");if(file)mode=Mode::Record;}",
+  "class": "dev-hook",
+  "reason": "replay recording requested by home()/replay.txt; never seeded into the run folder"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "(void)s.title_movie.open(s.movie_path,s.movie_error);",
+  "class": "not-a-file",
+  "reason": "TitleMovie::open: avformat_open_input, read only"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "state.frontend_save_directory=host.save_directory.empty()?home()+\"/SaveGame\":host.save_directory;",
+  "class": "seeded-read",
+  "reason": "the save folder: home()/SaveGame (the run folder's seeded SaveGame under the latch)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "(void)pf::make_directory(state.frontend_save_directory);",
+  "class": "redirected",
+  "reason": "the save folder in home()"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "!host.audio_output||!host.audio_output->open(error)){",
+  "class": "not-a-file",
+  "reason": "the host audio device open"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::FILE* open_result_log(const char*& used_path,int& last_error){",
+  "class": "definition",
+  "reason": "open_result_log: callers audited"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "path=home()+\"/\"+product().log_file;",
+  "class": "redirected",
+  "reason": "the result log in home()"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "if(std::FILE* log=std::fopen(path.c_str(),\"wb\")){used_path=path.c_str();return log;}",
+  "class": "redirected",
+  "reason": "open_result_log body: home()/product().log_file"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::FILE* log=open_result_log(used_path,last_error);",
+  "class": "redirected",
+  "reason": "the result log in home()"
+ },
+ {
+  "file": "src/runtime/game_host.hpp",
+  "line": "std::string& home();",
+  "class": "home-definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/runtime/game_host.hpp",
+  "line": "void set_home(int argc,char** argv); // argv[0]'s folder, or \"home=...\" in the arguments",
+  "class": "definition",
+  "reason": "declaration (never called in the desktop build)"
+ },
+ {
+  "file": "src/runtime/game_host.hpp",
+  "line": "std::FILE* open_result_log(const char*& used_path,int& last_error);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/runtime/host_platform.hpp",
+  "line": "virtual bool open(std::string& error)=0;",
+  "class": "not-a-file",
+  "reason": "the host audio interface (opens the audio device)"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "Trace(){if(const char* p=std::getenv(\"OR2_EXE_TRACE\"))file=std::fopen(p,\"ab\");}",
+  "class": "env-gated",
+  "reason": "OR2_EXE_TRACE"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "bool exe_image_write_cache(const std::string& path,const std::vector<std::uint8_t>& image,std::string* error){",
+  "class": "definition",
+  "reason": "exe_image_write_cache: callers audited"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "std::FILE* f=std::fopen(temp.c_str(),\"wb\");if(!f)return fail(error,\"cannot create \"+temp);",
+  "class": "definition",
+  "reason": "exe_image_write_cache body: path.tmp beside its path argument"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(std::fclose(f)!=0||!ok){std::remove(temp.c_str());return fail(error,\"cannot write \"+temp);}",
+  "class": "definition",
+  "reason": "exe_image_write_cache body"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "std::remove(path.c_str());",
+  "class": "definition",
+  "reason": "exe_image_write_cache body: its path argument"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(std::rename(temp.c_str(),path.c_str())!=0){std::remove(temp.c_str());return fail(error,\"cannot write \"+path);}",
+  "class": "definition",
+  "reason": "exe_image_write_cache body"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}",
+  "class": "latched-read-only",
+  "reason": "only when rewrite_in_place; setup passes !game_dir_read_only for the game folder's cache (nene 10191 finding 1)"
+ },
+ {
+  "file": "src/system/exe_image.hpp",
+  "line": "bool exe_image_write_cache(const std::string& path,const std::vector<std::uint8_t>& image,std::string* error);",
+  "class": "definition",
+  "reason": "declaration; callers audited"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "bool make_directory(const std::string& path){",
+  "class": "definition",
+  "reason": "make_directory: callers audited"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "const int rc=_mkdir(path.c_str());",
+  "class": "definition",
+  "reason": "make_directory body"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "const int rc=mkdir(path.c_str(),0777);",
+  "class": "definition",
+  "reason": "make_directory body (POSIX)"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "bool remove_directory(const std::string& path){",
+  "class": "definition",
+  "reason": "remove_directory: callers audited"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "return _rmdir(path.c_str())==0;",
+  "class": "definition",
+  "reason": "remove_directory body"
+ },
+ {
+  "file": "src/system/files.cpp",
+  "line": "return rmdir(path.c_str())==0;",
+  "class": "definition",
+  "reason": "remove_directory body (POSIX)"
+ },
+ {
+  "file": "src/system/files.hpp",
+  "line": "bool make_directory(const std::string& path);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/system/files.hpp",
+  "line": "bool remove_directory(const std::string& path);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "src/system/network_bsd.cpp",
+  "line": "std::strcpy(a.sun_path,name.c_str());unlink(a.sun_path);",
+  "class": "latched-skip",
+  "reason": "the BSD LAN platform is not installed in a latched process (xbox main.cpp)"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "if(!file_exists(cache)&&std::rename(from.c_str(),cache.c_str())==0)continue;",
+  "class": "latched-skip",
+  "reason": "adopt_former_cache: never called for the game folder when game_dir_read_only; the run-folder call stays in the run folder"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "if(!fallback.empty()&&!file_exists(fallback)&&std::rename(from.c_str(),fallback.c_str())==0)continue;",
+  "class": "latched-skip",
+  "reason": "adopt_former_cache, as above"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "if(file_exists(cache)||(!fallback.empty()&&file_exists(fallback)))std::remove(from.c_str());",
+  "class": "latched-skip",
+  "reason": "adopt_former_cache, as above"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "std::remove((old+\"/\"+name).c_str());",
+  "class": "latched-skip",
+  "reason": "adopt_former_cache, as above"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "(void)remove_directory(old);",
+  "class": "latched-skip",
+  "reason": "adopt_former_cache, as above"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "if((game_dir_read_only||!exe_image_write_cache(cache,image,&e))&& (fallback.empty()||!make_directory(spare)||!exe_image_write_cache(fallback,image,&e))){",
+  "class": "latched-read-only",
+  "reason": "the game-folder cache is not written when game_dir_read_only (the joined key includes the fallback line)"
+ },
+ {
+  "file": "src/system/setup_screen.cpp",
+  "line": "(fallback.empty()||!make_directory(spare)||!exe_image_write_cache(fallback,image,&e))){",
+  "class": "redirected",
+  "reason": "fallback = home()/OR2006C2C.cache, the run folder under the latch"
+ },
+ {
+  "file": "src/system/title_movie.hpp",
+  "line": "bool open(const std::string& path,std::string& error);",
+  "class": "not-a-file",
+  "reason": "TitleMovie::open declaration (read only)"
+ },
+ {
+  "file": "xbox/source/audio.hpp",
+  "line": "bool open(std::string& error);",
+  "class": "not-a-file",
+  "reason": "XAudio2 device open"
+ },
+ {
+  "file": "xbox/source/d3d11_display.cpp",
+  "line": "if(std::FILE* f=std::fopen((std::string(dir)+name).c_str(),\"wb\")){",
+  "class": "env-gated",
+  "reason": "OR2_XBOX_SCREENSHOT_DIR"
+ },
+ {
+  "file": "xbox/source/d3d11_display.hpp",
+  "line": "bool open(unsigned width,unsigned height,std::string& error);",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "bool open(std::string& e)override{return audio_.open(e);}",
+  "class": "not-a-file",
+  "reason": "the host audio interface forwarding to XAudio2"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "const std::string path=rt::home()+\"/options.ini\";",
+  "class": "seeded-read",
+  "reason": "options.ini is seeded into the run folder"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "if(!f){if(std::FILE* w=std::fopen(path.c_str(),\"wb\")){std::fputs(OptionsDefault,w);std::fclose(w);}return;}",
+  "class": "redirected",
+  "reason": "path = rt::home()/options.ini (default file)"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())rt::home()=run;",
+  "class": "home-definition",
+  "reason": "a latched process: home() is the run folder before the terminate handler is installed"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "if(std::FILE* f=std::fopen((rt::home()+\"/crash.txt\").c_str(),\"wb\")){",
+  "class": "redirected",
+  "reason": "rt::home()/crash.txt"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "try{rt::home()=application_home(argc,argv);}catch(const std::exception& e){",
+  "class": "home-definition",
+  "reason": "home() = the latched run folder (application_home returns latched_home())"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "diag.save_directory=rt::home()+\"/SaveGame\";",
+  "class": "seeded-read",
+  "reason": "the save folder: seeded, then written there"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "std::printf(\"(started from: %s).\\n\\nLast error: %s\\n\",rt::home().c_str(),error.c_str());",
+  "class": "not-a-file",
+  "reason": "a message"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "const bool ready=outrun::platform::exe_setup_prepare(retail_root,rt::home(),setup,&error,!outrun::xbox_runtime::latched_home().empty());",
+  "class": "redirected",
+  "reason": "the EXE cache fallback in home() (the run folder); game folder read only when latched"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "outrun::enhancements::GpuVideoBackend video(rt::home()+\"/options.ini\",g_options.video);",
+  "class": "redirected",
+  "reason": "options.ini read and written in home()"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "std::FILE* result_log=open_result_log(result_log_path,result_log_error);",
+  "class": "redirected",
+  "reason": "game_host: home()/product().log_file"
+ },
+ {
+  "file": "xbox/source/platform_api.cpp",
+  "line": "std::FILE* f=std::fopen(probe.c_str(),\"wb\");if(!f)return false;std::fclose(f);std::remove(probe.c_str());return true;",
+  "class": "latched-skip",
+  "reason": "writable(): application_home returns the latched run folder before probing the game folder"
+ },
+ {
+  "file": "xbox/source/platform_api.cpp",
+  "line": "std::string application_home(int argc,char** argv){",
+  "class": "home-definition",
+  "reason": "returns latched_home() first in a latched process"
+ },
+ {
+  "file": "xbox/source/platform_api.cpp",
+  "line": "std::filesystem::create_directories(retail_root+\"/SaveGame\",ec);",
+  "class": "latched-skip",
+  "reason": "application_home returns the latched run folder first (its SaveGame is made by the fence)"
+ },
+ {
+  "file": "xbox/source/platform_api.hpp",
+  "line": "std::string application_home(int argc,char** argv);",
+  "class": "home-definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "xbox/source/renderer.cpp",
+  "line": "if(!impl->display->open(FramebufferWidth,FramebufferHeight,error)){delete impl;return false;}",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
+ },
+ {
+  "file": "xbox/source/setup_display.cpp",
+  "line": "if(!impl_->display.open(unsigned(screen.width()),unsigned(screen.height()),error)){impl_.reset();failed_=true;return;}",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error){",
+  "class": "definition",
+  "reason": "write_section: callers audited"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "{std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f){error=\"cannot write \"+temp;return false;}",
+  "class": "wheel-off",
+  "reason": "write_section body; its only callers are the 35a8aa3 wheel import"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "std::remove(path.c_str());",
+  "class": "wheel-off",
+  "reason": "write_section body"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "if(std::rename(temp.c_str(),path.c_str())!=0){error=\"cannot replace \"+path;return false;}",
+  "class": "wheel-off",
+  "reason": "write_section body"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "if(std::FILE* f=std::fopen(own.c_str(),\"wb\")){std::fputs(legacy?ImportHeader:Template,f);std::fclose(f);}",
+  "class": "latched-skip",
+  "reason": "load_desktop_settings(create_if_missing=false) in a latched process"
+ },
+ {
+  "file": "windows/source/desktop_settings.hpp",
+  "line": "bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!CreateDirectoryW(dst.c_str(),nullptr)){plan.refusal=\"cannot create \"+utf8(dst);ok=false;break;}",
+  "class": "fence",
+  "reason": "seed: a folder inside the run folder"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!CopyFileExW(src.c_str(),dst.c_str(),nullptr,nullptr,nullptr,COPY_FILE_FAIL_IF_EXISTS)){",
+  "class": "fence",
+  "reason": "seed: a copy into the run folder (fail if exists)"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "Plan prepare_run(const std::wstring& folder_in,const std::wstring& game_root_in,std::uint32_t pid,const SeedLimits& limits){",
+  "class": "definition",
+  "reason": "prepare_run: callers audited"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!CreateDirectoryW(plan.run_root.c_str(),nullptr)){",
+  "class": "fence",
+  "reason": "the run folder, created exclusively"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!CreateDirectoryW((plan.run_root+L\"\\\\SaveGame\").c_str(),nullptr)){plan.refusal=\"cannot create the run's SaveGame\";return plan;}",
+  "class": "fence",
+  "reason": "the run's SaveGame"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!CopyFileExW(options.c_str(),(plan.run_root+L\"\\\\options.ini\").c_str(),nullptr,nullptr,nullptr,COPY_FILE_FAIL_IF_EXISTS)){plan.refusal=\"cannot copy options.ini\";return plan;}",
+  "class": "fence",
+  "reason": "seed: options.ini into the run folder"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "const HANDLE h=CreateFileW((plan.run_root+L\"\\\\run.json\").c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "fence",
+  "reason": "the run receipt (CREATE_NEW)"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "const bool ok=WriteFile(h,j.data(),DWORD(j.size()),&written,nullptr)&&written==j.size()&&FlushFileBuffers(h);",
+  "class": "fence",
+  "reason": "the run receipt"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "bool write_refusal(const Plan& plan,std::uint32_t pid){",
+  "class": "definition",
+  "reason": "write_refusal: callers audited"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "if(!DeleteFileW(path.c_str()))return false;",
+  "class": "fence",
+  "reason": "an ordinary file at refused-<pid>.txt loses its name, never written through (a link or folder there refuses first)"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);",
+  "class": "fence",
+  "reason": "refused-<pid>.txt in %LOCALAPPDATA%\\dbce\\outrun2006-decomp, always a new file"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "const bool ok=WriteFile(h,text.data(),DWORD(text.size()),&written,nullptr)&&written==text.size();",
+  "class": "fence",
+  "reason": "refused-<pid>.txt"
+ },
+ {
+  "file": "windows/source/test_fence.hpp",
+  "line": "Plan prepare_run(const std::wstring& dbce_folder,const std::wstring& game_root,std::uint32_t pid,const SeedLimits& limits={});",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "windows/source/test_fence.hpp",
+  "line": "bool write_refusal(const Plan&,std::uint32_t pid);",
+  "class": "definition",
+  "reason": "declaration"
+ },
+ {
+  "file": "windows/source/test_injection.cpp",
+  "line": "HANDLE map=CreateFileMappingA(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(ObserveData),name.c_str());",
+  "class": "in-memory",
+  "reason": "the observer: a page-file mapping (and the 35a8aa3 test path, off in a latched process)"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "bool open(Device& d,HWND hwnd){",
+  "class": "not-a-file",
+  "reason": "the 35a8aa3 DirectInput device open"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "if(GetFileAttributesA(backup.c_str())==INVALID_FILE_ATTRIBUTES&&!CopyFileA(g.settings_path.c_str(),backup.c_str(),TRUE)){",
+  "class": "wheel-off",
+  "reason": "35a8aa3 legacy import backup; wheel_input is not configured in a latched process"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "if(!write_section(g.settings_path,\"Controls\",body,error)||!write_section(g.settings_path,\"ControlsImport\",marker,error)){",
+  "class": "wheel-off",
+  "reason": "35a8aa3 legacy import"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "write_section(g.settings_path,\"Wheel\",{std::string(\"SteeringSensitivity = \")+a,std::string(\"SteeringDeadZone = \")+b},error);",
+  "class": "wheel-off",
+  "reason": "35a8aa3 legacy import"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "if(!open(*d,hwnd)){std::printf(\"controls: %s: cannot open %s\\n\",e.action.c_str(),d->name.c_str());continue;}",
+  "class": "not-a-file",
+  "reason": "the 35a8aa3 DirectInput device open"
+ },
+ {
+  "file": "windows/source/window_desktop.cpp",
+  "line": "plan=fence::prepare_run(dbce,game,GetCurrentProcessId());",
+  "class": "fence",
+  "reason": "the latched entry point"
+ },
+ {
+  "file": "windows/source/window_desktop.cpp",
+  "line": "if(!plan.refusal.empty())return fence::write_refusal(plan,GetCurrentProcessId())?3:4; // 4: refused, not recorded (a linked folder)",
+  "class": "fence",
+  "reason": "the latched entry point; write_refusal never writes through a link"
+ },
+ {
+  "file": "windows/source/window_desktop.cpp",
+  "line": "if(std::freopen(log.c_str(),\"w\",stdout))std::setvbuf(stdout,nullptr,_IONBF,0);",
+  "class": "entry-redirected",
+  "reason": "log = the run folder's runtime.log when latched"
+ },
+ {
+  "file": "windows/source/window_desktop.cpp",
+  "line": "if(std::freopen(log.c_str(),\"a\",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);",
+  "class": "entry-redirected",
+  "reason": "log = the run folder's runtime.log when latched"
+ },
+ {
+  "file": "windows/shim/core.cpp",
+  "line": "auto o=p_.open(*found);",
+  "class": "not-a-file",
+  "reason": "the provider's device open"
+ },
+ {
+  "file": "windows/shim/dinput_provider.hpp",
+  "line": "OpenResult open(const DeviceInfo& listed) override;",
+  "class": "not-a-file",
+  "reason": "the DirectInput provider's device open (CreateDevice; no file)"
+ },
+ {
+  "file": "windows/shim/shim.hpp",
+  "line": "virtual OpenResult open(const DeviceInfo& listed)=0; // `opened` is the identity read back from the new handle",
+  "class": "not-a-file",
+  "reason": "the provider interface's device open"
+ }
+]

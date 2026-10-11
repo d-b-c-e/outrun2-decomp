@@ -543,12 +543,33 @@ void test_control_flood(){
 }
 }
 
+// Astra 10429: a run of pending reads that starts at clock 0 still ages; 0 is a clock reading, not "no run". A
+// nonzero origin is the control. Both: one ReadPending event, then read-failed and one reacquisition past the limit.
+void test_pending_from_clock_zero(){
+    for(const std::int64_t origin:{std::int64_t(0),std::int64_t(5000)}){
+        CoreConfig cfg;cfg.pending_limit_us=100;
+        Rig r(false,profile({wheel("confirm = button 0")}),false,cfg);
+        r.p.clock=origin;
+        auto& d=r.dev(r.w);
+        d.script.push_back({Call::Ok,Call::Pending});d.script.push_back({Call::Ok,Call::Pending});
+        const std::string at=" (origin "+std::to_string(origin)+")";
+        auto f=r.step(0);                                   // opens; the first read, at the origin, is pending
+        check(act(f,"confirm").status==Status::ReadPending,"the first read is pending"+at);
+        r.step(101);                                        // still pending, 101 us later: past the 100 us limit
+        int pending_events=0,epoch_ends=0;
+        for(const auto& e:r.core->drain_events()){pending_events+=e.kind==EventKind::ReadPending;epoch_ends+=e.kind==EventKind::EpochEnd;}
+        f=r.step(0);
+        check(pending_events==1&&epoch_ends==1,"one ReadPending event, then the epoch ends"+at+": "+std::to_string(pending_events)+" pending, "+std::to_string(epoch_ends)+" ended");
+        check(d.reacquires==1&&f.samples[0].epoch==2,"the same handle reacquired as epoch 2"+at);
+    }
+}
+
 int main(){
     try{
         test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
-        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();
+        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim slice 1: "<<checks<<" checks passed\n";
     return 0;

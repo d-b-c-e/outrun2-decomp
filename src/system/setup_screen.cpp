@@ -111,16 +111,17 @@ void adopt_former_cache(const std::string& dir,const std::string& cache,const st
 }
 }
 
-bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_dir,const SetupPlatform& platform,std::string* error){
+bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_dir,const SetupPlatform& platform,std::string* error,
+                       bool game_dir_read_only){
     const std::string root=without_slash(game_dir),cache=root+"/"+ExeImageCacheName;
     const std::string spare=without_slash(fallback_dir),fallback=spare.empty()?std::string():spare+"/"+ExeImageCacheName;
-    adopt_former_cache(root,cache,fallback);
+    if(!game_dir_read_only)adopt_former_cache(root,cache,fallback);
     if(!spare.empty()&&spare!=root)adopt_former_cache(spare,fallback,{});
     std::string e;
     if(exe_image_loaded())return true;   // development: OR2_EXE
     // Next to the game files, possibly prepared ahead of time (tools/or2setup,
     // tools/ps5_package.py) on read-only storage such as a package.
-    if(exe_image_load_cache(cache,&e))return true;
+    if(exe_image_load_cache(cache,&e,!game_dir_read_only))return true;   // the game folder's cache: never rewritten when read only
     if(!fallback.empty()&&exe_image_load_cache(fallback,&e))return true;
     using Clock=std::chrono::steady_clock;
     const auto start=Clock::now();auto last=start-std::chrono::seconds(1);
@@ -170,7 +171,7 @@ bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_d
     screen.set_step(2,SetupScreen::State::Running);screen.set_progress(-1.0);
     screen.set_detail("");show(true);
     // The game folder first; the platform's own folder when the game folder is read-only.
-    if(!exe_image_write_cache(cache,image,&e)&&
+    if((game_dir_read_only||!exe_image_write_cache(cache,image,&e))&&
        (fallback.empty()||!make_directory(spare)||!exe_image_write_cache(fallback,image,&e))){
         screen.set_step(2,SetupScreen::State::Failed);
         return fail("Cannot save the prepared data",{"This folder must be writable, with 10 MB free.","Folder: "+root},e);

@@ -134,10 +134,11 @@ bool write_section(const std::string& path,const std::string& section,const std:
     if(std::rename(temp.c_str(),path.c_str())!=0){error="cannot replace "+path;return false;}
     return true;
 }
-Ini load_desktop_settings(const std::string& folder){
+Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     Ini ini;
     const auto own=folder+"/OutRunDesktop.ini";
     if(ini.load(own)){std::printf("settings: %s\n",own.c_str());return ini;}
+    if(!create_if_missing){std::printf("settings: %s absent (read only in a test process)\n",own.c_str());return ini;}
     Ini tweaks;
     const bool legacy=tweaks.load(folder+"/OutRun2006Tweaks.ini")&&tweaks.has_section("DirectInput");
     if(std::FILE* f=std::fopen(own.c_str(),"wb")){std::fputs(legacy?ImportHeader:Template,f);std::fclose(f);}

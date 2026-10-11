@@ -29,5 +29,6 @@ private:
 bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error);
 // OutRunDesktop.ini in `folder`, written with comments when it does not exist. When it is new and the folder has
 // an OutRun2006Tweaks.ini, the new file is left without [Controls] so that the Tweaks bindings get imported.
-Ini load_desktop_settings(const std::string& folder);
+// create_if_missing=false (a latched test process): read only; a missing file is simply empty.
+Ini load_desktop_settings(const std::string& folder,bool create_if_missing=true);
 }

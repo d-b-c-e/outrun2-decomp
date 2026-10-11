@@ -187,7 +187,8 @@ bool exe_image_write_cache(const std::string& path,const std::vector<std::uint8_
     return true;
 }
 
-bool exe_image_load_cache(const std::string& path,std::string* error){
+ExeImageVerifyHook& exe_image_verify_hook(){static ExeImageVerifyHook hook=nullptr;return hook;}
+bool exe_image_load_cache(const std::string& path,std::string* error,bool rewrite_in_place){
     std::vector<std::uint8_t> file;
     if(!read_file(path,file,64u<<20,error))return false;
     if(file.size()<CacheHeader||std::memcmp(file.data(),CacheMagic,8)!=0||rd32(file.data()+8)!=CacheVersion||
@@ -199,8 +200,9 @@ bool exe_image_load_cache(const std::string& path,std::string* error){
     const auto id=exe_image_range_set_id();
     if(std::memcmp(file.data()+32,id.data(),32)!=0){
         // Built for another range table: check again from the cached image.
-        if(!exe_image_verify(image,error))return false;
-        std::string ignored;exe_image_write_cache(path,image,&ignored);
+        const auto verify=exe_image_verify_hook();
+        if(!(verify?verify(image,error):exe_image_verify(image,error)))return false;
+        if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}
     }
     exe_image_install(std::move(image));
     return true;
