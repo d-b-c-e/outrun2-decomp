@@ -49,6 +49,25 @@ static class BundleChecks {
         {var dir=Copy();CompletionBundle.Finalize(dir);var file=Path.Combine(dir,"source.jsonl");
          File.WriteAllText(file,File.ReadAllText(file).Replace("spike-only","spike-test"));
          Refuse(()=>CompletionBundle.Read(dir),"Changed but still valid JSON metadata is refused by file hash");}
+        {var dir=Copy();CompletionBundle.Finalize(dir);Field(dir,14,"1");Field(dir,10,"3");
+         Refuse(()=>CompletionBundle.Read(dir),"Changed but semantically valid worker report is refused by seal hash");}
+        {var dir=Copy();File.Copy(Path.Combine(capture,"late.jsonl"),Path.Combine(dir,"source.jsonl"),true);
+         Refuse(()=>CompletionBundle.Finalize(dir),"Eligible report cannot seal another run's late-complete source");
+         Check(!File.Exists(Path.Combine(dir,"complete.tsv")),"Swapped attempt gets no seal");
+         ArtifactSeal.Complete(dir,CompletionBundle.Required);
+         Refuse(()=>CompletionBundle.Read(dir),"Generic seal cannot validate a swapped report/source pair");}
+        {var dir=Copy();File.Copy(Path.Combine(capture,"late.jsonl"),Path.Combine(dir,"source.jsonl"),true);
+         Field(dir,21,new FileInfo(Path.Combine(dir,"source.jsonl")).Length.ToString());Field(dir,22,ArtifactSeal.Hash(Path.Combine(dir,"source.jsonl")));
+         Refuse(()=>CompletionBundle.Finalize(dir),"Correct file hash with a different attempt nonce still refuses");}
+        {var dir=Copy();Field(dir,22,new string('0',64));
+         Refuse(()=>CompletionBundle.Finalize(dir),"Correct nonce with an incorrect worker source hash refuses");}
+        {var dir=Copy();Field(dir,21,"1");Refuse(()=>CompletionBundle.Finalize(dir),"Incorrect worker source length refuses");}
+        {var dir=Copy();Field(dir,15,"1");Field(dir,10,"3");ArtifactSeal.Complete(dir,CompletionBundle.Required);
+         Refuse(()=>CompletionBundle.Read(dir),"Pre-end foreign producer loss refuses even with reconciled counts");}
+        {var dir=Copy();Field(dir,23,"1");Field(dir,10,"3");CompletionBundle.Finalize(dir);
+         Check(CompletionBundle.Read(dir).Length==2,"Foreign post-end diagnostics are distinct from capture loss");}
+        {var dir=Copy();File.WriteAllText(Path.Combine(dir,"unexpected.bin"),"extra");ArtifactSeal.Complete(dir,CompletionBundle.Required.Concat(new[]{"unexpected.bin"}).ToArray());
+         Refuse(()=>CompletionBundle.Read(dir),"Closed fixture contract refuses extra sealed members");}
         foreach(var (column,value) in new[]{(1,"999"),(2,"0"),(3,"3"),(4,"1"),(5,"durationLimit"),(6,"0"),(7,"0"),(8,"0"),(9,"1"),
             (10,"3"),(11,"1"),(12,"1"),(13,"1"),(16,"1"),(17,"1"),(18,"1"),(19,"1"),(10,"-1"),(10,"1.0")}){
             var dir=Copy();Field(dir,column,value);ArtifactSeal.Complete(dir,CompletionBundle.Required);

@@ -42,7 +42,7 @@ struct Report {
     // Live reads are snapshots; reconcile only after capture_counts_final AND producer calls quiesce.
     // Post-end diagnostic calls can still advance refusal counters after capture itself has finished.
     Outcome outcome{};
-    std::uint64_t attempted{},accepted{},written{},queue_full{},invalid{},after_failure{},after_end{},wrong_producer{},declared_last{},last_written{};
+    std::uint64_t attempted{},accepted{},written{},queue_full{},invalid{},after_failure{},after_end{},wrong_producer{},after_end_wrong_producer{},declared_last{},last_written{};
     std::size_t ring_bytes{};
     bool producer_done{},worker_done{},drain_timed_out{};
     bool first_rejected{},capture_counts_final{}; // first pre-end loss rejection, not a later refusal
@@ -59,7 +59,7 @@ struct State {
     std::atomic<std::uint64_t> read{0},write{0};
     std::atomic<Outcome> outcome{Outcome::Open};
     std::atomic<bool> producer_done{false},worker_done{false},drain_timed_out{false};
-    std::atomic<std::uint64_t> attempted{0},accepted{0},written{0},queue_full{0},invalid{0},after_failure{0},after_end{0},wrong_producer{0},declared_last{0},last_written{0};
+    std::atomic<std::uint64_t> attempted{0},accepted{0},written{0},queue_full{0},invalid{0},after_failure{0},after_end{0},wrong_producer{0},after_end_wrong_producer{0},declared_last{0},last_written{0};
     std::atomic_flag producer_busy=ATOMIC_FLAG_INIT;
     std::thread::id producer_thread;
     bool producer_thread_set{};
@@ -92,6 +92,7 @@ struct State {
         Report r;r.producer_done=producer_done.load(std::memory_order_acquire);r.worker_done=worker_done.load(std::memory_order_acquire);
         r.outcome=outcome.load();r.attempted=attempted;r.accepted=accepted;r.written=written;
         r.queue_full=queue_full;r.invalid=invalid;r.after_failure=after_failure;r.after_end=after_end;r.wrong_producer=wrong_producer;r.declared_last=declared_last;r.last_written=last_written;
+        r.after_end_wrong_producer=after_end_wrong_producer;
         r.ring_bytes=ring.capacity()*sizeof(Packet);r.drain_timed_out=drain_timed_out;
         r.first_rejected=rejection_ready.load(std::memory_order_acquire);
         if(r.first_rejected){r.first_rejected_sequence=first_rejected_sequence;r.first_rejected_us=first_rejected_us;r.first_rejected_reason=first_rejected_reason;}
@@ -108,14 +109,14 @@ class Producer {
     std::int64_t last_us_=-1;
     std::uint64_t next_{};
     struct Entry {
-        State& s;bool acquired{},correct{};
+        State& s;bool acquired{},correct{},post_end{};
         explicit Entry(State& state):s(state){
             acquired=!s.producer_busy.test_and_set(std::memory_order_acquire);
             if(acquired){
                 if(!s.producer_thread_set){s.producer_thread=std::this_thread::get_id();s.producer_thread_set=true;}
                 correct=s.producer_thread==std::this_thread::get_id();
             }
-            if(!correct)s.fail(Outcome::WrongProducer);
+            if(!correct){post_end=s.producer_done.load(std::memory_order_acquire);if(!post_end)s.fail(Outcome::WrongProducer);}
         }
         ~Entry(){if(acquired)s.producer_busy.clear(std::memory_order_release);}
     };
@@ -129,7 +130,11 @@ public:
     bool push(const Packet& p){
         ++s_->attempted;
         Entry entry(*s_);
-        if(!entry.correct){++s_->wrong_producer;if(!s_->producer_done.load())s_->rejected(p,Outcome::WrongProducer);return false;}
+        if(!entry.correct){
+            if(entry.post_end)++s_->after_end_wrong_producer;
+            else{++s_->wrong_producer;s_->rejected(p,Outcome::WrongProducer);}
+            return false;
+        }
         if(ended_){++s_->after_end;return false;}
         if(s_->outcome.load()!=Outcome::Open){++s_->after_failure;return false;}
         bool valid=p.width==s_->width&&p.sequence==next_&&p.sequence!=UINT64_MAX&&p.source_us>=0&&p.source_us>last_us_;

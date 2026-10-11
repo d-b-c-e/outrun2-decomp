@@ -65,7 +65,11 @@ if args.mutations:
     original=(here/'managed/CompletionBundle.cs').read_text()
     variants={
       'bundle-ignores-sealed-hashes': ([('ArtifactSeal.Verify(directory,Required);','/* omitted seal verification */')],
-                                    'Changed but still valid JSON metadata is refused by file hash'),
+                                    'Changed but semantically valid worker report is refused by seal hash'),
+      'bundle-report-not-bound': ([('BindSource(directory,p,records[0].Metadata);','/* no source/report identity binding */')],
+                                    "Eligible report cannot seal another run's late-complete source"),
+      'bundle-allows-extra-members': ([('ExactInventory(directory);','/* accepts an open-ended inventory */')],
+                                    'Closed fixture contract refuses extra sealed members'),
       'bundle-trusts-inner-footer': ([
         ('Require(p[1]=="2"&&p[2]=="1"&&p[5]=="stopped","Worker was not eligible to seal");','/* ignore terminal outcome */'),
         ('Require(p[6]=="1"&&p[7]=="1"&&p[8]=="1"&&p[9]=="0","Worker/producer not quiescent or drain timed out");','/* ignore timeout */'),

@@ -47,7 +47,7 @@ std::unique_ptr<Controller> controller(std::shared_ptr<Trace> t,std::size_t cap=
     return std::make_unique<Controller>(cap,2,cap*sizeof(Packet),std::make_unique<FakeSink>(std::move(t)),1,std::move(hooks));
 }
 void reconcile(const Report& r){
-    check(r.attempted==r.accepted+r.queue_full+r.invalid+r.after_failure+r.after_end+r.wrong_producer,"attempt reconciliation");
+    check(r.attempted==r.accepted+r.queue_full+r.invalid+r.after_failure+r.after_end+r.wrong_producer+r.after_end_wrong_producer,"attempt reconciliation");
     check(r.written<=r.accepted,"written cannot exceed accepted");
     if(r.capture_counts_final)check(r.accepted==r.written+r.discarded,"accepted packet reconciliation");
     if(r.may_seal()){
@@ -61,7 +61,10 @@ void normal(){
     auto t=trace();t->write_gate.enabled=true;auto c=controller(t);auto p=c->producer();
     auto first=packet(1);check(p.push(first),"first accepted");wait([&]{return t->write_gate.entered.load();});
     first.values[0]=999;check(p.push(packet(2))&&p.push(packet(3)),"producer proceeds while sink is paused");
-    p.finish(3);t->release();const auto r=c->drain(2s);done(p);
+    p.finish(3);
+    std::thread during_drain([&]{p.push(packet(4));});during_drain.join();
+    check(p.report().outcome==Outcome::Draining&&p.report().after_end_wrong_producer==1,"foreign post-end call does not abort an ordered drain");
+    t->release();const auto r=c->drain(2s);done(p);
     check(r.may_seal()&&t->inner_complete&&t->stops==1&&t->abandons==0,"clean drain completes");
     check(t->rows.size()==3&&t->rows[0].values[0]==1&&t->rows[2].source_us==300&&t->rows[2].sequence==3,"owned snapshots and source times preserved");
     check(t->owner_calls==0&&t->destroys==1,"all sink calls and destruction on worker");
@@ -70,7 +73,7 @@ void normal(){
     check(after.outcome==Outcome::Complete&&after.after_end==1,"completion first is not downgraded by later cancellation");reconcile(after);
     check(!after.first_rejected,"post-end refusal is not a lost capture frame");
     std::thread other([&]{p.push(packet(5));});other.join();const auto foreign=p.report();
-    check(foreign.may_seal()&&foreign.wrong_producer==1&&!foreign.first_rejected,"foreign post-end call cannot label a clean tape lossy");reconcile(foreign);
+    check(foreign.may_seal()&&foreign.wrong_producer==0&&foreign.after_end_wrong_producer==2&&!foreign.first_rejected,"foreign post-end call cannot label a clean tape lossy");reconcile(foreign);
 }
 
 void overflow(){

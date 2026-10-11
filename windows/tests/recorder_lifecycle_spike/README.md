@@ -80,7 +80,7 @@ from private copies, never edits to the reviewed checkout.
   not final counts.
 
 `attempted = accepted + queue_full + invalid + after_failure + after_end +
-wrong_producer` after calls quiesce. Once producer and worker are both done,
+wrong_producer + after_end_wrong_producer` after calls quiesce. Once producer and worker are both done,
 `accepted = written + discarded`. Reports retain the first rejected source
 sequence/time/reason, declared tail, last written tail, and the sink's own reason.
 Counters from a still-running worker are observations, not a final receipt. Reconcile
@@ -90,6 +90,8 @@ Post-end diagnostic calls can still change their own counters after capture ends
 They cannot extend an already completed tape. `first_rejected` describes the first
 pre-end ingress loss (queue full, invalid packet or wrong producer); post-end and
 post-failure refusals are counts only, not a fabricated lost capture frame.
+Foreign post-end calls have their own diagnostic counter and cannot abort an
+already ordered drain. Pre-end foreign calls remain sticky capture failures.
 Sink open/write/stop/reason exceptions are contained; abandon and destructors
 are required to be noexcept. A throwing destructor violates this contract and
 terminates the host. The final completion-mutex operation also assumes a valid
@@ -144,9 +146,26 @@ report and JSONL, using the existing toolkit `ArtifactSeal` implementation and
 `SessionReader`. No new seal format or toolkit API is introduced. The required
 members are `bundle.meta`, `worker.tsv` and `source.jsonl`, bound by lengths and
 SHA-256 in `complete.tsv`. The fixture-only discriminator is
-`dbce.shim.worker-bundle-spike@1`; it must never qualify input or trajectory replay.
-The worker-report layout is exactly 20 TSV fields in this proof, with the
+`dbce.shim.worker-bundle-spike@2`; it must never qualify input or trajectory replay.
+The worker-report layout is exactly 24 TSV fields in this proof, with the
 prototype's Complete enum value 2. It is not an extensible production wire format.
+
+The native worker now binds its result to this specific stream. Every attempted
+capture gets a fresh 128-bit BCrypt nonce, written both in the native metadata
+and the report. After successful inner stop/close, the same worker opens the
+closed file denying writes/deletes, reads at most 64 MiB and records its exact
+size/SHA-256 before it can publish Complete. Hashing is included in the existing
+drain deadline; hashing failure or a late finish cannot produce eligibility.
+The shared identity storage is read only after acquiring worker_done. Native
+hashes are checked by the independent .NET SHA-256 implementation through
+ArtifactSeal. The finalizer/read path checks both nonce and exact byte identity,
+and the seal itself then binds report and source together.
+
+Nene's review of `2dd8903` found the old v1 envelope accepted a normal report
+paired with the late run's same-shaped inner-complete stream. That historical
+receipt does not qualify trusted-result binding. The new swapped-attempt tests
+cover both finalize and read, even with a generic valid seal; nonce-only and
+hash/length mismatches are independent controls. No v1 bundle is silently adopted.
 
 The finalizer requires a successful, finished producer and worker, consistent
 nonempty source counts/tail and no capture loss or timeout. The full production
@@ -156,7 +175,10 @@ two-value packet workload; that is not a general-purpose Core frame decoder.
 Actual failed, limited and late-complete native captures cannot finalize, and
 remain refused even if a generic valid file seal is manually added to them.
 
-Read returns rows only after full seal and semantic validation. File handles deny
+Read returns rows only after full seal and semantic validation. The sealed member
+set must equal the three required names exactly; extra members are refused before
+the generic verifier opens them. Pre-end wrong-producer counts must be zero;
+post-end diagnostics have separate counts. File handles deny
 ordinary write/delete sharing throughout validation/publication, and fixed paths
 plus all ancestors reject reparse points. An open writer prevents sealing.
 Complete uses the existing temporary-file plus non-overwriting rename behavior;
@@ -171,6 +193,9 @@ the whole bundle or replacing ancestor directories concurrently. It neither
 asserts power-loss durability nor bounds synchronous hash/seal I/O. Choosing the
 runtime finalizer host, its deadline and P21 teardown behavior is still required.
 This managed finalizer is a conformance fixture, not code loaded into OutRun.
+The known workload begins at sequence 1. Production must carry first_sequence
+and validate declared - first + 1 == written instead of this fixture's
+accepted == written == declared identity.
 
 **Still outside this proof:** the actual profile/caps/event/adapter bundle,
 maximum serialized byte preflight, recorded enum adoption and per-input/physics

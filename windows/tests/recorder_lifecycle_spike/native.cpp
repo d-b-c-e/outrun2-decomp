@@ -1,5 +1,7 @@
 #include "worker.hpp"
 #include "session_writer.h"
+#include "../../shim/sha256.hpp"
+#include <bcrypt.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -7,15 +9,37 @@ using namespace recorder_spike;
 using namespace std::chrono_literals;
 namespace fs=std::filesystem;
 struct Gate {std::atomic<bool> entered{false},resume{false};};
+struct FileIdentity {
+    std::string nonce,sha;
+    std::uint64_t bytes{};
+    const std::thread::id controller=std::this_thread::get_id();
+    FileIdentity(){
+        std::array<std::uint8_t,16> random{};
+        if(BCryptGenRandom(nullptr,random.data(),ULONG(random.size()),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0)throw std::runtime_error("capture nonce failed");
+        nonce=dbce::shim::hex(random.data(),random.size());
+    }
+    void closed_source(const fs::path& path){
+        if(std::this_thread::get_id()==controller)throw std::runtime_error("identity must be recorded by the worker");
+        struct File {HANDLE h;~File(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}} file{
+            CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};
+        LARGE_INTEGER size{};
+        if(file.h==INVALID_HANDLE_VALUE||!GetFileSizeEx(file.h,&size)||size.QuadPart<=0||size.QuadPart>64*1024*1024)throw std::runtime_error("closed capture size unavailable");
+        std::vector<std::uint8_t> data(std::size_t(size.QuadPart));DWORD count=0;
+        if(!ReadFile(file.h,data.data(),DWORD(data.size()),&count,nullptr)||count!=data.size())throw std::runtime_error("closed capture hash read failed");
+        sha=dbce::shim::hex(dbce::shim::sha256(data.data(),data.size()));bytes=data.size();
+    }
+};
 struct NativeSink final:Sink {
     dbce::session::Writer writer;
     fs::path path;
     dbce::session::Limits limits;
     std::shared_ptr<Gate> write_gate,stop_gate;
-    explicit NativeSink(fs::path p):path(std::move(p)){}
+    const std::shared_ptr<FileIdentity> identity;
+    explicit NativeSink(fs::path p,std::shared_ptr<FileIdentity> id):path(std::move(p)),identity(std::move(id)){}
     bool open()override{
         dbce::session::Metadata m;m.game="outrun-recorder-lifecycle-fixture";m.pluginVersion="spike-only";m.toolkitVersion="writer-85147b8";
         m.properties["qualification"]="offline worker lifecycle, no game or device";
+        m.properties["captureNonce"]=identity->nonce;
         return writer.open(path.wstring(),m,limits);
     }
     static void gate(const std::shared_ptr<Gate>& g){if(g){g->entered=true;while(!g->resume)std::this_thread::yield();}}
@@ -27,7 +51,12 @@ struct NativeSink final:Sink {
         for(std::uint32_t i=0;i<p.width;++i)channels["value."+std::to_string(i)]=p.values[i];
         return writer.sample(double(p.source_us)/1000000.0,channels);
     }
-    bool stop()override{gate(stop_gate);return writer.stop();}
+    bool stop()override{
+        gate(stop_gate);
+        if(!writer.stop())return false;
+        if(writer.active())throw std::runtime_error("writer remained open after stop");
+        identity->closed_source(path);return true;
+    }
     bool stopped_at_limit()const override{
         const auto& r=writer.reason();
         return !writer.active()&&(r=="durationLimit"||r=="fileSizeLimit"||r=="recordSizeLimit");
@@ -46,7 +75,8 @@ int main(int argc,char** argv){
         fs::path root=argv[1];if(fs::exists(root))throw std::runtime_error("new result directory required");fs::create_directories(root);
         std::ofstream reports(root/"outcomes.tsv");
         for(const std::string mode:{"normal","abandoned","limited","late"}){
-            auto sink=std::make_unique<NativeSink>(root/(mode+".jsonl"));
+            auto identity=std::make_shared<FileIdentity>();
+            auto sink=std::make_unique<NativeSink>(root/(mode+".jsonl"),identity);
             auto block=std::make_shared<Gate>();
             if(mode=="abandoned")sink->write_gate=block;
             if(mode=="late")sink->stop_gate=block;
@@ -68,7 +98,8 @@ int main(int argc,char** argv){
             reports<<mode<<'\t'<<int(r.outcome)<<'\t'<<r.may_seal()<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.sink_reason
                 <<'\t'<<r.producer_done<<'\t'<<r.worker_done<<'\t'<<r.capture_counts_final<<'\t'<<r.drain_timed_out
                 <<'\t'<<r.attempted<<'\t'<<r.queue_full<<'\t'<<r.invalid<<'\t'<<r.after_failure<<'\t'<<r.after_end
-                <<'\t'<<r.wrong_producer<<'\t'<<r.declared_last<<'\t'<<r.last_written<<'\t'<<r.first_rejected<<'\t'<<r.discarded<<'\n';
+                <<'\t'<<r.wrong_producer<<'\t'<<r.declared_last<<'\t'<<r.last_written<<'\t'<<r.first_rejected<<'\t'<<r.discarded
+                <<'\t'<<identity->nonce<<'\t'<<identity->bytes<<'\t'<<identity->sha<<'\t'<<r.after_end_wrong_producer<<'\n';
             const auto expected=mode=="normal"?Outcome::Complete:mode=="abandoned"?Outcome::QueueFull:mode=="limited"?Outcome::WriterLimit:Outcome::TimedOut;
             if(r.outcome!=expected)throw std::runtime_error("wrong native outcome: "+mode);
         }
