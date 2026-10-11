@@ -62,7 +62,7 @@ private:
     std::set<std::string> native_refused_layouts_;
     ComPtr<ID3D11Buffer> vs_constants_;std::vector<float> vs_shadow_;      // C[256] and the pixel-centre fix (VS b0)
     bool native_enabled_{true};
-    struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{}; double ms{};
+    struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};
              std::map<std::string,std::uint64_t> refused; } native_stats_;
     Texture* texture(std::uint32_t);
     ID3D11RenderTargetView* colour_view();

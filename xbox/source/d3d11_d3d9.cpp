@@ -19,9 +19,10 @@ using namespace platform::d3d9;
 namespace {
 constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
+constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
     ComPtr<ID3DBlob> code,errors;
-    const HRESULT hr=D3DCompile(source.data(),source.size(),"pc_shader",nullptr,nullptr,entry,target,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
+    const HRESULT hr=D3DCompile(source.data(),source.size(),"pc_shader",nullptr,nullptr,entry,target,CompileFlags,0,&code,&errors);
     if(FAILED(hr))throw std::runtime_error(std::string("HLSL compile: ")+(errors?static_cast<const char*>(errors->GetBufferPointer()):"unknown error"));
     return code;
 }
@@ -44,7 +45,10 @@ void colour(std::uint32_t c,float* out){out[0]=float((c>>16)&255)/255;out[1]=flo
 std::string shader_cache_path(const std::string& source,const char* target){
     std::uint64_t h=1469598103934665603ull;
     auto mix=[&h](const char* p,std::size_t n){for(std::size_t i=0;i<n;++i){h^=std::uint8_t(p[i]);h*=1099511628211ull;}};
-    mix(source.data(),source.size());mix(target,std::strlen(target));mix("O3",2);
+    // The compile flags and the compiler version are part of the key: a change compiles again rather than
+    // loading code built another way.
+    const std::uint32_t build[2]{CompileFlags,std::uint32_t(D3D_COMPILER_VERSION)};
+    mix(source.data(),source.size());mix(target,std::strlen(target));mix(reinterpret_cast<const char*>(build),sizeof build);
     char name[40];std::snprintf(name,sizeof name,"/ps-%016llx.cso",(unsigned long long)h);
     return outrun::runtime::home()+"/shadercache"+name;
 }
@@ -109,13 +113,14 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
-    if(query_live_)context_->End(queries_[query_index_].Get());
+    if(query_live_){context_->End(queries_[query_index_].Get());query_pending_[query_index_]=true;}
+    collect_queries(false);   // what the GPU has finished; the rest of the diagnostic count is not waited for
     std::printf("shader programs: %u compiled, %u from the cache, %.0f ms in total, slowest %.0f ms\n",
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
-    std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache (%.0f ms); %llu buffer uploads (%llu bytes)\n",
-                (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.ms,
+    std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
+                (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
     for(const auto& r:native_stats_.refused)std::printf("  CPU vertex path: %s (%llu draws)\n",r.first.c_str(),(unsigned long long)r.second);
 }
@@ -182,7 +187,10 @@ void D3D11D3D9Device::begin_frame(){
     if(msaa_live_)ensure_msaa();
     bound_=Bound{};
     if(!count_only){
-        if(query_pending_[query_index_])collect_queries(true);   // three frames behind: the GPU is that far back
+        // A slot three frames old that the GPU has not answered yet: its sample (diagnostics only) is dropped and the
+        // query reissued, never waited for; OR2_XBOX_DRAW_STATS waits, for its per-frame log.
+        static const bool stats=std::getenv("OR2_XBOX_DRAW_STATS")!=nullptr;
+        if(query_pending_[query_index_]){collect_queries(stats);query_pending_[query_index_]=false;}
         context_->Begin(queries_[query_index_].Get());query_live_=true;}
 }
 void D3D11D3D9Device::collect_queries(bool wait_all){
@@ -341,7 +349,7 @@ D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::strin
         }
     }
     const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
-    ++(loaded?native_stats_.loaded:native_stats_.compiled);native_stats_.ms+=ms;
+    ++(loaded?native_stats_.loaded:p.shader?native_stats_.compiled:native_stats_.failed);native_stats_.ms+=ms;
     std::printf("shader: vertex program %zu (%zu blobs) %s in %.0f ms\n",native_programs_.size()+1,program.blobs.size(),loaded?"loaded":"compiled",ms);
     return &(native_programs_[key]=std::move(p));
 }
