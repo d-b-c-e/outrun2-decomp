@@ -4713,7 +4713,7 @@ std::uint32_t native_frame_platform_call(void* user,std::uint32_t pc,const std::
         if(in.pc_input_layer){
             native_pc_input_set_pad(*b.context,in.pc_pad);
             PcInputDevice d{};const auto m=b.context->mode_state.current;
-            in.pc_record_used=native_pc_input_update_406fa0(*b.context,d)&&(m==16u||m==18u);
+            in.pc_record_used=native_pc_input_update_406fa0(*b.context,d)&&(m==16u||m==18u)&&(!in.pc_overlay||in.pc_overlay_yield);
             if(in.pc_record_used)in.pc_device=d;
             if(std::getenv("OR2_INPUT_DEBUG")){static std::string last;auto& st=native_pc_input_stats();
                 if(st.last_error!=last){last=st.last_error;std::fprintf(stderr,"[input] %s\n",last.c_str());}

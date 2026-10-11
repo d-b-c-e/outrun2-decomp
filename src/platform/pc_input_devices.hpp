@@ -24,6 +24,10 @@ struct PcDirectInputPad {
     std::array<std::uint8_t,32> buttons{};
 };
 void native_pc_input_set_pad(NativeRuntimeContext&,const PcDirectInputPad&);
+// The keyboard device's GetDeviceState (DIK key states, bit 7 down): a platform with a keyboard sets it (the
+// desktop build, outside test processes); unset, the keyboard reads all keys up, as on the consoles.
+using PcKeyboardSource=void(*)(std::uint8_t keys[256]);
+PcKeyboardSource& native_pc_keyboard_source();
 // 403DE0 (41779B, after the D3D device): DirectInput8Create, EnumDevices
 // (game controllers -> 403EF0), then the keyboard. Runs once.
 bool native_pc_input_create_403de0(NativeRuntimeContext&);

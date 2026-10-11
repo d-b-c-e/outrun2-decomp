@@ -8,6 +8,8 @@
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "test_fence.hpp"
+#include "desktop_keyboard.hpp"
+#include "platform/pc_input_devices.hpp"
 #include <windows.h>
 #include <shellapi.h>
 #include <winrt/base.h>
@@ -19,6 +21,13 @@ namespace {
 bool closed=false,borderless=true;
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){closed=true;return 0;}
+    // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
+    // window loses the focus. Alt+F4 and the other system keys still reach DefWindowProc.
+    if(message==WM_KEYDOWN||message==WM_SYSKEYDOWN||message==WM_KEYUP||message==WM_SYSKEYUP){
+        const unsigned scan=(unsigned(l)>>16)&0xffu;
+        if(scan)outrun::desktop::desktop_keys()[scan|((unsigned(l)>>24)&1u?0x80u:0u)]=message==WM_KEYDOWN||message==WM_SYSKEYDOWN?0x80u:0u;
+    }
+    if(message==WM_KILLFOCUS)outrun::desktop::desktop_keys().fill(0);
     if(message==WM_SETCURSOR&&borderless&&LOWORD(l)==HTCLIENT){SetCursor(nullptr);return TRUE;}
     return DefWindowProcW(hwnd,message,w,l);
 }
@@ -126,6 +135,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
+        // Ordinary play: the game's own keyboard (the reconstructed PC keyboard device and its key tables).
+        outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
+            const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
         outrun::desktop::wheel_input_configure(settings);
         outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
     }else{

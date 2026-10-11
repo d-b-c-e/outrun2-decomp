@@ -151,12 +151,13 @@ constexpr std::uint32_t PadAxes=5u,PadButtons=10u;
 }
 NativePcInputStats& native_pc_input_stats(){return stats_;}
 void native_pc_input_set_pad(NativeRuntimeContext&,const PcDirectInputPad& pad){state().pad=pad;}
+PcKeyboardSource& native_pc_keyboard_source(){static PcKeyboardSource source=nullptr;return source;}
 const std::uint8_t* native_pc_input_record(NativeRuntimeContext&){return state().record.data();}
 namespace {
 // The fake DirectInput device state (GetDeviceState, COM +24).
 std::uint32_t device_state(State& s,bool keyboard,std::uint8_t* p,std::uint32_t size){
     std::memset(p,0,size);
-    if(keyboard)return 0u;
+    if(keyboard){if(const auto source=native_pc_keyboard_source();source&&size>=256u)source(p);return 0u;}
     if(size<0x50u)return 0x80070057u;                       // E_INVALIDARG
     for(unsigned k=0;k<8;++k)put32(p+k*4,std::uint32_t(s.pad.axes[k]));
     put32(p+0x20,s.pad.pov);put32(p+0x24,0xffffffffu);put32(p+0x28,0xffffffffu);put32(p+0x2c,0xffffffffu);

@@ -18,6 +18,9 @@ struct NativeInputState {
     // the race reads it through the PC layer (406FA0) instead of pc_device.
     PcDirectInputPad pc_pad{};
     bool pc_input_layer{},pc_record_used{};
+    // Desktop: pc_device carries the wheel (the PC layer still runs for the keyboard). The race reads the PC layer's
+    // record instead only in a frame where the wheel yields (it is idle and a key is held).
+    bool pc_overlay{},pc_overlay_yield{};
     bool connected{};
     std::int32_t steering{};       // -128..127
     std::uint32_t accelerator{};   // 0..255

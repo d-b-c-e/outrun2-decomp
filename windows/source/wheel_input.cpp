@@ -3,6 +3,7 @@
 #include "desktop_settings.hpp"
 #include "test_injection.hpp"
 #include "native_window.hpp"
+#include "desktop_keyboard.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #define DIRECTINPUT_VERSION 0x0800
@@ -285,19 +286,25 @@ void wheel_input_configure(const Ini& ini){
 void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
     if(!g.configured)return;
     if(!g.started)start();
-    if(g.open.empty())return;
-    inject::poll();
-    for(Device* d:g.open)poll(*d);
-    log_activity();
     const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
     const bool race=mode==16u||mode==18u;
-    std::uint32_t held=0;
-    for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
-    held|=gear_pulses(runtime,race);
+    // Outside the race the menus read these edges, not the PC layer: the original default menu keys (61E678:
+    // Enter, Esc, the arrows) count as the matching buttons. In the race the keyboard is the PC layer's own.
+    std::uint32_t keys=0;
+    if(!race){
+        using outrun::desktop::desktop_key;
+        if(desktop_key(0x1c))keys|=1u<<Confirm;if(desktop_key(0x01))keys|=1u<<Back;
+        if(desktop_key(0xc8))keys|=1u<<NavUp;if(desktop_key(0xd0))keys|=1u<<NavDown;
+        if(desktop_key(0xcb))keys|=1u<<NavLeft;if(desktop_key(0xcd))keys|=1u<<NavRight;
+    }
+    if(!g.open.empty()){inject::poll();for(Device* d:g.open)poll(*d);log_activity();}
+    std::uint32_t held=keys;
+    if(!g.open.empty())for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
+    if(!g.open.empty())held|=gear_pulses(runtime,race);
     const std::uint32_t down=held&~g.previous_buttons;
     g.previous_buttons=held;
     auto on=[](std::uint32_t bits,Button b){return (bits&(1u<<b))!=0;};
-    const Bound* steer_binding=find("steer");
+    const Bound* steer_binding=g.open.empty()?nullptr:find("steer");
     std::int32_t steer=0;std::uint32_t accel=0,brake=0;
     if(held||steer_binding)out.connected=true;
     if(steer_binding){
@@ -309,7 +316,10 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
         steer=std::int32_t(std::lround(n*32767.0));
         accel=std::uint32_t(std::lround(value("throttle")*255.0));
         brake=std::uint32_t(std::lround(value("brake")*255.0));
-        out.pc_input_layer=false;
+        // The PC layer stays on for the keyboard (its own device and key tables): this frame's race input is the
+        // wheel, unless the wheel is idle while a key is held, when the layer's record is read instead.
+        out.pc_overlay=true;
+        out.pc_overlay_yield=std::abs(steer)<656&&accel<3u&&brake<3u&&(held&~keys)==0u&&outrun::desktop::desktop_any_key();
         out.steering=std::clamp(steer/256,-128,127);
         out.accelerator=std::max(out.accelerator,accel);
         out.brake=std::max(out.brake,brake);
