@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import pathlib
 import shutil
 import subprocess
@@ -85,10 +86,11 @@ mutation = result / "negative-replay"
 shutil.copytree(result / "runs/resolved", mutation)
 path = mutation / "validated.tsv"
 text = path.read_text()
-old = "action.steer.value 0\n"
-if old not in text:
+old = next((line for line in text.splitlines(keepends=True) if line.startswith("action.steer.value ")), None)
+if old is None:
     raise RuntimeError("Exact-replay mutation anchor missing")
-path.write_text(text.replace(old, "action.steer.value 0.0000000000000001\n", 1))
+changed = math.nextafter(float(old.split()[1]), math.inf)
+path.write_text(text.replace(old, "action.steer.value " + repr(changed) + "\n", 1))
 mutant = run("changed-channel", [exe, "--replay", mutation / "capture"], None)
 if mutant.returncode == 0 or "preserve every real-provider producer channel" not in mutant.stderr:
     raise RuntimeError("Changed channel was not detected")
