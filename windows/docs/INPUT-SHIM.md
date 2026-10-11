@@ -1,11 +1,11 @@
 # Input shim: architecture
 
-**Draft r2, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). For review, not adopted.**
+**Draft r3, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). For review, not adopted.**
 
-r2 answers Astra's r1 review (`dbce-project-mgmt/inbox/2026-10-10-romi-input-shim-r1-review.md`): ten findings,
-cited below as R1-F1 to R1-F10, and the decisions on Q1-Q11. It also folds in the author's own notes. Section 18
-logs the rounds. Section 17 is the first proof matrix: what the fake provider and the OutRun adapter must
-demonstrate before anything runs on the rig.
+r3 closes Astra's r2 review (`dbce-project-mgmt/inbox/2026-10-10-romi-input-shim-r2-review.md`): eight findings,
+cited as R2-F1 to R2-F8, and the decisions on N1-N8. The r1 findings are cited as R1-F1 to R1-F10. Section 18 logs
+the rounds. Section 17 is the proof matrix, staged by implementation slice. Each slice is reviewed before the next
+one starts (R2-F8).
 
 This is a design for a shared input path: one portfolio-owned profile per game, shared code that owns the devices and
 resolves the bindings, and a game adapter that hands standard actions to the game. OutRun 2006 (decomp) is the
@@ -48,8 +48,17 @@ Non-goals:
 - Online and anti-cheat games: the core runs in-process (STD-018).
 - A line-count target for adapters. State, fencing and diagnostics are never cut to stay small (R1 closing note).
 
-If the core fails to start (DirectInput unavailable, or an unreadable profile), the game runs on its own input and
-never crashes. The adapter treats an absent core as "nothing available" and reports it.
+**Failure policy has two separate halves** (R2-F2):
+
+- **Ordinary process** (no test request). If the core fails to start, for example because DirectInput is unavailable
+  or the profile is absent or unreadable, the game runs on its own native input and never crashes. The adapter treats
+  an absent core as "nothing available" and reports it.
+- **Test-requested process** (latched, section 9). It never falls back to native driving, the owner's saves or the
+  network:
+  - if the fences cannot be verified, the process refuses to start the game;
+  - if the core or the profile fails after the fences are verified, the process enters a verified **inert** state.
+
+  Both cases are defined in section 9.
 
 ## 3. Terms
 
@@ -77,20 +86,33 @@ provider worker ──► epoch table ──► read samples ─► test channel
                                                                       ▼            ▼
                                                      observer (shared memory) ◄── adapter state signals
                                                      recorder queue ──► recorder worker ──► session_writer
+inject.on / inject.txt ─► control worker ─► command generation (to the tick)    status queue ─► control worker ─► runtime.log
 ```
 
 | Thread | Does | Never does |
 |---|---|---|
-| Game input thread | `tick()`: adopt the latest epoch table, read open epochs, deliver injection, resolve, run the adapter sink, publish the observer, enqueue one recorder snapshot. | Enumerate, open, close, rescan or touch files. |
-| Provider worker | Initial enumeration and opens, hot-plug rescans (bounded per pass), closes after the input thread lets go. | Read samples for frames. |
-| Recorder worker | Owns `session_writer`, drains the queue. | Run in any game callback. |
+| Game input thread | `tick()`, which: adopts the latest epoch table and command generation; reads every owned epoch; validates the whole frame (section 9); delivers injection; resolves; runs the adapter sink; publishes the observer (it is the single writer of the observer and its event ring); queues status changes and one recorder snapshot. | Enumerate, open, close, rescan, or read, parse or write a file. |
+| Provider worker | Initial enumeration and opens; hot-plug rescans (bounded per pass); bounded reacquisition; closes after the input thread lets go. | Read samples for frames. |
+| Control worker | Polls and reads the session and command files, parses and validates batches against an immutable snapshot of the profile and device capabilities, and hands the input thread an immutable **command generation**. Drains the status queue into `runtime.log` JSON lines. | Touch device objects or the observer. |
+| Recorder worker | Owns `session_writer`, drains the recorder queue. | Run in any game callback. |
 
-Reads can block in some drivers, so there is no "adds no latency" claim (R1-F5). Every sample records how long its
-read took and its age at resolution, and the status counts reads over 2 ms. An epoch is handed to the input thread as
-an immutable table generation. A close is requested by the worker, acknowledged by the input thread at its next tick,
-and only then released. A COM device object is never used by two threads at once. Whether DirectInput accepts a
-device opened on the worker and read on the input thread is confirmed live before the design is final (section 17,
-L1).
+**Rules:**
+- No file I/O on the tick (R2-F6).
+- **Times are recorded separately:** the control worker stamps acceptance, the input thread stamps activation (when it
+  adopts a generation), and each sample stamps its own delivery.
+- **Handoffs between threads** use C++-memory-model-correct primitives:
+  - an atomic pointer to immutable generations, retired only after the input thread acknowledges;
+  - bounded queues with mutexes or atomics;
+  - never a counter around unsynchronized mutable objects.
+- **Status changes** are coalesced (the latest per action or device within 100 ms) into a bounded queue. Overflow is
+  counted and reported even when recording is off.
+- **Reads can block** in some drivers, so the design makes no "adds no latency" claim (R1-F5). Every sample records
+  how long its read took and its age at resolution, and the status counts reads over 2 ms.
+- **Epochs** reach the input thread as an immutable table generation. The worker requests a close, the input thread
+  acknowledges at its next tick, and only then is the device released. No COM device object is ever used by two
+  threads at once.
+- **Still to confirm live:** whether DirectInput accepts a device opened on the worker and read on the input thread
+  (section 17, slice 4).
 
 ## 5. Profile file, writer transaction, import, discovery
 
@@ -101,22 +123,63 @@ section 5 defines, Schema 1, plus any other sections and keys, which every write
 - A second `[Controls]` or a duplicate action key refuses the whole profile and names both lines.
 - An invalid binding line is reported and skipped, per the contract.
 - A missing file binds nothing. The game runs on native input and the status says why.
-- r1 and r2 read at start only. Edits apply at the next launch (R1 Q7). A future live reload must swap the whole
+- The shim reads at start only. Edits apply at the next launch (R1 Q7). A future live reload must swap the whole
   profile atomically and then follow the rearm rules (section 6).
 
-**Writer transaction**, the same for Wheelkit (C#) and F6 (C++), with shared fixture vectors (R1-F6, Q2):
-1. Read the file's bytes and hash them (SHA-256): this is the base.
-2. Refuse when the file declares a format version this writer cannot preserve.
-3. Build the new bytes: replace only `[Controls]`. Every other section, unknown keys inside `[Controls]`, comments,
-   the BOM and line endings stay byte for byte.
-4. Write a uniquely named temporary sibling, flush it, and read it back to compare.
-5. Re-read the destination. If its hash is no longer the base, refuse with a conflict, so the other frontend's edit
-   is never lost.
-6. Replace with `ReplaceFileW` and a backup name, so that on any failure the original is restorable. When the file is
-   new, create it with a no-replace `MoveFileExW`. Then verify the destination bytes, remove the backup and report the
-   new hash.
-7. The fixture vectors include a conflict, a forced replacement failure (the destination held open), preserved
-   unknown sections, a CRLF file with a BOM, and a missing file.
+**Writer transaction.** Wheelkit (C#) and F6 (C++) run the same transaction, with shared fixture vectors (R1-F6, Q2).
+Cooperating writers are serialized; an editor that does not cooperate is detected and never silently overwritten
+(R2-F1).
+
+1. **Canonical target.**
+   - Open the target's folder and refuse a reparse point on the file or any folder above it (STD-035 item 12).
+   - Take `GetFinalPathNameByHandleW` with `VOLUME_NAME_GUID`, so drive letters, `subst` and 8.3 names alias to one
+     name, and fold its case, because NTFS here is case-insensitive.
+2. **Writer lock.**
+   - A named mutex, `Local\DbceControlsWriter-<SHA-256 of the canonical path>`, held from step 3 to step 10.
+   - The wait is bounded to 2 s; a timeout returns `busy` and writes nothing.
+   - `WAIT_ABANDONED` means a writer died while holding the lock. It counts as acquired, and recovery runs first: it
+     reports the target hash and leftover files, deletes orphan temporary files and keeps every backup.
+   - An editor that does not use the lock (Notepad, say) is not serialized. Steps 7 and 9 detect it.
+3. **Base.** Read the target's bytes, or note that it is absent, and hash them (SHA-256). The caller passes the base it
+   showed the user. If the two differ, the result is `conflict` and nothing is written.
+4. **Format.** Refuse when the file declares a format version this writer cannot preserve.
+5. **New bytes.** Replace only `[Controls]`. Every other section, unknown keys inside `[Controls]`, comments, the BOM
+   and line endings stay byte for byte.
+6. **Temporary sibling.**
+   - Created with `CREATE_NEW` under a unique name, written, `FlushFileBuffers`, closed.
+   - Read back and compared with the intended bytes.
+7. **Recheck.** Re-read the target. Its hash must still be the base; otherwise `conflict`, the temporary file is
+   deleted and the target is untouched.
+8. **Commit.**
+   - **Target exists:** `ReplaceFileW(target, temp, backup, REPLACEFILE_WRITE_THROUGH)`, where the backup is
+     `<file>.bak-<UTC>-<base hash prefix>` and holds the displaced bytes. Failures follow the documented codes:
+     - `ERROR_UNABLE_TO_REMOVE_REPLACED` or `ERROR_UNABLE_TO_MOVE_REPLACEMENT`: the target is unchanged. Delete the
+       temporary file and report the failure.
+     - `ERROR_UNABLE_TO_MOVE_REPLACEMENT_2`: the original now sits at the backup name. Move it back without replacing
+       anything. If that fails, report where the settings are and touch nothing more.
+   - **Target absent:** `MoveFileExW(temp, target, MOVEFILE_WRITE_THROUGH)` without `REPLACE_EXISTING`. If the file now
+     exists, something else created it in the meantime, so the result is `conflict` and the temporary file is deleted.
+9. **Displacement check.** The backup's hash must equal the base. If it does not, an editor that ignores the lock wrote
+   between step 7 and step 8, so the result is `conflict`. Recovery never overwrites the unknown newer bytes:
+   - if the target still holds this writer's bytes, a fresh copy of the backup replaces it, and that replacement makes
+     its own backup of this writer's bytes;
+   - if the target holds anything else, nothing is touched and every file is reported;
+   - either way the edit is reported as not applied.
+10. **Verify** that the target bytes equal the new bytes.
+11. **Backups are kept.** The backup made in this transaction is never deleted by it. Older ones are pruned to the
+    newest five, under the lock. Then the lock is released.
+12. **Result:** one of `applied`, `conflict`, `busy` or `failed`, with the new hash and the names of the backups.
+
+The fixture vectors include:
+- interleaved writers driven by test barriers at every step;
+- an editor that ignores the lock writing between steps 7 and 8;
+- an abandoned lock;
+- a timeout;
+- alias paths: case, an 8.3 name, a refused junction;
+- a race to create a missing file;
+- a forced replacement failure;
+- preserved unknown sections;
+- a CRLF file with a BOM.
 
 `Revision` stays Wheelkit's profile content hash (contract section 5). The status reports the file hash too, so a
 reader can tell which bytes were applied.
@@ -124,7 +187,7 @@ reader can tell which bytes were applied.
 **Legacy import** (Tweaks `[DirectInput]` to `dbce-controls.ini`) is **explicit** (R1 Q1):
 - It is started from Wheelkit, or from a standalone opt-in importer that runs the same vectors.
 - It shows a preview first: the proposed bytes, every note, and every Tweaks key that is not carried over.
-- It is all-or-nothing and no-clobber: it creates the file only when none exists, through step 6.
+- It is all-or-nothing and no-clobber: it creates the file only when none exists (step 8, target absent).
 - It never modifies the Tweaks or OutRun files.
 - A missing `dbce-controls.ini` is not consent to import.
 
@@ -154,13 +217,26 @@ Wheelkit needs this marker plus the executable identity before it offers to writ
 Proven reader behavior is reused behind this boundary (R1 Q4). Copying WheelFfb's reader code would not share its
 handle, so the design never claims that it does.
 
-**Shutdown order:**
-1. The adapter stops ticking.
-2. A test run ends: owned actions go neutral and a last frame is published.
-3. The recorder stops, with a bounded flush (1 s). Past the deadline the capture is incomplete.
-4. Force leases stop and unload their effects gracefully. A force process is never hard-killed.
-5. Read leases are unacquired and released.
-6. The worker is joined, and DirectInput is released.
+**Shutdown order.** The game is made safe first; disk comes last (R2-F5).
+
+1. **Stop consumption.** The adapter delivers one final neutral frame to the game, with every owned action at rest and
+   held digital actions released. Then it stops ticking. If the game's input thread has already stopped, no frame can
+   be delivered, and the report says so.
+2. **Stop physical effects.** Force leases stop and unload their effects gracefully. A force process is never
+   hard-killed, which would strand an effect on the wheel. OutRun has no force lease, so the step is recorded as `none`.
+3. **End the test run,** recording its final state.
+4. **Drain the recorder,** bounded to 1 s. Past that the capture is marked incomplete.
+5. **Release the read leases,** but only once the input thread has acknowledged that it is out of `tick()`.
+   - Shutdown waits a bounded 200 ms for a tick that is still running. It never releases a handle that may still be in
+     use.
+   - If the acknowledgement never comes (the input thread is stuck or gone in an unknown state), the leases and their
+     COM objects are deliberately leaked, process exit reclaims them, and shutdown reports `unresolved: input thread`.
+6. **Stop the workers.** Each is told to stop and joined with a bounded wait. A worker that does not stop is detached
+   and reported, never waited on forever.
+7. **Release DirectInput** if every lease was released. Then report the shutdown result: `complete`, or `unresolved`
+   naming the steps.
+
+Lease objects stay alive until their ownership has actually been released.
 
 **Identity** (STD-035 item 6). The instance GUID must match and the product GUID must equal the binding's `prod`. Both
 are checked in the listing and again after the open (`GetDeviceInfo`). A product mismatch is a status, never a
@@ -174,20 +250,38 @@ An unreadable or empty range makes the axis unqualified. Object counts are never
 Samples are rescaled from the range read back, and the injection range function returns the same values. This is
 configuration evidence, not proof of acquisition, a successful read or an observed action (R1-F8).
 
+**Read results are classified, not just compared with zero** (N2):
+
+| `GetDeviceState` / `Poll` result | Meaning | Action |
+|---|---|---|
+| any `SUCCEEDED` code (`DI_OK`, `S_FALSE`, `DI_NOEFFECT`, ...) | a valid sample | use it |
+| `DIERR_INPUTLOST`, `DIERR_NOTACQUIRED` | acquisition lost | end the usable epoch; neutral this frame; bounded reacquisition of the same verified handle (at most 3 tries over 100 ms); success opens a **new epoch** with rearm; otherwise close and rescan |
+| `DIERR_UNPLUGGED` and anything else | device gone or unknown | end the epoch; neutral; close; rescan by identity |
+
 **Epochs** (STD-035 item 7, R1-F5):
-- A failed read ends the epoch at once (N2). Its owned actions are neutral in the same frame, and each held digital
-  action gets one up edge.
-- The worker reopens only the exact identity, as a new epoch.
+- Ending an epoch neutralizes its owned actions in the same frame, with one up edge for each held digital action.
+- A test run fails on any epoch end (section 9) and never resumes silently.
+- A reopen is only ever of the exact identity, as a new epoch.
 - Rescans run on device-arrival notifications, plus every 2 s while a bound device is missing. Each pass is bounded
   to one enumeration and at most four opens.
 
-**Rearm at every epoch start**, the first open and every reopen (R1-F5, N1):
-- **Digital** actions: an object held at the epoch's first valid read is masked until it has been read released once.
-  A reconnect never manufactures a press.
-- **Pedal** actions (`throttle`, `brake`, `clutch`, `handbrake`): neutral until the normalized value has been at or
-  below 0.05 once in the epoch. A held pedal never resumes throttle.
-- **`steer`**: live at once. It is an absolute position, and holding it at centre would be wrong.
-- Each action reports `rearming` until it is ready. A test run never continues across an epoch change (section 9).
+**Becoming live** (R2-F7). An action is `live` only after a successful, fresh read in the current epoch: within
+100 ms, and not merely after verifying its objects and opening its epoch. Then its rearm rule must be met. A single
+invalid read can never rearm anything.
+
+**Rearm rules at every epoch start** (the first open and every reopen; R1-F5, N1, R2-F7). Each action's rule is chosen
+deliberately and reported with its threshold:
+
+| Action | Rule | Why |
+|---|---|---|
+| digital (`shiftUp`, `gear1`..`8`, menus, `camera`, ...) | masked until read released once | a reconnect never manufactures a press, a shift or a gate |
+| `steer` | live on the first fresh valid read | absolute position; holding it at centre would be wrong |
+| `throttle` | neutral until at or below 0.05 (normalized) once | a held throttle must never resume driving |
+| `handbrake` | neutral until at or below 0.05 once | a sudden rear lock at speed is the hazard |
+| `brake` | live on the first fresh valid read | absolute; a held brake is the safe direction and must not be suppressed |
+| `clutch` | live on the first fresh valid read | absolute; a held clutch disengages drive (the safe direction) |
+
+Each action reports `rearming` until it is ready, with the condition it is waiting for.
 
 **Hot-plug policy:** exact identity, bounded rescans, a new epoch, neutral rearm, no silent test continuation (R1 Q8).
 
@@ -206,7 +300,7 @@ struct DeviceSample {
 };
 struct ActionValue {
     float value;                     // steer -1..1, pedal 0..1, digital 0 / 1; rest when not live
-    ActionStatus status;             // live, rearming, unavailable(reason), unsupported, invalid, unbound
+    ActionStatus status;             // live, rearming, test-neutral, unavailable(reason), unsupported, invalid, unbound
     std::uint16_t sample;            // index of its source sample in this frame, or none
     bool injected;                   // its bound object carried a delivered value in that sample
 };
@@ -220,21 +314,25 @@ struct Frame {
 };
 ```
 
-- **Provenance** (R1-F1). Every action names its source sample. Every sample names its device, epoch and sequence,
-  plus the batch and content hash of exactly the objects that carried a delivered value. A later physical read
-  carries no mark, so the observer can never tag it with the last batch. Acceptance, refusal, delivery failure, epoch
-  begin and end (with the device and the reason), drops and run-state changes are separate events (section 9). They
-  are not frame fields.
+- **Provenance** (R1-F1).
+  - Every action names its source sample.
+  - Every sample names its device, epoch and sequence, plus the batch number and a hash prefix for exactly the objects
+    that carried a delivered value.
+  - The full SHA-256 for each batch number is in the batch log (section 9), which outlives the observer's event ring.
+  - A later physical read carries no mark, so the observer can never tag it with the last batch.
+  - Acceptance, refusal, delivery failure, epoch begin and end (with the device and the reason), drops and run-state
+    changes are separate events (section 9), not frame fields.
 - **Normalization** is exactly the contract's (`dbce_controls.hpp`, shared vectors).
 - **Statuses:**
 
 | Status | Meaning | Start-line group |
 |---|---|---|
-| `live` | applied, object verified, epoch open, rearmed | applied |
-| `rearming` | applied, waiting for release or rest (section 6) | applied |
+| `live` | applied, object verified, a fresh valid read in this epoch, rearmed | applied |
+| `rearming` | applied, fresh read, waiting for its rearm condition (section 6) | applied |
+| `test-neutral` | a latched process with no delivered injected value for this action in this frame. Neutral is generated at the action layer, not as a raw sample, and the real raw value is still observed (section 9). | applied |
 | `unsupported` | the adapter declares the game has no such action, with the reason | unsupported |
 | `invalid` | the contract parser refused the line, with the reason | invalid |
-| `device-missing` / `product-mismatch` / `object-missing` / `range-unqualified` / `opening` | configured but not available, with the reason | unavailable |
+| `device-missing` / `product-mismatch` / `object-missing` / `range-unqualified` / `opening` / `read-pending` (opened, no valid read yet) / `read-failed` (epoch ended, reopening) | configured but not available, with the reason | unavailable |
 | `unbound` | omitted or empty in the profile | not counted |
 
 An object bound to two actions is reported. It is refused only when the adapter declares the pair exclusive.
@@ -253,7 +351,9 @@ An adapter:
    - An override applied after the game has resolved its input is never claimed as duplicate protection. A native
      button may already have confirmed, paused, reset or shifted.
    - Max-merge cannot remove a duplicate wheel contribution from an aggregate that has lost device identity.
-   - Unrelated native input (keyboard, pad) is preserved.
+   - Unrelated native input (keyboard, pad) is preserved in ordinary play. In a latched process the adapter suppresses
+     its gameplay contribution before the consumer. It keeps an explicit stop path (window close, the pad's exit
+     combination) and reports the native values it suppressed (section 9).
    - Duplicate exposure is verified at run time, never assumed from a product or type label (R1-F9). For example, the
      adapter lists every native device that matches an owned VID/PID.
 4. **Declares a merge policy per action** (override, max-merge or native-only) between owned values and unrelated
@@ -273,64 +373,138 @@ An adapter:
 
 ## 9. Test runs: latch, admission, batches, failure, observation
 
-**States** (R1-F2):
+**States** (R1-F2, R2-F2 to R2-F4):
 
 ```
-NONE ──(inject.on present at start)──► LATCHED ──(admission passes)──► RUNNING ──► COMPLETED | EXPIRED
-                                          │                               │
-                                          └───────(any failure)───────────┴──────► FAILED
+NONE ──(inject.on exists at start)──► LATCHED ──► fences verified? ──no──► REFUSED (game never initializes)
+                                                       │yes
+                                                       ▼
+                       core/profile/admission ok? ──no──► INERT (game runs offline, all gameplay input neutral)
+                                                       │yes
+                                                       ▼
+                                   WAITING (neutral, bounded) ──first batch──► RUNNING ──► COMPLETED | EXPIRED
+                                       │                                          │
+                                       └────────────(any failure)─────────────────┴──────► FAILED
 ```
 
-- **LATCHED** is set at process start, in the entry point, before the game initializes saves or network. It is set
-  whatever the session file contains: refused, stale and expired files latch too, and the latch lasts for the
-  process.
-  - From LATCHED on, owned actions are neutral except for injected samples during RUNNING.
-  - The fences stay in force until exit.
-  - A latched process never returns owned devices to physical control.
-  - Owner trap: a stale `inject.on` disables the wheel. Mitigations: a loud start line (`TEST PROCESS: ... wheel input
-    disabled; saves redirected`), Wheelkit warning that the switch is present, and the harness's cleanup removing it
-    (STD-034 item 7). See N4.
-- **Admission**, all required:
-  - a strict session file: exactly one `nonce=` (8-64 alphanumeric) and one `expires=` (at most 1 h ahead), no
-    unknown or duplicate keys, strict UTF-8, at most 512 B;
-  - Schema 1 with at least one applied action;
-  - every adapter fence `verified`;
-  - no force path (section 11).
+**LATCHED.**
+- Decided first in the entry point: the only test is whether `inject.on` exists. That check is independent of the
+  profile, the provider and the core, so a profile or core failure cannot bypass it.
+- The latch is set whatever the file contains: refused, stale and expired files latch too.
+- It lasts for the life of the process. A latched process never returns any wheel-class action to physical control,
+  and never uses the owner's saves or the network.
+- Then the adapter installs and self-checks its fences, before the game initializes.
 
-  Otherwise FAILED.
-- **Batches.** Each version of `inject.txt` is one batch:
-  - it starts with `nonce=<session>` and `batch=<n>`, where `n` is strictly greater than the last accepted batch
-    (N5); then at most 32 commands; at most 4096 B;
-  - it is validated whole against a scratch injection table: grammar, bindings, objects, ranges and capacity;
-  - a valid batch replaces every running sample atomically, and the acceptance event carries the session, `n`, the
-    content hash (SHA-256 of the bytes), the command count and the time;
-  - the same content under the same `n` is a duplicate. It is reported and ignored (R1 Q3).
-- **FAILED** is terminal for the process. Triggers:
-  - a refused batch;
-  - an unreadable, oversize or wrong-nonce command file;
-  - a delivery failure of an injected object (unreadable range, missing object, failed read);
-  - an epoch end on any device the run has injected into.
+**REFUSED.** A fence cannot be verified, or the run folder cannot be made. The process does not initialize the game.
+It writes the reason to `%LOCALAPPDATA%\dbce\<productId>\refused-<pid>.txt` and exits with a distinct code. No owner
+file is touched.
 
-  Running samples are dropped and owned actions are neutral (one up edge each). The fences stay and the event is
-  logged. A new file never rearms the process. Physical control never returns, not even for the axis the injection
-  was holding.
-- **COMPLETED** happens on a batch whose only command is `end`. **EXPIRED** happens at the session expiry. Both drop
-  running samples and leave owned actions neutral for the rest of the process.
-- **During RUNNING**, objects not injected read the real device, as `controls-contract.md` section 6 says. The idle
-  gate keeps the rig unattended (N3).
-- **Stimuli.** Qualification uses `inject raw` built independently from the intended profile's raw objects
-  (STD-034 item 3). `inject action` resolves through the applied mapping and is for navigation only. Each acceptance
-  event records which kinds a batch used.
-- **Observer v2:** `Local\Dbce<Product>InjectObserve-<nonce>`, created by this process or refused. Seqlock,
-  versioned, with its layout documented beside the product (`windows/docs/OBSERVER.md`). It carries:
-  - run state, latch and fence states;
-  - the last frame: seq, tick time, and per action its value, status, injected flag and source sample;
-  - that frame's sample table: device, epoch, seq, read end, validity and the injection mark;
-  - the adapter's state signals, each with its frame seq and offset;
-  - an event ring of 64 entries with an increasing event sequence, so a reader detects overrun by a gap.
+**INERT.** The fences are verified, but the core, the profile, the provider or admission failed. The game runs with
+the fences in place, offline, with redirected saves.
+- Every action the adapter supports is neutral, whatever the profile does or does not name. An invalid or missing
+  profile therefore cannot shrink the owned set and slip past neutralization (R2-F2).
+- Native gameplay input is suppressed too.
+- The observer reports the reason, and the run is FAILED.
 
-  The join is explicit: batch to the first sample that carries its mark, to the frame that used that sample, to the
-  state signals published for that frame seq.
+**Admission**, all required:
+- a strict session file: exactly one `nonce=` (8-64 alphanumeric) and one `expires=` (at most 1 h ahead), no unknown
+  or duplicate keys, strict UTF-8, at most 512 B;
+- Schema 1 with at least one applied action;
+- every adapter fence `verified`;
+- no force path (section 11);
+- every owned device `live` or `rearming` after its first fresh read.
+
+The **admitted workload** is the set of owned devices at admission. All of them are required for the rest of the run,
+including any the run has not injected into yet (R2-F4).
+
+**WAITING.** Admitted, no batch yet. Every owned action is `test-neutral`. If no valid first batch arrives within
+120 s, the run is FAILED (`no command`).
+
+**Batches** (N5, R2-F4). The control worker reads each new version of `inject.txt`.
+- **Header:** `nonce=<session>` then `batch=<n>`, then at most 32 commands, at most 4096 B.
+- **Order of checks:**
+  1. Wrong nonce: FAILED.
+  2. Compute the full SHA-256 of the bytes.
+  3. `n` equal to the last accepted batch, with the same hash: an exact duplicate. Reported and ignored, and the
+     running samples keep their deadlines (no TTL extension).
+  4. `n` equal to the last accepted batch with different bytes, or `n` lower than it: FAILED.
+  5. `n` higher: validate the whole batch against a scratch injection table built from the immutable profile and the
+     device capabilities (grammar, bindings, objects, ranges, capacity).
+  6. Valid: the batch becomes an immutable command generation handed to the input thread. Any refusal: FAILED.
+- **Activation.** The input thread adopts the generation at the start of a tick, and from that tick it replaces every
+  running sample atomically. Per-object deadlines (`ms=`) count from activation.
+- **Batch log.** Every accepted, duplicate and refused batch is written to the batch log, a `runtime.log` JSON line with
+  `n`, the full hash, the command count and kinds, and the acceptance and activation times. The observer's ring may
+  overwrite its entry; the log keeps the mapping.
+
+**Frame boundary in a test run** (R2-F4).
+- Each tick reads and validates every device in the admitted workload before any value reaches the sink. A device
+  passes when its read is valid, its epoch is unchanged and every injected object for it was delivered with a readable
+  range.
+- Only if all of them pass are the injected values published. If any fails, the whole frame goes to the sink neutral
+  and the run is FAILED, so an injected action on the first device never executes when the second device fails in the
+  same tick.
+- Ordinary play keeps per-device independence. One device failing neutralizes only its own actions, so pedals still
+  work without the steering device.
+
+**RUNNING.**
+- An owned action takes a value only from an injected object delivered in this frame. Otherwise it is `test-neutral`,
+  generated at the action layer, never as a fake raw sample claiming delivery (N3, R2-F3).
+- Real raw values of non-injected objects are still read and observed, for diagnosis. They never reach an action.
+  A held physical pedal, hardware noise or another controller therefore cannot drive the game.
+- Native gameplay input (the pad, the keyboard) is suppressed before the consumer and observed. Any non-neutral native
+  value during RUNNING is reported as an event and invalidates the qualification. The stop path is kept: window close
+  and the pad's exit combination.
+- When an object's `ms=` runs out, its action returns to `test-neutral`, never to physical input.
+
+**FAILED** is terminal for the process. Its triggers:
+- a refused, regressed or conflicting batch;
+- an unreadable or oversize command file after the first committed batch;
+- the waiting timeout;
+- a delivery failure;
+- an epoch end on any device in the admitted workload;
+- a frame-boundary failure;
+- INERT.
+
+On FAILED, running samples are dropped and every owned action is neutral, with one up edge each. The fences stay and
+the event is logged. A new file never rearms the process.
+
+**COMPLETED and EXPIRED.** COMPLETED is a batch whose only command is `end`. EXPIRED is the session expiry, `expires=`.
+Both drop running samples and leave every owned action neutral for the rest of the process. Per-object expiry,
+session expiry and `end` are distinct events, and none of them resumes physical input.
+
+**Stimuli.** Qualification uses `inject raw`, built independently from the intended profile's raw objects (STD-034
+item 3). `inject action` resolves through the applied mapping and is for navigation only. The batch log records which
+kinds each batch used.
+
+**Owner-visible latch** (N4). A latched process shows an unmistakable in-game banner: "TEST MODE: wheel disabled,
+saves redirected; close the game and clear the test request in Wheelkit".
+- Wheelkit shows the same explanation, and offers an explicit **clear test request** action.
+- That action is available only while the game is closed, and only for a request whose owner receipt
+  (`owner=`/`receipt=` lines in `inject.on`, written by the harness) identifies it.
+- An unknown active request is never deleted automatically.
+
+**Observer v2:** `Local\Dbce<Product>InjectObserve-<nonce>`, created by this process or refused. Versioned; layout in
+`windows/docs/OBSERVER.md`. It carries:
+- run state, latch and fence states;
+- the last frame: seq, tick time, and per action its value, status, injected flag and source sample;
+- the frame's sample table: device, epoch, seq, read end, validity, injection mark (batch number plus hash prefix),
+  and the raw values;
+- suppressed native input;
+- the adapter's state signals, each with its frame seq and offset;
+- an event ring of 64 entries with an increasing event sequence, so a reader detects overrun by a gap.
+
+How it is written (R2-F6):
+- The input thread is the only writer.
+- A seqlock: the sequence is a `std::atomic<std::uint32_t>` in the mapping, and payload words are written as
+  `std::atomic_ref<std::uint32_t>` relaxed stores between release and acquire fences. The writer never waits on
+  readers, so a reader dying cannot stall the game.
+
+Proof required (section 17): a concurrent reader thread checks a payload checksum for torn reads, a reader process is
+killed mid-read, and the ring is overrun.
+
+The join is explicit: batch number (full hash in the batch log), to the first sample carrying its mark, to the frame
+that used that sample, to the state signals published for that frame seq.
 
 ## 10. Recording
 
@@ -393,9 +567,17 @@ R1-F8, Q11.
   - the run state and the fences;
   - read-timing counters.
 
-  Whether a status file is also needed is N6.
-- **Evidence stays apart** (STD-033 item 4). Verified objects are configuration evidence. Live status is
-  availability. Neither is an observed game response.
+  These are bounded, queued and coalesced lines written by the control worker. There is no second persistent status
+  file until a consumer needs one (N6). Each line carries the process id and start time, the run nonce (when
+  latched), the profile file hash and the build (core and adapter versions, and the executable's SHA-256). Each line
+  also carries gap counters: status lines coalesced or dropped, and recorder and observer overruns.
+- **Evidence stays apart** (STD-033 item 4, R2-F7):
+  - verified objects are configuration evidence;
+  - `live` is current availability;
+  - neither is an observed game response.
+
+  The start line is a human summary, not test proof. Final evidence joins the structured status, the batch log and
+  the observer for one process, run, profile and build, and it reports every gap.
 
 ## 13. Interception classes: candidates, not proof
 
@@ -432,7 +614,7 @@ before 453BB0 consumes `NativeInputState`. Nothing in the game reads the actions
 
 | Path | Source | Owned devices | How excluded |
 |---|---|---|---|
-| WGI `Gamepad` | `xbox/source/platform_api.cpp:24` | wheels and the DS-8X are not expected to be Gamepads | Verified at run time: at start, log every WGI Gamepad and RawGameController with VID/PID. If an owned identity appears as a Gamepad, `read_pad` drops it before the pad adapter, and the adapter reports it. |
+| WGI `Gamepad` | `xbox/source/platform_api.cpp:24` | wheels and the DS-8X are not expected to be Gamepads | Verified at run time: at start, log every WGI Gamepad and RawGameController with VID/PID. If an owned identity appears as a Gamepad, `read_pad` drops it before the pad adapter, and the adapter reports it. An adapter fixture feeds the same owned identity through a fake WGI Gamepad and through the provider, and shows exactly one consumer (slice 2). On the rig, the start-up listing corroborates which path was chosen; it is not the proof. |
 | Keyboard | none in the Xbox desktop build (no `WM_KEY*` / `GetAsyncKeyState` in `xbox/source`, `windows/source`) | — | absent |
 | PC DirectInput layer (406FA0) | emulated from `pc_pad`, which is built from the WGI pad | — | no real device behind it |
 
@@ -468,8 +650,16 @@ in the status.
 - the consumed 7D6810 steer, accelerator and brake (offset: the previous tick);
 - the record words and buttons written (offset: this tick).
 
-**Fences under the latch** (R1-F9). Each has an admission self-check: a writer that resolves outside the run folder
-refuses admission. The run folder is `%LOCALAPPDATA%\dbce\outrun2006-decomp\run-<nonce>\`.
+**Fences under the latch** (R1-F9, R2-F8, N8). Each has an admission self-check: a writer that resolves outside the run
+folder refuses admission.
+
+**Run folder.** `%LOCALAPPDATA%\dbce\outrun2006-decomp\run-<nonce>-<pid>\`.
+- It is created exclusively (`CreateDirectoryW` fails if it exists). The folder and its parents refuse reparse points.
+- It is seeded with a verified copy of the owner's SaveGame and `options.ini`: real copies, never hard links or reparse
+  aliases.
+- The copy is bounded (at most 256 files and 64 MiB), each file's path is validated to stay inside, and every file's
+  SHA-256 is pinned in the run manifest (`run.json`).
+- An empty, first-run SaveGame is a separate qualification case, not a replacement for the owner-copy run.
 
 | Writer | Source | Under the latch | Self-check |
 |---|---|---|---|
@@ -482,8 +672,14 @@ refuses admission. The run folder is `%LOCALAPPDATA%\dbce\outrun2006-decomp\run-
 | LAN | `native_network_set_platform` (`main.cpp:168`) | not installed: offline | the platform pointer is null |
 | Force | no producer in the decomp (no `CreateEffect` or vibration in `src`, `xbox/source`, `windows/source`; WGI `Gamepad.Vibration` never set) | n/a | grep evidence in the receipt |
 
-The audit is repeated whenever upstream changes are merged. Any new writer either joins the table or refuses
-admission.
+**Proof is by actual writes, not configured paths** (R2-F8):
+- The adapter fixture drives the real writer functions under a latched host configuration and checks where the bytes
+  land: a save write, `write_options`, the crash breadcrumb and the log.
+- **Undeclared writers are refused at build time.** A source-audit test lists every file-writing call site in `src`,
+  `xbox/source` and `windows/source`: `fopen` with a write mode, `ofstream`, `CreateFile*` with write access, `rename`,
+  `remove`, `std::filesystem` writes. It fails when one is missing from this table. The audit reruns on every upstream
+  merge.
+- At run time the harness's before-and-after snapshot of the game folder (STD-034 item 7) corroborates the result.
 
 **Unsupported, with reasons:**
 - clutch, handbrake, neutral and reverse: not in the game;
@@ -500,7 +696,7 @@ admission.
 | # | Decision |
 |---|---|
 | Q1 | Explicit, previewable, all-or-nothing, no-clobber import from Wheelkit or an opt-in importer. Never automatic. |
-| Q2 | One writer transaction for both frontends, one file, revision and hash checks. No mandatory Wheelkit. |
+| Q2 | One writer transaction for both frontends, one file, revision and hash checks, and a cross-process writer lock (section 5). No mandatory Wheelkit. |
 | Q3 | Whole-batch replace with identity and deduplication. An invalid batch fails the run and leaves owned actions neutral. |
 | Q4 | Reuse proven behavior behind an explicit provider boundary. No promise of shared force handles. |
 | Q5 | Second game: DRIVE (class B), after its current qualification, as an opt-in isolated spike. Class C is research only. |
@@ -511,59 +707,89 @@ admission.
 | Q10 | No stable ABI before the second adapter. An experimental bridge is allowed; a second resolver is not. |
 | Q11 | Versioned structured status plus a compatible line. Old readers fail closed. Unavailable stays separate. |
 
-**Open for round 2:**
+**Decided in round 2** (Astra's answers, adopted):
 
-| # | Question | Proposal |
+| # | Decision | Where |
 |---|---|---|
-| N1 | Rearm thresholds | Digital: read released once. Pedal: normalized value at or below 0.05 once. Steer: live at once. |
-| N2 | Is every failed read an epoch end, including a transient `DIERR_INPUTLOST`? | Yes: end at once, then reopen through the worker (the safe reading of STD-035 item 7). |
-| N3 | Do non-injected objects of owned devices stay physical during RUNNING? | Yes, per contract section 6, with the idle gate. The alternative is to neutralize every non-injected owned action during a run. |
-| N4 | A stale or expired `inject.on` latches and disables the wheel | Accept it (fail closed), with a loud start line, a Wheelkit warning and harness cleanup. |
-| N5 | Batch identity | `batch=<n>` required after the nonce, strictly increasing; content hash in the acceptance event. |
-| N6 | Structured status channel | JSON lines in `runtime.log` first. A status file only if Wheelkit needs live availability. |
-| N7 | Provider token | `shim-ini-controls-1`, so old readers fail closed. |
-| N8 | Seeding the run folder's SaveGame | A copy of the owner's SaveGame, so menus behave as usual. The alternative is empty, which shows first-run screens. |
+| N1 | Digital waits for release. Steer, brake and clutch go live on a fresh valid read. Throttle and handbrake wait for rest. Thresholds, freshness and reasons are recorded. One invalid read never rearms. | section 6 |
+| N2 | A read failure ends the usable epoch and neutralizes. A transient loss may reacquire the same verified handle, but as a new epoch with rearm. Results are classified by `SUCCEEDED`, not by nonzero. A test fails. | section 6 |
+| N3 | During a test, owned actions are neutral unless an injected value was delivered (`test-neutral`), and real raw values are observed. Native gameplay input is suppressed and observed. Ordinary play is unchanged. This is a versioned shim test policy. | section 9 |
+| N4 | Latch safely, with an unmistakable in-game banner and a Wheelkit explanation. The receipt-bound clear action works only while the game is closed. An unknown request is never deleted automatically. | section 9 |
+| N5 | Nonce, increasing `batch=<n>`, full SHA-256. An exact duplicate is ignored without extending TTLs. The same `n` with other bytes, or a regression, fails. First-file wait and per-object expiry are specified. | section 9 |
+| N6 | Bounded, queued JSON lines in `runtime.log`, with process, run, profile and build identity and gap counters. No extra status file yet. | section 12 |
+| N7 | `shim-ini-controls-1`. Astra tests real Wheelkit readers; the token is a hypothesis until that test passes. | section 12, slice 1 W |
+| N8 | A verified, bounded copy of the owner's saves and options in an exclusively created run folder, with hashes pinned and no links. First-run is a separate case. | section 15 |
 
-## 17. First proof matrix
+**Constants reviewed with the code, not here:** the 100 ms freshness window, the 0.05 rest threshold, three
+reacquisition tries over 100 ms, the 120 s first-batch wait, the 250 ms gear deadline, the 2 s writer-lock wait, the
+200 ms shutdown wait, and the queue sizes. Every one of them is reported in the status or the recorder metadata.
 
-Levels:
-- **U**: a unit test against the fake provider (no devices, no game);
-- **A**: an adapter fixture (OutRun sink and state machine on fake frames and a fake car word);
+## 17. Proof matrix, staged by slice
+
+Each slice is written as tests and code, reviewed, and accepted before the next slice starts (R2-F8). Levels:
+- **U**: a unit test on pure code and the fake provider;
+- **A**: an adapter fixture;
 - **W**: a Wheelkit-side test (Astra);
-- **L**: a live injected run under the lease and idle gate, after a source PASS;
-- **O**: the owner at the wheel.
+- **L**: on the rig under the lease and idle gate;
+- **O**: the owner.
 
-Nothing at L or O runs before U and A pass and the source is reviewed.
+**Slice 1: pure core and fake provider.** No DirectInput, no game.
 
 | # | Requirement | Proof | Level |
 |---|---|---|---|
-| P1 | Identity checked in the listing and after the open; a product mismatch is a status | fake listing with twins and a mismatched product; an identity change between listing and open | U |
-| P2 | Objects verified by offset; non-contiguous axes | fake device with X, Z and Rz only; a binding on Y gives `object-missing` | U |
-| P3 | Range read back per axis; unqualified axes refused; rescale from the read-back range | fake ranges: refused request, unreadable, empty, -32768..32767 | U |
-| P4 | A failed read ends the epoch, owned actions neutral in the same frame, one up edge | fake read failure while a button and a pedal are held | U |
-| P5 | A reopen gives a new epoch; held digital masked until released; pedal neutral until at rest; steer live | fake reconnect with the button held and the pedal at 0.8 | U |
-| P6 | The worker never blocks the tick; close handoff | fake slow enumeration and open; tick timing; close requested during a tick | U |
-| P7 | Statuses and start line after the device checks; the `unavailable` group | profile spanning every status | U |
-| P8 | Structured status JSON on start and on change | as P7, plus P4 and P5 transitions | U |
-| P9 | Old readers fail closed on `shim-ini-controls-1` | Wheelkit reader at its pinned commit against fixture log lines | W |
-| P10 | Writer transaction: preservation, conflict, replacement failure, BOM and CRLF, new file | shared fixture vectors run by the C++ writer (F6) and the C# writer | U, W |
-| P11 | Import: explicit, preview, all-or-nothing, no-clobber, sources untouched | owner Redux values (35a8aa3 vectors), an existing target refused, a failure midway | U |
-| P12 | Latch at start, whatever the session file says; never cleared | missing, stale, malformed and valid `inject.on` | U |
-| P13 | Admission requires strict session, Schema 1, every fence verified, no force | fake adapter with one unverified fence | U |
-| P14 | Batch validated whole; replace atomic; duplicate ignored; `batch=<n>` monotonic | 33 commands; a bad 5th line; the same content twice; a lower `n` | U |
-| P15 | Refused batch, delivery failure or epoch end means FAILED: neutral, terminal, no rearm on new files | each trigger, then a valid file | U |
-| P16 | `end` gives COMPLETED; expiry gives EXPIRED; owned actions neutral afterwards; physical input never returns | fake clock | U |
-| P17 | Provenance: an action names its sample, a sample names its epoch and seq and the batch of injected objects only; no mark on a later physical read | injected steer, then expiry, then a physical read | U |
-| P18 | Observer join: batch to sample to frame to state signal; ring overrun detected | fake adapter signals; 70 events | U |
-| P19 | Recorder: one producer, bounded queue, overflow makes the capture incomplete, flush deadline, metadata pins | fake slow writer; validated by the managed `SessionReader` | U |
-| P20 | OutRun sink: steer word, pedals max-merged with the pad, pedals without steering, button bits and edges | fake frames into `NativeInputState` | A |
-| P21 | OutRun H-pattern: pulse, release, deadline, retries, ambiguous gates, unavailable gear, impossible gear | fake car gear word responding late, never or twice | A |
-| P22 | OutRun fences self-check: save, options, crash, log in the run folder; LAN off; hooks off | admission fixture on the host configuration | A |
-| P23 | No duplicate consumer: WGI Gamepad and RawGameController listing at start | live start-up log on the rig, read only | L |
-| P24 | Threading: a device opened on the worker and read on the input thread | live read-only probe, no game input | L |
-| P25 | Closed loop (STD-034): staged wrong bindings, Wheelkit Apply, raw stimuli, game words move, exact restore | Astra's harness | L |
-| P26 | Multi-device: steering and pedals from the R12, gears from the DS-8X, each from its own device | P25 with DS-8X raw stimuli | L |
-| P27 | The owner drives it | at the rig | O |
+| P1 | Identity in the listing and after the open; a product mismatch is a status | fake twins, mismatched product, an identity change between listing and open | U |
+| P2 | Objects by offset; non-contiguous axes | fake device with X, Z and Rz only; a binding on Y gives `object-missing` | U |
+| P3 | Per-axis range readback; unqualified axes refused; rescale from the read-back range | refused request, unreadable, empty, -32768..32767 | U |
+| P4 | Read classification; epoch end neutral in the same frame with one up edge; bounded reacquisition opens a new epoch | `S_FALSE` used as valid; `INPUTLOST` while a button and pedals are held; `UNPLUGGED` | U |
+| P5 | Rearm per action: digital masked; throttle and handbrake wait for rest; brake, clutch and steer live on a fresh read; nothing goes live without a fresh valid read | reconnect with each action held; a stale read; one invalid read | U |
+| P6 | The worker never blocks the tick; close handoff and acknowledgement | fake slow enumeration and open; a close requested mid-tick | U |
+| P7 | Statuses, including `read-pending`, `read-failed` and `test-neutral`; start line after the device checks | a profile spanning every status | U |
+| P8 | Structured status: coalesced, bounded, identity-pinned; overflow counted with recording off | a status storm | U |
+| P9 | Old readers fail closed on `shim-ini-controls-1` and the new statuses | Wheelkit reader at its pinned commit | W |
+| P10 | Writer transaction: interleaved writers with barriers (lost-update counterexample), an editor that ignores the lock between recheck and commit, abandoned lock, timeout, aliases, missing-file race, replacement failure, preservation, BOM and CRLF | shared vectors and barrier tests, C++ (F6) and C# | U, W |
+| P11 | Import: explicit, preview, all-or-nothing, no-clobber, sources untouched | owner Redux vectors; an existing target; a failure midway | U |
+| P12 | Latch from `inject.on` existence alone; never cleared; failed-core and invalid-profile latched starts go INERT with every supported action neutral; a fence failure is REFUSED before game init | missing, stale, malformed and valid `inject.on`; core init failure; no profile | U |
+| P13 | Admission requires strict session, Schema 1, every fence verified, no force, fresh reads; the admitted workload is fixed | fake adapter with one unverified fence | U |
+| P14 | Batches: header and order of checks; exact duplicate ignored without TTL extension; same `n` with other bytes fails; regression fails; 33 commands; a bad 5th line; first-batch timeout | each case | U |
+| P15 | Frame boundary: a second-device failure in the same tick, so no injected action from the first device reaches the sink; epoch loss of a device not yet injected fails the run | two fake devices | U |
+| P16 | RUNNING: a held physical pedal outside the injection set stays `test-neutral` and its raw value is observed; native input is suppressed and flagged; per-object expiry gives `test-neutral` | fake physical holds and a fake native pad | U |
+| P17 | FAILED, COMPLETED and EXPIRED are terminal and neutral; physical input never returns; a new file never rearms | each trigger, then a valid file | U |
+| P18 | Provenance: action to sample to batch number to full hash in the batch log; no mark on a later physical read | injected steer, expiry, physical read | U |
+| P19 | Observer: single writer; a concurrent reader's torn-read checksum; a reader killed mid-read; ring overrun detected; the join | reader thread; a child reader process; 70 events | U |
+| P20 | Recorder: one producer, emission versus source times, bounded rows and bytes, overflow makes the capture incomplete, flush deadline, metadata pins | fake slow writer; managed `SessionReader` | U |
+| P21 | Shutdown order: neutral frame, then force stop (`none` here), then run end, then recorder drain, then leases; with the input thread stopped: no hang, no release of an in-use handle, `unresolved` reported | fake stuck input thread | U |
+
+**Slice 2: OutRun adapter on fakes.** No devices, no game window.
+
+| # | Requirement | Proof | Level |
+|---|---|---|---|
+| P22 | Sink: steer word, pedals max-merged with the pad, pedals without steering, button bits and edges | fake frames into `NativeInputState` | A |
+| P23 | H-pattern: pulse, release, deadline, retries, ambiguous gates, unavailable gear, impossible gear | fake gear word responding late, never or twice | A |
+| P24 | Fences by actual writes: save, `write_options`, crash, log land in the run folder; LAN not installed; dev hooks refused; an undeclared writer fails the source audit | fixture driving the real writers; source-audit test | A |
+| P25 | Pre-consumer exclusion: the same owned identity offered through a fake WGI Gamepad and through the provider reaches the game once | fake WGI pad plus fake provider | A |
+| P26 | Ordinary native-only start: no profile, the pad drives the game; unrelated pad input merges in ordinary play; latched with no profile goes INERT | host fixture | A |
+| P27 | Run folder: exclusive creation, bounded and verified copy, no links, hashes pinned | fixture on a temp tree with a junction | A |
+
+**Slice 3: real DirectInput provider.** Against fake COM devices, as WheelFfb's `injection_test` does.
+
+| # | Requirement | Proof | Level |
+|---|---|---|---|
+| P28 | P1-P6 and P21 rerun through the real provider code over fake COM objects | fake COM devices | U |
+
+**Slice 4: read-only rig.** Under the lease and idle gate, with no game input and no force.
+
+| # | Requirement | Proof | Level |
+|---|---|---|---|
+| P29 | A device opened on the worker and read on the input thread; read-time distribution | read-only probe | L |
+| P30 | The R12, DS-8X and stalk: identities, objects and ranges as read back; WGI listing corroborates P25 | read-only probe | L |
+
+**Slice 5: fenced game run** (Astra's harness).
+
+| # | Requirement | Proof | Level |
+|---|---|---|---|
+| P31 | Closed loop (STD-034): staged wrong bindings, Wheelkit Apply, raw stimuli, game words move, exact restore | harness | L |
+| P32 | Multi-device: steering and pedals from the R12, gears from the DS-8X, each from its own device | P31 with DS-8X raw stimuli | L |
+| P33 | The owner drives it | at the rig | O |
 
 ## 18. Review log
 
@@ -571,4 +797,6 @@ Nothing at L or O runs before U and A pass and the source is reviewed.
 |---|---|---|---|
 | r1 | 2026-10-10 | zero | First draft (`6a53b95`), within Astra's constraints 8795, 8815 and 8823 and addressing the 35a8aa3 findings. |
 | r1 review | 2026-10-10 | Astra | Ten findings plus answers to Q1-Q11 (`inbox/2026-10-10-romi-input-shim-r1-review.md`, hcom 8993). |
-| r2 | 2026-10-10 | zero | Every finding addressed: per-sample provenance and an event ring (F1); a terminal FAILED state with owned actions neutral and no rearm (F2); interception before the consumer, per-API audit, no after-the-fact duplicate claims (F3); one provider with read and force leases, a bridge provider and a shutdown order (F4); a thread model, read timing, rearm rules and bounded rescans (F5); one writer transaction for F6 and Wheelkit, unknown content preserved, explicit import (F6); one producer, emission versus source time, bounds, metadata, lifecycle audit first (F7); versioned structured status, old readers failing closed, STD-036 needing evidence (F8); fence self-checks gating admission and the OutRun writer audit table (F9); an H-pattern state machine on a monotonic clock (F10). Added the author's notes (enumeration off the input thread, window, background policy, one state-signal seam, core failure means native input), questions N1-N8 and the first proof matrix. |
+| r2 | 2026-10-10 | zero | `6b89385`. Every r1 finding addressed; questions N1-N8 and a first proof matrix added. |
+| r2 review | 2026-10-10 | Astra | Eight findings plus answers to N1-N8 (`inbox/2026-10-10-romi-input-shim-r2-review.md`, hcom 9109). |
+| r3 | 2026-10-10 | zero | Closes the r2 findings: a cross-process writer lock with displacement check and kept backups (F1); a test request latched from file existence alone, with REFUSED before game init and a verified INERT state (F2); one RUNNING policy, `test-neutral` at the action layer with native input suppressed and observed (F3); a frame boundary over the admitted workload, the batch order of checks, the first-batch wait, per-object expiry and the batch log with full hashes (F4); a shutdown order that is safe first and writes to disk last, with a stopped input thread handled (F5); a control worker for file I/O and status, memory-model-correct handoffs and an observer seqlock with torn-read proof (F6); `live` needing a fresh read, per-action rearm rules and identity-pinned evidence (F7); the matrix staged into five slices with the additions requested (F8). N1-N8 adopted. |
