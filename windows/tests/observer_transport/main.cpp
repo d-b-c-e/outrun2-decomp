@@ -36,15 +36,22 @@ int wmain(int argc,wchar_t** argv){
         need(published&&!torn&&s.sequence==2,"changed generation during read is refused without replacing prior snapshot");
         need(read(local,s)&&valid(s)&&s.words[0]==2,"read recovers after concurrent publication");
 
-        Storage concurrent;std::atomic<bool> ready{false},done{false};std::atomic<unsigned> successes{0},failures{0};
-        std::thread producer([&]{Writer writer(concurrent);ready=true;for(std::uint32_t g=1;g<=2000;++g)if(!writer.publish(pattern(g)))++failures;done=true;});
+        Storage concurrent;std::atomic<bool> ready{false},done{false};std::atomic<unsigned> successes{0},failures{0},distinct{0};
+        std::thread producer([&]{Writer writer(concurrent);ready=true;for(std::uint32_t g=1;g<=2000;++g){if(!writer.publish(pattern(g)))++failures;if(g%10==0)Sleep(1);}done=true;});
         std::vector<std::thread> readers;
-        for(int k=0;k<3;++k)readers.emplace_back([&]{while(!ready.load())std::this_thread::yield();std::uint64_t previous=0;do{Snapshot snap;if(read(concurrent,snap)){if(!valid(snap)||snap.sequence<previous)++failures;previous=snap.sequence;++successes;}}while(!done.load());});
-        producer.join();for(auto& r:readers)r.join();need(successes>0&&failures==0,"three overlapping readers never see a torn or reversed generation");
+        for(int k=0;k<3;++k)readers.emplace_back([&]{while(!ready.load())std::this_thread::yield();std::uint64_t previous=0;unsigned observed=0;do{Snapshot snap;if(read(concurrent,snap)){if(!valid(snap)||snap.sequence<previous)++failures;if(snap.sequence!=previous){++observed;++distinct;}previous=snap.sequence;++successes;}}while(!done.load());if(observed<50)++failures;});
+        producer.join();for(auto& r:readers)r.join();need(successes>=1000&&distinct>=150&&failures==0,"three overlapping readers never see a torn or reversed generation");
         need(read(concurrent,s)&&s.words[0]==2000&&valid(s),"final concurrent snapshot");
 
         const auto suffix=std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
         const auto name=L"Local\\DbceShimObserver-"+suffix,eventName=name+L"-entered";
+        // Model the creator's pre-construction interval: readers refuse before
+        // mapping any atomic storage. Zero-fill alone is not construction.
+        const auto early_name=name+L"-early",gate_name=early_name+L"-initialized";
+        HANDLE gate=CreateEventW(nullptr,TRUE,FALSE,gate_name.c_str());need(gate!=nullptr,"early construction gate created");
+        HANDLE early=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(Storage)),early_name.c_str());need(early!=nullptr,"unconstructed mapping created");
+        bool early_refused=false;try{Mapping reader(early_name,false);}catch(const std::runtime_error&){early_refused=true;}need(early_refused,"reader refuses before atomic construction publication");
+        CloseHandle(early);CloseHandle(gate);
         Mapping owner(name,true);Writer mapped(owner.writable());need(mapped.publish(pattern(1)),"mapped publish");
         {Mapping reader(name,false);need(read(reader.storage(),s)&&valid(s),"FILE_MAP_READ snapshot");bool refused=false;try{(void)reader.writable();}catch(const std::logic_error&){refused=true;}need(refused,"reader cannot request writable storage");}
         bool duplicate=false;try{Mapping second(name,true);}catch(const std::runtime_error&){duplicate=true;}need(duplicate,"existing mapping ownership refused");
@@ -60,6 +67,6 @@ int wmain(int argc,wchar_t** argv){
         need(TerminateProcess(pi.hProcess,73)!=0&&WaitForSingleObject(pi.hProcess,5000)==WAIT_OBJECT_0,"owned reader ended within deadline");
         DWORD code=0;need(GetExitCodeProcess(pi.hProcess,&code)&&code==73,"owned reader exit observed");
         need(mapped.publish(pattern(102))&&read(owner.storage(),s)&&valid(s),"writer and subsequent read survive reader death");
-        std::printf("PASS %d observer transport checks; %u coherent overlapping reads; no game/device/force\n",checks,successes.load());return 0;
+        std::printf("PASS %d observer transport checks; %u coherent reads, %u distinct reader generations; no game/device/force\n",checks,successes.load(),distinct.load());return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"FAIL %s\n",e.what());return 1;}
 }

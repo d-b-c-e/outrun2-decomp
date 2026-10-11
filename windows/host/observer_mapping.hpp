@@ -13,12 +13,26 @@
 namespace dbce::shim::observe {
 class Mapping {
     HANDLE handle_{};
+    HANDLE ready_{};
     void* view_{};
     bool writer_{};
 public:
     Mapping(const std::wstring& name,bool create) : writer_(create) {
         if(name.empty() || name.size()>200 || name.rfind(L"Local\\DbceShimObserver-",0)!=0)
             throw std::invalid_argument("Observer name must use its local namespace");
+        // Readers acquire this publication gate before touching atomic storage.
+        // It is signalled only after placement construction completes. Keeping
+        // its handle also prevents name reuse while a reader is still alive.
+        const auto ready_name=name+L"-initialized";
+        if(create) {
+            ready_=CreateEventW(nullptr,TRUE,FALSE,ready_name.c_str());
+            const DWORD error=GetLastError();
+            if(!ready_ || error==ERROR_ALREADY_EXISTS) {if(ready_)CloseHandle(ready_);ready_=nullptr;throw std::runtime_error("Observer readiness ownership refused");}
+        } else {
+            ready_=OpenEventW(SYNCHRONIZE,FALSE,ready_name.c_str());
+            if(!ready_ || WaitForSingleObject(ready_,0)!=WAIT_OBJECT_0) {if(ready_)CloseHandle(ready_);ready_=nullptr;throw std::runtime_error("Observer not initialized");}
+        }
+        try {
         if(create) {
             handle_=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(Storage)),name.c_str());
             const DWORD error=GetLastError();
@@ -26,12 +40,17 @@ public:
         }else handle_=OpenFileMappingW(FILE_MAP_READ,FALSE,name.c_str());
         if(!handle_) throw std::runtime_error("Observer mapping open failed");
         view_=MapViewOfFile(handle_,create?FILE_MAP_ALL_ACCESS:FILE_MAP_READ,0,0,sizeof(Storage));
-        if(!view_) {CloseHandle(handle_);handle_=nullptr;throw std::runtime_error("Observer map failed");}
-        if(create) new(view_) Storage();
+        if(!view_) throw std::runtime_error("Observer map failed");
+        if(create) {new(view_) Storage();if(!SetEvent(ready_))throw std::runtime_error("Observer initialization publication failed");}
+        } catch(...) {
+            if(view_)UnmapViewOfFile(view_);view_=nullptr;
+            if(handle_)CloseHandle(handle_);handle_=nullptr;
+            CloseHandle(ready_);ready_=nullptr;throw;
+        }
     }
     Mapping(const Mapping&)=delete;
     Mapping& operator=(const Mapping&)=delete;
-    ~Mapping() {if(view_) UnmapViewOfFile(view_);if(handle_) CloseHandle(handle_);}
+    ~Mapping() {if(view_) UnmapViewOfFile(view_);if(handle_) CloseHandle(handle_);if(ready_)CloseHandle(ready_);}
     Storage& writable() {if(!writer_) throw std::logic_error("Read-only observer");return *static_cast<Storage*>(view_);}
     const Storage& storage() const {return *static_cast<const Storage*>(view_);}
 };

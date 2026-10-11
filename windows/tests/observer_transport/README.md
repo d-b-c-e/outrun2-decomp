@@ -7,6 +7,9 @@ refuses a wrong-thread or competing writer, forces publication halfway through
 a reader copy, and runs three overlapping readers against 2,000 generations.
 A separate read-only mapped child is killed halfway through a read; the writer
 must continue without waiting and subsequent readers still work.
+The producer is paced every ten generations; at least 1,000 coherent reads and
+50 distinct generations per reader are required. A separate initialization event refuses readers before atomic
+construction is published; zero-filled mapping existence is not readiness.
 
 The runner pins clean source and plants three code defects: accepting an odd
 sequence, omitting the final sequence check, and allowing the wrong thread to
