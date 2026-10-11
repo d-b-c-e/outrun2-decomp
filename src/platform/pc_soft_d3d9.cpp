@@ -157,11 +157,15 @@ std::uint32_t PcSoftD3D9Device::create_texture_from_file(const PcTextureFileRequ
     for(unsigned f=0;f<o.texture.faces.size();++f)for(unsigned l=0;l<o.texture.faces[f].size();++l)o.rgba[f].push_back(pc_dds_rgba(o.texture,f,l));
     objects_.push_back(std::move(o));return std::uint32_t(objects_.size());}
 bool PcSoftD3D9Device::shade_vertex(std::uint32_t index,std::int32_t base,Vertex& out){
+    std::array<V4,256> c;
+    for(unsigned k=0;k<256;++k)c[k]={vs_constants[k][0],vs_constants[k][1],vs_constants[k][2],vs_constants[k][3]};
+    return shade_vertex(index,base,out,c.data());
+}
+bool PcSoftD3D9Device::shade_vertex(std::uint32_t index,std::int32_t base,Vertex& out,const V4* constants){
     auto* decl=object(declaration);auto* vs=object(vertex_shader);
     if(!decl||!vs||vs->kind!=KVs)return false;
-    pc_shader::VsState s;std::array<V4,256> c;
-    for(unsigned k=0;k<256;++k)c[k]={vs_constants[k][0],vs_constants[k][1],vs_constants[k][2],vs_constants[k][3]};
-    s.C=c.data();
+    pc_shader::VsState s;
+    s.C=constants;
     for(auto& v:s.V)v={0,0,0,1};
     for(const auto& e:decl->elements){
         if(e.stream==PcDeclEndStream)break;
@@ -193,10 +197,15 @@ std::uint32_t PcSoftD3D9Device::draw_indexed_primitive(std::uint32_t type,std::i
     if(!ib)return 1;
     ps_=ps&&ps->kind==KPs?&ps->program:nullptr;
     auto index=[&](std::uint32_t k){std::uint16_t v;std::memcpy(&v,ib->bytes.data()+std::size_t(k)*2,2);return v;};
-    std::map<std::uint32_t,Vertex> cache;
+    // Each index is shaded once per draw: a flat cache by index (16-bit), valid while its stamp is this draw's.
+    if(index_vertices_.empty()){index_vertices_.resize(65536);index_stamps_.assign(65536,0u);}
+    if(++index_stamp_==0u){std::fill(index_stamps_.begin(),index_stamps_.end(),0u);index_stamp_=1u;}
+    for(unsigned k=0;k<256;++k)draw_constants_[k]={vs_constants[k][0],vs_constants[k][1],vs_constants[k][2],vs_constants[k][3]};
     auto vertex=[&](std::uint32_t i)->const Vertex*{
-        auto it=cache.find(i);if(it!=cache.end())return &it->second;
-        Vertex v{};if(!shade_vertex(i,base,v))return nullptr;return &cache.emplace(i,v).first->second;};
+        Vertex& v=index_vertices_[i];
+        if(index_stamps_[i]==index_stamp_)return &v;
+        v=Vertex{};if(!shade_vertex(i,base,v,draw_constants_.data()))return nullptr;
+        index_stamps_[i]=index_stamp_;return &v;};
     const std::size_t total=type==5?std::size_t(count)+2:type==4?std::size_t(count)*3:0;
     if(!total||(std::size_t(start)+total)*2>ib->bytes.size())return 1;
     note_dip_state(count);
@@ -235,25 +244,32 @@ std::uint32_t PcSoftD3D9Device::draw_indexed_primitive(std::uint32_t type,std::i
     return 0;
 }
 void PcSoftD3D9Device::triangle(const Vertex& a,const Vertex& b,const Vertex& c){
-    // Clip against z >= 0 and z <= w (D3D clip volume depth range).
-    std::vector<Vertex> poly{a,b,c};
+    // Clip against z >= 0 and z <= w (D3D clip volume depth range). A triangle inside both planes (the usual
+    // case) keeps its vertices in order, so it goes to raster as it is; two planes leave at most five vertices.
+    auto inside=[](const Vertex& v){return v.pos[2]>=0.f&&v.pos[3]-v.pos[2]>=0.f;};
+    if(inside(a)&&inside(b)&&inside(c)){
+        if(!(a.pos[3]>1e-6f)||!(b.pos[3]>1e-6f)||!(c.pos[3]>1e-6f))return;
+        const Vertex tri[3]{a,b,c};raster(tri,3u);return;
+    }
+    Vertex poly[8]{a,b,c},out[8];std::size_t n=3;
     auto lerpv=[](const Vertex& p,const Vertex& q,float t){Vertex r;
         for(unsigned k=0;k<4;++k)r.pos[k]=p.pos[k]+(q.pos[k]-p.pos[k])*t;
         for(unsigned k=0;k<2;++k)r.d[k]=lerp4(p.d[k],q.d[k],t);for(unsigned k=0;k<8;++k)r.t[k]=lerp4(p.t[k],q.t[k],t);
         r.fog=p.fog+(q.fog-p.fog)*t;return r;};
     for(int plane=0;plane<2;++plane){
-        std::vector<Vertex> out;
+        std::size_t m=0;
         auto dist=[&](const Vertex& v){return plane==0?v.pos[2]:v.pos[3]-v.pos[2];};
-        for(std::size_t k=0;k<poly.size();++k){
-            const Vertex& p=poly[k];const Vertex& q=poly[(k+1)%poly.size()];
+        for(std::size_t k=0;k<n;++k){
+            const Vertex& p=poly[k];const Vertex& q=poly[(k+1)%n];
             const float dp=dist(p),dq=dist(q);
-            if(dp>=0.f)out.push_back(p);
-            if((dp>=0.f)!=(dq>=0.f))out.push_back(lerpv(p,q,dp/(dp-dq)));
+            if(dp>=0.f)out[m++]=p;
+            if((dp>=0.f)!=(dq>=0.f))out[m++]=lerpv(p,q,dp/(dp-dq));
         }
-        poly.swap(out);if(poly.size()<3)return;
+        for(std::size_t k=0;k<m;++k)poly[k]=out[k];
+        n=m;if(n<3)return;
     }
-    for(const auto& v:poly)if(!(v.pos[3]>1e-6f))return;
-    raster(poly.data(),unsigned(poly.size()));
+    for(std::size_t k=0;k<n;++k)if(!(poly[k].pos[3]>1e-6f))return;
+    raster(poly,unsigned(n));
 }
 void PcSoftD3D9Device::raster(const Vertex* v,unsigned n){
     struct S { float x,y,z,iw; };
@@ -493,6 +509,11 @@ void PcSoftD3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,
     if(!rhw&&!xyz){errors.push_back("draw_primitive_up: only XYZRHW / XYZ FVFs are supported");return;}
     std::size_t total=0;
     switch(type){case 4:total=std::size_t(count)*3;break;case 5:case 6:total=std::size_t(count)+2;break;
+        case 1:case 2:case 3:
+            if(skipped_up[type]++==0u||(skipped_up[type]&(skipped_up[type]-1u))==0u)   // the 1st, 2nd, 4th, 8th... of each primitive
+                std::printf("renderer: DrawPrimitiveUP primitive %u (%s) fvf %x count %u stride %u not drawn (%llu so far)\n",type,
+                            type==1?"points":type==2?"line list":"line strip",fvf,count,stride,(unsigned long long)skipped_up[type]);
+            return;
         default:errors.push_back("draw_primitive_up: unsupported primitive type");return;}
     // FVF layout: position (16), [normal 12], [psize 4], [diffuse], [specular], texture sets.
     constexpr std::size_t none=~std::size_t(0);

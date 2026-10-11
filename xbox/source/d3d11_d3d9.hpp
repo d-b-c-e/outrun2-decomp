@@ -4,6 +4,7 @@
 #include <wrl/client.h>
 #include <map>
 #include <string>
+#include <vector>
 namespace outrun::xbox_runtime {
 using Microsoft::WRL::ComPtr;
 // Direct3D 11 back end of the D3D9 device, the same split as the PS5 GL
@@ -60,10 +61,17 @@ private:
     ComPtr<ID3D11Query> query_;bool query_live_{};
     unsigned frame_draws_{},frame_vertices_{};
     std::map<std::uint32_t,ComPtr<ID3D11PixelShader>> shader_programs_;
+    struct {unsigned compiled{},loaded{};double ms{},max_ms{};} shader_stats_;   // pixel programs: compiled vs from the disk cache
     std::map<std::string,ComPtr<ID3D11RasterizerState>> rasterizer_states_;
     std::map<std::string,ComPtr<ID3D11DepthStencilState>> depth_states_;
     std::map<std::string,ComPtr<ID3D11BlendState>> blend_states_;
     std::map<std::string,ComPtr<ID3D11SamplerState>> sampler_states_;
+    // The last description of each state and its object (owned by the maps above): consecutive draws mostly repeat
+    // them, and a map lookup builds a key string. A null object means nothing cached yet.
+    D3D11_RASTERIZER_DESC last_rasterizer_{};ID3D11RasterizerState* last_rasterizer_state_{};
+    D3D11_DEPTH_STENCIL_DESC last_depth_{};ID3D11DepthStencilState* last_depth_state_{};
+    D3D11_BLEND_DESC last_blend_{};ID3D11BlendState* last_blend_state_{};
+    D3D11_SAMPLER_DESC last_sampler_[6]{};ID3D11SamplerState* last_sampler_state_[6]{};
     void allocate_back(unsigned width,unsigned height);
     void ensure_msaa();
     unsigned back_w_{},back_h_{},msaa_{1},msaa_samples_{};

@@ -3,7 +3,11 @@
 #include "fxaa_hlsl.hpp"
 #include <cmath>
 #include <d3dcompiler.h>
+#include "runtime/game_host.hpp"
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <vector>
 #include <cfloat>
 #include <cstdio>
 #include <cstdlib>
@@ -34,6 +38,33 @@ D3D11_BLEND_OP blend_op(unsigned v){return D3D11_BLEND_OP(v>=1&&v<=5?v:1u);}
 D3D11_TEXTURE_ADDRESS_MODE address(unsigned v){return D3D11_TEXTURE_ADDRESS_MODE(v>=1&&v<=5?v:1u);}
 template<class T> std::string key(const T& d){return std::string(reinterpret_cast<const char*>(&d),sizeof d);}
 void colour(std::uint32_t c,float* out){out[0]=float((c>>16)&255)/255;out[1]=float((c>>8)&255)/255;out[2]=float(c&255)/255;out[3]=float(c>>24)/255;}
+// Compiled pixel programs on disk (home()/shadercache; a latched process's home is its run folder): FNV-1a 64 of the
+// source, target and flags. A missing, short or unreadable file is compiled again; a failed write only costs time.
+std::string shader_cache_path(const std::string& source,const char* target){
+    std::uint64_t h=1469598103934665603ull;
+    auto mix=[&h](const char* p,std::size_t n){for(std::size_t i=0;i<n;++i){h^=std::uint8_t(p[i]);h*=1099511628211ull;}};
+    mix(source.data(),source.size());mix(target,std::strlen(target));mix("O3",2);
+    char name[40];std::snprintf(name,sizeof name,"/ps-%016llx.cso",(unsigned long long)h);
+    return outrun::runtime::home()+"/shadercache"+name;
+}
+std::vector<std::uint8_t> read_shader_cache(const std::string& path){
+    std::vector<std::uint8_t> bytes;
+    if(std::FILE* f=std::fopen(path.c_str(),"rb")){
+        std::uint8_t buffer[4096];std::size_t n;
+        while((n=std::fread(buffer,1,sizeof buffer,f))>0)bytes.insert(bytes.end(),buffer,buffer+n);
+        std::fclose(f);
+    }
+    return bytes.size()<16?std::vector<std::uint8_t>{}:bytes;
+}
+void write_shader_cache(const std::string& path,const void* data,std::size_t size){
+    std::error_code e;std::filesystem::create_directories(std::filesystem::u8path(outrun::runtime::home()+"/shadercache"),e);
+    const std::string temp=path+".tmp";
+    std::FILE* f=std::fopen(temp.c_str(),"wb");if(!f)return;
+    const bool ok=std::fwrite(data,1,size,f)==size;
+    if(std::fclose(f)!=0||!ok){std::remove(temp.c_str());return;}
+    std::filesystem::rename(std::filesystem::u8path(temp),std::filesystem::u8path(path),e);
+    if(e)std::remove(temp.c_str());
+}
 }
 D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* context,unsigned w,unsigned h)
     :PcSoftD3D9Device(w,h),device_(device),context_(context){
@@ -72,7 +103,13 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     check(device_->CreateShaderResourceView(dummycube_.Get(),nullptr,&dummycube_srv_),"CreateShaderResourceView(dummy cube)");
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;check(device_->CreateQuery(&q,&query_),"CreateQuery");
 }
-D3D11D3D9Device::~D3D11D3D9Device(){if(query_live_)context_->End(query_.Get());}
+D3D11D3D9Device::~D3D11D3D9Device(){
+    if(query_live_)context_->End(query_.Get());
+    std::printf("shader programs: %u compiled, %u from the cache, %.0f ms in total, slowest %.0f ms\n",
+                shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
+    std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
+                (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
+}
 void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     if(!w||!h||w>16384||h>16384)throw std::runtime_error("invalid GPU back buffer size");
     back_srv_.Reset();back_rtv_.Reset();back_dsv_.Reset();back_colour_tex_.Reset();back_depth_tex_.Reset();
@@ -239,16 +276,25 @@ void D3D11D3D9Device::apply_state(){
     r.MultisampleEnable=back&&msaa_live_?TRUE:FALSE;
     r.CullMode=render[RS_CULLMODE]==CULL_NONE?D3D11_CULL_NONE:render[RS_CULLMODE]==CULL_CCW?D3D11_CULL_BACK:D3D11_CULL_FRONT;
     const float bias=f(render[RS_DEPTHBIAS]),slope=f(render[RS_SLOPESCALEDEPTHBIAS]);r.DepthBias=INT(bias*16777215.f);r.SlopeScaledDepthBias=slope;
-    auto& rs=rasterizer_states_[key(r)];if(!rs)check(device_->CreateRasterizerState(&r,&rs),"CreateRasterizerState");context_->RSSetState(rs.Get());
+    if(!last_rasterizer_state_||std::memcmp(&r,&last_rasterizer_,sizeof r)!=0){
+        auto& rs=rasterizer_states_[key(r)];if(!rs)check(device_->CreateRasterizerState(&r,&rs),"CreateRasterizerState");
+        last_rasterizer_=r;last_rasterizer_state_=rs.Get();}
+    context_->RSSetState(last_rasterizer_state_);
     D3D11_DEPTH_STENCIL_DESC d{};d.DepthEnable=render[RS_ZENABLE]!=0;d.DepthWriteMask=render[RS_ZWRITEENABLE]?D3D11_DEPTH_WRITE_MASK_ALL:D3D11_DEPTH_WRITE_MASK_ZERO;
     d.DepthFunc=comparison(render[RS_ZFUNC]);d.StencilEnable=render[52]!=0;d.StencilReadMask=UINT8(render[58]);d.StencilWriteMask=UINT8(render[59]);
     d.FrontFace={stencil_op(render[53]),stencil_op(render[54]),stencil_op(render[55]),comparison(render[56])};d.BackFace=d.FrontFace;
-    auto& ds=depth_states_[key(d)];if(!ds)check(device_->CreateDepthStencilState(&d,&ds),"CreateDepthStencilState");context_->OMSetDepthStencilState(ds.Get(),render[57]&255);
+    if(!last_depth_state_||std::memcmp(&d,&last_depth_,sizeof d)!=0){
+        auto& ds=depth_states_[key(d)];if(!ds)check(device_->CreateDepthStencilState(&d,&ds),"CreateDepthStencilState");
+        last_depth_=d;last_depth_state_=ds.Get();}
+    context_->OMSetDepthStencilState(last_depth_state_,render[57]&255);
     D3D11_BLEND_DESC b{};auto& t=b.RenderTarget[0];const bool separate=render[RS_SEPARATEALPHABLENDENABLE]!=0;
     t.BlendEnable=render[RS_ALPHABLENDENABLE]!=0;t.SrcBlend=blend_factor(render[RS_SRCBLEND]);t.DestBlend=blend_factor(render[RS_DESTBLEND]);t.BlendOp=blend_op(render[RS_BLENDOP]);
     t.SrcBlendAlpha=alpha_factor(render[separate?RS_SRCBLENDALPHA:RS_SRCBLEND]);t.DestBlendAlpha=alpha_factor(render[separate?RS_DESTBLENDALPHA:RS_DESTBLEND]);
     t.BlendOpAlpha=blend_op(render[separate?RS_BLENDOPALPHA:RS_BLENDOP]);t.RenderTargetWriteMask=UINT8(render[RS_COLORWRITEENABLE]&15);
-    auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState");context_->OMSetBlendState(bs.Get(),nullptr,0xffffffffu);
+    if(!last_blend_state_||std::memcmp(&b,&last_blend_,sizeof b)!=0){
+        auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState");
+        last_blend_=b;last_blend_state_=bs.Get();}
+    context_->OMSetBlendState(last_blend_state_,nullptr,0xffffffffu);
 }
 void D3D11D3D9Device::bind_textures(){
     ID3D11ShaderResourceView* views[12];ID3D11SamplerState* samplers[6];
@@ -258,9 +304,20 @@ void D3D11D3D9Device::bind_textures(){
         D3D11_SAMPLER_DESC d{};
         d.Filter=D3D11_FILTER((linear?D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT:0)|(mag?D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT:0)|(mip==2?D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR:0));
         d.AddressU=address(p[SAMP_ADDRESSU]);d.AddressV=address(p[SAMP_ADDRESSV]);d.AddressW=address(p[SAMP_ADDRESSW]);
-        d.MipLODBias=f(p[SAMP_MIPMAPLODBIAS]);d.ComparisonFunc=D3D11_COMPARISON_NEVER;colour(p[SAMP_BORDERCOLOR],d.BorderColor);
+        // D3D9 takes any LOD bias; D3D11 refuses one outside -16..15.99 (or NaN) with E_INVALIDARG.
+        const float bias=f(p[SAMP_MIPMAPLODBIAS]);
+        d.MipLODBias=std::isfinite(bias)?std::clamp(bias,D3D11_MIP_LOD_BIAS_MIN,D3D11_MIP_LOD_BIAS_MAX):0.f;
+        d.ComparisonFunc=D3D11_COMPARISON_NEVER;colour(p[SAMP_BORDERCOLOR],d.BorderColor);
         d.MinLOD=o&&o->kind==KTexture?float(std::min(p[SAMP_MAXMIPLEVEL],std::max(1u,o->texture.levels)-1)):0.f;d.MaxLOD=mip==0?d.MinLOD:FLT_MAX;
-        auto& ss=sampler_states_[key(d)];if(!ss)check(device_->CreateSamplerState(&d,&ss),"CreateSamplerState");samplers[s]=ss.Get();
+        if(last_sampler_state_[s]&&std::memcmp(&d,&last_sampler_[s],sizeof d)==0){samplers[s]=last_sampler_state_[s];continue;}
+        auto& ss=sampler_states_[key(d)];
+        if(!ss){
+            const HRESULT hr=device_->CreateSamplerState(&d,&ss);
+            if(FAILED(hr)){char t[256];std::snprintf(t,sizeof t,"CreateSamplerState (stage %u: filter %x address %u/%u/%u bias %08x lod %g..%g; D3D9 min/mag/mip %u/%u/%u)",
+                s,unsigned(d.Filter),unsigned(d.AddressU),unsigned(d.AddressV),unsigned(d.AddressW),p[SAMP_MIPMAPLODBIAS],d.MinLOD,d.MaxLOD,
+                p[SAMP_MINFILTER],p[SAMP_MAGFILTER],unsigned(mip));check(hr,t);}
+        }
+        samplers[s]=ss.Get();last_sampler_[s]=d;last_sampler_state_[s]=ss.Get();
     }
     context_->PSSetShaderResources(0,12,views);context_->PSSetSamplers(0,6,samplers);
 }
@@ -279,8 +336,21 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
         for(unsigned col=0;col<4;++col){if(col)fixed+=",";const auto k=row*4+col;fixed+=k<program->blobs.size()?std::to_string(program->blobs[k]):"-1";}fixed+=")";}
     fixed+="};static const int4 info=int4("+std::to_string(program->blobs.size())+",0,0,0);\n";
     source.insert(insert,fixed);
-    const auto code=compile(source,"ps_main","ps_4_1");ComPtr<ID3D11PixelShader> shader;
-    check(device_->CreatePixelShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader),"CreatePixelShader");
+    // The specialized interpreter at optimization level 3 takes long to compile, and a race meets dozens of programs
+    // the first time: the code is kept in home()/shadercache under a hash of its source, so later runs load it.
+    const auto started=std::chrono::steady_clock::now();
+    ComPtr<ID3D11PixelShader> shader;
+    const std::string path=shader_cache_path(source,"ps_4_1");
+    const auto cached=read_shader_cache(path);
+    const bool loaded=!cached.empty()&&SUCCEEDED(device_->CreatePixelShader(cached.data(),cached.size(),nullptr,&shader));
+    if(!loaded){
+        const auto code=compile(source,"ps_main","ps_4_1");
+        check(device_->CreatePixelShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader),"CreatePixelShader");
+        write_shader_cache(path,code->GetBufferPointer(),code->GetBufferSize());
+    }
+    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+    ++(loaded?shader_stats_.loaded:shader_stats_.compiled);shader_stats_.ms+=ms;shader_stats_.max_ms=std::max(shader_stats_.max_ms,ms);
+    std::printf("shader: program %zu %s in %.0f ms\n",shader_programs_.size()+1,loaded?"loaded":"compiled",ms);
     return (shader_programs_[pixel_shader]=shader).Get();
 }
 void D3D11D3D9Device::flush(){

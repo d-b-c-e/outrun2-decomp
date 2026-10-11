@@ -904,5 +904,41 @@
   "line": "if(!CreateDirectoryW(cfg_.folder.c_str(),nullptr))throw std::runtime_error(\"capture folder exists or cannot be created\");",
   "class": "entry-redirected",
   "reason": "ShimRecorder: the capture folder, created new by the first push; the latched entry (shim_input.cpp) passes the fence run folder plus 'capture', so it exists only inside a verified run folder"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "return outrun::runtime::home()+\"/shadercache\"+name;",
+  "class": "redirected",
+  "reason": "shader_cache_path: home()/shadercache/<hash>.cso (the run folder when latched)"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "std::error_code e;std::filesystem::create_directories(std::filesystem::u8path(outrun::runtime::home()+\"/shadercache\"),e);",
+  "class": "redirected",
+  "reason": "write_shader_cache: creates home()/shadercache (the run folder when latched)"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "std::FILE* f=std::fopen(temp.c_str(),\"wb\");if(!f)return;",
+  "class": "redirected",
+  "reason": "write_shader_cache: temp = shader_cache_path(...)+\".tmp\" under home()/shadercache"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "if(std::fclose(f)!=0||!ok){std::remove(temp.c_str());return;}",
+  "class": "redirected",
+  "reason": "write_shader_cache: removes its own temp under home()/shadercache"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "std::filesystem::rename(std::filesystem::u8path(temp),std::filesystem::u8path(path),e);",
+  "class": "redirected",
+  "reason": "write_shader_cache: temp to its path, both under home()/shadercache"
+ },
+ {
+  "file": "xbox/source/d3d11_d3d9.cpp",
+  "line": "if(e)std::remove(temp.c_str());",
+  "class": "redirected",
+  "reason": "write_shader_cache: removes its own temp under home()/shadercache"
  }
 ]

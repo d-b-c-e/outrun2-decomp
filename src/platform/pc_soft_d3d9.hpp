@@ -11,6 +11,7 @@
 #include "platform/pc_d3d9_state.hpp"
 #include "platform/pc_dds.hpp"
 #include "platform/pc_shader_programs.hpp"
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -138,6 +139,10 @@ public:
     // shaders, constants, FVF) and its arguments into draw_hash, so two
     // builds can be compared frame by frame.
     bool hash_draws{false};
+    // DrawPrimitiveUP calls with a point (1), line list (2) or line strip (3) primitive, which this device does not
+    // draw: counted and logged (first time per primitive and FVF), not a failure. A compatibility fallback, not
+    // equivalent rendering.
+    std::uint64_t skipped_up[4]{};
     std::uint64_t draw_hash{0xcbf29ce484222325ull};
     std::uint64_t draws_hashed{};
     std::uint32_t dump_frame{};
@@ -169,6 +174,7 @@ protected:
     void rebind(std::uint32_t& slot,std::uint32_t handle);
     struct Vertex { float pos[4]; pc_shader::V4 d[2],t[8];float fog; };
     bool shade_vertex(std::uint32_t index,std::int32_t base,Vertex&);
+    bool shade_vertex(std::uint32_t index,std::int32_t base,Vertex&,const pc_shader::V4* constants);   // the 256 VS constants
     void triangle(const Vertex&,const Vertex&,const Vertex&);
     virtual void raster(const Vertex*,unsigned n);
     pc_shader::V4 sample(int stage,const pc_shader::V4& c,float dudx,float dvdx,float dudy,float dvdy);
@@ -183,6 +189,9 @@ protected:
     const PcShaderProgram* ps_{};
     bool pretransformed_{};     // raster(): Vertex::pos is x,y,z,rhw in pixels
     std::vector<Vertex> up_vertices_; // DrawPrimitiveUP decode buffer (reused)
+    // DrawIndexedPrimitive: each index's shaded vertex, valid while its stamp is the draw's (16-bit indices).
+    std::vector<Vertex> index_vertices_;std::vector<std::uint32_t> index_stamps_;std::uint32_t index_stamp_{};
+    std::array<pc_shader::V4,256> draw_constants_{};
     PcSoftD3DXSprite sprite_{*this};
 };
 }
