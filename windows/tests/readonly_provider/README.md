@@ -71,3 +71,32 @@ binding still names raw button index 11, which does not exist on this device;
 the resolver correctly reports object-missing. P29 establishes device reads,
 not this binding. P30 must inventory all three devices' actual objects/ranges
 and WGI paths before any game-input qualification.
+
+## P30 source candidate
+
+The probe now retains `objects.tsv` from a copied Core device report at the
+last input tick. It names the bound identity that the provider verified at open,
+epoch and state, plus each of the 8 axis, 128 button and 4 POV offsets. Axes
+include the actual range-readback flag and limits. Closed/unadopted epochs
+advertise no capabilities. The report contains no native handle, reads no worker
+fields, performs no I/O and is only callable on the input thread or after it
+stopped. Six regression assertions cover missing/open/lost state, sparse ranges,
+identity and copy isolation; the complete Core suite passes 146 checks.
+
+The profile must have no invalid bindings and one to four distinct devices.
+The final valid-stream/release counts must equal that profile's count;
+`Run-Probe.ps1 -ExpectedDevices` also verifies the exact release count. Its
+timeout path retains whatever redirected output has completed after closure.
+
+`wgi_inventory --list-only <new folder>` is separate and read-only. Three WGI
+metadata listings at one-second intervals retain RawGameController names,
+NonRoamableIds, VID/PID and object counts, Gamepad conversion, and all Gamepads.
+It calls no reading or vibration setter and opens no window. Run after the
+provider probe closes, under the same lease and a bounded external supervisor.
+VID/PID corroborates products; it does not prove a DirectInput instance join or
+the future game's pre-consumer exclusion. C++/WinRT is compiled as C++20 because
+the local SDK's C++17 coroutine header refuses Clang; the Core remains C++17.
+
+This extension has built with warnings as errors. P30 live qualification and
+independent source review are pending; the earlier P29 evidence remains pinned
+to its original executable and source.

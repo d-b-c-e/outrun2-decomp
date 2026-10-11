@@ -9,7 +9,8 @@ param(
     [Parameter(Mandatory)][string]$Result,
     [Parameter(Mandatory)][string]$Toolkit,
     [Parameter(Mandatory)][string]$LeasePath,
-    [Parameter(Mandatory)][string]$LeaseToken
+    [Parameter(Mandatory)][string]$LeaseToken,
+    [ValidateRange(1,4)][int]$ExpectedDevices=2
 )
 $ErrorActionPreference='Stop'
 . (Join-Path $Toolkit 'tools/playback/Stage-RigLease.ps1')
@@ -48,7 +49,7 @@ try {
     $h=Get-Content -Raw -LiteralPath (Join-Path $capture 'host-shutdown.json')|ConvertFrom-Json
     $r.host=$h
     if($h.pid -ne $r.pid -or $h.creationTime -ne $r.creationTime -or $h.state -cne 'resolved' -or $h.unresolved.Count -ne 0 -or
-       !$h.inputReleased -or $h.released -lt 2 -or $h.held -ne 0){throw 'Host identity or normal shutdown proof differs.'}
+       !$h.inputReleased -or $h.released -ne $ExpectedDevices -or $h.held -ne 0){throw 'Host identity or normal shutdown proof differs.'}
     Assert-StageRigLease -Path $LeasePath -Token $LeaseToken
     if((Get-FileHash -LiteralPath $exe).Hash -ine $ExecutableSha256 -or (Get-FileHash -LiteralPath $profileCopy).Hash -ine $ProfileSha256){throw 'Retained inputs changed during the run.'}
     $r.passed=$true
@@ -59,6 +60,13 @@ finally {
             $r.forced=$true;$process.Kill();$r.closed=$process.WaitForExit(5000)
         }elseif($started){$r.closed=$true}
         if($started -and $r.closed){$r.exitCode=$process.ExitCode}
+        # Preserve output on nonzero exit and timeout too, after confirmed closure. A hung inherited pipe never
+        # extends the deadline: unfinished tasks are recorded as a cleanup error rather than waited indefinitely.
+        if($started -and $r.closed -and $stdout -and $stderr){
+            if(!$stdout.IsCompleted -or !$stderr.IsCompleted){throw 'Process closed but its redirected output did not finish.'}
+            [IO.File]::WriteAllText((Join-Path $Result 'stdout.log'),$stdout.GetAwaiter().GetResult())
+            [IO.File]::WriteAllText((Join-Path $Result 'stderr.log'),$stderr.GetAwaiter().GetResult())
+        }
     }catch{$r.cleanupErrors+= $_.Exception.Message;$r.passed=$false}
     try{$r|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $Result 'receipt.json')}
     finally{$process.Dispose()}

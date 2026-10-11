@@ -604,4 +604,14 @@ StartReport Core::start_report()const{
            "); invalid "+std::to_string(invalid.size())+" ("+list(invalid)+"); unavailable "+std::to_string(unavailable.size())+" ("+list(unavailable)+")";
     return r;
 }
+std::vector<DeviceReport> Core::device_reports()const{
+    // All fields read here belong to the input thread or are immutable after set_profile. Never read worker_state,
+    // worker_reason, pending opens or native objects. A failed/closed epoch cannot advertise stale capabilities.
+    std::vector<DeviceReport> out;out.reserve(devs_.size());
+    for(const auto& d:devs_){
+        const bool opened=d.state==DevState::Open;
+        out.push_back({d.id,d.epoch,opened,opened?d.caps:ObjectCaps{},device_status(d)});
+    }
+    return out;
+}
 }

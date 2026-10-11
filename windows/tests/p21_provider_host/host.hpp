@@ -90,6 +90,7 @@ public:
     BasicProviderHost(const BasicProviderHost&) = delete; BasicProviderHost& operator=(const BasicProviderHost&) = delete;
 
     const dbce::shim::Frame& tick() { return w_->core->tick(); }   // input thread
+    std::vector<dbce::shim::DeviceReport> device_reports()const { return w_->core->device_reports(); } // input thread
     long long worker_passes() const { return w_->passes.load(); }
     RecorderType& recorder() { return *recorder_; } // input thread; the host owns its full lifetime
 

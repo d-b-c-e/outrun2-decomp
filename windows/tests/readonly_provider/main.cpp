@@ -27,7 +27,11 @@ int wmain(int argc, wchar_t** argv) {
         need(fs::is_regular_file(profile_path) && fs::file_size(profile_path) <= MaxProfileBytes, "bounded profile required");
         std::ifstream stream(profile_path, std::ios::binary);
         const std::string profile((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-        need(read_profile(profile).ok, "profile must parse before opening DirectInput");
+        const auto parsed=read_profile(profile);
+        need(parsed.ok&&parsed.section.error.empty()&&parsed.section.invalid.empty(), "profile must parse without invalid bindings before opening DirectInput");
+        std::set<std::string> expected;
+        for(const auto& binding:parsed.section.bound)expected.insert(binding.binding.dev);
+        need(!expected.empty()&&expected.size()<=4,"one to four explicit profile devices required");
         need(fs::create_directory(result), "result folder must be new");
 
         // A valid owned top-level HWND, never shown or focused. Do not use the owner's window as a cooperative target.
@@ -50,12 +54,23 @@ int wmain(int argc, wchar_t** argv) {
             frames.push_back(host->tick());
             Sleep(16);
         }
+        const auto devices=host->device_reports(); // same input thread, after its final tick, before stopping the adopted epochs
         const auto report = host->stop();
         if (!report.resolved) host->forced_exit();
         host.reset(); // All driver work has ended before the cooperative HWND is destroyed.
         need(DestroyWindow(window) != 0, "window destroy failed");
         need(UnregisterClassW(wc.lpszClassName, wc.hInstance) != 0, "window class cleanup failed");
 
+        std::ofstream objects(result / "objects.tsv",std::ios::binary);
+        objects<<"device\tinstance\tproduct\tepoch\topened\tstatus\tkind\tindex\tpresent\trange_readable\tmin\tmax\n";
+        for(std::size_t i=0;i<devices.size();++i){
+            const auto& d=devices[i];
+            auto prefix=[&]{objects<<i<<'\t'<<d.identity.dev<<'\t'<<d.identity.prod<<'\t'<<d.epoch<<'\t'<<d.opened<<'\t'<<d.status<<'\t';};
+            for(int k=0;k<8;++k){prefix();objects<<"axis\t"<<k<<'\t'<<d.caps.axis[k]<<'\t'<<d.caps.range_ok[k]<<'\t'<<d.caps.min[k]<<'\t'<<d.caps.max[k]<<'\n';}
+            for(int k=0;k<128;++k){prefix();objects<<"button\t"<<k<<'\t'<<d.caps.button[k]<<"\t0\t0\t0\n";}
+            for(int k=0;k<4;++k){prefix();objects<<"pov\t"<<k<<'\t'<<d.caps.pov[k]<<"\t0\t0\t0\n";}
+        }
+        objects.close();need(objects.good(),"object inventory output failed");
         std::ofstream samples(result / "samples.tsv", std::ios::binary);
         samples << "frame\ttick_us\tboundary_us\tdevice\tepoch\tsequence\tread_start_us\tread_end_us\tpoll\tstate\tvalid\tstale";
         for (int i = 0; i < 8; ++i) samples << "\taxis" << i;
@@ -87,7 +102,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         samples.close(); actions.close();
         need(samples.good() && actions.good(), "evidence output failed");
-        need(frames.size() == 300 && valid_devices.size() >= 2, "expected 300 ticks and at least two valid device streams");
+        need(frames.size() == 300 && valid_devices.size() == expected.size() && report.released==int(expected.size()), "expected 300 ticks and exactly the profile's device streams/releases");
         std::cout << "PASS: 300 real Core ticks; " << valid_devices.size() << " devices read; resolved shutdown. Read-only, no game or force.\n";
         return 0;
     } catch (const std::exception& ex) { std::cerr << ex.what() << '\n'; return 1; }

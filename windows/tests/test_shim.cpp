@@ -564,12 +564,29 @@ void test_pending_from_clock_zero(){
     }
 }
 
+void test_device_reports(){
+    Rig r(false,profile({"steer = "+axis(0,32768),wheel("camera = button 0")}),false);
+    auto before=r.core->device_reports();
+    check(before.size()==1&&!before[0].opened&&before[0].epoch==0&&!before[0].caps.axis[0],"no capabilities before an adopted open");
+    r.dev(r.w).caps.min[0]=-1234;r.dev(r.w).caps.max[0]=5678;
+    r.step();
+    auto live=r.core->device_reports();
+    check(live.size()==1&&live[0].opened&&live[0].epoch==1&&live[0].status=="live","live epoch report");
+    check(live[0].identity.dev==W&&live[0].identity.prod==WP,"verified bound identity retained");
+    check(live[0].caps.axis[0]&&!live[0].caps.axis[1]&&live[0].caps.range_ok[0]&&live[0].caps.min[0]==-1234&&live[0].caps.max[0]==5678,"actual sparse caps and range readback");
+    live[0].caps.min[0]=0;
+    check(r.core->device_reports()[0].caps.min[0]==-1234,"a report copy cannot change the live caps");
+    r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
+    auto lost=r.core->device_reports();
+    check(!lost[0].opened&&lost[0].epoch==1&&!lost[0].caps.axis[0]&&lost[0].caps.button.none(),"lost epoch clears advertised capabilities without inventing a new epoch");
+}
+
 int main(){
     try{
         test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
-        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();
+        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim slice 1: "<<checks<<" checks passed\n";
     return 0;

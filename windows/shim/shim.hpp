@@ -209,6 +209,15 @@ struct CoreConfig {
 };
 
 struct StartReport { std::string line; std::vector<std::string> notes; };
+// Input-thread snapshot of an adopted device epoch. Identity is the bound identity verified against both the listing
+// and the opened handle. No native handle escapes. Caps are empty unless that adopted epoch remains open.
+struct DeviceReport {
+    DeviceInfo identity;
+    std::uint32_t epoch{};
+    bool opened{};
+    ObjectCaps caps;
+    std::string status;
+};
 
 class Core {
 public:
@@ -236,6 +245,7 @@ public:
 
     // Reports (input thread, or after it stopped).
     StartReport start_report()const;
+    std::vector<DeviceReport> device_reports()const;
     const std::array<Event,EventRingSize>& ring()const{return ring_;}
     Run run()const{return run_;}
     std::string run_reason()const{return run_reason_;}
