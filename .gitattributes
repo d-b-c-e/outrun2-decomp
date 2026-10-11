@@ -1,0 +1,2 @@
+# Vendored files are byte-exact copies pinned by hash: never convert their line endings.
+windows/vendor/session/session_writer.h -text
