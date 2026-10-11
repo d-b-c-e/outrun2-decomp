@@ -1,395 +1,574 @@
 # Input shim: architecture
 
-**Draft r1, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). For review, not adopted.**
+**Draft r2, 2026-10-10. Author zero (Claude). Reviewer Astra (romi). For review, not adopted.**
 
-This is the design for a shared input path: one portfolio-owned profile per game, shared code that reads the devices
-and resolves the bindings, and a small game adapter that hands standard actions to the game. OutRun 2006 (decomp)
-is the reference adapter. The design is decomp-local and opt-in until it has been reviewed and shown to work again
-in a second existing game. Then the core moves to the toolkit with a version and pinned hashes (Astra 8815). No
-standard changes until then; section 12 lists the amendments promotion would need.
+r2 answers Astra's r1 review (`dbce-project-mgmt/inbox/2026-10-10-romi-input-shim-r1-review.md`): ten findings,
+cited below as R1-F1 to R1-F10, and the decisions on Q1-Q11. It also folds in the author's own notes. Section 18
+logs the rounds. Section 17 is the first proof matrix: what the fake provider and the OutRun adapter must
+demonstrate before anything runs on the rig.
+
+This is a design for a shared input path: one portfolio-owned profile per game, shared code that owns the devices and
+resolves the bindings, and a game adapter that hands standard actions to the game. OutRun 2006 (decomp) is the
+reference adapter. The design is decomp-local and opt-in. It moves to the toolkit, versioned and pinned by hash, only
+after review and a second existing game, which is #DRIVE Rally after its current qualification (Astra 8815, R1 Q5).
+No standard changes until then. Native-store writers and the existing companion remain valid backends; the shim is
+an additional backend, not a replacement.
 
 Owner direction, 2026-10-10: "design a shim for each game where we can have standard input, mapping, and
-configuration that mostly sits outside the game's native methods (e.g. leaving its config files mostly alone)". Since
-this could become the foundation for every game, it is reviewed in rounds before the core is built. The review log is
-at the end.
+configuration that mostly sits outside the game's native methods (e.g. leaving its config files mostly alone)", and
+"do heavy iterative architecture reviews with Astra on this please - since it could be the foundation for literally
+all games, it's very important to get the details right".
 
 ## 1. Why
 
 Today each game gets a Wheelkit storage adapter that writes the game's own binding store (STD-033 item 2). Most of
-the cost is in STD-035's sixteen writer rules: foreign file formats, product-keyed tables, cloud saves, kept bindings
-that collide, the consumer's required set, bounded parsers for binary stores. Every new game pays it again, and the
-game's own config can still drift underneath.
+the cost is in STD-035's sixteen writer rules: foreign formats, product-keyed tables, cloud saves, colliding kept
+bindings, the consumer's required set, bounded parsers for binary stores. Every new game pays it again.
 
-The shim moves the binding out of the game:
-
-- Wheelkit writes one file per game, in the toolkit's own `ini-controls-1` form.
-- The runtime only reads it.
-- Shared code resolves it against the devices.
-- The adapter writes actions, not bindings, into the game.
-
-The game's saved mappings are never written.
+The shim keeps the binding in one portfolio-owned file per game. Shared code owns the devices and resolves the
+binding. The adapter writes actions, not bindings, into the game, and the game's saved mappings are never written.
 
 ## 2. Goals and non-goals
 
 Goals:
-
-- One profile format, one writer (Wheelkit), one reader, for every shim game.
-- Every binding read from its own device (STD-036 by construction).
-- Test injection, the observer and recording implemented once, in the core. Adapters do not reimplement them.
-- An adapter small enough to review in one sitting: about 150 lines for OutRun.
+- One profile format and one writer transaction (section 5), used by both Wheelkit and the in-game F6 panel, against
+  one authoritative file per game.
+- One input provider per game process. It owns every device handle; other mods in the process consume its frames
+  and never open a second reader (R1-F6).
+- Every binding read from its own device (STD-036). Qualification still needs multi-device evidence (R1-F8).
+- Test runs, provenance, observation and recording implemented once, in the core.
 
 Non-goals:
-
 - Replacing a game's physics, menus or input semantics. The adapter feeds the highest input level that keeps the
-  game's own processing; OutRun's 453860 dead zone and quantisation still run, for example.
-- OS-level input, virtual-device drivers or focus changes. vJoy poisoned DirectInput on this rig, and ViGEm is
-  retired.
-- A stable binary ABI in r1 (Astra 8815). This is a source seam first.
-- Deterministic physics replay (Astra 8823).
+  game's own processing.
+- OS-level input, virtual-device drivers or focus changes.
+- A stable binary ABI before the second adapter. A minimal experimental bridge for the managed proof may be needed,
+  but never a second resolver implementation by default (R1 Q10).
+- Deterministic physics replay.
+- Online and anti-cheat games: the core runs in-process (STD-018).
+- A line-count target for adapters. State, fencing and diagnostics are never cut to stay small (R1 closing note).
+
+If the core fails to start (DirectInput unavailable, or an unreadable profile), the game runs on its own input and
+never crashes. The adapter treats an absent core as "nothing available" and reports it.
 
 ## 3. Terms
 
 | Term | Meaning |
 |---|---|
 | Profile | The `[Controls]` section, `ini-controls-1` Schema 1, unchanged from `controls-contract.md`. |
-| Device source | Code that enumerates, opens and reads physical devices. DirectInput first. |
-| Epoch | One open of one device instance. It ends at close, a failed read or a disconnect. |
-| ActionFrame | One tick's result: every contract action's value, availability and edges. |
-| Adapter | The game-specific code: what the game supports, frame to game input, game state, fences. |
-| Test latch | Set for the life of the process as soon as a test session is requested (section 9). |
+| Provider | The single owner of every input device handle in the process (section 6). |
+| Lease | The provider's grant of one device to one use: read, or force (exclusive). |
+| Epoch | One open of one device identity. It ends at a failed read, a disconnect or a close. Numbers increase per identity and are never reused. |
+| Sample | One read attempt of one epoch: valid or failed, with its timestamps and its injection marks. |
+| Owned action | An applied action whose binding the provider resolves (section 7). |
+| Frame | One tick's resolution: the samples used, every action's value, status and source sample, and edges. |
+| Run | One test session, from the latch to completion, expiry or failure (section 9). |
+| Batch | One accepted version of the command file, identified by session, batch number and content hash. |
+| Adapter | The game-specific code: capability, interception point, frame sink, state signals, fences. |
 
-## 4. Layers
+## 4. Layers and threads
 
 ```
-dbce-controls.ini ─► Profile reader ─┐
-                                     ▼
-devices ─► Device source ─► test channel ─► Resolver ─► ActionFrame ─► Adapter ─► game input
-   (one epoch per open)   (raw samples, before     │                    │
-                           any binding resolves)   │                    ├─► game state signals
-                                                   ▼                    ▼
-                                  Recorder queue ◄─┴────────────────────┤
-                                  Observer (shared memory) ◄────────────┘
+dbce-controls.ini ─► profile reader ─┐                       game input thread (tick)
+                                     ▼                       ─────────────────────────
+provider worker ──► epoch table ──► read samples ─► test channel ─► resolver ─► frame ─► adapter sink ─► game
+ (enumerate, open,   (handoff by     (Poll + Get-   (deliver batch    │            │        (interception
+  rescan, close)      generation)     DeviceState)   into samples)    │            │         point, R1-F3)
+                                                                      ▼            ▼
+                                                     observer (shared memory) ◄── adapter state signals
+                                                     recorder queue ──► recorder worker ──► session_writer
 ```
 
-**Core**, game-agnostic:
-
-- profile reader;
-- device sources;
-- test channel and test latch;
-- resolver and ActionFrame;
-- start report;
-- observer;
-- recorder.
-
-**Adapter**, per game:
-
-- capability declaration;
-- frame sink and native-input merge;
-- state signals;
-- fences;
-- its own extra report lines.
-
-The seam is a C++17 source interface (sections 6 to 8). The core has no game headers. The adapter uses the core
-through that interface only.
-
-## 5. Profile file and discovery
-
-- **File:** `dbce-controls.ini` beside the game executable (Astra 8815). It holds `[Controls]` exactly as
-  `controls-contract.md` section 5 defines it, Schema 1. The core ignores other sections, so later metadata can sit
-  there.
-- **Writer:** Wheelkit only. It replaces the whole file atomically (a uniquely named temporary sibling, then
-  `ReplaceFileW` with a backup name, or a no-replace `MoveFileExW` when the file is new). A reader therefore sees the
-  old file or the new one, never a mix. The runtime never writes it, with the one exception in Q1.
-- **Reader:**
-  - Read once at start, in one bounded read: 64 KiB, strict UTF-8 with an optional BOM.
-  - A second `[Controls]` section or a duplicate action key refuses the whole profile and names both lines.
-  - Anything else follows the contract: an invalid line is reported and skipped; an unknown key is reported.
-- **Role** (contract section 5a): the canonical binding store for this game's wheel controls, and the only store the
-  shim reads. An omitted action means the shim supplies nothing for it. The game's native input (pad, keyboard)
-  follows the adapter's merge policy (section 8).
-- **Absent file:** nothing is bound. The start line says `controls: nothing applied via ini-controls-1: no
-  dbce-controls.ini`, and the game runs on its native input.
-- **The game's own files are never written by the core.** For OutRun that means `OutRunDesktop.ini`,
-  `OutRun2006Tweaks.ini`, `options.ini` and the saves.
-- **Discovery:** `<exe stem>.product.json` beside the executable (Astra 6295). For OutRun it is
-  `OutRunDesktop.product.json`, copied from `windows/product.json` at build or deploy. It declares:
-  - `productId`;
-  - `controlsStore: "shim-ini-controls-1"` plus the profile file name;
-  - the shim core version and the adapter id;
-  - the injection folder and the observer name and version.
-
-  Wheelkit requires the marker plus the executable identity before it offers to write.
-- **Legacy import:** the Tweaks `[DirectInput]` keys turned into a `dbce-controls.ini`. It runs once, never replaces
-  an existing `dbce-controls.ini` and never modifies its sources (Astra 8815). Who triggers it is Q1. The mapping
-  itself (Tweaks button to action, axis scaling, POV numbers, shifter precedence) is already written and
-  unit-checked in `controls_store.cpp`. It moves to shared fixture vectors either way, so a Wheelkit implementation
-  would run the same cases.
-
-## 6. Device source
-
-```cpp
-struct AxisCaps { bool present; long min, max; };          // the range read back after the open request
-struct ObjectCaps { AxisCaps axis[8]; std::bitset<128> button; bool pov[4]; };
-struct DeviceInfo { std::string dev, prod, name; unsigned type; bool forceFeedback; };
-class DeviceSource {                                        // one per API; DirectInput first
-public:
-    virtual std::vector<DeviceInfo> enumerate() = 0;        // attached now
-    virtual OpenResult open(const DeviceInfo&) = 0;          // identity checked before and after; caps; a new epoch
-    virtual ReadResult read(Epoch, RawState&) = 0;           // one coherent snapshot, or failed (the epoch ends)
-    virtual void close(Epoch) = 0;
-};
-```
-
-- **Identity** (STD-035 item 6):
-  - The instance GUID matches, and the product GUID equals the binding's `prod`.
-  - Both are checked in the listing and again after the open (`GetDeviceInfo`).
-  - A product mismatch is a status (section 7), never a fallback to another instance.
-- **Objects:**
-  - After `SetDataFormat(c_dfDIJoystick2)`, every object is checked by its DIJOYSTATE2 offset: `GetObjectInfo` for
-    existence, and for axes also `GetProperty(DIPROP_RANGE)` after the 0..65535 request (Astra 6313-1).
-  - An axis whose range cannot be read, or whose max is not above its min, is unqualified.
-  - Object counts are never turned into contiguous indices: a wheel with three axes may have X, Z and Rz.
-  - Raw axis samples are rescaled from the range read back, as `controls-contract.md` section 3 allows.
-  - The injection range function returns the same read-back values.
-- **Epochs** (STD-035 item 7):
-  - A failed read ends the epoch, and that device's outputs are released in the same tick: axes to rest, digital up
-    with one up edge.
-  - A device comes back only by enumerating by identity again, as a new epoch.
-  - Running test samples never cross epochs.
-- **Reuse** (Astra 8815: reuse robust lifecycle code where feasible). Lift WheelFfb's proven reader parts into this
-  source:
-  - the per-offset range readback;
-  - POV low-word centring, with invalid angles neutral;
-  - one coherent snapshot per read;
-  - the read-through-the-force-handle rule for the wheel the force path owns.
-
-  Do not wrap the WheelFfb DLL itself: it is process-global, uses index-based slots and couples to its force state.
-  This is Q4.
-- **A fake source for tests** scripts listings, opens and reads:
-  - range refusal and unreadable ranges;
-  - missing objects;
-  - twin products;
-  - an identity change during the open;
-  - failed reads and disconnects mid-hold.
-- **Later sources:** SDL, opened by USB identity as Slipstream does, plus XInput and HID. Contract bindings are
-  DirectInput objects today, so each new source needs a declared object mapping. That is out of scope for r1.
-
-## 7. Resolver, statuses and ActionFrame
-
-Each profile entry gets exactly one status. It is reported per action and counted in the start line:
-
-| Status | Meaning | Start line group |
+| Thread | Does | Never does |
 |---|---|---|
-| `applied` | the game supports it and its object was verified on its device | applied |
-| `unsupported` | the adapter declares the game has no such action (with the reason) | unsupported |
-| `invalid` | the contract parser refused the line (with the reason) | invalid |
-| `device-missing` | no attached device has the instance | unavailable *(new group)* |
-| `product-mismatch` | the instance exists with another product | unavailable |
-| `object-missing` | the device has no such axis, button or hat | unavailable |
-| `range-unqualified` | the axis range is unreadable or empty | unavailable |
+| Game input thread | `tick()`: adopt the latest epoch table, read open epochs, deliver injection, resolve, run the adapter sink, publish the observer, enqueue one recorder snapshot. | Enumerate, open, close, rescan or touch files. |
+| Provider worker | Initial enumeration and opens, hot-plug rescans (bounded per pass), closes after the input thread lets go. | Read samples for frames. |
+| Recorder worker | Owns `session_writer`, drains the queue. | Run in any game callback. |
 
-The start line, emitted once the devices have been checked (Astra 6313-2: no syntactically applied phantom
-objects):
+Reads can block in some drivers, so there is no "adds no latency" claim (R1-F5). Every sample records how long its
+read took and its age at resolution, and the status counts reads over 2 ms. An epoch is handed to the input thread as
+an immutable table generation. A close is requested by the worker, acknowledged by the input thread at its next tick,
+and only then released. A COM device object is never used by two threads at once. Whether DirectInput accepts a
+device opened on the worker and read on the input thread is confirmed live before the design is final (section 17,
+L1).
 
-```
-controls: profile "<p>" revision <r> via shim-ini-controls-1: applied n (ids); unsupported m (ids); invalid k (ids); unavailable u (ids)
-```
+## 5. Profile file, writer transaction, import, discovery
 
-It is followed by one line per non-applied action naming its status and reason. The added `unavailable` group
-is an extension of the STD-033 line, and Wheelkit's reader must accept it (Q11).
+**File.** `dbce-controls.ini` beside the game executable. It holds `[Controls]` exactly as `controls-contract.md`
+section 5 defines, Schema 1, plus any other sections and keys, which every writer preserves (R1-F6).
+
+**Reader.** Read once at start in one bounded read (64 KiB), strict UTF-8 with an optional BOM.
+- A second `[Controls]` or a duplicate action key refuses the whole profile and names both lines.
+- An invalid binding line is reported and skipped, per the contract.
+- A missing file binds nothing. The game runs on native input and the status says why.
+- r1 and r2 read at start only. Edits apply at the next launch (R1 Q7). A future live reload must swap the whole
+  profile atomically and then follow the rearm rules (section 6).
+
+**Writer transaction**, the same for Wheelkit (C#) and F6 (C++), with shared fixture vectors (R1-F6, Q2):
+1. Read the file's bytes and hash them (SHA-256): this is the base.
+2. Refuse when the file declares a format version this writer cannot preserve.
+3. Build the new bytes: replace only `[Controls]`. Every other section, unknown keys inside `[Controls]`, comments,
+   the BOM and line endings stay byte for byte.
+4. Write a uniquely named temporary sibling, flush it, and read it back to compare.
+5. Re-read the destination. If its hash is no longer the base, refuse with a conflict, so the other frontend's edit
+   is never lost.
+6. Replace with `ReplaceFileW` and a backup name, so that on any failure the original is restorable. When the file is
+   new, create it with a no-replace `MoveFileExW`. Then verify the destination bytes, remove the backup and report the
+   new hash.
+7. The fixture vectors include a conflict, a forced replacement failure (the destination held open), preserved
+   unknown sections, a CRLF file with a BOM, and a missing file.
+
+`Revision` stays Wheelkit's profile content hash (contract section 5). The status reports the file hash too, so a
+reader can tell which bytes were applied.
+
+**Legacy import** (Tweaks `[DirectInput]` to `dbce-controls.ini`) is **explicit** (R1 Q1):
+- It is started from Wheelkit, or from a standalone opt-in importer that runs the same vectors.
+- It shows a preview first: the proposed bytes, every note, and every Tweaks key that is not carried over.
+- It is all-or-nothing and no-clobber: it creates the file only when none exists, through step 6.
+- It never modifies the Tweaks or OutRun files.
+- A missing `dbce-controls.ini` is not consent to import.
+
+The mapping already written in `controls_store.cpp` (button to action, axis scaling, POV numbers, an explicit shifter
+device taking precedence) becomes those vectors.
+
+**Discovery.** `<exe stem>.product.json` beside the executable (`OutRunDesktop.product.json`, copied from
+`windows/product.json`). It declares:
+- `productId`;
+- `controlsStore: "shim-ini-controls-1"` and the file name;
+- the core and adapter ids and versions;
+- the status format version;
+- the test folder and the observer name and version.
+
+Wheelkit needs this marker plus the executable identity before it offers to write.
+
+## 6. Provider: ownership, identity, epochs, rearm
+
+**One owner** (R1-F4). The provider holds every device handle in the process. It grants leases:
+- **Read lease.** A non-exclusive, background handle. This is the only lease OutRun needs: it has no force.
+- **Force lease** (reserved). An exclusive handle for the force-feedback wheel. While it exists, that wheel is read
+  through the same handle, because a second open of a force device is never made.
+- **Bridge provider**, an alternative implementation for consumers that already own the wheel through WheelFfb.
+  WheelFfb stays the owner, and the provider reads through it by instance identity. A consumer that adopts the shim
+  never opens a second exclusive path.
+
+Proven reader behavior is reused behind this boundary (R1 Q4). Copying WheelFfb's reader code would not share its
+handle, so the design never claims that it does.
+
+**Shutdown order:**
+1. The adapter stops ticking.
+2. A test run ends: owned actions go neutral and a last frame is published.
+3. The recorder stops, with a bounded flush (1 s). Past the deadline the capture is incomplete.
+4. Force leases stop and unload their effects gracefully. A force process is never hard-killed.
+5. Read leases are unacquired and released.
+6. The worker is joined, and DirectInput is released.
+
+**Identity** (STD-035 item 6). The instance GUID must match and the product GUID must equal the binding's `prod`. Both
+are checked in the listing and again after the open (`GetDeviceInfo`). A product mismatch is a status, never a
+fallback to another instance.
+
+**Objects.** After `SetDataFormat(c_dfDIJoystick2)`, every bound object is checked by its DIJOYSTATE2 offset:
+- existence with `GetObjectInfo`;
+- for axes, the range with `GetProperty(DIPROP_RANGE)` after the 0..65535 request (R1 finding on 35a8aa3).
+
+An unreadable or empty range makes the axis unqualified. Object counts are never turned into contiguous indices.
+Samples are rescaled from the range read back, and the injection range function returns the same values. This is
+configuration evidence, not proof of acquisition, a successful read or an observed action (R1-F8).
+
+**Epochs** (STD-035 item 7, R1-F5):
+- A failed read ends the epoch at once (N2). Its owned actions are neutral in the same frame, and each held digital
+  action gets one up edge.
+- The worker reopens only the exact identity, as a new epoch.
+- Rescans run on device-arrival notifications, plus every 2 s while a bound device is missing. Each pass is bounded
+  to one enumeration and at most four opens.
+
+**Rearm at every epoch start**, the first open and every reopen (R1-F5, N1):
+- **Digital** actions: an object held at the epoch's first valid read is masked until it has been read released once.
+  A reconnect never manufactures a press.
+- **Pedal** actions (`throttle`, `brake`, `clutch`, `handbrake`): neutral until the normalized value has been at or
+  below 0.05 once in the epoch. A held pedal never resumes throttle.
+- **`steer`**: live at once. It is an absolute position, and holding it at centre would be wrong.
+- Each action reports `rearming` until it is ready. A test run never continues across an epoch change (section 9).
+
+**Hot-plug policy:** exact identity, bounded rescans, a new epoch, neutral rearm, no silent test continuation (R1 Q8).
+
+## 7. Samples, resolver, statuses, frame provenance
 
 ```cpp
-struct ActionValue { float value; bool available; bool injected; };   // steer -1..1, pedals 0..1, digital 0 / 1
-struct ActionFrame {
-    std::uint64_t seq;            // one per resolve
-    std::int64_t  readUs;         // QueryPerformanceCounter microseconds at the device reads (monotonic)
-    ActionValue   action[ActionCount];  // fixed index per contract action id
-    std::uint64_t down, up;       // digital edges against the previous frame, one bit per digital action
-    std::uint32_t batch;          // the last accepted test batch, 0 none
-    std::uint32_t epochEvents;    // a device epoch began or ended in this frame
+struct InjectionMark { std::uint64_t batch; std::uint8_t hash[8]; std::uint8_t axes; std::bitset<128> buttons; std::uint8_t povs; };
+struct DeviceSample {
+    std::uint32_t device;            // the provider's identity index, stable for the process
+    std::uint32_t epoch;             // per identity, increasing, never reused
+    std::uint64_t seq;               // per identity, every read attempt
+    std::int64_t  readStartUs, readEndUs;   // QueryPerformanceCounter microseconds
+    bool valid;                      // the read succeeded
+    RawState state;                  // axes in the read-back range, buttons, POVs (valid samples only)
+    InjectionMark injected;          // objects that actually carried a delivered value in THIS read; empty otherwise
+};
+struct ActionValue {
+    float value;                     // steer -1..1, pedal 0..1, digital 0 / 1; rest when not live
+    ActionStatus status;             // live, rearming, unavailable(reason), unsupported, invalid, unbound
+    std::uint16_t sample;            // index of its source sample in this frame, or none
+    bool injected;                   // its bound object carried a delivered value in that sample
+};
+struct Frame {
+    std::uint64_t seq;
+    std::int64_t  tickUs;            // when tick() began
+    std::uint64_t runEvents;         // the event-ring sequence at this frame (section 9)
+    SampleTable   samples;           // fixed capacity: one per bound device read this tick
+    ActionValue   action[ActionCount];
+    std::uint64_t down, up;          // digital edges against the previous frame
 };
 ```
 
-- Normalization is exactly the contract's (`dbce_controls.hpp`, shared vectors).
-- An unavailable action reads its rest value (steer 0, pedal 0, digital up). A held digital action whose device
-  goes away produces one up edge (neutral release).
-- Every action reads its own device, so a second device needs no merging (STD-036).
-- An object bound to two actions is reported. It is refused only when the adapter declares the pair exclusive.
-  Wheelkit's writer already refuses collisions (STD-035 item 3).
+- **Provenance** (R1-F1). Every action names its source sample. Every sample names its device, epoch and sequence,
+  plus the batch and content hash of exactly the objects that carried a delivered value. A later physical read
+  carries no mark, so the observer can never tag it with the last batch. Acceptance, refusal, delivery failure, epoch
+  begin and end (with the device and the reason), drops and run-state changes are separate events (section 9). They
+  are not frame fields.
+- **Normalization** is exactly the contract's (`dbce_controls.hpp`, shared vectors).
+- **Statuses:**
+
+| Status | Meaning | Start-line group |
+|---|---|---|
+| `live` | applied, object verified, epoch open, rearmed | applied |
+| `rearming` | applied, waiting for release or rest (section 6) | applied |
+| `unsupported` | the adapter declares the game has no such action, with the reason | unsupported |
+| `invalid` | the contract parser refused the line, with the reason | invalid |
+| `device-missing` / `product-mismatch` / `object-missing` / `range-unqualified` / `opening` | configured but not available, with the reason | unavailable |
+| `unbound` | omitted or empty in the profile | not counted |
+
+An object bound to two actions is reported. It is refused only when the adapter declares the pair exclusive.
+Wheelkit's writer already refuses collisions (STD-035 item 3).
 
 ## 8. Adapter contract
 
 An adapter:
 
-1. **Declares** for every contract action whether the game supports it, or why not. Those reasons are the
-   `unsupported` group.
-2. **Ticks** the core exactly once per game input sample, on the game's input thread, and consumes that frame there.
-   This is a pull model: reads happen at the game's input point, which adds no latency or thread hop, and recording
-   and observation share that clock.
-3. **Merges** with native input according to a per-action policy it declares: override, max-merge or native-only.
-   - It guarantees **no duplicate consumer**: one physical device never reaches the game through two paths.
-   - Where the game can also read the wheel natively, the adapter closes that path, by overriding after the game
-     resolves its own input or by hiding the device from it. It never does this by rewriting the game's saved
-     bindings.
-4. **Releases to neutral** on stop, scene change and disconnect. No input stays held, and each release gives one
-   edge.
-5. **Supplies state signals:** named numeric channels with units for the observer and recorder (speed, gear, the
-   game's consumed steering). It names what it cannot observe, and states the frame offset of each signal, e.g.
-   "consumed as of the previous tick".
-6. **Implements the fences**, keyed on the core's test latch. They are required before any injected run (Astra
-   8815):
-   - saves, results and scores go to a run copy or are refused;
-   - network and LAN are off;
-   - option writes are refused;
-   - no force path exists (section 10).
-7. **Reports** its fence states at start, next to the controls start line.
+1. **Declares** for every contract action whether the game supports it, or the reason it does not.
+2. **Names its interception point**, the place where it hands the frame to the game. That point must come before
+   every consumer of the actions it owns (R1-F3).
+3. **Audits every native input path** the game has (each API: DirectInput, XInput, RawInput, HID, WGI, SDL, an
+   engine's own reader) and states how owned devices are excluded from each *before* the game consumes them: hidden at
+   the API, filtered in the native reader, or absent by construction.
+   - An override applied after the game has resolved its input is never claimed as duplicate protection. A native
+     button may already have confirmed, paused, reset or shifted.
+   - Max-merge cannot remove a duplicate wheel contribution from an aggregate that has lost device identity.
+   - Unrelated native input (keyboard, pad) is preserved.
+   - Duplicate exposure is verified at run time, never assumed from a product or type label (R1-F9). For example, the
+     adapter lists every native device that matches an owned VID/PID.
+4. **Declares a merge policy per action** (override, max-merge or native-only) between owned values and unrelated
+   native input, and declares the context, edge and repeat semantics with the point where each is observed. Example:
+   OutRun's menus act on frontend-feature edges, while the race reads held `buttons_04` bits.
+5. **Neutralizes** the owned contribution on stop, scene change, epoch end and test failure. It never resurrects stale
+   native wheel input.
+6. **Supplies the window** that cooperative levels need, and declares its background policy: whether owned devices
+   drive the game while it is unfocused.
+7. **Supplies state signals** through one interface: named numeric channels with units, each tagged with the frame
+   seq it belongs to and its offset (e.g. "as consumed in the previous tick"). It names what it cannot observe. The
+   same interface feeds the observer, the recorder and, later, telemetry (STD-016) and the force model, so a game has
+   one state source rather than three.
+8. **Implements and self-checks its fences** (section 9). Each fence reports `verified` with evidence, such as the
+   effective path, the absent pointer or the grep result. Anything missing or ambiguous refuses admission (R1-F9).
+9. **Declares derived inputs**, if any (e.g. steering into menu left and right). They are never fed back as actions.
 
-## 9. Test channel, observer, recorder
+## 9. Test runs: latch, admission, batches, failure, observation
 
-- **Session:** `inject.on` and `inject.txt` under `%LOCALAPPDATA%\dbce\<productId>\`, per contract section 6,
-  STD-034 item 5 and STD-035 item 9.
-  - Raw samples are delivered inside device-source reads, before the resolver. A test therefore exercises the
-    profile, the resolver and the adapter.
-  - `inject action` resolves through the applied bindings.
-- **Latch, at process start:**
-  - It is set as soon as `inject.on` is seen at start, before any other check, whether the session then arms or is
-    refused. It is never cleared, not at expiry or after a refusal (Astra review, item 4).
-  - It is decided before the game initializes its saves or network, so adapter fences are in place before the first
-    write.
-  - For OutRun that means in the desktop entry point, before the game host starts, not at the first input sample as
-    in 35a8aa3.
-- **Strict session file:**
-  - exactly one `nonce=` and one `expires=`;
-  - unknown keys and duplicates are refused;
-  - strict UTF-8, bounded.
-- **Batches:**
-  - Each `inject.txt` version is one batch.
-  - It is parsed and validated whole first: size, count, grammar, bindings and table capacity, against a scratch
-    table.
-  - A valid batch then replaces every running sample.
-  - A refused batch drops every running sample (fail closed) and logs why.
-  - Nothing is ever partially accepted (Astra review, item 4). Replace versus add is Q3.
-- **Observer:**
-  - `Local\Dbce<Product>InjectObserve-<nonce>`, created by this process or refused. Seqlock, versioned, with its
-    layout documented next to the product (Astra 6295: keep the decomp's own name and version).
-  - It carries:
-    - frame `seq` and `readUs`;
-    - the batch id;
-    - per-action injected flags;
-    - the raw samples of bound axes;
-    - the adapter's sink values and state signals, each with the frame seq it belongs to.
-  - The clock join is explicit. A harness matches a batch to the first frame that carries it, then to the state
-    signal published for that frame's seq.
-- **Recorder:**
-  - It uses the toolkit's `native/session/session_writer.h` (`dbce.wheel.session` version 1), pinned by commit and
-    hash (Astra 8823).
-  - One worker thread owns the writer.
-  - The input thread pushes copied snapshots into a bounded single-producer queue, with their original timestamps.
-  - Overflow counts drops and records the gap. Samples are never manufactured.
-  - Channels: the raw bound objects, ActionFrame values, adapter state signals.
-  - Off unless a recording session is requested (Q9).
-- **Replay:** raw replay feeds the device source and exercises the bindings. Action replay feeds the adapter. Neither
-  claims deterministic physics. Pose replay stays game-specific.
+**States** (R1-F2):
 
-## 10. Force feedback (later, but it shapes r1)
+```
+NONE ──(inject.on present at start)──► LATCHED ──(admission passes)──► RUNNING ──► COMPLETED | EXPIRED
+                                          │                               │
+                                          └───────(any failure)───────────┴──────► FAILED
+```
 
-- When a game gets force feedback, the core owns the wheel's device handle. Force needs an exclusive acquire, and the
-  wheel is then read through that same handle, as WheelFfb does. The device source therefore has a mode for "opened
-  by the force path, read through its handle".
-- The test latch means no force path is ever created (STD-034 item 4). The environment mute `DBCE_FFB_MUTE` is the
-  second interlock (STD-035 item 8). The force model itself (`native/forcemodel`) is unchanged.
+- **LATCHED** is set at process start, in the entry point, before the game initializes saves or network. It is set
+  whatever the session file contains: refused, stale and expired files latch too, and the latch lasts for the
+  process.
+  - From LATCHED on, owned actions are neutral except for injected samples during RUNNING.
+  - The fences stay in force until exit.
+  - A latched process never returns owned devices to physical control.
+  - Owner trap: a stale `inject.on` disables the wheel. Mitigations: a loud start line (`TEST PROCESS: ... wheel input
+    disabled; saves redirected`), Wheelkit warning that the switch is present, and the harness's cleanup removing it
+    (STD-034 item 7). See N4.
+- **Admission**, all required:
+  - a strict session file: exactly one `nonce=` (8-64 alphanumeric) and one `expires=` (at most 1 h ahead), no
+    unknown or duplicate keys, strict UTF-8, at most 512 B;
+  - Schema 1 with at least one applied action;
+  - every adapter fence `verified`;
+  - no force path (section 11).
 
-## 11. Interception classes across the portfolio
+  Otherwise FAILED.
+- **Batches.** Each version of `inject.txt` is one batch:
+  - it starts with `nonce=<session>` and `batch=<n>`, where `n` is strictly greater than the last accepted batch
+    (N5); then at most 32 commands; at most 4096 B;
+  - it is validated whole against a scratch injection table: grammar, bindings, objects, ranges and capacity;
+  - a valid batch replaces every running sample atomically, and the acceptance event carries the session, `n`, the
+    content hash (SHA-256 of the bytes), the command count and the time;
+  - the same content under the same `n` is a duplicate. It is reported and ignored (R1 Q3).
+- **FAILED** is terminal for the process. Triggers:
+  - a refused batch;
+  - an unreadable, oversize or wrong-nonce command file;
+  - a delivery failure of an injected object (unreadable range, missing object, failed read);
+  - an epoch end on any device the run has injected into.
 
-| Class | How the adapter reaches the game | Game config | Duplicate-consumer guard | Portfolio examples |
+  Running samples are dropped and owned actions are neutral (one up edge each). The fences stay and the event is
+  logged. A new file never rearms the process. Physical control never returns, not even for the axis the injection
+  was holding.
+- **COMPLETED** happens on a batch whose only command is `end`. **EXPIRED** happens at the session expiry. Both drop
+  running samples and leave owned actions neutral for the rest of the process.
+- **During RUNNING**, objects not injected read the real device, as `controls-contract.md` section 6 says. The idle
+  gate keeps the rig unattended (N3).
+- **Stimuli.** Qualification uses `inject raw` built independently from the intended profile's raw objects
+  (STD-034 item 3). `inject action` resolves through the applied mapping and is for navigation only. Each acceptance
+  event records which kinds a batch used.
+- **Observer v2:** `Local\Dbce<Product>InjectObserve-<nonce>`, created by this process or refused. Seqlock,
+  versioned, with its layout documented beside the product (`windows/docs/OBSERVER.md`). It carries:
+  - run state, latch and fence states;
+  - the last frame: seq, tick time, and per action its value, status, injected flag and source sample;
+  - that frame's sample table: device, epoch, seq, read end, validity and the injection mark;
+  - the adapter's state signals, each with its frame seq and offset;
+  - an event ring of 64 entries with an increasing event sequence, so a reader detects overrun by a gap.
+
+  The join is explicit: batch to the first sample that carries its mark, to the frame that used that sample, to the
+  state signals published for that frame seq.
+
+## 10. Recording
+
+R1-F7, Q9.
+
+- **One designated producer**, the game input thread, assembles a copied snapshot per tick: frame values, sample
+  metadata, and adapter state signals with their own source seq and time. It pushes the snapshot into a bounded
+  single-producer queue. Future producers (a physics thread, the force model) each get their own bounded ingress.
+  They are not added to this queue.
+- **Times.** The row time is the emission time: the producer's `tickUs`, monotonic by construction. Source sample
+  times and frame seqs are channels (`src.state.frameSeq`, `src.state.us`). A late signal never carries an older row
+  time.
+- **Bounds:**
+  - the queue holds 1024 rows and 4 MiB;
+  - `session_writer`'s limits apply (600 s, 64 MiB, 256 KiB per record);
+  - stop flushes for at most 1 s.
+
+  Overflow counts the drops and writes a gap marker when there is space. Any drop or a flush timeout makes the footer
+  incomplete. Ticks are never manufactured.
+- **Metadata:**
+  - the profile revision and file hash;
+  - device identities with their read-back ranges;
+  - device policies (rearm, background);
+  - core and adapter versions and commits;
+  - effective tuning (sensitivity, dead zone);
+  - units per channel;
+  - whether the process is ordinary or a test run.
+- **Writer:** `native/session/session_writer.h`, pinned by commit and hash.
+- **Control surface: open.** Wheelkit's existing recording and playback runner lifecycle (Wheelkit
+  `docs/RECORDING-PLAYBACK.md`) is audited first, and reused where it fits. No `record.on` is invented before that
+  audit. Ordinary recording, test admission and pose replay stay separate modes.
+
+## 11. Force feedback
+
+R1-F4.
+
+- Force uses the force lease (section 6). OutRun has none yet.
+- A latched process creates no force path (STD-034 item 4). The environment mute `DBCE_FFB_MUTE` is the second
+  interlock (STD-035 item 8). Both must cover the stock game's producers and those of other mods in the process, not
+  only the shim's own.
+- No-force qualification mutes delivery. It does not delete the producer. Force calculation and telemetry stay
+  available with delivery muted.
+
+## 12. Status and reporting
+
+R1-F8, Q11.
+
+- **Human start line,** once the provider has checked the devices:
+  `controls: profile "<p>" revision <r> via shim-ini-controls-1: applied n (ids); unsupported m (ids); invalid k
+  (ids); unavailable u (ids)`. One line follows per non-live action, with its status and reason. The provider token
+  `shim-ini-controls-1` is new, and a reader that knows only `ini-controls-1` must treat it as unknown, which means
+  not configured. Astra tests this against Wheelkit's reader at its pinned commit: an unknown provider or status must
+  fail closed and never keep a green badge.
+- **Structured status:** `controls-status {"v":1,...}` JSON lines in `runtime.log`, written at start and on every
+  change. They carry:
+  - per action: id, status, reason, device and epoch;
+  - per device: identity, name, status, epoch and the objects verified;
+  - the profile revision and file hash;
+  - the core and adapter versions;
+  - the run state and the fences;
+  - read-timing counters.
+
+  Whether a status file is also needed is N6.
+- **Evidence stays apart** (STD-033 item 4). Verified objects are configuration evidence. Live status is
+  availability. Neither is an observed game response.
+
+## 13. Interception classes: candidates, not proof
+
+| Class | How the adapter reaches the game | Game config | Pre-consumer guard to prove | Candidates |
 |---|---|---|---|---|
-| **A: source or mod-owned sink** | writes actions into the game's input variables | untouched | our build has no other wheel path | OutRun decomp, Daytona and F-Zero recomps; BepInEx mods that already read devices (art of rally, Woden, Horizon Chase Turbo, iRacing Arcade) |
-| **B: engine action override** | replaces engine-level action values after native resolution (Rewired, Unity Input System, InControl) | untouched | per-action override, never added; device hidden from the engine if needed | #DRIVE Rally, Karting Superstars |
-| **C: in-process virtual device** | a proxy presents a fixed virtual controller whose objects are the actions | bound once to the virtual device, or the game's default for it | the proxy hides the physical devices | DirectInput: V-Rally 4, Rush Rally 3, DiRT/GRID, Gravel; SDL: CannonBall, Slipstream |
+| **A: source or mod-owned sink** | writes actions into the game's input variables | untouched | our build has no other path for owned devices; verified per API at run time | OutRun decomp (reference); Daytona and F-Zero recomps; BepInEx mods that already read devices |
+| **B: engine action override** | replaces engine action values at the engine's input stage (Rewired, Unity Input System, InControl) | untouched | owned devices removed from the engine's controller set before it produces actions, for every API the engine reads (Rewired also reads RawInput/HID/XInput) | #DRIVE Rally (second game, after its qualification); Karting Superstars |
+| **C: in-process virtual device** | a proxy presents a fixed virtual controller | bound once to it, or its default | physical devices hidden from every API the game uses | research hypothesis only (R1 Q5): DirectInput and SDL games |
 | D: out of process | companion process to a virtual pad | — | — | Sonic CrossWorlds today; not a shim target |
 
-- Class A is the reference (this adapter).
-- Class C is the boldest claim. It holds only for a game proven to take the virtual device without a native-store
-  write per profile.
-- Class A in Unity needs the core from C#. That means either a C ABI (deferred by Astra 8815) or the managed twin of
-  the contract (`Dbce.Wheel.Input`). This is the main portability risk (Q5, Q10).
+The class-A Unity mods and the class-B adapter need the core from C#. That takes the experimental bridge (Q10) or the
+managed contract twin (`Dbce.Wheel.Input`) for parsing only. There is never a second resolver. DRIVE is where that
+gets settled.
 
-## 12. Standards impact (on promotion only)
+## 14. Standards impact (on promotion only)
 
-- **STD-033 item 2** ("each game keeps one store; never a second competing store"). In a shim game,
-  `dbce-controls.ini` is the one store for wheel controls. The native store stays as the game left it, but must not
-  be a competing path for the same devices, and section 8 item 3 is what makes that true. Amendment needed: "a game
-  may keep its controls in the shim store instead of its native store when its adapter proves no duplicate
-  consumer".
-- **STD-035:** for shim games the writer rules shrink to one format and one writer. Items 6 to 10 (runtime
-  injection) are implemented once in the core.
-- **STD-034:** unchanged. Configured is the core's start line; observed is game state after raw injection.
-- **STD-036:** met by construction.
-- **STD-030 (F6 panel):** the controls page of a shim game would edit `dbce-controls.ini`, which clashes with
-  "Wheelkit owns writes" (Q2).
+- **STD-033 item 2.** In a shim game, `dbce-controls.ini` is the one store for wheel controls. The native store stays
+  as the game left it and must not be a competing path for owned devices, which section 8 items 2 and 3 must prove.
+  Amendment: "a game may keep its controls in the shim store instead of its native store when its adapter proves
+  pre-consumer exclusion of owned devices on every native path".
+- **STD-035.** The writer rules shrink to the section 5 transaction. Items 6 to 10 (runtime) are implemented once in
+  the core.
+- **STD-034.** Unchanged. Configured is the status, observed is game state after raw injection, accepted is the owner.
+- **STD-036.** The shim reads each binding from its own device, but that is not qualification. It needs multi-device
+  execution evidence (R1-F8).
+- **STD-030.** F6 and Wheelkit share the section 5 transaction. F6 controls are never made read-only (R1-F6).
 
-## 13. OutRun 2006 reference adapter
+## 15. OutRun 2006 reference adapter
 
-- **Tick:** `xbox_runtime::input_filter`, after the pad adapter, once per 453BB0 input sample.
-- **Sink** (game units):
-  - steer becomes record word 0x0E (`lround(n * 32767)`, full range; the game's 453860 then applies its own 0.0078
-    dead zone and -127..127 quantisation);
-  - throttle and brake become 0x0D and 0x0C (`lround(n * 255)`), max-merged with the pad;
-  - `pc_input_layer = false` whenever any of the three is available. An unavailable channel keeps the pad's record
-    value, so pedals work without the steering device (Astra review, item 1);
-  - buttons become the `buttons_04` bits, menu edges and frontend features, as in 35a8aa3.
-- **H-pattern:**
-  - Shift pulses go toward the held gate's gear, reading car word +208.
-  - One pulse every other tick; it stops after four pulses without a change.
-  - The game has no neutral or reverse.
-- **Coexistence:**
-  - The Xbox core reads only `Windows.Gaming.Input` Gamepads (`platform_api.cpp`). Wheels and the DS-8X are not
-    WGI Gamepads, so there is no second wheel path. At the rig, verify this with a start-up line listing WGI
-    gamepads.
-  - Pad and keyboard keep working.
-- **State signals:**
-  - mode and in-gameplay;
-  - speed (car +1C4);
-  - gear (+208);
-  - the consumed 7D6810 steer, accelerator and brake (as of the previous tick);
-  - the record values written.
-- **Fences under the latch:**
-  - the game's writable state normally lives in the game folder (`application_home`: cache, saves, options and logs).
-    Under the latch, a run folder under the injection folder takes the saves and the options:
-    - `diag.save_directory` (xbox `main.cpp`, now `home + "/SaveGame"`) goes to the run folder, seeded with a copy of
-      the owner's SaveGame so menus behave normally;
-    - the `options.ini` path (`main.cpp` 106 and 308) goes to a run copy;
-    - the EXE image cache (`exe_setup_prepare`) stays where it is. It is derived and deterministic, and it is named in
-      the fence report;
-    - `runtime.log` stays (it is the evidence);
-  - the LAN platform is not installed (`native_network_set_platform` skipped), so the game is offline;
-  - the build has no force path.
-- **Unsupported, with reasons:**
-  - clutch, handbrake, neutral and reverse: not in the game;
-  - gear7 and gear8;
-  - select;
-  - lookBack, reset and horn: not mapped yet;
-  - modMenu: until the F6 panel;
-  - muteFfb: until force feedback.
+**Interception point.** `xbox_runtime::input_filter`. It runs after the pad adapter (`DualSenseInput::update`) and
+before 453BB0 consumes `NativeInputState`. Nothing in the game reads the actions earlier.
 
-## 14. Open questions for review
+**Native path audit** (R1-F3, R1-F9):
+
+| Path | Source | Owned devices | How excluded |
+|---|---|---|---|
+| WGI `Gamepad` | `xbox/source/platform_api.cpp:24` | wheels and the DS-8X are not expected to be Gamepads | Verified at run time: at start, log every WGI Gamepad and RawGameController with VID/PID. If an owned identity appears as a Gamepad, `read_pad` drops it before the pad adapter, and the adapter reports it. |
+| Keyboard | none in the Xbox desktop build (no `WM_KEY*` / `GetAsyncKeyState` in `xbox/source`, `windows/source`) | — | absent |
+| PC DirectInput layer (406FA0) | emulated from `pc_pad`, which is built from the WGI pad | — | no real device behind it |
+
+**Sink:**
+- `steer`: record word 0x0E = `lround(n * 32767)`, overriding the pad's steering when live. 453860 then applies its
+  0.0078 dead zone and its quantisation.
+- `throttle`, `brake`: 0x0D and 0x0C = `lround(n * 255)`, max-merged with the pad's triggers, which are an unrelated
+  device.
+- `pc_input_layer = false` whenever any of the three is live. A channel that is not live keeps the pad's record value,
+  so pedals work without the steering device (R1 review of 35a8aa3, item 1).
+- Buttons go to the `buttons_04` bits (race, held), menu edges and frontend features (menus, down edges), as in
+  35a8aa3.
+
+**Background policy:** owned devices drive the game while it is unfocused, as a cabinet needs. The policy is declared
+in the status.
+
+**H-pattern** (R1-F10). A state machine on a monotonic clock, not frame counts:
+- The target is the gear of exactly one held gate. With none held it is idle. With two or more held it is
+  `ambiguous`: no action, logged once per hold.
+- Gear state comes from car +208. Outside a race or without a car, the gear is `unavailable` and the machine waits.
+- Each step:
+  - a shift pulse held for one tick, then released for at least one tick;
+  - wait for the consumed gear to change, with a 250 ms deadline;
+  - on change, the next step; on the deadline, retry the step at most twice;
+  - then stop with `gear target not reached (gear g, target t)`, logged once until the gate changes.
+- Impossible gears (above the car's top gear) end the same way, because the car's gear count has not been read yet.
+- Neutral and reverse are `unsupported` (the game has none). Forward-gear chasing never stands in for them.
+
+**State signals:**
+- mode and in-gameplay;
+- speed (car +1C4, game units);
+- gear (+208);
+- the consumed 7D6810 steer, accelerator and brake (offset: the previous tick);
+- the record words and buttons written (offset: this tick).
+
+**Fences under the latch** (R1-F9). Each has an admission self-check: a writer that resolves outside the run folder
+refuses admission. The run folder is `%LOCALAPPDATA%\dbce\outrun2006-decomp\run-<nonce>\`.
+
+| Writer | Source | Under the latch | Self-check |
+|---|---|---|---|
+| Saves, licences, results, ghosts | `diag.save_directory` (`xbox/source/main.cpp:195`), from which `frontend_save_directory` comes; `license_owners->persistence` (`game_host.cpp:1155`), `race_end_runtime.cpp:933/1154` and `race_ghosts_runtime.cpp:72` all derive from it | redirected to the run folder, seeded from a copy of the owner's SaveGame | the effective `frontend_save_directory` equals the run folder |
+| `options.ini` | `main.cpp:106`, `:308`; `gpu_backend.cpp:31` writes it | redirected to a run copy | the effective options path is in the run folder |
+| `crash.txt` | `main.cpp:177` | redirected | path check |
+| `runtime.log` (stdout) | window entry point | redirected to the run folder, so the owner's log is untouched | path check |
+| `trace.txt`, `replay.bin` | `game_host.cpp:91`, `:117` (development hooks) | refused (hooks disabled) | the hooks are off |
+| EXE image cache | `exe_setup_prepare` | kept: derived and deterministic, declared in the fence report | declared |
+| LAN | `native_network_set_platform` (`main.cpp:168`) | not installed: offline | the platform pointer is null |
+| Force | no producer in the decomp (no `CreateEffect` or vibration in `src`, `xbox/source`, `windows/source`; WGI `Gamepad.Vibration` never set) | n/a | grep evidence in the receipt |
+
+The audit is repeated whenever upstream changes are merged. Any new writer either joins the table or refuses
+admission.
+
+**Unsupported, with reasons:**
+- clutch, handbrake, neutral and reverse: not in the game;
+- gear7 and gear8;
+- select;
+- lookBack, reset and horn: not mapped yet;
+- modMenu: until the F6 panel;
+- muteFfb: until force feedback.
+
+## 16. Decisions and remaining questions
+
+**Decided in round 1** (Astra's answers, adopted):
+
+| # | Decision |
+|---|---|
+| Q1 | Explicit, previewable, all-or-nothing, no-clobber import from Wheelkit or an opt-in importer. Never automatic. |
+| Q2 | One writer transaction for both frontends, one file, revision and hash checks. No mandatory Wheelkit. |
+| Q3 | Whole-batch replace with identity and deduplication. An invalid batch fails the run and leaves owned actions neutral. |
+| Q4 | Reuse proven behavior behind an explicit provider boundary. No promise of shared force handles. |
+| Q5 | Second game: DRIVE (class B), after its current qualification, as an opt-in isolated spike. Class C is research only. |
+| Q6 | Game and adapter shaping as now. Record the effective values and avoid a double dead zone. Any canonical shaping needs versioning. |
+| Q7 | Start-only. A future reload swaps the whole profile and then rearms. |
+| Q8 | Exact identity, bounded rescan, new epoch, neutral rearm, no silent test continuation. |
+| Q9 | Audit Wheelkit's existing session lifecycle first. Ordinary recording and test runs stay distinct. |
+| Q10 | No stable ABI before the second adapter. An experimental bridge is allowed; a second resolver is not. |
+| Q11 | Versioned structured status plus a compatible line. Old readers fail closed. Unavailable stays separate. |
+
+**Open for round 2:**
 
 | # | Question | Proposal |
 |---|---|---|
-| Q1 | Who triggers the legacy import? | Runtime, only when `dbce-controls.ini` is absent and a Tweaks `[DirectInput]` exists. It creates the file through a temporary file and a no-replace move, and the log names it. Alternative: Wheelkit runs the same vectors and writes the file itself, so the runtime never writes. |
-| Q2 | F6 panel and Wheelkit both editing controls | F6 shows the profile read-only, plus live capture that hands bindings to Wheelkit. Alternative: F6 writes through the same atomic protocol with a revision check. |
-| Q3 | A new batch: replace or add to running samples? A refused batch: drop all or keep? | Replace; drop all (fail closed). |
-| Q4 | Device lifecycle reuse | Lift WheelFfb's reader parts into a source-level DirectInput source with a fake twin; don't wrap the DLL. |
-| Q5 | The second game for promotion | One that tests portability, not the same class: a class-B (Rewired) or a C++ class-C proxy game rather than another recomp. Astra's call, DRIVE-aware. |
-| Q6 | Steering sensitivity and dead zone | Game options, applied by the adapter, read from the game's own settings, for now. A core-level shaping block would need a contract change. |
-| Q7 | Live profile reload on a new revision | Not in r1: read at start only. |
-| Q8 | Hot-plug | Reopen by identity on device arrival, as a new epoch, and report it. Bounded rescan while a bound device is missing. |
-| Q9 | How recording is requested | A `record.on` session file beside `inject.on`, with its own bounds. |
-| Q10 | When the C ABI comes | After the second game shows what crosses the seam. |
-| Q11 | The `unavailable` group in the start line | Accept it in Wheelkit's reader and keep it separate from `unsupported`. |
+| N1 | Rearm thresholds | Digital: read released once. Pedal: normalized value at or below 0.05 once. Steer: live at once. |
+| N2 | Is every failed read an epoch end, including a transient `DIERR_INPUTLOST`? | Yes: end at once, then reopen through the worker (the safe reading of STD-035 item 7). |
+| N3 | Do non-injected objects of owned devices stay physical during RUNNING? | Yes, per contract section 6, with the idle gate. The alternative is to neutralize every non-injected owned action during a run. |
+| N4 | A stale or expired `inject.on` latches and disables the wheel | Accept it (fail closed), with a loud start line, a Wheelkit warning and harness cleanup. |
+| N5 | Batch identity | `batch=<n>` required after the nonce, strictly increasing; content hash in the acceptance event. |
+| N6 | Structured status channel | JSON lines in `runtime.log` first. A status file only if Wheelkit needs live availability. |
+| N7 | Provider token | `shim-ini-controls-1`, so old readers fail closed. |
+| N8 | Seeding the run folder's SaveGame | A copy of the owner's SaveGame, so menus behave as usual. The alternative is empty, which shows first-run screens. |
 
-## 15. Review log
+## 17. First proof matrix
+
+Levels:
+- **U**: a unit test against the fake provider (no devices, no game);
+- **A**: an adapter fixture (OutRun sink and state machine on fake frames and a fake car word);
+- **W**: a Wheelkit-side test (Astra);
+- **L**: a live injected run under the lease and idle gate, after a source PASS;
+- **O**: the owner at the wheel.
+
+Nothing at L or O runs before U and A pass and the source is reviewed.
+
+| # | Requirement | Proof | Level |
+|---|---|---|---|
+| P1 | Identity checked in the listing and after the open; a product mismatch is a status | fake listing with twins and a mismatched product; an identity change between listing and open | U |
+| P2 | Objects verified by offset; non-contiguous axes | fake device with X, Z and Rz only; a binding on Y gives `object-missing` | U |
+| P3 | Range read back per axis; unqualified axes refused; rescale from the read-back range | fake ranges: refused request, unreadable, empty, -32768..32767 | U |
+| P4 | A failed read ends the epoch, owned actions neutral in the same frame, one up edge | fake read failure while a button and a pedal are held | U |
+| P5 | A reopen gives a new epoch; held digital masked until released; pedal neutral until at rest; steer live | fake reconnect with the button held and the pedal at 0.8 | U |
+| P6 | The worker never blocks the tick; close handoff | fake slow enumeration and open; tick timing; close requested during a tick | U |
+| P7 | Statuses and start line after the device checks; the `unavailable` group | profile spanning every status | U |
+| P8 | Structured status JSON on start and on change | as P7, plus P4 and P5 transitions | U |
+| P9 | Old readers fail closed on `shim-ini-controls-1` | Wheelkit reader at its pinned commit against fixture log lines | W |
+| P10 | Writer transaction: preservation, conflict, replacement failure, BOM and CRLF, new file | shared fixture vectors run by the C++ writer (F6) and the C# writer | U, W |
+| P11 | Import: explicit, preview, all-or-nothing, no-clobber, sources untouched | owner Redux values (35a8aa3 vectors), an existing target refused, a failure midway | U |
+| P12 | Latch at start, whatever the session file says; never cleared | missing, stale, malformed and valid `inject.on` | U |
+| P13 | Admission requires strict session, Schema 1, every fence verified, no force | fake adapter with one unverified fence | U |
+| P14 | Batch validated whole; replace atomic; duplicate ignored; `batch=<n>` monotonic | 33 commands; a bad 5th line; the same content twice; a lower `n` | U |
+| P15 | Refused batch, delivery failure or epoch end means FAILED: neutral, terminal, no rearm on new files | each trigger, then a valid file | U |
+| P16 | `end` gives COMPLETED; expiry gives EXPIRED; owned actions neutral afterwards; physical input never returns | fake clock | U |
+| P17 | Provenance: an action names its sample, a sample names its epoch and seq and the batch of injected objects only; no mark on a later physical read | injected steer, then expiry, then a physical read | U |
+| P18 | Observer join: batch to sample to frame to state signal; ring overrun detected | fake adapter signals; 70 events | U |
+| P19 | Recorder: one producer, bounded queue, overflow makes the capture incomplete, flush deadline, metadata pins | fake slow writer; validated by the managed `SessionReader` | U |
+| P20 | OutRun sink: steer word, pedals max-merged with the pad, pedals without steering, button bits and edges | fake frames into `NativeInputState` | A |
+| P21 | OutRun H-pattern: pulse, release, deadline, retries, ambiguous gates, unavailable gear, impossible gear | fake car gear word responding late, never or twice | A |
+| P22 | OutRun fences self-check: save, options, crash, log in the run folder; LAN off; hooks off | admission fixture on the host configuration | A |
+| P23 | No duplicate consumer: WGI Gamepad and RawGameController listing at start | live start-up log on the rig, read only | L |
+| P24 | Threading: a device opened on the worker and read on the input thread | live read-only probe, no game input | L |
+| P25 | Closed loop (STD-034): staged wrong bindings, Wheelkit Apply, raw stimuli, game words move, exact restore | Astra's harness | L |
+| P26 | Multi-device: steering and pedals from the R12, gears from the DS-8X, each from its own device | P25 with DS-8X raw stimuli | L |
+| P27 | The owner drives it | at the rig | O |
+
+## 18. Review log
 
 | Round | Date | By | Change |
 |---|---|---|---|
-| r1 | 2026-10-10 | zero | First draft. It works within Astra's constraints (8795, 8815, 8823) and addresses the 35a8aa3 findings (6313 and the inbox review). |
+| r1 | 2026-10-10 | zero | First draft (`6a53b95`), within Astra's constraints 8795, 8815 and 8823 and addressing the 35a8aa3 findings. |
+| r1 review | 2026-10-10 | Astra | Ten findings plus answers to Q1-Q11 (`inbox/2026-10-10-romi-input-shim-r1-review.md`, hcom 8993). |
+| r2 | 2026-10-10 | zero | Every finding addressed: per-sample provenance and an event ring (F1); a terminal FAILED state with owned actions neutral and no rearm (F2); interception before the consumer, per-API audit, no after-the-fact duplicate claims (F3); one provider with read and force leases, a bridge provider and a shutdown order (F4); a thread model, read timing, rearm rules and bounded rescans (F5); one writer transaction for F6 and Wheelkit, unknown content preserved, explicit import (F6); one producer, emission versus source time, bounds, metadata, lifecycle audit first (F7); versioned structured status, old readers failing closed, STD-036 needing evidence (F8); fence self-checks gating admission and the OutRun writer audit table (F9); an H-pattern state machine on a monotonic clock (F10). Added the author's notes (enumeration off the input thread, window, background policy, one state-signal seam, core failure means native input), questions N1-N8 and the first proof matrix. |
