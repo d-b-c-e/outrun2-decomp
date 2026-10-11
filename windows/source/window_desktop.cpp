@@ -6,6 +6,7 @@
 #include "native_window.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
+#include "shim_input.hpp"
 #include "test_fence.hpp"
 #include <windows.h>
 #include <shellapi.h>
@@ -127,9 +128,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     if(!plan.latched){
         outrun::desktop::wheel_input_configure(settings);
         outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
+    }else{
+        // The fenced test process: the input shim (Core, the control worker over inject.txt, the OutRun adapter).
+        outrun::desktop::shim_input_configure(plan,settings);
+        outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter;
     }
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::wheel_input_shutdown();
+    if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     return result;
 }

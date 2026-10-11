@@ -104,6 +104,7 @@ public:
         return frame;
     }
     std::vector<dbce::shim::DeviceReport> device_reports()const { return w_->core->device_reports(); } // input thread
+    dbce::shim::StartReport start_report()const { return w_->core->start_report(); }           // input thread
     long long worker_passes() const { return w_->passes.load(); }
     RecorderType& recorder() { return *recorder_; } // input thread; the host owns its full lifetime
     void close_control_admission(){

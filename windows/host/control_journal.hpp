@@ -27,6 +27,8 @@ struct JournalIdentity {
     std::string profile_revision, core_version, adapter_version;
     std::vector<DeviceInfo> devices;            // the immutable profile device table, in index order
     std::string start_line;                     // the human start line (also in runtime.log), split into rows
+    // False until the shared identity builder hashes them; the journal then writes null, never an invented value.
+    bool executable_known{true},build_known{true};
 };
 
 constexpr std::size_t LatchedJournalCap=std::size_t(8)<<20, OrdinaryJournalCap=std::size_t(2)<<20;
@@ -134,10 +136,11 @@ class JournalFile {
         if(!json_string(prefix_,i.core_version,lim_.small_bytes))return false;
         prefix_+=",\"adapter\":";
         if(!json_string(prefix_,i.adapter_version,lim_.small_bytes))return false;
-        prefix_+=",\"executableSha256\":\""+hex(i.id.executable)+"\",\"buildSha256\":\""+hex(i.id.build)+"\"}";
+        prefix_+=",\"executableSha256\":"+(i.executable_known?"\""+hex(i.id.executable)+"\"":std::string("null"))+
+                 ",\"buildSha256\":"+(i.build_known?"\""+hex(i.id.build)+"\"":std::string("null"))+"}";
         return true;
     }
-    bool open(){
+    bool open_journal(){
         using journal_detail::json_string;using journal_detail::num;
         opened_=true;
         if(!id_)return fail("journal identity missing");
@@ -191,7 +194,7 @@ public:
         using journal_detail::json_string;using journal_detail::num;using journal_detail::snum;
         if(finished_||failed_)return false;
         if(!on_worker())return fail("journal used off its worker");
-        if(!opened_&&!open())return false;
+        if(!opened_&&!open_journal())return false;
         const std::array<std::uint64_t,6> now{j.status_dropped,j.status_coalesced,j.events_dropped,j.control_events_dropped,j.batches_offered,j.identical_skipped};
         if(j.events.empty()&&j.status.empty()&&have_counters_&&now==counters_){++empty_skipped_;return true;}   // the skip count is not compared
         ++drain_;
@@ -222,7 +225,7 @@ public:
         if(finished_)return complete_;
         finished_=true;
         bool ok=on_worker()||fail("journal finished off its worker");
-        if(ok&&!opened_)ok=open();
+        if(ok&&!opened_)ok=open_journal();
         if(ok&&!failed_){std::string tail;ok=end_line(tail,true,nullptr)&&write_raw(tail);}
         if(ok&&!failed_&&!FlushFileBuffers(file_))ok=fail("journal flush failed");
         if(file_!=INVALID_HANDLE_VALUE){if(!CloseHandle(file_))ok=fail("journal close failed");file_=INVALID_HANDLE_VALUE;}

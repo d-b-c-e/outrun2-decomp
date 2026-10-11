@@ -802,5 +802,47 @@
   "line": "virtual OpenResult open(const DeviceInfo& listed)=0; // `opened` is the identity read back from the new handle",
   "class": "not-a-file",
   "reason": "the provider interface's device open"
+ },
+ {
+  "file": "windows/host/control_journal.hpp",
+  "line": "const bool ok=lim_.write?lim_.write(file_,bytes.data(),DWORD(bytes.size()),done):WriteFile(file_,bytes.data(),DWORD(bytes.size()),&done,nullptr)!=FALSE;",
+  "class": "entry-redirected",
+  "reason": "JournalFile::write_raw: appends only to the handle open_journal created in its folder; the latched entry gives it plan.run_root (shim_input.cpp)"
+ },
+ {
+  "file": "windows/host/control_journal.hpp",
+  "line": "if(create_folder_&&!CreateDirectoryW(folder_.c_str(),nullptr))return fail(\"journal folder exists or cannot be created (\"+num(GetLastError())+\")\");",
+  "class": "entry-redirected",
+  "reason": "JournalFile: only with create_folder (an ordinary per-process folder under the dbce folder, CREATE_NEW semantics); the latched entry passes the fence run folder with create_folder false"
+ },
+ {
+  "file": "windows/host/control_journal.hpp",
+  "line": "file_=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "entry-redirected",
+  "reason": "JournalFile: controls-journal.jsonl, CREATE_NEW, in its folder; the latched entry gives it plan.run_root (shim_input.cpp)"
+ },
+ {
+  "file": "windows/host/control_snapshot.hpp",
+  "line": "file_=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_SEQUENTIAL_SCAN,nullptr);",
+  "class": "not-a-file",
+  "reason": "SnapshotFile: GENERIC_READ, OPEN_EXISTING, no write sharing: the bounded read of inject.on / inject.txt; writes nothing"
+ },
+ {
+  "file": "windows/host/observer_mapping.hpp",
+  "line": "handle_=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(Storage)),name.c_str());",
+  "class": "in-memory",
+  "reason": "observe::Mapping: an INVALID_HANDLE_VALUE page-file mapping (the observer transport), no file on disk"
+ },
+ {
+  "file": "windows/host/provider_host.hpp",
+  "line": "report_ = CreateFileW((folder_ + L\"\\\\host-shutdown.json\").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);",
+  "class": "entry-redirected",
+  "reason": "ProviderHost: host-shutdown.json in its folder; the latched entry gives it plan.run_root (shim_input.cpp)"
+ },
+ {
+  "file": "windows/host/provider_host.hpp",
+  "line": "WriteFile(report_, t.data(), DWORD(t.size()), &n, nullptr); SetEndOfFile(report_);",
+  "class": "entry-redirected",
+  "reason": "ProviderHost::write_report: the pre-opened host-shutdown.json in the run folder"
  }
 ]

@@ -1,0 +1,177 @@
+"""The input shim's first in-game loop: one latched OutRunDesktop run driven through inject.txt.
+
+Live, on the rig, only when coordinated (Astra/owner). It reuses the existing protections: the hub's rig lease and
+owner-idle gate (tools/Rig-Lease.ps1), the test fence (inject.on latches; the game folder is only read; saves,
+options and logs go to the run folder), and this build's absence of any force feedback. It never touches the owner's
+game folder: it runs from a dedicated test copy (`--prepare` builds it from a source folder). It sends no OS input
+and never foregrounds anything: commands go through inject.txt, and the game is closed with WM_CLOSE to its own
+window. inject.on / inject.txt are removed on every exit path.
+
+Workload: confirm/start presses until the game reaches a race (mode 16/18, read from the shim's runtime.log lines),
+then steer and throttle holds, then `end`. Evidence: the run folder's runtime.log (the shim's record/consumed lines),
+controls-journal.jsonl (the strict reader) and host-shutdown.json.
+"""
+import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, random, re, shutil, string, subprocess, sys, time
+
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
+DBCE = pathlib.Path(os.environ["LOCALAPPDATA"]) / "dbce" / "outrun2006-decomp"
+HUB_LEASE = pathlib.Path(r"E:\Source\dbce-project-mgmt\tools\Rig-Lease.ps1")
+# Test-only bindings on the rig's real DirectInput identities (readonly-provider-live-03): the axes as the owner's
+# profile has them, the menu actions on otherwise unused R12 buttons. Physical presses of these buttons are not
+# admitted objects during the run (latched: physical input stays test-neutral).
+WHEEL = "dev={d71b8350-61b7-11f1-8001-444553540000} prod={0006346e-0000-0000-0000-504944564944}"
+PROFILE = "\n".join([
+    "[Controls]", "Schema = 1", "Profile = ShimFirstLoop", "Revision = t1", "Transmission = Sequential",
+    "steer = axis 0 %s range=0..65535 rest=32768 travel=+1" % WHEEL,
+    "throttle = axis 2 %s range=0..65535 rest=0 travel=+1" % WHEEL,
+    "brake = axis 5 %s range=0..65535 rest=0 travel=+1" % WHEEL,
+    "confirm = button 20 %s" % WHEEL, "start = button 21 %s" % WHEEL, "back = button 22 %s" % WHEEL,
+    "navUp = button 23 %s" % WHEEL, "navDown = button 24 %s" % WHEEL, ""])
+SIGNAL = re.compile(r"input shim: frame (\d+) run (\w+) mode (\d+)( race)? record steer (-?\d+) accel (\d+) brake (\d+) "
+                    r"buttons ([0-9a-f]+) consumed steer (-?\d+) accel (-?\d+) brake (-?\d+)")
+
+user32 = ctypes.WinDLL("user32", use_last_error=True); kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+
+def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+
+
+def replace_file(path, data):
+    """Atomic publish of inject files: a sibling temp, then ReplaceFileW (works while the shim holds the old handle
+    with FILE_SHARE_DELETE; MoveFileEx(REPLACE_EXISTING) is refused then, Astra 15795). New file: a plain rename."""
+    path = pathlib.Path(path); tmp = path.with_name(path.name + ".tmp-" + "".join(random.choices(string.ascii_lowercase, k=8)))
+    tmp.write_bytes(data)
+    if path.exists():
+        for _ in range(20):
+            if kernel32.ReplaceFileW(str(path), str(tmp), None, 0, None, None): return
+            time.sleep(0.05)
+        tmp.unlink(missing_ok=True); raise OSError("ReplaceFileW failed: %d" % ctypes.get_last_error())
+    os.rename(tmp, path)
+
+
+def windows_of(pid):
+    found = []
+    def cb(h, _):
+        p = wt.DWORD(); user32.GetWindowThreadProcessId(h, ctypes.byref(p))
+        if p.value == pid and user32.IsWindowVisible(h): found.append(h)
+        return True
+    user32.EnumWindows(EnumWindowsProc(cb), 0)
+    return found
+
+
+def lease(action, purpose=""):
+    cmd = ["pwsh", "-NoProfile", "-File", str(HUB_LEASE), "-" + action]
+    if action == "Enter": cmd += ["-Purpose", purpose, "-IdleMinutes", "5"]
+    q = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if q.returncode != 0: raise RuntimeError("rig lease %s refused: %s" % (action, (q.stdout + q.stderr).strip()[-400:]))
+
+
+def prepare(source, game, candidate):
+    if game.exists(): raise SystemExit("the test folder already exists: %s" % game)
+    shutil.copytree(source, game)
+    shutil.copy2(candidate, game / "OutRunDesktop.exe")
+    (game / "OutRunDesktop.ini").write_text(PROFILE, encoding="utf-8", newline="\n")
+    print("prepared %s (exe %s, profile %s)" % (game, sha(game / "OutRunDesktop.exe")[:16], sha(game / "OutRunDesktop.ini")[:16]))
+
+
+def main():
+    a = argparse.ArgumentParser(description=__doc__)
+    a.add_argument("--game", type=pathlib.Path, default=pathlib.Path(r"E:\Games\OutRunShimTest"))
+    a.add_argument("--candidate", type=pathlib.Path, required=True)
+    a.add_argument("--prepare-from", type=pathlib.Path, help="build --game as a copy of this game folder first")
+    a.add_argument("--result", type=pathlib.Path, required=True)
+    a.add_argument("--seconds", type=int, default=180)
+    a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
+    o = a.parse_args()
+    if o.prepare_from: prepare(o.prepare_from, o.game, o.candidate); return
+    out = o.result.resolve()
+    problems = []
+    if out.exists(): problems.append("result folder exists")
+    if not (o.game / "OR2006C2C.exe").exists(): problems.append("no game data in %s (use --prepare-from)" % o.game)
+    if not (o.game / "OutRunDesktop.exe").exists() or sha(o.game / "OutRunDesktop.exe") != sha(o.candidate):
+        problems.append("the test folder's OutRunDesktop.exe is not the candidate")
+    ini = o.game / "OutRunDesktop.ini"
+    if not ini.exists() or ini.read_text(encoding="utf-8") != PROFILE:
+        problems.append("the test folder's OutRunDesktop.ini is not the test profile")
+    for f in ("inject.on", "inject.txt"):
+        if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
+    running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
+    if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
+    plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
+                dbce=str(DBCE), seconds=o.seconds, problems=problems)
+    if o.check_only or problems:
+        print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
+    out.mkdir(parents=True)
+    receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[])
+    nonce = "".join(random.choices(string.ascii_letters + string.digits, k=16))
+    proc = None; run_root = None; leased = False
+    try:
+        lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
+        DBCE.mkdir(parents=True, exist_ok=True)
+        replace_file(DBCE / "inject.on", ("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
+        proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
+        receipt["pid"] = proc.pid
+        run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
+        deadline = time.time() + o.seconds; seen = 0; mode = None; race = False; n = 0; last_press = 0; lines = []
+        def batch(commands):
+            nonlocal n
+            n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
+            replace_file(DBCE / "inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
+        phase = "menus"; phase_at = 0
+        while time.time() < deadline and proc.poll() is None:
+            time.sleep(0.2)
+            if log.exists():
+                text = log.read_text(encoding="utf-8", errors="replace"); new = text.splitlines()[seen:]; seen += len(new); lines += new
+                for l in new:
+                    m = SIGNAL.search(l)
+                    if m: mode = int(m.group(3)); race = m.group(4) is not None
+            if phase == "menus":
+                if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
+                if time.time() - last_press > 1.5 and len(receipt["presses"]) < 40:
+                    action = "start" if len(receipt["presses"]) % 3 == 0 else "confirm"
+                    batch(["inject action %s 1 ms=200" % action]); receipt["presses"].append(dict(action=action, mode=mode)); last_press = time.time()
+            elif phase == "steer-right" and time.time() - phase_at > 3.5:
+                phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
+            elif phase == "steer-left" and time.time() - phase_at > 3.5:
+                phase = "end"; batch(["end"]); break
+        receipt["phase"] = phase; receipt["race"] = race
+        time.sleep(1.0)
+        if proc.poll() is None:
+            for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)   # WM_CLOSE: the game's own close path
+            try: proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                # A latched process whose stop did not resolve parks for its supervisor (P21): this runner ends it.
+                receipt["forced"] = True; proc.kill(); proc.wait(timeout=15)
+        receipt["exitCode"] = proc.returncode
+    except Exception as e:
+        receipt["errors"].append(repr(e))
+        if proc and proc.poll() is None:
+            for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)
+            try: proc.wait(timeout=30)
+            except subprocess.TimeoutExpired: receipt["forced"] = True; proc.kill()
+    finally:
+        for f in ("inject.on", "inject.txt"):
+            try: (DBCE / f).unlink()
+            except FileNotFoundError: pass
+            except OSError as e: receipt["errors"].append("cleanup %s: %r" % (f, e))
+        if run_root and run_root.exists(): shutil.copytree(run_root, out / "run", dirs_exist_ok=True)
+        if leased:
+            try: lease("Exit")
+            except Exception as e: receipt["errors"].append(repr(e))
+        if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
+        if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
+        sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
+        sig = [m for m in sig if m]
+        receipt["modes"] = sorted({int(m.group(3)) for m in sig})
+        receipt["maxRecordSteer"] = max([abs(int(m.group(5))) for m in sig], default=0)
+        receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
+        receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
+        (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
+        print(json.dumps({k: receipt.get(k) for k in ("pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer", "maxConsumedSteer",
+                                                     "maxConsumedAccel", "errors")}, indent=1))
+
+
+if __name__ == "__main__":
+    main()
