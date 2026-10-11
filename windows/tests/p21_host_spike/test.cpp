@@ -33,7 +33,7 @@ static void in_process(const std::wstring& root) {
         HostConfig c; c.folder = sub(root, L"a"); c.nonce = "a1";
         Host h(c); Sleep(20);
         const auto t0 = Clock::now(); const auto r = h.stop(Fast);
-        check(r.resolved && r.recorder == RecOutcome::Complete && r.unresolved.empty(), "P21a: a quiet host resolves with a complete recorder");
+        check(r.resolved && r.recorder == RecOutcome::Complete && r.recorder_joined && r.unresolved.empty(), "P21a: a quiet host resolves with a complete, joined recorder");
         check(ms_since(t0) < 100, "P21a: nothing waits when nothing blocks");
         const auto hr = host_report(c.folder); const auto wr = worker_report(c.folder);
         check(hr.state == "resolved" && hr.nonce == "a1" && wr.outcome == "Complete" && wr.nonce == "a1", "P21a: host and worker reports name the capture");
@@ -70,6 +70,21 @@ static void in_process(const std::wstring& root) {
         { std::unique_lock<std::mutex> l(rs->m); rs->cv.wait_for(l, std::chrono::seconds(2), [&] { return rs->worker_done; }); }
         check(rs->outcome.load() == RecOutcome::TimedOut && worker_report(c.folder).outcome == "TimedOut", "P21c: a late finish never becomes Complete");
         check(host_report(c.folder).state == "unresolved", "P21c: and the host report stays unresolved");
+    }
+    {   // P21c2 (Astra 11867): Complete, then the worker blocks writing its own report
+        HostConfig c; c.folder = sub(root, L"c2"); c.nonce = "c2";
+        c.report_gate->close();
+        Host h(c);
+        const auto r = h.stop(Fast);
+        bool joined = false; for (auto& u : r.unresolved) joined |= u == "recorder: worker not joined";
+        check(!r.resolved && !r.recorder_joined && joined, "P21c2: a Complete outcome whose worker has not returned is not a resolved recorder");
+        check(host_report(c.folder).state == "unresolved", "P21c2: the host report says unresolved before the worker report exists");
+        auto rs = h.recorder_state();
+        c.report_gate->release();
+        { std::unique_lock<std::mutex> l(rs->m); rs->cv.wait_for(l, std::chrono::seconds(2), [&] { return rs->worker_done; }); }
+        const auto w = worker_report(c.folder);
+        check(w.outcome == "Complete" && !may_seal("c2", w, host_report(c.folder), ExitObservation{true, true, false, 0}),
+              "P21c2: the late Complete worker report still cannot seal beside the unresolved host report");
     }
     {   // P21d: no supervisor finish
         HostConfig c; c.folder = sub(root, L"d"); c.nonce = "d1";

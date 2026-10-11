@@ -21,6 +21,9 @@ cmake --build <build> --config Release
   the worker finishes on its own shared state.
 - **P21c.** A recorder blocked in stop times out (`TimedOut`). A later finish never becomes `Complete`, and the host
   report stays `unresolved`.
+- **P21c2** (Astra 11867). The recorder publishes `Complete`, then blocks writing its own `worker.tsv`. The host is
+  `unresolved` ("recorder: worker not joined"), because the join is required independently of the outcome. The late
+  `Complete` worker report still cannot seal.
 - **P21d.** `stop()` called off the producer (input) thread cancels the recorder. It is never a supervisor finish.
 - **P21i.** Destroying a host without `stop()` returns at once, and the shutdown file never reads `resolved`.
 - **P21h.** The seal rule: of the 8 combinations of worker `Complete`, host `resolved` and a normal externally
@@ -43,6 +46,7 @@ stop budget plus 2 s.
 - A late finish allowed to become `Complete` fails P21c.
 - A destructor that runs a budgeted stop fails P21i.
 - `finish()` allowed off the producer thread fails P21d.
+- A host that ignores the recorder join fails P21c2.
 
 ## What this does not show
 

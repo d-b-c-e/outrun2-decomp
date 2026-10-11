@@ -17,6 +17,11 @@ r2 makes three changes:
   the provider can fail after the writer has completed.
 - D9 no longer calls a budgeted stop from a destructor.
 
+r2.1 (Astra 11867) adds three things:
+- The recorder resolves only when its worker has actually joined, a fact carried separately from the outcome.
+- The unresolved path writes nothing to `stdout` or `runtime.log`.
+- A hanging synchronous report write is stated as a known limit for ordinary processes.
+
 ## 1. What is already decided, and what is open
 
 INPUT-SHIM.md section 6 fixes the shutdown **order**:
@@ -106,6 +111,11 @@ first report. Phases and budgets:
    - The producer (this thread) pushes the final run-end frame and calls `finish(last_sequence)`.
    - `Controller::drain(1000 ms)` includes the inner close and the closed-file size and SHA (P20 v2).
    - The worker writes `worker.tsv` itself, as its last act. The host never writes a worker report.
+   - The drain returns the outcome **and whether the worker thread actually finished and was joined**, as separate
+     facts (r2.1, Astra 11867). A recorder resolves only when both hold: outcome `Complete` and worker joined.
+   - The worker can publish `Complete` and then block writing its own report. A `Complete` outcome is not a
+     finished worker, and the first-terminal rule keeps `Complete` even after the deadline.
+   - So "worker not joined" is reported and makes the host `unresolved` on its own.
 5. **Leases, at most 200 ms.** `DInputProvider::shutdown(200)` stops admission and releases idle devices. No tick is
    in flight: the input thread is the caller.
 6. **Workers, one shared 200 ms deadline.** The provider and control workers are told to stop and joined. The
@@ -132,13 +142,21 @@ process** (H1, H9).
   CRT teardown.
   - The host writes the report and calls `TerminateProcess(GetCurrentProcess(), ForcedExitCode)` (distinct code
     `0xDBCE0021`).
-  - This notifies no DLL, so no detach code can deadlock on a lock the stuck worker held. It is justified only
-    because OutRun's EXE owns its process and no evidence is at stake. It is labelled `forced` in
-    `host-shutdown.json` and `runtime.log`.
+  - This notifies no DLL, so no detach code can deadlock on a lock the stuck worker held.
+  - It is acceptable (Astra 11867) only because this source-only, input-only shim owns its EXE, holds no active
+    force, and the game's saves are flushed when written. No evidence is at stake.
+  - It is labelled `forced` in `host-shutdown.json` only.
   - It loses unflushed CRT buffers, which hold nothing here, and skips DLL cleanup, which the OS reclaims.
   - No supervisor observes an owner process; the report is the only record.
-- No in-process path calls `ExitProcess` after an unresolved stop. None calls `fflush` behind a possibly blocked
-  stream.
+- **Nothing on the unresolved path writes to `stdout` or `runtime.log`**: no `printf`, no `fflush`, no CRT stream.
+  The only write is the host report, a synchronous `WriteFile` on a handle opened at host start.
+- No in-process path calls `ExitProcess` after an unresolved stop.
+- **Limit: that report write can itself hang** (H2).
+  - In a latched process this is covered: the supervisor sees no state change past its bound and ends the process,
+    labelled forced. The capture stays tainted.
+  - An ordinary process has **no hard exit-time guarantee** if the report write or an earlier phase hangs. The host
+    bounds every wait it controls, but cannot bound a blocked synchronous `WriteFile`. This is recorded as a known
+    limit, not claimed away.
 
 **D5. No I/O cancellation, no closing handles from another thread, no `TerminateThread`** (P20 rule).
 - The budgets plus D4 cover file and driver hangs.
@@ -241,6 +259,7 @@ return result;
 | P21a | Order and budgets: the producer pushes the run end and finishes, then the drain, leases and joins; `resolved`; elapsed under the budget plus a margin | prototype host, fake workers with barriers |
 | P21b | A provider worker blocked in a fake driver call gives `unresolved: worker provider`. Leases and DirectInput are leaked, never released under it. Elapsed stays bounded | same |
 | P21c | A recorder blocked in write or stop gives `TimedOut` and `unresolved`. Releasing it later cannot make the host report `resolved` | same |
+| P21c2 | The recorder publishes `Complete`, then blocks writing `worker.tsv`. The host is `unresolved` with "worker not joined"; the late `Complete` report still cannot seal | report-write gate |
 | P21d | No supervisor finish: `stop()` off the producer thread gives `Cancelled`, never `Complete` | same |
 | P21e | The supervisor (separate processes): a latched child with a stuck worker writes `unresolved` and parks. The parent ends it by its own handle and records `forced`. An ordinary child exits with `0xDBCE0021`. A resolved child exits 0 through normal CRT teardown | child EXE plus parent supervisor |
 | P21f | `exit()` inside the game: the hook runs `stop()` once, a second stop returns the first report, and D4 applies | child EXE |

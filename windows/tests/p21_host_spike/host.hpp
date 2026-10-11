@@ -80,6 +80,7 @@ struct RecorderState {
     std::thread::id producer;
     std::mutex m; std::condition_variable cv; bool worker_done = false;
     std::shared_ptr<Gate> stop_gate;            // the sink's stop/close/hash may block here
+    std::shared_ptr<Gate> report_gate;          // the worker's own report write may block here, after Complete
     std::wstring report_path; std::string nonce;
     bool fail(RecOutcome why) {
         auto prior = outcome.load();
@@ -98,8 +99,8 @@ class Recorder {
     std::shared_ptr<RecorderState> s_;
     std::thread t_;
 public:
-    Recorder(std::wstring report_path, std::string nonce, std::shared_ptr<Gate> stop_gate) : s_(std::make_shared<RecorderState>()) {
-        s_->report_path = std::move(report_path); s_->nonce = std::move(nonce); s_->stop_gate = std::move(stop_gate);
+    Recorder(std::wstring report_path, std::string nonce, std::shared_ptr<Gate> stop_gate, std::shared_ptr<Gate> report_gate) : s_(std::make_shared<RecorderState>()) {
+        s_->report_path = std::move(report_path); s_->nonce = std::move(nonce); s_->stop_gate = std::move(stop_gate); s_->report_gate = std::move(report_gate);
         s_->producer = std::this_thread::get_id();     // the input thread creates it and is its only producer
         auto s = s_;
         t_ = std::thread([s] {
@@ -108,7 +109,9 @@ public:
             if (s->outcome.load() == RecOutcome::Draining) { s->stop_gate->pass(); stopped = true; }   // inner stop, close, closed-file hash
             RecOutcome final = s->outcome.load();
             if (stopped) { auto d = RecOutcome::Draining; if (s->outcome.compare_exchange_strong(d, RecOutcome::Complete)) final = RecOutcome::Complete; else final = s->outcome.load(); }
-            // The worker's own report, its last act (D3 step 4): never written by the host.
+            // The worker's own report, its last act (D3 step 4): never written by the host. The write itself can block
+            // after the outcome is already Complete (Astra 11867), so completion of the outcome is not completion of the worker.
+            s->report_gate->pass();
             write_file(s->report_path, std::string("outcome\t") + name(final) + "\nnonce\t" + s->nonce + "\n");
             { std::lock_guard<std::mutex> l(s->m); s->worker_done = true; }
             s->cv.notify_all();
@@ -121,10 +124,13 @@ public:
         auto o = RecOutcome::Open; s_->outcome.compare_exchange_strong(o, RecOutcome::Draining);
         s_->producer_done = true; s_->cv.notify_all(); return true;
     }
-    RecOutcome drain(Clock::time_point deadline) {
+    // The outcome and, separately, whether the worker thread actually finished and was joined. A Complete outcome
+    // whose worker is still inside its report write is not a resolved recorder.
+    struct Drained { RecOutcome outcome; bool joined; };
+    Drained drain(Clock::time_point deadline) {
         std::unique_lock<std::mutex> l(s_->m);
-        if (!s_->cv.wait_until(l, deadline, [&] { return s_->worker_done; })) { l.unlock(); s_->fail(RecOutcome::TimedOut); return s_->outcome.load(); }
-        l.unlock(); if (t_.joinable()) t_.join(); return s_->outcome.load();
+        if (!s_->cv.wait_until(l, deadline, [&] { return s_->worker_done; })) { l.unlock(); s_->fail(RecOutcome::TimedOut); return {s_->outcome.load(), false}; }
+        l.unlock(); if (t_.joinable()) t_.join(); return {s_->outcome.load(), true};
     }
     bool worker_done() { std::lock_guard<std::mutex> l(s_->m); return s_->worker_done; }
     std::shared_ptr<RecorderState> state() const { return s_; }
@@ -150,12 +156,14 @@ struct Report {
     bool resolved = false;
     std::vector<std::string> unresolved;
     RecOutcome recorder = RecOutcome::Open;
+    bool recorder_joined = false;               // independent of the outcome (Astra 11867)
     long long elapsed_us = 0;
 };
 struct HostConfig {
     std::wstring folder; std::string nonce;
     std::shared_ptr<Gate> provider_gate = std::make_shared<Gate>(), control_gate = std::make_shared<Gate>(),
-                          recorder_gate = std::make_shared<Gate>(), lease_gate = std::make_shared<Gate>();
+                          recorder_gate = std::make_shared<Gate>(), lease_gate = std::make_shared<Gate>(),
+                          report_gate = std::make_shared<Gate>();
 };
 
 class Host {
@@ -169,7 +177,7 @@ class Host {
 public:
     std::atomic<bool> destroyed_without_stop{false};
     explicit Host(HostConfig c) : c_(std::move(c)), input_(std::this_thread::get_id()),
-        recorder_(c_.folder + L"\\worker.tsv", c_.nonce, c_.recorder_gate), provider_("provider", c_.provider_gate), control_("control", c_.control_gate) {
+        recorder_(c_.folder + L"\\worker.tsv", c_.nonce, c_.recorder_gate, c_.report_gate), provider_("provider", c_.provider_gate), control_("control", c_.control_gate) {
         leases_.in_use = c_.lease_gate;
         report_ = CreateFileW((c_.folder + L"\\host-shutdown.json").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
@@ -178,7 +186,8 @@ public:
         if (report_ == INVALID_HANDLE_VALUE) return;
         std::string t = std::string("{\"state\":\"") + state + "\",\"nonce\":\"" + c_.nonce + "\"";
         if (r) {
-            t += ",\"recorder\":\"" + std::string(name(r->recorder)) + "\",\"elapsedUs\":" + std::to_string(r->elapsed_us) + ",\"unresolved\":[";
+            t += ",\"recorder\":\"" + std::string(name(r->recorder)) + "\",\"recorderJoined\":" + (r->recorder_joined ? "true" : "false") +
+                 ",\"elapsedUs\":" + std::to_string(r->elapsed_us) + ",\"unresolved\":[";
             for (size_t i = 0; i < r->unresolved.size(); ++i) t += (i ? ",\"" : "\"") + r->unresolved[i] + "\"";
             t += "]";
         }
@@ -195,8 +204,10 @@ public:
         write_report("stopping", nullptr);                                      // phase 0
         if (std::this_thread::get_id() != input_) r.unresolved.push_back("stop off the input thread");
         recorder_.finish();                                                     // phase 4 (cancels off the producer thread)
-        r.recorder = recorder_.drain(Clock::now() + std::chrono::milliseconds(b.recorder_ms));
+        const auto drained = recorder_.drain(Clock::now() + std::chrono::milliseconds(b.recorder_ms));
+        r.recorder = drained.outcome; r.recorder_joined = drained.joined;
         if (r.recorder != RecOutcome::Complete) r.unresolved.push_back(std::string("recorder: ") + name(r.recorder));
+        if (!r.recorder_joined) r.unresolved.push_back("recorder: worker not joined");
         leases_.shutdown(Clock::now() + std::chrono::milliseconds(b.leases_ms)); // phase 5
         if (leases_.leaked) r.unresolved.push_back("lease leaked");
         provider_.request_stop(); control_.request_stop();                      // phase 6: one shared deadline
