@@ -283,6 +283,8 @@ return result;
 | P21i | Destruction without `stop()` returns at once (no wait), and the shutdown file never reads `resolved` | prototype host |
 
 | P21j | Integration with the reviewed P20 recorder (`windows/tests/p21_recorder_integration`): actual Core/Adapter frames, the real native writer and closed-file seal, the worker thread joined, supervised child processes, and the out-of-process finalizer sealing only the resolved capture | `run.py --mutations` |
+| P21k | P28's P21 half (`windows/tests/p21_provider_host`). The host around zero's real Core and DInputProvider over fake COM, the provider worker on its own thread. A bounded slow reacquisition inside the lease wait recovers. One past every budget, or an event-backed one that never returns, leaves the device held and DirectInput kept: parked, supervisor-forced, never sealed, never released under the call. So do an ordinary process (`0xDBCE0021`), a listing that never returns, and a stop off the input thread | `run.py --mutations` |
+| P21g | Teardown audit (`windows/tests/teardown_audit.py`, a sibling of write_audit) over `windows/shim`: no stdio, no static/thread_local/namespace-scope object with a dynamic destructor, no detach, no process or thread ending. Clean; one planted violation per rule is caught | `teardown_audit.py --mutations` |
 
 P28's rerun of P21 through the real provider over fake COM objects stays as written.
 
