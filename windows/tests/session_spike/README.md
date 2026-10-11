@@ -113,6 +113,15 @@ inputs; this is not yet a self-contained portable replay bundle.
    source time. Strictly increasing row times remain mandatory. Source clock
    changes and duplicated timestamps fail capture rather than adding epsilon.
 
+8. **A one-second drain wait is not cancellable file I/O.** This writer calls
+   synchronous `WriteFile` and `FlushFileBuffers`. A stalled worker cannot be
+   safely destroyed or have its handle closed from another thread to enforce
+   the deadline. Report unresolved/incomplete, retain ownership until it returns,
+   and never publish the outer completion seal after a timeout, even if a late
+   worker writes its own complete footer. Fake slow-writer checks must cover this
+   late completion race. Do not claim a bounded OS write or forcefully kill a
+   thread using the writer. This fixture does not implement the worker/drain.
+
 ## Wheelkit lifecycle audit
 
 The current `dbce-wheelkit/docs/RECORDING-PLAYBACK.md` and four implemented flows
