@@ -1,7 +1,7 @@
 [
  {
   "file": "src/enhancements/gpu_backend.cpp",
-  "line": "if(!path_.empty())write_options(path_,{{\"widescreen\",settings_.widescreen?\"1\":\"0\"},",
+  "line": "if(!path_.empty())write_options(path_,{{\"widescreen\",settings_.widescreen?\"1\":\"0\"}, {\"resolution\",resolution_key(settings_.resolution)},{\"antialiasing\",antialiasing_key(settings_.antialiasing)}, {\"framerate\",std::to_string(settings_.frame_rate)}});",
   "class": "redirected",
   "reason": "path_ = home()/options.ini (xbox main.cpp: GpuVideoBackend video(rt::home()+\"/options.ini\"))"
  },
@@ -102,6 +102,42 @@
   "reason": "a licence file under the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
  },
  {
+  "file": "src/platform/menu_audio.hpp",
+  "line": "bool play_music(std::vector<std::uint8_t> file,bool loop,std::string& error){return music_.open(std::move(file),loop,error);}",
+  "class": "not-a-file",
+  "reason": "MusicStream::open: decodes music bytes already in memory"
+ },
+ {
+  "file": "src/platform/music_stream.hpp",
+  "line": "bool open(std::vector<std::uint8_t> file,bool loop,std::string& error);",
+  "class": "not-a-file",
+  "reason": "MusicStream::open declaration (in-memory bytes)"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "if(include_16b)open(0x16bu,0x39u);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "open(0x18au,0x3cu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "open(0x16cu,0x3bu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
+  "file": "src/platform/native_runtime.cpp",
+  "line": "if(include_190)open(0x190u,0x1fu);",
+  "class": "not-a-file",
+  "reason": "a local lambda opening frontend UI objects"
+ },
+ {
   "file": "src/platform/pc_soft_d3d9.cpp",
   "line": "bool PcSoftD3D9Device::write_png(const std::string& path)const{",
   "class": "definition",
@@ -120,6 +156,18 @@
   "reason": "declaration"
  },
  {
+  "file": "src/platform/race_area_services.cpp",
+  "line": "open(user,id,function);",
+  "class": "not-a-file",
+  "reason": "a race-area service callback (opens a game object, not a file)"
+ },
+ {
+  "file": "src/platform/race_area_services.cpp",
+  "line": "open(user,event,m.u32(0x5da068u+type*4u));",
+  "class": "not-a-file",
+  "reason": "a race-area service callback"
+ },
+ {
   "file": "src/platform/race_end_runtime.cpp",
   "line": "if(std::FILE* f=std::fopen((dir+\"/rankings.dat\").c_str(),\"wb\")){ // 406C50: u32 length, then the payload",
   "class": "redirected",
@@ -130,6 +178,30 @@
   "line": "auto* f=std::fopen(path.c_str(),\"wb\");if(!f)return 1u;",
   "class": "redirected",
   "reason": "path under g.save_directory = frontend_save_directory = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
+ },
+ {
+  "file": "src/platform/race_manager.cpp",
+  "line": "if((w.open(std::uint32_t(id))&3u)!=2u)continue;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open(id): a state query"
+ },
+ {
+  "file": "src/platform/race_manager.cpp",
+  "line": "if((w.open(std::uint32_t(id))&3u)!=2u)continue;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open(id): a state query"
+ },
+ {
+  "file": "src/platform/race_manager.hpp",
+  "line": "std::uint8_t open(std::uint32_t id) const;",
+  "class": "not-a-file",
+  "reason": "RaceWorld::open declaration: a state query"
+ },
+ {
+  "file": "src/platform/race_traffic_heart_meter.inc",
+  "line": "open(0x5b,0x69);break;",
+  "class": "not-a-file",
+  "reason": "a local lambda opening a HUD element"
  },
  {
   "file": "src/runtime/game_host.cpp",
@@ -186,6 +258,12 @@
   "reason": "replay recording requested by home()/replay.txt; never seeded into the run folder"
  },
  {
+  "file": "src/runtime/game_host.cpp",
+  "line": "(void)s.title_movie.open(s.movie_path,s.movie_error);",
+  "class": "not-a-file",
+  "reason": "TitleMovie::open: avformat_open_input, read only"
+ },
+ {
   "file": "src/runtime/game_host.hpp",
   "line": "std::string& home();",
   "class": "home-definition",
@@ -202,6 +280,12 @@
   "line": "std::FILE* open_result_log(const char*& used_path,int& last_error);",
   "class": "definition",
   "reason": "declaration"
+ },
+ {
+  "file": "src/runtime/host_platform.hpp",
+  "line": "virtual bool open(std::string& error)=0;",
+  "class": "not-a-file",
+  "reason": "the host audio interface (opens the audio device)"
  },
  {
   "file": "src/system/exe_image.cpp",
@@ -301,9 +385,9 @@
  },
  {
   "file": "src/system/setup_screen.cpp",
-  "line": "if((game_dir_read_only||!exe_image_write_cache(cache,image,&e))&&",
+  "line": "if((game_dir_read_only||!exe_image_write_cache(cache,image,&e))&& (fallback.empty()||!make_directory(spare)||!exe_image_write_cache(fallback,image,&e))){",
   "class": "latched-read-only",
-  "reason": "the game-folder cache is not written when game_dir_read_only"
+  "reason": "the game-folder cache is not written when game_dir_read_only (the joined key includes the fallback line)"
  },
  {
   "file": "src/system/setup_screen.cpp",
@@ -312,10 +396,34 @@
   "reason": "fallback = home()/OR2006C2C.cache, the run folder under the latch"
  },
  {
+  "file": "src/system/title_movie.hpp",
+  "line": "bool open(const std::string& path,std::string& error);",
+  "class": "not-a-file",
+  "reason": "TitleMovie::open declaration (read only)"
+ },
+ {
+  "file": "xbox/source/audio.hpp",
+  "line": "bool open(std::string& error);",
+  "class": "not-a-file",
+  "reason": "XAudio2 device open"
+ },
+ {
   "file": "xbox/source/d3d11_display.cpp",
   "line": "if(std::FILE* f=std::fopen((std::string(dir)+name).c_str(),\"wb\")){",
   "class": "env-gated",
   "reason": "OR2_XBOX_SCREENSHOT_DIR"
+ },
+ {
+  "file": "xbox/source/d3d11_display.hpp",
+  "line": "bool open(unsigned width,unsigned height,std::string& error);",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "bool open(std::string& e)override{return audio_.open(e);}",
+  "class": "not-a-file",
+  "reason": "the host audio interface forwarding to XAudio2"
  },
  {
   "file": "xbox/source/main.cpp",
@@ -394,6 +502,18 @@
   "line": "std::string application_home(int argc,char** argv);",
   "class": "home-definition",
   "reason": "declaration"
+ },
+ {
+  "file": "xbox/source/renderer.cpp",
+  "line": "if(!impl->display->open(FramebufferWidth,FramebufferHeight,error)){delete impl;return false;}",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
+ },
+ {
+  "file": "xbox/source/setup_display.cpp",
+  "line": "if(!impl_->display.open(unsigned(screen.width()),unsigned(screen.height()),error)){impl_.reset();failed_=true;return;}",
+  "class": "not-a-file",
+  "reason": "D3D11 display open"
  },
  {
   "file": "windows/source/desktop_settings.cpp",
@@ -517,6 +637,12 @@
  },
  {
   "file": "windows/source/wheel_input.cpp",
+  "line": "bool open(Device& d,HWND hwnd){",
+  "class": "not-a-file",
+  "reason": "the 35a8aa3 DirectInput device open"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
   "line": "if(GetFileAttributesA(backup.c_str())==INVALID_FILE_ATTRIBUTES&&!CopyFileA(g.settings_path.c_str(),backup.c_str(),TRUE)){",
   "class": "wheel-off",
   "reason": "35a8aa3 legacy import backup; wheel_input is not configured in a latched process"
@@ -532,6 +658,12 @@
   "line": "write_section(g.settings_path,\"Wheel\",{std::string(\"SteeringSensitivity = \")+a,std::string(\"SteeringDeadZone = \")+b},error);",
   "class": "wheel-off",
   "reason": "35a8aa3 legacy import"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "if(!open(*d,hwnd)){std::printf(\"controls: %s: cannot open %s\\n\",e.action.c_str(),d->name.c_str());continue;}",
+  "class": "not-a-file",
+  "reason": "the 35a8aa3 DirectInput device open"
  },
  {
   "file": "windows/source/window_desktop.cpp",
@@ -556,5 +688,17 @@
   "line": "if(std::freopen(log.c_str(),\"a\",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);",
   "class": "entry-redirected",
   "reason": "log = the run folder's runtime.log when latched"
+ },
+ {
+  "file": "windows/shim/core.cpp",
+  "line": "auto o=p_.open(*found);",
+  "class": "not-a-file",
+  "reason": "the provider's device open"
+ },
+ {
+  "file": "windows/shim/shim.hpp",
+  "line": "virtual OpenResult open(const DeviceInfo& listed)=0; // `opened` is the identity read back from the new handle",
+  "class": "not-a-file",
+  "reason": "the provider interface's device open"
  }
 ]

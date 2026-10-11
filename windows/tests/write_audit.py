@@ -5,10 +5,14 @@
 # match a classified entry in write_audit.json exactly (file + the whole normalized line, so a destination change no
 # longer matches); an unclassified call, or an entry that no longer matches anything, fails.
 #
-# Flagged: fopen/freopen/_wfopen/_fsopen/fdopen unless the mode is a visible read-only literal; every C++ output or
-# read-write file stream; .open() with an output flag; Win32 file creation, move, replace, delete, copy, directories,
-# attributes, links, WriteFile, private-profile writes and file mappings; C rename/remove/unlink/mkdir/rmdir/tmpfile;
-# std::filesystem mutations; and calls to the writer wrappers below.
+# Flagged: the fopen family (including fopen_s / _wfopen_s / freopen_s) unless the mode is a visible read-only literal;
+# CRT descriptor opens (_open, _wopen, _sopen[_s], _wsopen[_s], _creat, open) unless the flags are visibly O_RDONLY;
+# every member .open() unless its mode is visibly ios::in only; every C++ output or read-write file stream; Win32 file
+# creation, move, replace, delete, copy, directories, attributes, links, WriteFile, private-profile writes and file
+# mappings; C rename/remove/unlink/mkdir/rmdir/tmpfile; std::filesystem mutations; writer wrappers; home() uses.
+# The key is the whole call: a finding whose parentheses stay open is joined with its continuation lines, so a changed
+# destination on a later line no longer matches. Textual matching only: an allowlisted writer still needs the actual
+# write-destination fixture (test_fence.cpp); argument dataflow outside the call is not established here.
 import json, pathlib, re, sys
 
 # Everything linked into OutRunDesktop.exe: all of src (conservative), the Xbox core's sources and headers, windows/.
@@ -21,15 +25,19 @@ SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
             "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home"]
 
-OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|freopen|_wfreopen|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
+OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|fopen_s|_wfopen_s|freopen|_wfreopen|freopen_s|_wfreopen_s|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
+# CRT descriptor opens (2b audit review): flagged unless the flags are visibly read only (O_RDONLY, no write flag).
+DESC_RE = re.compile(r"(?<![\w.>:])(?:::)?(_open|_wopen|_sopen|_sopen_s|_wsopen|_wsopen_s|_creat|_wcreat|creat|open)\s*\(")
 STREAM_RE = re.compile(r"\b(?:std::)?(ofstream|wofstream|basic_ofstream|fstream|wfstream|basic_fstream|filebuf|wfilebuf|basic_filebuf)\b")
-OPEN_FLAG_RE = re.compile(r"\.open\s*\(.*\bios(?:_base)?::(out|app|trunc)\b")
+# Any member .open() (a stream's mode may be a variable; 2b audit review): flagged unless its mode is visibly
+# std::ios::in with no out/app/trunc. Non-file .open() calls are classified as not-a-file.
+MEMBER_OPEN_RE = re.compile(r"(?:\.|->)\s*open\s*\(")
 WIN_RE = re.compile(r"\b(CreateFile[AW]?|CreateFile2|MoveFile(?:Ex|WithProgress)?[AW]?|ReplaceFile[AW]?|DeleteFile[AW]?|"
                     r"CopyFile(?:Ex|2)?[AW]?|CreateDirectory(?:Ex)?[AW]?|RemoveDirectory[AW]?|SetFileAttributes[AW]?|"
                     r"CreateHardLink[AW]?|CreateSymbolicLink[AW]?|SHFileOperation[AW]?|WriteFile(?:Ex)?|SetEndOfFile|"
                     r"WritePrivateProfile\w*|CreateFileMapping[AW]?)\s*\(")
 C_RE = re.compile(r"(?<![\w.>:])(?:std::)?(rename|remove|_unlink|unlink|_wremove|_wrename|_wunlink|_rmdir|_wrmdir|rmdir|"
-                  r"_mkdir|_wmkdir|mkdir|tmpfile|tmpnam|_wtmpnam)\s*\(")
+                  r"_mkdir|_wmkdir|mkdir|tmpfile|tmpfile_s|tmpnam|tmpnam_s|_wtmpnam|_wtmpnam_s)\s*\(")
 FS_RE = re.compile(r"\b(create_directory|create_directories|create_hard_link|create_symlink|create_directory_symlink|"
                    r"remove_all|copy_file|copy_symlink|resize_file|permissions|last_write_time)\s*\(|"
                    r"\b(?:filesystem|fs)::(remove|rename|copy)\s*\(")
@@ -42,7 +50,7 @@ def normalize(line):
     return " ".join(line.strip().split())
 
 def call_args(text, start):
-    """The text inside the call's parentheses starting at text[start] == '(' (single line, best effort)."""
+    """The text inside the call's parentheses starting at text[start] == '(' (may span joined lines)."""
     depth, i = 0, start
     while i < len(text):
         c = text[i]
@@ -84,16 +92,23 @@ def last_arg(args):
     parts.append(cur)
     return parts[-1].strip() if parts else ""
 
-def read_only_open(line, m):
-    args = call_args(line, m.end() - 1)
-    mode = last_arg(args)
-    if m.group(1) in ("fdopen", "_fdopen"):
-        pass
+def read_only_open(text, m):
+    mode = last_arg(call_args(text, m.end() - 1))
     lit = re.fullmatch(r'L?"([^"]*)"', mode)
     if not lit:
         return False                      # a variable or computed mode: a candidate
     flags = lit.group(1)
     return "w" not in flags and "a" not in flags and "+" not in flags and flags.startswith("r")
+
+def read_only_desc(text, m):
+    if m.group(1) in ("_creat", "_wcreat", "creat"):
+        return False
+    args = call_args(text, m.end() - 1)
+    return bool(re.search(r"\b_?O_RDONLY\b", args)) and not re.search(r"\b_?O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)\b", args)
+
+def read_only_member_open(text, m):
+    args = call_args(text, m.end() - 1)
+    return bool(re.search(r"\bios(?:_base)?::in\b", args)) and not re.search(r"\bios(?:_base)?::(out|app|trunc)\b", args)
 
 def strip_comment_and_strings(line):
     out, i, in_str = [], 0, False
@@ -116,14 +131,15 @@ def strip_comment_and_strings(line):
         i += 1
     return "".join(out)
 
-def scan_text(rel, text):
-    findings = []
-    in_block = False
-    for number, raw in enumerate(text.splitlines(), 1):
+def preprocess(text):
+    """Per line: (the line without comments, the same with string contents blanked)."""
+    out, in_block = [], False
+    for raw in text.splitlines():
         line = raw
         if in_block:
             end = line.find("*/")
             if end < 0:
+                out.append(("", ""))
                 continue
             line = line[end + 2:]
             in_block = False
@@ -135,24 +151,43 @@ def scan_text(rel, text):
                 in_block = True
                 break
             line = line[:a] + line[b + 2:]
-        code = strip_comment_and_strings(line)
+        out.append((line, strip_comment_and_strings(line)))
+    return out
+
+def scan_text(rel, text):
+    raws = text.splitlines()
+    pre = preprocess(text)
+    findings = []
+    for i, (line, code) in enumerate(pre):
         if not code.strip() or code.lstrip().startswith("#"):
             continue
+        # The whole call: extend over continuation lines while this line's parentheses stay open (2b audit review: a
+        # destination on the next line is part of the key).
+        j, depth = i, code.count("(") - code.count(")")
+        while depth > 0 and j + 1 < len(pre) and j - i < 12:
+            j += 1
+            depth += pre[j][1].count("(") - pre[j][1].count(")")
+        joined = " ".join(pre[k][0] for k in range(i, j + 1))
         kinds = []
         for m in OPEN_RE.finditer(code):
-            if not read_only_open(line, m):
+            if not read_only_open(joined, OPEN_RE.search(joined, m.start()) or m):
                 kinds.append(m.group(1))
+        for m in DESC_RE.finditer(code):
+            if not read_only_desc(joined, DESC_RE.search(joined, m.start()) or m):
+                kinds.append(m.group(1))
+        for m in MEMBER_OPEN_RE.finditer(code):
+            if not read_only_member_open(joined, MEMBER_OPEN_RE.search(joined, m.start()) or m):
+                kinds.append(".open")
         if STREAM_RE.search(code):
             kinds.append(STREAM_RE.search(code).group(1))
-        if OPEN_FLAG_RE.search(line):
-            kinds.append("open(out)")
         kinds += [m.group(1) for m in WIN_RE.finditer(code)]
         kinds += [m.group(1) for m in C_RE.finditer(code)]
         kinds += [m.group(1) or m.group(2) for m in FS_RE.finditer(code)]
         kinds += ["wrapper:" + m.group(1) for m in WRAP_RE.finditer(code)]
         kinds += ["home:" + m.group(1) for m in HOME_RE.finditer(code)]
         if kinds:
-            findings.append({"file": rel, "line": normalize(raw), "number": number, "kinds": sorted(set(kinds))})
+            key = normalize(" ".join(raws[k] for k in range(i, j + 1)))
+            findings.append({"file": rel, "line": key, "number": i + 1, "kinds": sorted(set(kinds))})
     return findings
 
 def scan_tree(repo):
@@ -257,6 +292,11 @@ def selftest(repo, entries):
     cases.append(("a Win32 delete", mutated(rank, lambda t: t + "\nstatic void d(){DeleteFileW(L\"x\");}\n")))
     cases.append(("a filesystem mutation", mutated(rank, lambda t: t + "\nstatic void m(){std::filesystem::remove_all(\"x\");}\n")))
     cases.append(("a game-data read through home()", mutated(rank, lambda t: t + "\nstatic void h(){auto p=home()+\"/data/course.pak\";}\n")))
+    # The 2b audit review's reproductions (artifacts/outrun-fence-audit-review-efa963c).
+    cases.append(("fopen_s with wb", mutated(rank, lambda t: t + '\nstatic void fs(){std::FILE* f=nullptr;fopen_s(&f,"x.dat","wb");}\n')))
+    cases.append(("_wfopen_s with wb", mutated(rank, lambda t: t + '\nstatic void wfs(){std::FILE* f=nullptr;_wfopen_s(&f,L"x.dat",L"wb");}\n')))
+    cases.append(("_open with write flags", mutated(rank, lambda t: t + '\nstatic void op(const char* p){_open(p,_O_WRONLY|_O_CREAT|_O_TRUNC);}\n')))
+    cases.append(("a stream opened with a variable mode", mutated(rank, lambda t: t + '\ntemplate<class S> void so(S& stream,const char* path){auto mode=std::ios::out|std::ios::trunc;stream.open(path,mode);}\n')))
     cases.append(("a removed writer (stale entry)", mutated(rank, lambda t: t.replace('std::fopen((dir+"/rankings.dat").c_str(),"wb")', 'nullptr'))))
     failures = []
     if audit(base, entries) or check_guards(repo):
@@ -274,10 +314,21 @@ def selftest(repo, entries):
     for name, findings in cases:
         if not audit(findings, entries):
             failures.append("NOT CAUGHT: " + name)
-    ro = scan_text("x.cpp", 'void r(const char* p){std::fopen(p,"rb");std::fopen(p,"r");}\n')
+    # A multiline call: the destination on the continuation line is part of the key (2b audit review).
+    multi = 'static void m(){\n    std::FILE* f=std::fopen(\n        (safe_run_path+"/x.dat").c_str(),"wb");\n}\n'
+    approved = [{"file": "windows/source/x.cpp", "line": f["line"], "class": "redirected"} for f in scan_text("windows/source/x.cpp", multi)]
+    if len(approved) != 1 or audit(scan_text("windows/source/x.cpp", multi), approved):
+        failures.append("the multiline control does not pass unmodified")
+    changed = multi.replace("safe_run_path", "original_game_path")
+    if not audit(scan_text("windows/source/x.cpp", changed), approved):
+        failures.append("NOT CAUGHT: a multiline call whose destination changed on the continuation line")
+    # Read-only counterparts are not flagged.
+    ro = scan_text("x.cpp", 'void r(const char* p,std::ifstream& s){std::fopen(p,"rb");std::fopen(p,"r");std::FILE* f=nullptr;fopen_s(&f,p,"rb");'
+                            '_open(p,_O_RDONLY|_O_BINARY);s.open(p,std::ios::in|std::ios::binary);}\n'
+                            'void r2(const char* p){std::FILE* f=std::fopen(\n    p,"rb");}\n')
     if ro:
-        failures.append("a read-only fopen was flagged")
-    return failures, len(cases)
+        failures.append("a read-only open was flagged: " + "; ".join(f["line"] for f in ro))
+    return failures, len(cases) + 1
 
 def main():
     repo = pathlib.Path(sys.argv[1])
@@ -290,7 +341,7 @@ def main():
         failures, n = selftest(repo, entries)
         for f in failures:
             print(f)
-        print(f"write audit selftest: {n + 2} mutations, {len(failures)} failure(s)")
+        print(f"write audit selftest: {n + 2} mutations plus read-only controls, {len(failures)} failure(s)")
         return 1 if failures else 0
     errors = audit(scan_tree(repo), entries) + check_guards(repo)
     for e in errors:
