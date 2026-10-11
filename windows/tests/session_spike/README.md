@@ -31,6 +31,10 @@ edges. A failed shifter read and a held shift after reopening are included.
 - Every decoded channel equals the original frame.
 - Raw replay through a fresh real core reproduces all twelve frames, including
   rearm, epochs and edges. The fake provider is replayed; no hardware is read.
+- Two intentionally wrong profiles (inverted steering and a different shifter
+  button) produce mismatches, proving this raw replay exercises the actual binding
+  resolver instead of simply returning the saved actions. These are deliberate
+  fixture mutations; live replay must refuse an unexpected profile mismatch.
 - Action replay through the real OutRun adapter reproduces its steering, pedal,
   shift, frontend and record-word outputs under the same **fixed fake game state**.
 - A separate actual core injection frame preserves both devices' object marks and
@@ -95,7 +99,9 @@ inputs; this is not yet a self-contained portable replay bundle.
    rearm, which can differ from the live core when recording began. Initially
    classify such tapes as signal/action captures unless a complete startup or a
    validated resolver checkpoint is present. H-pattern action replay additionally
-   depends on the observed car/gear and adapter state. Do not claim it reproduces
+   depends on the observed car/gear and adapter state. Ordinary play can also
+   merge an unrelated pad with the shim; its pre-consumer input/edges and adapter
+   version must be captured to reproduce that merge. Do not claim it reproduces
    the sink from actions alone. A prerecorded gear or pose is not proof of live
    transmission/physics response.
 
@@ -143,3 +149,5 @@ Observed result: October 10, 2026, private evidence
 `dbce-project-mgmt/artifacts/shim-recording-audit-20261010-03`. The first draft's
 attempt to send an over-15-digit batch was correctly refused; final fixture uses
 the parser's true limit and keeps the >2^53 test explicitly synthetic.
+The follow-up `shim-recording-audit-20261010-04` adds the two wrong-profile
+controls: inverted steering differs on 12 frames, the wrong shift button on two.

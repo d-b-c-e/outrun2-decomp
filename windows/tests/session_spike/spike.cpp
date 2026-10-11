@@ -201,12 +201,27 @@ void replay(const fs::path& root){
         raw_rig.tick(f.tick_us-raw_rig.p.clock);
         check(encode(*raw_rig.frame)==rows[k],"raw replay through fresh real Core reproduces actions, epochs, edges and provenance");
     }
+    // A negative control must make a real binding error visible: playback is not just returning saved action values.
+    for(bool wrong_shift:{false,true}){
+        const auto bad_profile=profile({wrong_shift?Steer:Steer+" inverted",Throttle,Brake,
+            sb("shiftUp",wrong_shift?10:11),wb("camera",5),wb("navLeft",7)});
+        Rig wrong(false,bad_profile,true);wrong.view=view;
+        int mismatches=0;
+        for(const auto& row:rows){const auto f=decode(row);
+            for(const auto& s:f.samples){auto& d=wrong.dev(s.device);d.state=s.physical;d.script.push_back({s.poll,s.state});}
+            wrong.tick(f.tick_us-wrong.p.clock);
+            const int action=action_index(wrong_shift?"shiftUp":"steer");
+            if(wrong.frame->action[action].value!=f.action[action].value)++mismatches;
+        }
+        check(mismatches>0,"wrong binding must fail raw replay comparison");
+        std::cout<<"Negative profile control "<<(wrong_shift?"wrong shifter button":"inverted steering")<<": "<<mismatches<<" mismatched frames\n";
+    }
     auto corrupt=rows[0];corrupt["action.steer.status"]=99;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt.erase("sample.0.physical.axis0");expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["action.steer.sample"]=31;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["frame.lo"]=-1;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["unknown"]=1;expect_decode_refused(corrupt);
-    std::cout<<"PASS: 12 raw and action replay frames through production core/adapter, exact full-channel comparison; 5 semantic corruptions refused\n";
+    std::cout<<"PASS: 12 raw and action replay frames through production core/adapter, exact full-channel comparison; 2 wrong-profile controls detected; 5 semantic corruptions refused\n";
 }
 int main(int argc,char** argv){try{
     check(argc==3,"usage: spike generate|replay absent-output-directory");
