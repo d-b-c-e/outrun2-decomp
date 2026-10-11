@@ -79,7 +79,21 @@ private:
     ComPtr<ID3D11RenderTargetView> back_rtv_;ComPtr<ID3D11DepthStencilView> back_dsv_;
     ComPtr<ID3D11VertexShader> vertex_;ComPtr<ID3D11InputLayout> layout_;ComPtr<ID3D11PixelShader> ffp_;
     ComPtr<ID3D11Buffer> vbo_,ubo_[3];std::size_t vbo_bytes_{};
-    ComPtr<ID3D11Query> query_;bool query_live_{};
+    // The occlusion queries of the diagnostic pixel count: rotated and collected when ready, never waited for
+    // (except with OR2_XBOX_DRAW_STATS, whose log prints each frame's count).
+    ComPtr<ID3D11Query> queries_[3];unsigned query_index_{};bool query_pending_[3]{},query_live_{};
+    void collect_queries(bool wait_all);
+    // What this frame has bound (see begin_frame): a call that would set the same is skipped.
+    struct Bound {
+        bool valid{},target{},ps_constants{},vs_constants{};
+        ID3D11RenderTargetView* rtv{};ID3D11DepthStencilView* dsv{};
+        D3D11_VIEWPORT viewport{};D3D11_RECT scissor{};bool viewport_set{},scissor_set{};
+        ID3D11RasterizerState* rasterizer{};ID3D11DepthStencilState* depth{};UINT stencil_ref{};ID3D11BlendState* blend{};
+        bool textures_set{};ID3D11ShaderResourceView* views[12]{};ID3D11SamplerState* samplers[6]{};
+        ID3D11PixelShader* ps{};ID3D11VertexShader* vs{};ID3D11InputLayout* layout{};D3D11_PRIMITIVE_TOPOLOGY topology{};
+        ID3D11Buffer* vb[16]{};UINT vb_stride[16]{},vb_offset[16]{};ID3D11Buffer* ib{};
+    } bound_;
+    std::vector<std::uint8_t> uniform_shadow_[3];
     unsigned frame_draws_{},frame_vertices_{};
     std::map<std::uint32_t,ComPtr<ID3D11PixelShader>> shader_programs_;
     struct {unsigned compiled{},loaded{};double ms{},max_ms{};} shader_stats_;   // pixel programs: compiled vs from the disk cache

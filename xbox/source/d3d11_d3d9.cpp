@@ -106,10 +106,10 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     t.ArraySize=6;t.MiscFlags=D3D11_RESOURCE_MISC_TEXTURECUBE;
     check(device_->CreateTexture2D(&t,init,&dummycube_),"CreateTexture2D(dummy cube)");
     check(device_->CreateShaderResourceView(dummycube_.Get(),nullptr,&dummycube_srv_),"CreateShaderResourceView(dummy cube)");
-    D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;check(device_->CreateQuery(&q,&query_),"CreateQuery");
+    D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
-    if(query_live_)context_->End(query_.Get());
+    if(query_live_)context_->End(queries_[query_index_].Get());
     std::printf("shader programs: %u compiled, %u from the cache, %.0f ms in total, slowest %.0f ms\n",
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
@@ -121,6 +121,7 @@ D3D11D3D9Device::~D3D11D3D9Device(){
 }
 void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     if(!w||!h||w>16384||h>16384)throw std::runtime_error("invalid GPU back buffer size");
+    bound_=Bound{};
     back_srv_.Reset();back_rtv_.Reset();back_dsv_.Reset();back_colour_tex_.Reset();back_depth_tex_.Reset();
     msaa_rtv_.Reset();msaa_dsv_.Reset();msaa_colour_tex_.Reset();msaa_depth_tex_.Reset();msaa_samples_=0;
     fxaa_copy_srv_.Reset();fxaa_copy_tex_.Reset();
@@ -173,21 +174,31 @@ void D3D11D3D9Device::finish_scene(){
     context_->VSSetShader(fxaa_vertex_.Get(),nullptr,0);context_->PSSetShader(fxaa_pixel_.Get(),nullptr,0);
     ID3D11ShaderResourceView* srv=fxaa_copy_srv_.Get();context_->PSSetShaderResources(0,1,&srv);
     ID3D11SamplerState* sampler=fxaa_sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
-    context_->Draw(3,0);
+    context_->Draw(3,0);bound_=Bound{};
     ++fxaa_passes;
 }
 void D3D11D3D9Device::begin_frame(){
     scene_finished_=false;msaa_live_=msaa_>1&&!count_only;
     if(msaa_live_)ensure_msaa();
-    if(!count_only){context_->Begin(query_.Get());query_live_=true;}
+    bound_=Bound{};
+    if(!count_only){
+        if(query_pending_[query_index_])collect_queries(true);   // three frames behind: the GPU is that far back
+        context_->Begin(queries_[query_index_].Get());query_live_=true;}
+}
+void D3D11D3D9Device::collect_queries(bool wait_all){
+    for(unsigned k=0;k<3;++k)if(query_pending_[k]){
+        UINT64 passed=0;HRESULT hr;
+        while((hr=context_->GetData(queries_[k].Get(),&passed,sizeof passed,wait_all?0:D3D11_ASYNC_GETDATA_DONOTFLUSH))==S_FALSE&&wait_all){}
+        if(hr==S_OK){pixels_shaded+=passed;query_pending_[k]=false;}
+    }
 }
 void D3D11D3D9Device::end_frame(){
     if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
-    if(!query_live_)return;context_->End(query_.Get());query_live_=false;
-    UINT64 passed=0;while(context_->GetData(query_.Get(),&passed,sizeof passed,0)==S_FALSE){}
-    pixels_shaded+=passed;
-    // Development: OR2_XBOX_DRAW_STATS=1 logs the draws of every 60th frame.
+    if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
+    query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
+    // Development: OR2_XBOX_DRAW_STATS=1 logs the draws of every 60th frame (and waits for each frame's count).
     static const bool stats=std::getenv("OR2_XBOX_DRAW_STATS")!=nullptr;static unsigned frame=0;
+    const auto before=pixels_shaded;collect_queries(stats);const UINT64 passed=pixels_shaded-before;
     if(stats&&(frame++%60u)==0u)std::fprintf(stdout,"D3D11 frame %u: draws=%u vertices=%u pixels=%llu viewport=%.0fx%.0f\n",
         frame,frame_draws_,frame_vertices_,(unsigned long long)passed,soft_viewport_.w,soft_viewport_.h);
     frame_draws_=frame_vertices_=0;
@@ -230,10 +241,13 @@ ID3D11DepthStencilView* D3D11D3D9Device::depth_view(std::uint32_t handle){
     return (depth_views_[handle]=view).Get();
 }
 void D3D11D3D9Device::bind_target(){
+    if(colour_target_==BackBuffer&&msaa_live_&&depth_target_&&depth_target_!=DepthBuffer)throw std::runtime_error("MSAA scene with a separate depth surface");
+    ID3D11RenderTargetView* rtv=colour_view();ID3D11DepthStencilView* dsv=depth_view(depth_target_);
+    if(bound_.target&&rtv==bound_.rtv&&dsv==bound_.dsv)return;
     // A texture bound for sampling cannot be the target at the same time.
     ID3D11ShaderResourceView* none[12]{};context_->PSSetShaderResources(0,12,none);
-    if(colour_target_==BackBuffer&&msaa_live_&&depth_target_&&depth_target_!=DepthBuffer)throw std::runtime_error("MSAA scene with a separate depth surface");
-    ID3D11RenderTargetView* rtv=colour_view();context_->OMSetRenderTargets(1,&rtv,depth_view(depth_target_));
+    context_->OMSetRenderTargets(1,&rtv,dsv);
+    bound_.target=true;bound_.rtv=rtv;bound_.dsv=dsv;bound_.textures_set=false;
 }
 void D3D11D3D9Device::release(std::uint32_t handle){
     PcSoftD3D9Device::release(handle);if(object(handle))return;
@@ -391,12 +405,14 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
         std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);}
     for(unsigned s=0;s<streams.size()&&s<16;++s)if(slots&(1u<<s)){
         ID3D11Buffer* b=gpu_buffer(streams[s].buffer);const UINT stride=streams[s].stride,offset=streams[s].offset;
-        context_->IASetVertexBuffers(s,1,&b,&stride,&offset);}
-    context_->IASetIndexBuffer(gpu_buffer(indices),DXGI_FORMAT_R16_UINT,0);
-    context_->IASetInputLayout(layout.Get());
-    context_->IASetPrimitiveTopology(type==5?D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);
-    context_->VSSetShader(program->shader.Get(),nullptr,0);
+        if(bound_.vb[s]!=b||bound_.vb_stride[s]!=stride||bound_.vb_offset[s]!=offset){
+            context_->IASetVertexBuffers(s,1,&b,&stride,&offset);bound_.vb[s]=b;bound_.vb_stride[s]=stride;bound_.vb_offset[s]=offset;}}
+    if(ID3D11Buffer* b=gpu_buffer(indices);bound_.ib!=b){context_->IASetIndexBuffer(b,DXGI_FORMAT_R16_UINT,0);bound_.ib=b;}
+    if(bound_.layout!=layout.Get()){context_->IASetInputLayout(layout.Get());bound_.layout=layout.Get();}
+    const auto topology=type==5?D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    if(bound_.topology!=topology){context_->IASetPrimitiveTopology(topology);bound_.topology=topology;}
+    if(!bound_.vs_constants){ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);bound_.vs_constants=true;}
+    if(bound_.vs!=program->shader.Get()){context_->VSSetShader(program->shader.Get(),nullptr,0);bound_.vs=program->shader.Get();}
     context_->DrawIndexed(UINT(total),start,base);
     ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
     return true;
@@ -405,8 +421,11 @@ void D3D11D3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,c
     batch_.clear();PcSoftD3D9Device::draw_primitive_up(type,count,data,stride);flush();
 }
 void D3D11D3D9Device::uniform(unsigned slot,const void* data,std::size_t bytes){
+    auto& shadow=uniform_shadow_[slot];   // the buffer keeps its contents: rewrite it only when they change
+    if(shadow.size()==bytes&&std::memcmp(shadow.data(),data,bytes)==0)return;
     D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(ubo_[slot].Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(constants)");
     std::memcpy(m.pData,data,bytes);context_->Unmap(ubo_[slot].Get(),0);
+    shadow.assign(static_cast<const std::uint8_t*>(data),static_cast<const std::uint8_t*>(data)+bytes);
 }
 void D3D11D3D9Device::apply_state(){
     // The logical PC target stretched to the back buffer's pixels; with the UI
@@ -415,8 +434,10 @@ void D3D11D3D9Device::apply_state(){
     double sx=back?double(back_w_)/back_width_:1,sy=back?double(back_h_)/back_height_:1,ox=0;
     if(back&&ui_rect_&&batch_rhw_){const double w=double(back_h_)*4/3;ox=std::floor((back_w_-w)/2);sx=w/back_width_;}
     const float vx=float(ox+soft_viewport_.x*sx),vy=float(soft_viewport_.y*sy),vw=float(soft_viewport_.w*sx),vh=float(soft_viewport_.h*sy);
-    D3D11_VIEWPORT vp{vx,vy,vw,vh,soft_viewport_.min_z,soft_viewport_.max_z};context_->RSSetViewports(1,&vp);
-    const D3D11_RECT scissor{LONG(std::lround(vx)),LONG(std::lround(vy)),LONG(std::lround(vx+vw)),LONG(std::lround(vy+vh))};context_->RSSetScissorRects(1,&scissor);
+    const D3D11_VIEWPORT vp{vx,vy,vw,vh,soft_viewport_.min_z,soft_viewport_.max_z};
+    if(!bound_.viewport_set||std::memcmp(&vp,&bound_.viewport,sizeof vp)!=0){context_->RSSetViewports(1,&vp);bound_.viewport=vp;bound_.viewport_set=true;}
+    const D3D11_RECT scissor{LONG(std::lround(vx)),LONG(std::lround(vy)),LONG(std::lround(vx+vw)),LONG(std::lround(vy+vh))};
+    if(!bound_.scissor_set||std::memcmp(&scissor,&bound_.scissor,sizeof scissor)!=0){context_->RSSetScissorRects(1,&scissor);bound_.scissor=scissor;bound_.scissor_set=true;}
     D3D11_RASTERIZER_DESC r{};r.FillMode=D3D11_FILL_SOLID;r.FrontCounterClockwise=FALSE;r.DepthClipEnable=TRUE;r.ScissorEnable=TRUE;
     r.MultisampleEnable=back&&msaa_live_?TRUE:FALSE;
     r.CullMode=render[RS_CULLMODE]==CULL_NONE?D3D11_CULL_NONE:render[RS_CULLMODE]==CULL_CCW?D3D11_CULL_BACK:D3D11_CULL_FRONT;
@@ -424,14 +445,15 @@ void D3D11D3D9Device::apply_state(){
     if(!last_rasterizer_state_||std::memcmp(&r,&last_rasterizer_,sizeof r)!=0){
         auto& rs=rasterizer_states_[key(r)];if(!rs)check(device_->CreateRasterizerState(&r,&rs),"CreateRasterizerState");
         last_rasterizer_=r;last_rasterizer_state_=rs.Get();}
-    context_->RSSetState(last_rasterizer_state_);
+    if(bound_.rasterizer!=last_rasterizer_state_){context_->RSSetState(last_rasterizer_state_);bound_.rasterizer=last_rasterizer_state_;}
     D3D11_DEPTH_STENCIL_DESC d{};d.DepthEnable=render[RS_ZENABLE]!=0;d.DepthWriteMask=render[RS_ZWRITEENABLE]?D3D11_DEPTH_WRITE_MASK_ALL:D3D11_DEPTH_WRITE_MASK_ZERO;
     d.DepthFunc=comparison(render[RS_ZFUNC]);d.StencilEnable=render[52]!=0;d.StencilReadMask=UINT8(render[58]);d.StencilWriteMask=UINT8(render[59]);
     d.FrontFace={stencil_op(render[53]),stencil_op(render[54]),stencil_op(render[55]),comparison(render[56])};d.BackFace=d.FrontFace;
     if(!last_depth_state_||std::memcmp(&d,&last_depth_,sizeof d)!=0){
         auto& ds=depth_states_[key(d)];if(!ds)check(device_->CreateDepthStencilState(&d,&ds),"CreateDepthStencilState");
         last_depth_=d;last_depth_state_=ds.Get();}
-    context_->OMSetDepthStencilState(last_depth_state_,render[57]&255);
+    if(bound_.depth!=last_depth_state_||bound_.stencil_ref!=(render[57]&255)){
+        context_->OMSetDepthStencilState(last_depth_state_,render[57]&255);bound_.depth=last_depth_state_;bound_.stencil_ref=render[57]&255;}
     D3D11_BLEND_DESC b{};auto& t=b.RenderTarget[0];const bool separate=render[RS_SEPARATEALPHABLENDENABLE]!=0;
     t.BlendEnable=render[RS_ALPHABLENDENABLE]!=0;t.SrcBlend=blend_factor(render[RS_SRCBLEND]);t.DestBlend=blend_factor(render[RS_DESTBLEND]);t.BlendOp=blend_op(render[RS_BLENDOP]);
     t.SrcBlendAlpha=alpha_factor(render[separate?RS_SRCBLENDALPHA:RS_SRCBLEND]);t.DestBlendAlpha=alpha_factor(render[separate?RS_DESTBLENDALPHA:RS_DESTBLEND]);
@@ -439,7 +461,7 @@ void D3D11D3D9Device::apply_state(){
     if(!last_blend_state_||std::memcmp(&b,&last_blend_,sizeof b)!=0){
         auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState");
         last_blend_=b;last_blend_state_=bs.Get();}
-    context_->OMSetBlendState(last_blend_state_,nullptr,0xffffffffu);
+    if(bound_.blend!=last_blend_state_){context_->OMSetBlendState(last_blend_state_,nullptr,0xffffffffu);bound_.blend=last_blend_state_;}
 }
 void D3D11D3D9Device::bind_textures(){
     ID3D11ShaderResourceView* views[12];ID3D11SamplerState* samplers[6];
@@ -464,7 +486,9 @@ void D3D11D3D9Device::bind_textures(){
         }
         samplers[s]=ss.Get();last_sampler_[s]=d;last_sampler_state_[s]=ss.Get();
     }
-    context_->PSSetShaderResources(0,12,views);context_->PSSetSamplers(0,6,samplers);
+    if(!bound_.textures_set||std::memcmp(views,bound_.views,sizeof views)!=0){context_->PSSetShaderResources(0,12,views);std::memcpy(bound_.views,views,sizeof views);}
+    if(!bound_.textures_set||std::memcmp(samplers,bound_.samplers,sizeof samplers)!=0){context_->PSSetSamplers(0,6,samplers);std::memcpy(bound_.samplers,samplers,sizeof samplers);}
+    bound_.textures_set=true;
 }
 ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::PcShaderProgram* program){
     auto found=shader_programs_.find(pixel_shader);if(found!=shader_programs_.end())return found->second.Get();
@@ -506,15 +530,20 @@ void D3D11D3D9Device::flush(){
         D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(vbo_bytes_);d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_VERTEX_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         check(device_->CreateBuffer(&d,nullptr,&vbo_),"CreateBuffer(vertices)");}
     D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vbo_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertices)");std::memcpy(m.pData,batch_.data(),bytes);context_->Unmap(vbo_.Get(),0);
-    const UINT stride=sizeof(Vertex),offset=0;ID3D11Buffer* vb=vbo_.Get();context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
-    context_->IASetInputLayout(layout_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->VSSetShader(vertex_.Get(),nullptr,0);
+    const UINT stride=sizeof(Vertex),offset=0;ID3D11Buffer* vb=vbo_.Get();
+    if(bound_.vb[0]!=vb||bound_.vb_stride[0]!=stride||bound_.vb_offset[0]!=offset){
+        context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);bound_.vb[0]=vb;bound_.vb_stride[0]=stride;bound_.vb_offset[0]=offset;}
+    if(bound_.layout!=layout_.Get()){context_->IASetInputLayout(layout_.Get());bound_.layout=layout_.Get();}
+    if(bound_.topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST){context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);bound_.topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;}
+    if(bound_.vs!=vertex_.Get()){context_->VSSetShader(vertex_.Get(),nullptr,0);bound_.vs=vertex_.Get();}
     context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.
 void D3D11D3D9Device::pixel_pipeline(){
     bind_target();apply_state();bind_textures();
     auto* ps=object(pixel_shader);const unsigned kind=ps&&ps->kind==4?(ps->program.version==0xffff0101u?1:2):0;
-    context_->PSSetShader(kind?pixel_program(kind,&ps->program):ffp_.Get(),nullptr,0);
+    ID3D11PixelShader* pixel=kind?pixel_program(kind,&ps->program):ffp_.Get();
+    if(bound_.ps!=pixel){context_->PSSetShader(pixel,nullptr,0);bound_.ps=pixel;}
     uniform(0,ps_constants.data(),8*4*sizeof(float));
     if(kind){struct {std::int32_t program[16],info[4],kinds[8];float bump[8][4],lum[2][4];} p{};
         std::fill(std::begin(p.program),std::end(p.program),-1);
@@ -530,6 +559,6 @@ void D3D11D3D9Device::pixel_pipeline(){
     float fixed[12]{};colour(render[RS_FOGCOLOR],fixed);fixed[3]=f(render[RS_FOGEND]);
     if(render[RS_FOGENABLE])fixed[4]=render[RS_FOGTABLEMODE]?float(render[RS_FOGTABLEMODE]):4.f;
     fixed[5]=f(render[RS_FOGSTART]);fixed[6]=f(render[RS_FOGDENSITY]);fixed[7]=1;fixed[8]=render[RS_ALPHATESTENABLE]?1.f:0.f;fixed[9]=float(render[RS_ALPHAREF]&255);fixed[10]=float(render[RS_ALPHAFUNC]);uniform(2,fixed,sizeof fixed);
-    ID3D11Buffer* constants[3]{ubo_[0].Get(),ubo_[1].Get(),ubo_[2].Get()};context_->PSSetConstantBuffers(0,3,constants);
+    if(!bound_.ps_constants){ID3D11Buffer* constants[3]{ubo_[0].Get(),ubo_[1].Get(),ubo_[2].Get()};context_->PSSetConstantBuffers(0,3,constants);bound_.ps_constants=true;}
 }
 }

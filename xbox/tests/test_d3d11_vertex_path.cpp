@@ -30,8 +30,12 @@ static std::vector<std::uint8_t> readback(ID3D11Device* device,ID3D11DeviceConte
 }
 // Pixels whose 3x3 neighbourhood is uniform in the CPU image must match within one level; edge pixels may differ
 // (CPU-transformed and GPU-transformed vertices round subpixel coverage differently).
-static void compare(D3D11D3D9Device& gpu,D3D11D3D9Device& cpu,ID3D11Device* device,ID3D11DeviceContext* context,const char* what,bool expect_drawn=true){
-    const auto a=readback(device,context,gpu.back_texture()),b=readback(device,context,cpu.back_texture());
+// Each device has its own D3D11 device and context, as in the game: a device caches what it has bound on its
+// context, so two of them must not share one.
+struct Gpu {ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;};
+static Gpu g_gpu,g_cpu;
+static void compare(D3D11D3D9Device& gpu,D3D11D3D9Device& cpu,const char* what,bool expect_drawn=true){
+    const auto a=readback(g_gpu.device.Get(),g_gpu.context.Get(),gpu.back_texture()),b=readback(g_cpu.device.Get(),g_cpu.context.Get(),cpu.back_texture());
     check(a.size()==64u*48u*4u&&b.size()==a.size(),"read back both back buffers");if(a.size()!=b.size()||a.empty())return;
     unsigned stable=0,bad=0,drawn=0;
     for(unsigned y=1;y<47;++y)for(unsigned x=1;x<63;++x){
@@ -50,12 +54,12 @@ int main(){
     std::setvbuf(stdout,nullptr,_IONBF,0);
     // The recovered vertex programs are read from the player's verified EXE image (OR2_EXE: its OR2006C2C.cache).
     if(!exe_image_autoload()){std::printf("SKIP: set OR2_EXE to the game's OR2006C2C.cache (the vertex programs come from it)\n");return 77;}
-    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
     const D3D_FEATURE_LEVEL levels[]{D3D_FEATURE_LEVEL_10_1};
-    if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&device,nullptr,&context))){
+    if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&g_gpu.device,nullptr,&g_gpu.context))||
+       FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&g_cpu.device,nullptr,&g_cpu.context))){
         std::printf("FAIL no WARP D3D11 device at feature level 10.1\n");return 1;}
-    _putenv("OR2_D3D11_CPU_VERTEX=");D3D11D3D9Device gpu(device.Get(),context.Get(),64,48);
-    _putenv("OR2_D3D11_CPU_VERTEX=1");D3D11D3D9Device cpu(device.Get(),context.Get(),64,48);
+    _putenv("OR2_D3D11_CPU_VERTEX=");D3D11D3D9Device gpu(g_gpu.device.Get(),g_gpu.context.Get(),64,48);
+    _putenv("OR2_D3D11_CPU_VERTEX=1");D3D11D3D9Device cpu(g_cpu.device.Get(),g_cpu.context.Get(),64,48);
     _putenv("OR2_D3D11_CPU_VERTEX=");
     D3D11D3D9Device* devices[]{&gpu,&cpu};
     struct Position {float x,y,z,w;unsigned bytes;float uv[2];};
@@ -88,7 +92,7 @@ int main(){
     }
     auto draw=[&](unsigned type,int base,unsigned start,unsigned count,const char* what,bool expect_drawn=true){
         for(auto* d:devices){d->begin_frame();d->clear(7,0xff000000,1,0);check(d->draw_indexed_primitive(type,base,0,4,start,count)==0,"indexed draw succeeds");}
-        compare(gpu,cpu,device.Get(),context.Get(),what,expect_drawn);
+        compare(gpu,cpu,what,expect_drawn);
     };
     const auto native_before=gpu.native_draws();
     for(unsigned config:{8u,8u|(1u<<9),0xffffffffu}){
@@ -113,10 +117,24 @@ int main(){
                     std::memcpy(d.lock(colour[i],4,unsigned(colours.size()*4),0),colours.data(),colours.size()*4);d.unlock(colour[i]);
                     check(d.draw_indexed_primitive(5,1,0,4,8,2)==0,"mutable stream draw succeeds");}
             }
-            compare(gpu,cpu,device.Get(),context.Get(),"stream rewritten between two draws");
+            compare(gpu,cpu,"stream rewritten between two draws");
             for(auto* d:devices)d->set_viewport(0,0,64,48,0,1);
         }
     }
+    // One frame of several draws: the device skips calls that set what is already bound, so state must carry over
+    // correctly between draws. Quadrant viewports, list and strip, changed constants, alpha blending on and off,
+    // and a CPU-path draw (index 0xFFFF) between GPU-path draws.
+    for(auto* d:devices){d->begin_frame();d->clear(7,0xff000000,1,0);}
+    struct Step {unsigned x,y,type,start,count;int base;float shift;bool blend;};
+    const Step steps[]{{0,0,4,2,2,1,0.f,false},{32,0,5,8,2,1,.1f,false},{0,24,4,12,1,1,0.f,true},{32,24,4,2,2,0,-.1f,true},{0,0,5,8,2,1,.05f,false}};
+    for(const auto& st:steps)for(auto* d:devices){
+        d->set_viewport(st.x,st.y,32,24,0,1);
+        const float shift[]{1,0,0,st.shift};d->set_vertex_shader_constant_f(64,shift,1);
+        d->set_render_state(RS_ALPHABLENDENABLE,st.blend?1u:0u);d->set_render_state(RS_SRCBLEND,5);d->set_render_state(RS_DESTBLEND,6);
+        check(d->draw_indexed_primitive(st.type,st.base,0,4,st.start,st.count)==0,"multi-draw frame draw succeeds");
+    }
+    compare(gpu,cpu,"several draws in one frame (bound-state cache)");
+    for(auto* d:devices){d->set_viewport(0,0,64,48,0,1);d->set_render_state(RS_ALPHABLENDENABLE,0);const float reset[]{1,0,0,0};d->set_vertex_shader_constant_f(64,reset,1);}
     check(gpu.native_draws()>native_before+20,"the GPU device drew through the GPU vertex path");
     check(cpu.native_draws()==0,"OR2_D3D11_CPU_VERTEX keeps every draw on the CPU path");
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
