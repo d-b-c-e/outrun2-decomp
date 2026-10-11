@@ -110,7 +110,13 @@ first report. Phases and budgets:
 4. **Recorder, at most 1000 ms.**
    - The producer (this thread) pushes the final run-end frame and calls `finish(last_sequence)`.
    - `Controller::drain(1000 ms)` includes the inner close and the closed-file size and SHA (P20 v2).
-   - The worker writes `worker.tsv` itself, as its last act. The host never writes a worker report.
+   - r2.2 (integration with the reviewed P20 composition): the reviewed `report()` member writer turns the worker's
+     **final, quiescent** report into `worker.tsv`. It runs on the producer thread, and only after the drain returned
+     an eligible outcome **and the worker thread was joined**. The same applies to `profile.ini`, `bundle.meta` and
+     `budget.tsv`.
+   - No member is written for an unjoined or ineligible recorder. A host that never joined the worker therefore never
+     produces a worker report. Writing it from the host does not add trust: D8 still needs the host's resolved report
+     and the external exit observation.
    - The drain returns the outcome **and whether the worker thread actually finished and was joined**, as separate
      facts (r2.1, Astra 11867). A recorder resolves only when both hold: outcome `Complete` and worker joined.
    - The worker can publish `Complete` and then block writing its own report. A `Complete` outcome is not a
@@ -266,6 +272,8 @@ return result;
 | P21g | Teardown audit: no stdio, no dynamic-destructor statics, no `detach` outside the host in worker-reachable code. Mutations are caught | `write_audit` extension |
 | P21h | The seal rule: of the 8 combinations of worker `Complete` x host `resolved` x normal external exit, only all-three seals. A swapped nonce in either report refuses | finalizer rule fixture |
 | P21i | Destruction without `stop()` returns at once (no wait), and the shutdown file never reads `resolved` | prototype host |
+
+| P21j | Integration with the reviewed P20 recorder (`windows/tests/p21_recorder_integration`): actual Core/Adapter frames, the real native writer and closed-file seal, the worker thread joined, supervised child processes, and the out-of-process finalizer sealing only the resolved capture | `run.py --mutations` |
 
 P28's rerun of P21 through the real provider over fake COM objects stays as written.
 
