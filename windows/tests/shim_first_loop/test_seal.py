@@ -23,6 +23,13 @@ if proc.returncode != 0 or not created or not isinstance(seal, dict) or seal["ex
 run.replay(out, receipt, tool)
 if not isinstance(receipt.get("replay"), dict) or receipt["replay"]["exit"] != 0 or '"result":"pass"' not in receipt["replay"]["output"]:
     raise SystemExit("FAIL replay step: %r" % receipt.get("replay"))
+# Astra 16889 (2): a sealed capture's fresh export equals the one sealing wrote; capture_replay refuses a mixed-up pair.
+again = out / "read-export.tsv"; run.read_export(dll, out / "run" / "capture", again)
+if again.read_bytes() != (out / "validated.tsv").read_bytes(): raise SystemExit("FAIL --read-export differs from the sealing export")
+blocks = (out / "validated.tsv").read_text().split("ROW ")
+(out / "short.tsv").write_text("ROW " + "ROW ".join(blocks[1:9]))
+q = subprocess.run([str(tool), str(out / "run" / "capture"), str(out / "short.tsv")], capture_output=True, text=True)
+if q.returncode == 0 or "not this capture's" not in q.stderr: raise SystemExit("FAIL capture_replay accepted another export: %r" % q.stderr)
 # The verdict: this receipt passes; each unmet condition alone fails it.
 good = dict(receipt, phase="end", exitCode=0, host={"state": "resolved"}, journal={"qualifies": True})
 if run.verdict(dict(good)): raise SystemExit("FAIL verdict refused a passing receipt: %r" % run.verdict(dict(good)))
@@ -31,12 +38,15 @@ for change in [dict(phase="steer-left"), dict(exitCode=1), dict(forced=True), di
                dict(errors=["cleanup inject.on: not our bytes"])]:
     if not run.verdict(dict(good, **change)): raise SystemExit("FAIL verdict passed %r" % change)
 # R3: a complete playback with race progression passes; an incomplete playback, a missing comparison or no progression fails.
-cmp = {"playedRows": 9, "progression": {"replayInGameRows": 9, "replayMaxSpeed": 12.5}}
+words = {w: "9/9" for w in ("recordSteer", "recordAccel", "recordBrake", "recordButtons")}
+cmp = {"tapeRows": 9, "playedRows": 9, "contiguous": True, "intended": words, "progression": {"replayInGameRows": 9, "replayMaxSpeed": 12.5}}
 r3 = dict(good, r3={"playbackComplete": True, "playbackEnd": "end line", "compare": cmp})
 if run.verdict(dict(r3)): raise SystemExit("FAIL verdict refused a passing R3 receipt: %r" % run.verdict(dict(r3)))
 for change in [dict(playbackComplete=False), dict(compare="comparison failed"),
-               dict(compare={"playedRows": 9, "progression": {"replayInGameRows": 9, "replayMaxSpeed": 0.0}}),
-               dict(compare={"playedRows": 9, "progression": {"replayInGameRows": 8, "replayMaxSpeed": 12.5}})]:
+               dict(compare=dict(cmp, progression={"replayInGameRows": 9, "replayMaxSpeed": 0.0})),
+               dict(compare=dict(cmp, progression={"replayInGameRows": 8, "replayMaxSpeed": 12.5})),
+               dict(compare=dict(cmp, contiguous=False)), dict(compare=dict(cmp, playedRows=8)),   # Astra 16889 (1)
+               dict(compare=dict(cmp, intended=dict(words, recordSteer="0/9"))), dict(compare=dict(cmp, intended={}))]:
     if not run.verdict(dict(r3, r3=dict(r3["r3"], **change))): raise SystemExit("FAIL R3 verdict passed %r" % change)
 m = run.REPLAY_END.search("input shim: replay end at live frame 900: 9 of 9 tape rows played (tape complete)")
 if not (m and m.group(2) == m.group(3) == "9" and m.group(4) == "tape complete"): raise SystemExit("FAIL replay end line not parsed")

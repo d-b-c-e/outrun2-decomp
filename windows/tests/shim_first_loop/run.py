@@ -13,7 +13,7 @@ controls-journal.jsonl (the strict reader) and host-shutdown.json. The capture (
 evidence copy by the reviewed P21 finalizer (--finalizer): the final host report is copied into it and this runner writes
 exit.json only for an exit it observed, with the process identity it held from the spawn.
 """
-import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, random, re, shutil, string, subprocess, sys, time
+import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
@@ -93,6 +93,13 @@ def replay(out, receipt, tool):
     receipt["replay"] = dict(exit=q.returncode, output=(q.stdout + q.stderr).strip()[-600:])
 
 
+def read_export(finalizer, capture, dest):
+    """The finalizer verifies a sealed capture again (seal inventory, hashes, host and exit, stream) and writes a fresh
+    export (Astra 16889): a reused capture's tape always comes from its sealed source."""
+    q = subprocess.run(["dotnet", str(finalizer), "--read-export", str(capture), str(dest)], capture_output=True, text=True, timeout=600)
+    if q.returncode != 0: raise ValueError("the sealed capture does not verify: %s" % ((q.stdout + q.stderr).strip().splitlines() or [""])[0][:300])
+
+
 def verdict(receipt):
     """Astra 16766: diagnostics are saved either way; any unmet condition fails the run."""
     failures = ["error: %s" % e for e in receipt["errors"]]
@@ -108,8 +115,13 @@ def verdict(receipt):
         if not r3.get("playbackComplete"): failures.append("replay playback incomplete: %s" % r3.get("playbackEnd"))
         cmp = r3.get("compare")
         if not isinstance(cmp, dict): failures.append("no R3 comparison: %s" % str(cmp)[:200])
-        elif not (cmp["progression"]["replayInGameRows"] == cmp["playedRows"] and cmp["progression"]["replayMaxSpeed"] > 0):
-            failures.append("no race progression during playback: %s" % json.dumps(cmp["progression"]))
+        else:   # Astra 16889: ordered complete coverage and every intended word equal; consumed words stay diagnostic
+            if not (cmp.get("contiguous") and cmp.get("playedRows") == cmp.get("tapeRows")):
+                failures.append("tape not covered in order: %s of %s rows, contiguous %s" % (cmp.get("playedRows"), cmp.get("tapeRows"), cmp.get("contiguous")))
+            bad = {w: v for w, v in (cmp.get("intended") or {}).items() if v.split("/")[0] != v.split("/")[1]}
+            if bad or not cmp.get("intended"): failures.append("intended words differ from the first run: %s" % json.dumps(bad))
+            if not (cmp["progression"]["replayInGameRows"] == cmp["playedRows"] and cmp["progression"]["replayMaxSpeed"] > 0):
+                failures.append("no race progression during playback: %s" % json.dumps(cmp["progression"]))
     replay_result = receipt.get("replay")
     if not (isinstance(replay_result, dict) and replay_result.get("exit") == 0): failures.append("adapter replay did not reconstruct: %s" % str(replay_result)[:300])
     receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
@@ -156,13 +168,15 @@ def main():
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
     if not o.replay_tool or not o.replay_tool.exists(): problems.append("no --replay-tool capture_replay.exe to replay the capture")
-    tape = None; tape_rows = 0
-    if o.replay_of:   # R3: only a passing, sealed first run is played
-        first = o.replay_of.resolve(); tape = first / "validated.tsv"
+    tape = None; tape_rows = 0; tape_source = None
+    if o.replay_of:   # R3: only a passing first run whose sealed capture verifies again is played
+        first = o.replay_of.resolve(); tape_source = first / "run" / "capture"; tape = out / "tape.tsv"
         try:
             if json.loads((first / "receipt.json").read_text()).get("result") != "pass": problems.append("--replay-of is not a passing run")
-            if not (first / "run" / "capture" / "complete.tsv").exists(): problems.append("--replay-of has no sealed capture")
-            tape_rows = len(compare_replay.tape(str(tape)))
+            if not o.finalizer or not o.finalizer.exists(): raise ValueError("no finalizer to verify it")
+            with tempfile.TemporaryDirectory() as t:   # the preflight writes nothing it keeps
+                read_export(o.finalizer, tape_source, pathlib.Path(t) / "tape.tsv"); tape_rows = len(compare_replay.tape(str(pathlib.Path(t) / "tape.tsv")))
+            if not tape_rows: problems.append("--replay-of has no race rows with the run Running")
         except (OSError, ValueError, SystemExit) as e: problems.append("--replay-of unusable: %s" % e)
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
@@ -171,12 +185,14 @@ def main():
     plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
-                replayOf=str(o.replay_of) if o.replay_of else None, tape=str(tape) if tape else None,
-                tapeSha256=sha(tape) if tape and tape.exists() else None, tapeRows=tape_rows,
+                replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
+    if tape:   # the run's own fresh export of the verified sealed source: the tape the game plays and the report compares
+        read_export(o.finalizer, tape_source, tape); plan["tapeSha256"] = sha(tape)
+        if len(compare_replay.tape(str(tape))) != tape_rows: raise SystemExit("the sealed source changed after the preflight")
     receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[],
                    injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
                              "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")

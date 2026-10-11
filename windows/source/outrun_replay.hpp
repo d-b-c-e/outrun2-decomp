@@ -1,11 +1,12 @@
 #pragma once
 // R3 (Astra 16754, decision A): a first latched run's recorded normalized Frames, played at the adapter boundary in a
 // second, cold latched run. Adapter/action replay: not a raw-to-Core replay, a mappings test or a route claim.
-// - The tape is a sealed capture's validated export (P21Finalizer --seal-export). Only its race part is kept: from the
+// - The tape is a fresh export of a sealed capture (P21Finalizer --read-export). Only its race part is kept: from the
 //   first row where the recorded adapter was in gameplay with the run Running, through the last consecutive Running row.
 // - Live Core stays authoritative. Playback starts at the live race entry (in a race, run Running) and plays one row per
-//   tick only while the live run is Running; any other live tick ends it, and from then the live frame (neutral in a
-//   latched run) goes to the adapter, as it does before the start and after the tape's last row.
+//   tick only while the live run is Running and the live game stays in the race; any other live tick ends it (Astra
+//   16889), and from then the live frame (neutral in a latched run) goes to the adapter, as it does before the start
+//   (menu navigation) and after the tape's last row.
 // - A played frame is the live frame with the tape row's actions and edges, which is all the adapter reads besides
 //   suppress_native (kept live). Its actions carry no sample index: they come from the tape, not a live sample.
 #include "outrun_capture.hpp"
@@ -46,6 +47,7 @@ public:
         const bool running=live.run==dbce::shim::Run::Running;
         if(!started_){if(!(live_race&&running))return live;started_=true;}
         if(!running){ended_=true;end_reason_=std::string("live run ")+dbce::shim::run_name(live.run);return live;}
+        if(!live_race){ended_=true;end_reason_="left the race";return live;}
         played_=live;const auto& r=rows_[next_];
         played_.action=r.action;played_.down=r.down;played_.up=r.up;
         row=std::int64_t(next_);

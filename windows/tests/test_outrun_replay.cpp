@@ -102,6 +102,20 @@ void test_live_run_ends_playback(){
     check(&g==&again&&row==-1&&tape.played()==3,"an ended tape never resumes");
 }
 
+// Astra 16889: once started, a live tick outside the race (run still Running) ends playback and the output is neutral.
+void test_leaving_the_race_ends_playback(){
+    const auto path=scratch()/"first-3.tsv";write_export(path,first_run().rows);
+    Tape tape(path);std::int64_t row=0;std::uint64_t seq=1200;Adapter adapter("Sequential");
+    {const auto live=latched(seq++,Run::Running);const auto& f=tape.play(live,true,row);NativeInputState s{};adapter.apply(f,view(16),s);
+     check(row==0&&adapter.signals().record_steer!=0,"one race row played, steering");}
+    const auto menu=latched(seq++,Run::Running);const auto& f=tape.play(menu,false,row);
+    check(&f==&menu&&row==-1&&tape.ended()&&tape.end_reason()=="left the race"&&tape.played()==1,"leaving the race ends playback");
+    NativeInputState s{};adapter.apply(f,view(3),s);
+    check(adapter.signals().record_steer==0&&adapter.signals().record_accel==0,"neutral once the race is left");
+    const auto back=latched(seq++,Run::Running);const auto& g=tape.play(back,true,row);
+    check(&g==&back&&row==-1&&tape.played()==1,"a left race never resumes playback");
+}
+
 void test_refusals(){
     std::vector<rec::Channels> menus;Adapter adapter("Sequential");
     for(std::uint64_t i=0;i<4;++i){const auto f=latched(10+i,Run::Running);const auto v=view(3);NativeInputState s{};adapter.apply(f,v,s);
@@ -119,7 +133,7 @@ void test_refusals(){
 
 int main(int argc,char** argv){
     if(argc==2)keep=argv[1];
-    try{test_selection_and_playback();test_live_run_ends_playback();test_refusals();}
+    try{test_selection_and_playback();test_live_run_ends_playback();test_leaving_the_race_ends_playback();test_refusals();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::error_code ec;std::filesystem::remove_all(scratch(),ec);
     std::cout<<"outrun replay tape: "<<checks<<" checks passed\n";

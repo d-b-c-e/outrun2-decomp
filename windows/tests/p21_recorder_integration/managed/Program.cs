@@ -117,8 +117,10 @@ static class Program {
     static int Main(string[] args){try{
         // Reuse the exact reviewed validator for a capture from the combined
         // real-provider/recorder fixture. The export is outside the sealed bundle.
-        if(args.Length==3&&args[0]=="--seal-export"){
-            var dir=Path.GetFullPath(args[1]);Finalize(dir);var captured=Read(dir);
+        // --read-export (Astra 16889): an already sealed capture, verified again (seal inventory, hashes, host and exit,
+        // stream) and exported fresh, so a reused capture's export is always regenerated from its sealed source.
+        if(args.Length==3&&(args[0]=="--seal-export"||args[0]=="--read-export")){
+            var dir=Path.GetFullPath(args[1]);if(args[0]=="--seal-export")Finalize(dir);var captured=Read(dir);
             using var output=new StreamWriter(new FileStream(args[2],FileMode.CreateNew,FileAccess.Write));
             foreach(var row in captured){output.WriteLine("ROW "+row.Channels.Count);
                 foreach(var value in row.Channels.OrderBy(x=>x.Key,StringComparer.Ordinal))

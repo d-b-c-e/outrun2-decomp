@@ -5,6 +5,9 @@
 // input, which a capture does not record, so it is reported separately and not claimed. This is an adapter/action
 // replay: not a raw-to-Core replay, a mappings test or a route claim. Prints one JSON summary line; exit 0 only when
 // every row reconstructs.
+// The export it consumes must be freshly generated from this sealed capture by the finalizer (--seal-export or
+// --read-export, which verify the seal); the runner always does so (Astra 16889/16903). The row-count and first/last
+// frame comparison with worker.tsv below is a sanity check against a mixed-up pair, not a binding.
 #include "outrun_capture.hpp"
 #include "shim.hpp"
 #include <cstdio>
@@ -30,12 +33,18 @@ int main(int argc, char** argv) {
         if (!std::filesystem::exists(capture / "complete.tsv")) throw std::runtime_error("capture not sealed (no complete.tsv)");
         const auto profile = dbce::shim::read_profile(read_text(capture / "profile.ini"));
         if (!profile.ok) throw std::runtime_error("capture profile.ini does not parse");
+        // Sanity check only (see above): the rows are the sealed worker report's written frames.
+        std::vector<std::string> worker;{std::stringstream w(read_text(capture / "worker.tsv"));std::string f;while(std::getline(w,f,'\t'))worker.push_back(f);}
+        if(worker.size()!=23)throw std::runtime_error("unknown worker report layout");
+        const auto written=std::stoull(worker[2]),last=std::stoull(worker[5]),first_seq=std::stoull(worker[6]);
+        std::uint64_t seen_first=0,seen_last=0;
         Adapter adapter(profile.section.transmission);
         std::uint64_t matched = 0, race = 0, injected = 0, native = 0; std::map<std::string, std::uint64_t> fields;
         std::string first;
         const auto rows = rec::read_export(exported, [&](const rec::Channels& row) {
             const auto frame = rec::decode(frame_channels(row));
             const auto view = decoded_view(row); const auto want = decoded_signals(row);
+            if (!seen_first) seen_first = frame.seq; seen_last = frame.seq;
             outrun::platform::NativeInputState sink{}; adapter.apply(frame, view, sink);
             if (want.in_gameplay) ++race;
             for (const auto& a : frame.action) if (a.injected) { ++injected; break; }
@@ -48,6 +57,10 @@ int main(int argc, char** argv) {
             }
             if (same) ++matched;
         });
+        if (rows != written || seen_first != first_seq || seen_last != last)
+            throw std::runtime_error("the export is not this capture's (rows " + std::to_string(rows) + "/" + std::to_string(written) +
+                                     ", frames " + std::to_string(seen_first) + ".." + std::to_string(seen_last) + " vs " +
+                                     std::to_string(first_seq) + ".." + std::to_string(last) + ")");
         std::string mismatch = "{";
         for (const auto& f : fields) mismatch += (mismatch.size() > 1 ? "," : "") + std::string("\"") + f.first + "\":" + std::to_string(f.second);
         mismatch += "}";
