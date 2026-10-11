@@ -41,4 +41,20 @@ q = subprocess.run(["dotnet", str(finalizer), "--seal-export", str(other / "run"
 first = ((q.stdout + q.stderr).strip().splitlines() or [""])[0]
 if refused.get("seal", {}).get("exit") == 0 or q.returncode == 0 or "known frame contract" not in first:
     raise SystemExit("FAIL a capture naming another game was not refused for its game: %s" % first)
-print("PASS dbce_shim capture sealed under the generic contract;", seal["output"].splitlines()[-1], "; another game id refused")
+# LATCHED|CAPTURE (Astra 18330): the latched run's capture, its journal beside it, sealed the same way.
+latched = out / "latched"
+(latched / "run").mkdir(parents=True)
+lp = subprocess.Popen([str(exe), "--latched-capture-child", str(latched / "run")])
+lcreated = run.creation_time(int(lp._handle))
+lp.wait(timeout=180)
+if lp.returncode != 0: raise SystemExit("FAIL latched capture child exited %s" % lp.returncode)
+lreceipt = {"forced": False, "errors": []}
+run.seal(latched, lp, lcreated, lreceipt, finalizer)
+lseal = lreceipt.get("seal")
+if not (isinstance(lseal, dict) and lseal["exit"] == 0 and "PASS validated export" in lseal["output"]):
+    raise SystemExit("FAIL latched capture not sealed: %r" % lseal)
+lexport = (latched / "validated.tsv").read_text()
+if "action.steer.injected 1" not in lexport or "game.valid 0" not in lexport:
+    raise SystemExit("FAIL the latched export lacks the injected action or the unconsumed final row")
+print("PASS dbce_shim capture sealed under the generic contract;", seal["output"].splitlines()[-1], "; another game id refused;",
+      "latched capture sealed:", lseal["output"].splitlines()[-1])

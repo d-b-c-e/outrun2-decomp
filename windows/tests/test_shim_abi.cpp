@@ -204,10 +204,59 @@ void test_capture(const std::filesystem::path& dir, bool expect_checks = true) {
     }
     check(read_text(c / "profile.ini") == Profile, "the exact profile bytes");
 }
+
+// LATCHED|CAPTURE, DRIVE's actual use (Astra 18330): the injected value reaches the rows, every consumed frame's row
+// carries its values, and the final tick after the admission closes is recorded unconsumed (game.valid=0).
+void test_latched_capture(const std::filesystem::path& dir, bool expect_checks = true) {
+    std::filesystem::create_directories(dir);
+    const auto session = dir / "inject.on", batch = dir / "inject.txt";
+    const auto expires = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() + 600;
+    { std::ofstream f(session, std::ios::binary); f << "nonce=abinonce1\nexpires=" << expires << "\n"; }
+    auto a = args_for(dir.wstring(), DBCE_SHIM_LATCHED | DBCE_SHIM_CAPTURE);
+    const auto sw = session.wstring(), bw = batch.wstring(), cap = (dir / "capture").wstring();
+    a.session_file = sw.c_str(); a.batch_file = bw.c_str(); a.fences_verified = 1; a.force_absent = 1;
+    a.capture_folder = cap.c_str(); a.game_id = "dbce-shim-abi"; a.game_channels = "speed\ngear\n"; a.context = "abi latched capture"; a.hz = 240; a.seconds = 30;
+    char why[256] = {}; void* h = nullptr; std::size_t slot = 0; auto* in = wheel_input(slot);
+    if (dbce_shim_open2_with_input(in, &a, &h, why, 256) != DBCE_SHIM_OK || !h) throw std::runtime_error(std::string("latched capture open: ") + why);
+    dbce_shim_frame f{}; f.struct_size = sizeof f;
+    const double v[2] = {42.0, 4};
+    int rows = 0; bool written = false, live = false;
+    for (int n = 0; n < 1200 && !live; ++n) {
+        if (dbce_shim_tick(h, &f) != DBCE_SHIM_OK) throw std::runtime_error("latched capture tick");
+        ++rows;
+        if (dbce_shim_record(h, f.seq, v, 2) != DBCE_SHIM_OK) throw std::runtime_error("latched capture record");
+        if (!written && f.run == uint8_t(dbce::shim::Run::Waiting)) {
+            std::ofstream b(batch, std::ios::binary); b << "nonce=abinonce1\nbatch=1\ninject action steer 0.5 ms=3000\n"; written = true;
+        }
+        live = f.action[idx("steer")].status == uint8_t(dbce::shim::Status::Live) && f.action[idx("steer")].injected;
+        if (!live) Sleep(5);
+    }
+    if (!live) throw std::runtime_error("the injected batch never drove steer");
+    char stopped[512] = {};
+    if (dbce_shim_stop(h, stopped, sizeof stopped, nullptr) != DBCE_SHIM_OK || std::string(stopped).find("capture complete") == std::string::npos)
+        throw std::runtime_error(std::string("latched capture stop: ") + stopped);
+    if (!expect_checks) return;
+    const auto lines = sample_lines(dir / "capture" / "source.jsonl");
+    check(int(lines.size()) == rows + 1, "one row per consumed frame plus the final tick");
+    for (int n = 0; n < rows; ++n)
+        check(lines[std::size_t(n)].find("\"game.valid\":1") != std::string::npos && lines[std::size_t(n)].find("\"game.speed\":42") != std::string::npos,
+              "consumed row " + std::to_string(n) + " carries its values");
+    check(lines.back().find("\"game.valid\":0") != std::string::npos && lines.back().find("\"game.speed\":0") != std::string::npos,
+          "the final tick after the admission closed is recorded unconsumed");
+    const auto& last = lines[std::size_t(rows - 1)];
+    const auto at = last.find("\"action.steer.value\":");
+    const double steer = at == std::string::npos ? 0 : std::strtod(last.c_str() + at + 21, nullptr);
+    check(last.find("\"action.steer.injected\":1") != std::string::npos && std::fabs(steer - 0.5) < 1e-3,
+          "the injected steer is in the recorded frame (" + std::to_string(steer) + ")");
+    check(std::filesystem::exists(dir / "controls-journal.jsonl") && read_text(dir / "capture" / "bundle.meta") == "dbce.shim.frame-capture@1\ngame=dbce-shim-abi\n",
+          "the journal and the generic capture side by side in the run folder");
+    check(in->counters.force_calls == 0, "no force call");
+}
 }
 
-int capture_child(const std::filesystem::path& run) {   // for the out-of-process seal check (shim_dll_seal.py)
-    try { test_capture(run, false); return 0; } catch (const std::exception& e) { std::cerr << e.what() << "\n"; return 1; }
+int capture_child(const std::filesystem::path& run, bool latched) {   // for the out-of-process seal check (shim_dll_seal.py)
+    try { if (latched) test_latched_capture(run, false); else test_capture(run, false); return 0; }
+    catch (const std::exception& e) { std::cerr << e.what() << "\n"; return 1; }
 }
 namespace {
 void test_dll(const std::wstring& path) {
@@ -225,9 +274,10 @@ void test_dll(const std::wstring& path) {
 }
 
 int main(int argc, char** argv) {
-    if (argc == 3 && std::string(argv[1]) == "--capture-child") return capture_child(std::filesystem::path(argv[2]));
+    if (argc == 3 && std::string(argv[1]) == "--capture-child") return capture_child(std::filesystem::path(argv[2]), false);
+    if (argc == 3 && std::string(argv[1]) == "--latched-capture-child") return capture_child(std::filesystem::path(argv[2]), true);
     try {
-        test_layout(); test_refusals(); test_lifecycle(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run");
+        test_layout(); test_refusals(); test_lifecycle(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
         if (argc == 2) test_dll(std::filesystem::path(argv[1]).wstring());
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
     std::error_code ec; std::filesystem::remove_all(scratch(), ec);
