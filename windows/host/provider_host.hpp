@@ -174,7 +174,8 @@ public:
         w_->core->close_control();
         if(control_){
             r.control_present=true;control_->stop=true;control_->cv.notify_all();
-            r.control_final_tick=control_final_tick_;
+            // Do not read input-thread state on the already-refused misuse path.
+            r.control_final_tick=std::this_thread::get_id()==input_&&control_final_tick_;
             if(!r.control_final_tick)r.unresolved.push_back("control closure has no final input tick");
             const auto deadline=Clock::now()+std::chrono::milliseconds(b.control_ms);
             std::unique_lock<std::mutex> l(control_->m);
