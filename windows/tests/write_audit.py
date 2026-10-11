@@ -132,27 +132,74 @@ def strip_comment_and_strings(line):
     return "".join(out)
 
 def preprocess(text):
-    """Per line: (the line without comments, the same with string contents blanked)."""
-    out, in_block = [], False
-    for raw in text.splitlines():
-        line = raw
-        if in_block:
-            end = line.find("*/")
-            if end < 0:
-                out.append(("", ""))
+    """A whole-file C++ lexer (2b fence review, nene 10191: a "/*" inside a string literal must not start a comment).
+    Per line: (the line with comments removed and literals kept, the same with string and char contents blanked).
+    Handles // and /* */ comments, "strings" with escapes, 'chars', raw strings R"d(...)d" with any prefix, and digit
+    separators (1'000). Line structure is preserved."""
+    nocomment, code = [], []
+    cur_nc, cur_code = [], []
+    i, n = 0, len(text)
+    state, raw_end = "code", ""
+    def newline():
+        nocomment.append("".join(cur_nc).rstrip("\r"))
+        code.append("".join(cur_code).rstrip("\r"))
+        cur_nc.clear(); cur_code.clear()
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            if state == "line":
+                state = "code"
+            elif state in ("string", "char"):
+                state = "code"                          # an unterminated literal ends at the line (as the compiler would fail)
+            newline()
+            i += 1
+            continue
+        if state == "code":
+            if text.startswith("//", i):
+                state = "line"; i += 2; continue
+            if text.startswith("/*", i):
+                state = "block"; i += 2
+                cur_nc.append(" "); cur_code.append(" ")
                 continue
-            line = line[end + 2:]
-            in_block = False
-        while "/*" in line:
-            a = line.find("/*")
-            b = line.find("*/", a + 2)
-            if b < 0:
-                line = line[:a]
-                in_block = True
-                break
-            line = line[:a] + line[b + 2:]
-        out.append((line, strip_comment_and_strings(line)))
-    return out
+            m = re.match(r'(?:u8|[uUL])?R"([^()\\ \t\n]{0,16})\(', text[i:i + 24]) if c in "uULR" else None
+            if m and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+                state, raw_end = "raw", ")" + m.group(1) + '"'
+                tok = m.group(0)
+                cur_nc.append(tok); cur_code.append('"' + " " * (len(tok) - 1))
+                i += len(tok); continue
+            if c == '"':
+                state = "string"; cur_nc.append(c); cur_code.append(c); i += 1; continue
+            if c == "'":
+                # A digit separator: inside a numeric literal (the token before it starts with a digit).
+                j = i - 1
+                while j >= 0 and (text[j].isalnum() or text[j] in "_.'"):
+                    j -= 1
+                token = text[j + 1:i]
+                if token and token[0].isdigit():
+                    cur_nc.append(c); cur_code.append(" "); i += 1; continue
+                state = "char"; cur_nc.append(c); cur_code.append(c); i += 1; continue
+            cur_nc.append(c); cur_code.append(c); i += 1; continue
+        if state == "line":
+            i += 1; continue
+        if state == "block":
+            if text.startswith("*/", i):
+                state = "code"; i += 2; continue
+            i += 1; continue
+        if state in ("string", "char"):
+            quote = '"' if state == "string" else "'"
+            if c == "\\" and i + 1 < n and text[i + 1] != "\n":
+                cur_nc.append(text[i:i + 2]); cur_code.append("  "); i += 2; continue
+            if c == quote:
+                state = "code"; cur_nc.append(c); cur_code.append(c); i += 1; continue
+            cur_nc.append(c); cur_code.append(" "); i += 1; continue
+        if state == "raw":
+            if text.startswith(raw_end, i):
+                state = "code"; cur_nc.append(raw_end); cur_code.append(" " * (len(raw_end) - 1) + '"'); i += len(raw_end); continue
+            cur_nc.append(c); cur_code.append(" "); i += 1; continue
+    newline()
+    if text.endswith("\n"):
+        nocomment.pop(); code.pop()
+    return list(zip(nocomment, code))
 
 def scan_text(rel, text):
     raws = text.splitlines()
@@ -243,7 +290,13 @@ CLASSES = {
 # The guards the latched-skip / latched-read-only / wheel-off / entry-redirected classifications rely on. Each must exist
 # (normalized line containing `text`), and where `before` is given, appear earlier in the same file than that text.
 GUARDS = [
-    ("xbox/source/platform_api.cpp", "if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())return run;", "if(!writable(retail_root))"),
+    ("xbox/source/platform_api.cpp", "if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty()){", "if(!writable(retail_root))"),
+    ("xbox/source/platform_api.cpp", "if(!same_folder(retail_root,outrun::xbox_runtime::latched_game_root()))throw std::runtime_error(", "return run;"),
+    ("xbox/source/main.cpp", "if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())rt::home()=run;", "std::set_terminate("),
+    ("src/system/setup_screen.cpp", "if(exe_image_load_cache(cache,&e,!game_dir_read_only))return true;", None),
+    ("src/system/exe_image.cpp", "if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}", None),
+    ("windows/source/window_desktop.cpp", "outrun::xbox_runtime::latched_game_root()=folder;", "std::freopen(log.c_str(),\"w\",stdout)"),
+    ("windows/source/test_fence.cpp", "if(plan.dbce_folder.empty()||has_reparse_point_on_path(plan.dbce_folder))return false;", None),
     ("xbox/source/main.cpp", "if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(", None),
     ("xbox/source/main.cpp", "exe_setup_prepare(retail_root,rt::home(),setup,&error,!outrun::xbox_runtime::latched_home().empty())", None),
     ("src/system/setup_screen.cpp", "if(!game_dir_read_only)adopt_former_cache(root,cache,fallback);", None),
@@ -297,6 +350,9 @@ def selftest(repo, entries):
     cases.append(("_wfopen_s with wb", mutated(rank, lambda t: t + '\nstatic void wfs(){std::FILE* f=nullptr;_wfopen_s(&f,L"x.dat",L"wb");}\n')))
     cases.append(("_open with write flags", mutated(rank, lambda t: t + '\nstatic void op(const char* p){_open(p,_O_WRONLY|_O_CREAT|_O_TRUNC);}\n')))
     cases.append(("a stream opened with a variable mode", mutated(rank, lambda t: t + '\ntemplate<class S> void so(S& stream,const char* path){auto mode=std::ios::out|std::ios::trunc;stream.open(path,mode);}\n')))
+    cases.append(("a writer after a \"/*\" string literal", mutated(rank, lambda t: t + '\nstatic const char* g="/*";\nstatic void w2(){std::FILE* f=std::fopen("x","wb");}\n')))
+    cases.append(("a writer after a quote char literal", mutated(rank, lambda t: t + "\nstatic const char q='\"';\nstatic void w3(){std::FILE* f=std::fopen(\"y\",\"wb\");}\n")))
+    cases.append(("a writer after a raw string holding /*", mutated(rank, lambda t: t + '\nstatic const char* r=R"(/* not a comment)";\nstatic void w4(){std::FILE* f=std::fopen("z","wb");}\n')))
     cases.append(("a removed writer (stale entry)", mutated(rank, lambda t: t.replace('std::fopen((dir+"/rankings.dat").c_str(),"wb")', 'nullptr'))))
     failures = []
     if audit(base, entries) or check_guards(repo):
@@ -304,7 +360,10 @@ def selftest(repo, entries):
     api = "xbox/source/platform_api.cpp"
     api_text = (repo / api).read_bytes().decode("utf-8")
     guard_cases = [
-        ("the latched home guard removed", {api: api_text.replace("if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())return run;", "")}),
+        ("the latched home guard removed", {api: api_text.replace("if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty()){", "{")}),
+        ("the data-root check removed", {api: api_text.replace("if(!same_folder(retail_root,outrun::xbox_runtime::latched_game_root()))throw std::runtime_error(", "(void)(")}),
+        ("the cache rewrite made unconditional", {"src/system/exe_image.cpp": (repo / "src/system/exe_image.cpp").read_bytes().decode("utf-8").replace(
+            "if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}", "{std::string ignored;exe_image_write_cache(path,image,&ignored);}")}),
         ("the LAN guard removed", {"xbox/source/main.cpp": (repo / "xbox/source/main.cpp").read_bytes().decode("utf-8").replace(
             "if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(", "outrun::platform::native_network_set_platform(")}),
     ]
@@ -341,7 +400,7 @@ def main():
         failures, n = selftest(repo, entries)
         for f in failures:
             print(f)
-        print(f"write audit selftest: {n + 2} mutations plus read-only controls, {len(failures)} failure(s)")
+        print(f"write audit selftest: {n + 4} mutations plus read-only controls, {len(failures)} failure(s)")
         return 1 if failures else 0
     errors = audit(scan_tree(repo), entries) + check_guards(repo)
     for e in errors:

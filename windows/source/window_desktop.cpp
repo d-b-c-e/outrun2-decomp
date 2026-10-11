@@ -100,9 +100,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         std::wstring game(folder.size(),L'\0');
         game.resize(std::size_t(MultiByteToWideChar(CP_UTF8,0,folder.data(),int(folder.size()),game.data(),int(game.size()))));
         plan=fence::prepare_run(dbce,game,GetCurrentProcessId());
-        if(!plan.refusal.empty()){fence::write_refusal(plan,GetCurrentProcessId());return 3;}
+        if(!plan.refusal.empty())return fence::write_refusal(plan,GetCurrentProcessId())?3:4;   // 4: refused, not recorded (a linked folder)
         cleared=fence::clear_development_switches();
         outrun::xbox_runtime::latched_home()=fence::utf8(plan.run_root);
+        outrun::xbox_runtime::latched_game_root()=folder;   // application_home refuses any other data root
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // real pixels for the borderless window
     winrt::init_apartment();   // Windows.Gaming.Input

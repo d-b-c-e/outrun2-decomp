@@ -36,6 +36,11 @@ void read_pad(outrun::ps5::PadSample& sample){
     for(auto m:mapping)if((r.Buttons&m.raw)==m.raw)sample.buttons|=m.logical;
     if(sample.l2>127)sample.buttons|=L2;if(sample.r2>127)sample.buttons|=R2;
 }
+// Two spellings of one folder: separators, case and trailing separators ignored (Windows paths).
+bool same_folder(std::string a,std::string b){
+    auto norm=[](std::string& s){for(auto& c:s){if(c=='/')c='\\';else if(c>='A'&&c<='Z')c=char(c-'A'+'a');}while(s.size()>3&&s.back()=='\\')s.pop_back();};
+    norm(a);norm(b);return !a.empty()&&a==b;
+}
 bool writable(const std::string& folder){
     const auto probe=folder+"/.or2-write-test";
     std::FILE* f=std::fopen(probe.c_str(),"wb");if(!f)return false;std::fclose(f);std::remove(probe.c_str());return true;
@@ -61,7 +66,11 @@ std::string application_home(int argc,char** argv){
     if(retail_root.empty())throw std::runtime_error("OutRun 2006 game folder not found (USB drive OutRun2006, LocalState\\OutRun2006 or next to the executable)");
     // A latched (test) desktop process: the game folder is data only. Its write probe and SaveGame folder were made in
     // the run folder by the entry point's fence, which also seeded the owner's saves there.
-    if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())return run;
+    if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty()){
+        // The seed and the receipt name the fenced folder; a different data root (--data=, a drive search) is refused.
+        if(!same_folder(retail_root,outrun::xbox_runtime::latched_game_root()))throw std::runtime_error("a test run needs the data folder to be the fenced game folder: data "+retail_root+", fenced "+outrun::xbox_runtime::latched_game_root());
+        return run;
+    }
     if(!writable(retail_root))throw std::runtime_error("the game folder is read-only: "+retail_root);
     std::error_code ec;
     std::filesystem::create_directories(retail_root+"/SaveGame",ec);

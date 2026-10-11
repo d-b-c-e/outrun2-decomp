@@ -40,17 +40,27 @@ bool seed_tree(const std::wstring& from,const std::wstring& to,const std::wstrin
     if(depth>4){plan.refusal="SaveGame is nested deeper than 4 folders";return false;}
     WIN32_FIND_DATAW d{};
     const HANDLE h=FindFirstFileW((from+L"\\*").c_str(),&d);
-    if(h==INVALID_HANDLE_VALUE)return GetLastError()==ERROR_FILE_NOT_FOUND;   // an empty folder
+    if(h==INVALID_HANDLE_VALUE){
+        const DWORD e=GetLastError();
+        if(e==ERROR_FILE_NOT_FOUND)return true;   // nothing to list
+        plan.refusal="cannot list "+utf8(relative)+" (error "+std::to_string(e)+")";   // e.g. access denied: never a partial seed
+        return false;
+    }
     bool ok=true;
-    do{
+    for(;;){
         const std::wstring name=d.cFileName;
-        if(name==L"."||name==L"..")continue;
+        auto next=[&]{if(FindNextFileW(h,&d))return true;
+                      const DWORD e=GetLastError();
+                      if(e!=ERROR_NO_MORE_FILES){plan.refusal="listing "+utf8(relative)+" stopped early (error "+std::to_string(e)+")";ok=false;}
+                      return false;};
+        if(name==L"."||name==L".."){if(next())continue;break;}
         const std::wstring src=from+L"\\"+name,dst=to+L"\\"+name,rel=relative.empty()?name:relative+L"\\"+name;
         if(d.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT){plan.refusal="a link in the owner's state is never followed: "+utf8(rel);ok=false;break;}
         if(d.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY){
             if(!CreateDirectoryW(dst.c_str(),nullptr)){plan.refusal="cannot create "+utf8(dst);ok=false;break;}
             if(!seed_tree(src,dst,rel,depth+1,limits,plan)){ok=false;break;}
-            continue;
+            if(next())continue;
+            break;
         }
         const std::uint64_t size=(std::uint64_t(d.nFileSizeHigh)<<32)|d.nFileSizeLow;
         if(plan.seeded.size()+1>limits.max_files){plan.refusal="the owner's state has more than "+std::to_string(limits.max_files)+" files";ok=false;break;}
@@ -62,7 +72,12 @@ bool seed_tree(const std::wstring& from,const std::wstring& to,const std::wstrin
         if(!ra||!rb||ha!=hb||a!=b){plan.refusal="the copy of "+utf8(rel)+" does not match its source";ok=false;break;}
         plan.seeded.push_back({rel,a,ha});
         plan.seeded_bytes+=a;
-    }while(FindNextFileW(h,&d));
+        if(!FindNextFileW(h,&d)){
+            const DWORD e=GetLastError();
+            if(e!=ERROR_NO_MORE_FILES){plan.refusal="listing "+utf8(relative)+" stopped early (error "+std::to_string(e)+")";ok=false;}
+            break;
+        }
+    }
     FindClose(h);
     return ok;
 }
@@ -126,13 +141,19 @@ Plan prepare_run(const std::wstring& folder_in,const std::wstring& game_root_in,
     if(!CreateDirectoryW((plan.run_root+L"\\SaveGame").c_str(),nullptr)){plan.refusal="cannot create the run's SaveGame";return plan;}
     // The owner's writable state: SaveGame (recursively) and options.ini. The game folder is only read.
     const std::wstring saves=plan.game_root+L"\\SaveGame";
+    // Absent only when Windows says so: any other failure (a path too long, access denied) refuses, never a first run.
     const DWORD sa=GetFileAttributesW(saves.c_str());
+    if(sa==INVALID_FILE_ATTRIBUTES&&GetLastError()!=ERROR_FILE_NOT_FOUND){plan.refusal="cannot inspect SaveGame (error "+std::to_string(GetLastError())+")";return plan;}
     if(sa!=INVALID_FILE_ATTRIBUTES){
         if(sa&FILE_ATTRIBUTE_REPARSE_POINT){plan.refusal="SaveGame is a link; it is never followed";return plan;}
-        if(!seed_tree(saves,plan.run_root+L"\\SaveGame",L"SaveGame",0,limits,plan))return plan;
+        if(!seed_tree(saves,plan.run_root+L"\\SaveGame",L"SaveGame",0,limits,plan)){
+            if(plan.refusal.empty())plan.refusal="seeding SaveGame failed";   // every failure refuses
+            return plan;
+        }
     }
     const std::wstring options=plan.game_root+L"\\options.ini";
     const DWORD oa=GetFileAttributesW(options.c_str());
+    if(oa==INVALID_FILE_ATTRIBUTES&&GetLastError()!=ERROR_FILE_NOT_FOUND){plan.refusal="cannot inspect options.ini (error "+std::to_string(GetLastError())+")";return plan;}
     if(oa!=INVALID_FILE_ATTRIBUTES){
         if(oa&FILE_ATTRIBUTE_REPARSE_POINT){plan.refusal="options.ini is a link; it is never followed";return plan;}
         std::uint64_t size=0;bool ok=false;
@@ -166,7 +187,8 @@ Plan prepare_run(const std::wstring& folder_in,const std::wstring& game_root_in,
 }
 
 bool write_refusal(const Plan& plan,std::uint32_t pid){
-    if(plan.dbce_folder.empty())return false;
+    // Never through a link: the refusal might be the link itself, and its target could be the game folder.
+    if(plan.dbce_folder.empty()||has_reparse_point_on_path(plan.dbce_folder))return false;
     const std::wstring path=plan.dbce_folder+L"\\refused-"+std::to_wstring(pid)+L".txt";
     const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(h==INVALID_HANDLE_VALUE)return false;

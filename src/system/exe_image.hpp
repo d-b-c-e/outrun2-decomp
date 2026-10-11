@@ -44,7 +44,12 @@ void exe_image_install(std::vector<std::uint8_t>&& image);
 // cannot be verified again.
 // File name of the prepared image in the cache folder (exe_image.bin before 2026-10-06).
 inline constexpr const char* ExeImageCacheName="OR2006C2C.cache";
-bool exe_image_load_cache(const std::string& path,std::string* error);
+// rewrite_in_place=false (a latched test process reading the game folder's cache): a cache built for another range
+// table is still verified and loaded, but never rewritten.
+bool exe_image_load_cache(const std::string& path,std::string* error,bool rewrite_in_place=true);
+// Tests only: replaces exe_image_verify inside exe_image_load_cache when set (null: the real check).
+using ExeImageVerifyHook=bool(*)(const std::vector<std::uint8_t>& image,std::string* error);
+ExeImageVerifyHook& exe_image_verify_hook();
 bool exe_image_write_cache(const std::string& path,const std::vector<std::uint8_t>& image,std::string* error);
 
 // What exe_image_find_source found in the game folder.

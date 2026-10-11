@@ -121,7 +121,7 @@ bool exe_setup_prepare(const std::string& game_dir,const std::string& fallback_d
     if(exe_image_loaded())return true;   // development: OR2_EXE
     // Next to the game files, possibly prepared ahead of time (tools/or2setup,
     // tools/ps5_package.py) on read-only storage such as a package.
-    if(exe_image_load_cache(cache,&e))return true;
+    if(exe_image_load_cache(cache,&e,!game_dir_read_only))return true;   // the game folder's cache: never rewritten when read only
     if(!fallback.empty()&&exe_image_load_cache(fallback,&e))return true;
     using Clock=std::chrono::steady_clock;
     const auto start=Clock::now();auto last=start-std::chrono::seconds(1);

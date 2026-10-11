@@ -32,7 +32,8 @@ std::wstring dbce_folder();
 bool latch_requested(const std::wstring& dbce_folder);
 // Step 2. `pid` names the run folder together with the nonce (or "nononce" when inject.on does not parse).
 Plan prepare_run(const std::wstring& dbce_folder,const std::wstring& game_root,std::uint32_t pid,const SeedLimits& limits={});
-// The reason, in %LOCALAPPDATA%\dbce\outrun2006-decomp\refused-<pid>.txt (never in the game folder).
+// The reason, in %LOCALAPPDATA%\dbce\outrun2006-decomp\refused-<pid>.txt (never in the game folder). Returns false,
+// writing nothing, when that folder or one above it is a link.
 bool write_refusal(const Plan&,std::uint32_t pid);
 
 // Effective paths under the plan (ordinary: the game folder; latched: the run folder).

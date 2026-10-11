@@ -48,6 +48,7 @@
 namespace outrun::xbox_runtime {
 InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}
 std::string& latched_home(){static std::string home;return home;}
+std::string& latched_game_root(){static std::string root;return root;}
 }
 
 namespace {
@@ -172,6 +173,8 @@ int or2_xbox_main(int argc,char** argv){
     if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(outrun::platform::pc_network_bsd_platform());
     consoleInit(nullptr);
     rt::product()={"OutRunXbox","OutRunXbox.log"};
+    // A latched process: home() is the run folder before anything can write (crash.txt included).
+    if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())rt::home()=run;
     // An uncaught exception or abort: crash.txt in the launch folder names it and the
     // last scene display / leaf (the result log is only written at a normal exit).
     std::set_terminate([]{

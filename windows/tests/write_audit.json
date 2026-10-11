@@ -19,13 +19,19 @@
  },
  {
   "file": "src/enhancements/video.cpp",
-  "line": "std::error_code ec;std::filesystem::rename(temp,path,ec);",
+  "line": "std::error_code ec;std::filesystem::rename(temp,path,ec);const bool moved=!ec;",
   "class": "redirected",
-  "reason": "write_options body: temp -> path (home()/options.ini), replacing it"
+  "reason": "write_options body (Windows): temp -> path (home()/options.ini), replacing it"
  },
  {
   "file": "src/enhancements/video.cpp",
-  "line": "if(ec){std::remove(temp.c_str());return false;}",
+  "line": "const bool moved=std::rename(temp.c_str(),path.c_str())==0; // POSIX rename replaces the destination",
+  "class": "redirected",
+  "reason": "write_options body (POSIX): temp -> path"
+ },
+ {
+  "file": "src/enhancements/video.cpp",
+  "line": "if(!moved){std::remove(temp.c_str());return false;}",
   "class": "redirected",
   "reason": "write_options body: removes its own temp"
  },
@@ -264,6 +270,48 @@
   "reason": "TitleMovie::open: avformat_open_input, read only"
  },
  {
+  "file": "src/runtime/game_host.cpp",
+  "line": "state.frontend_save_directory=host.save_directory.empty()?home()+\"/SaveGame\":host.save_directory;",
+  "class": "seeded-read",
+  "reason": "the save folder: home()/SaveGame (the run folder's seeded SaveGame under the latch)"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "(void)pf::make_directory(state.frontend_save_directory);",
+  "class": "redirected",
+  "reason": "the save folder in home()"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "!host.audio_output||!host.audio_output->open(error)){",
+  "class": "not-a-file",
+  "reason": "the host audio device open"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::FILE* open_result_log(const char*& used_path,int& last_error){",
+  "class": "definition",
+  "reason": "open_result_log: callers audited"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "path=home()+\"/\"+product().log_file;",
+  "class": "redirected",
+  "reason": "the result log in home()"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "if(std::FILE* log=std::fopen(path.c_str(),\"wb\")){used_path=path.c_str();return log;}",
+  "class": "redirected",
+  "reason": "open_result_log body: home()/product().log_file"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "std::FILE* log=open_result_log(used_path,last_error);",
+  "class": "redirected",
+  "reason": "the result log in home()"
+ },
+ {
   "file": "src/runtime/game_host.hpp",
   "line": "std::string& home();",
   "class": "home-definition",
@@ -292,6 +340,42 @@
   "line": "Trace(){if(const char* p=std::getenv(\"OR2_EXE_TRACE\"))file=std::fopen(p,\"ab\");}",
   "class": "env-gated",
   "reason": "OR2_EXE_TRACE"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "bool exe_image_write_cache(const std::string& path,const std::vector<std::uint8_t>& image,std::string* error){",
+  "class": "definition",
+  "reason": "exe_image_write_cache: callers audited"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "std::FILE* f=std::fopen(temp.c_str(),\"wb\");if(!f)return fail(error,\"cannot create \"+temp);",
+  "class": "definition",
+  "reason": "exe_image_write_cache body: path.tmp beside its path argument"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(std::fclose(f)!=0||!ok){std::remove(temp.c_str());return fail(error,\"cannot write \"+temp);}",
+  "class": "definition",
+  "reason": "exe_image_write_cache body"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "std::remove(path.c_str());",
+  "class": "definition",
+  "reason": "exe_image_write_cache body: its path argument"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(std::rename(temp.c_str(),path.c_str())!=0){std::remove(temp.c_str());return fail(error,\"cannot write \"+path);}",
+  "class": "definition",
+  "reason": "exe_image_write_cache body"
+ },
+ {
+  "file": "src/system/exe_image.cpp",
+  "line": "if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}",
+  "class": "latched-read-only",
+  "reason": "only when rewrite_in_place; setup passes !game_dir_read_only for the game folder's cache (nene 10191 finding 1)"
  },
  {
   "file": "src/system/exe_image.hpp",
@@ -436,6 +520,12 @@
   "line": "if(!f){if(std::FILE* w=std::fopen(path.c_str(),\"wb\")){std::fputs(OptionsDefault,w);std::fclose(w);}return;}",
   "class": "redirected",
   "reason": "path = rt::home()/options.ini (default file)"
+ },
+ {
+  "file": "xbox/source/main.cpp",
+  "line": "if(const auto& run=outrun::xbox_runtime::latched_home();!run.empty())rt::home()=run;",
+  "class": "home-definition",
+  "reason": "a latched process: home() is the run folder before the terminate handler is installed"
  },
  {
   "file": "xbox/source/main.cpp",
@@ -673,9 +763,9 @@
  },
  {
   "file": "windows/source/window_desktop.cpp",
-  "line": "if(!plan.refusal.empty()){fence::write_refusal(plan,GetCurrentProcessId());return 3;}",
+  "line": "if(!plan.refusal.empty())return fence::write_refusal(plan,GetCurrentProcessId())?3:4; // 4: refused, not recorded (a linked folder)",
   "class": "fence",
-  "reason": "the latched entry point"
+  "reason": "the latched entry point; write_refusal never writes through a link"
  },
  {
   "file": "windows/source/window_desktop.cpp",
