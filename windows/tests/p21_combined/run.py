@@ -67,13 +67,13 @@ run("supervised", [exe, result / "runs"])
 shutil.copytree(result / "runs", result / "runs-unsealed")   # as the supervisor left them, for the negative control
 accepted = []
 refused = []
-for mode in ["resolved", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"]:
+for mode in ["resolved", "discovery", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"]:
     directory = result / "runs" / mode
     counters = json.loads((directory / "provider-counters.json").read_text())
     if counters["creates"] != 2 or counters["reads"] < 32 or counters["polls"] < 32 or any(counters[k] != 0 for k in ("forceCalls", "releaseDuringCall", "afterRelease")):
         raise RuntimeError("Real provider calls/lifetime invalid: " + mode)
     outcome = run("seal-" + mode, ["dotnet", dll, "--seal-export", directory / "capture", directory / "validated.tsv"], None)
-    if mode in ("resolved", "release-within"):
+    if mode in ("resolved", "discovery", "release-within"):
         if outcome.returncode:
             raise RuntimeError("Resolved capture refused: " + mode)
         if counters["inputRefs"] != 0:
@@ -120,4 +120,4 @@ receipt = {"sourceCommit": before["source"]["commit"], "toolkitCommit": before["
     "sealedAndReplayed": accepted, "unresolvedRefused": refused, "changedChannelRefused": True, "otherRunHostRefused": True, "commands": commands,
     "sha256": {str(p.relative_to(result)): sha(p) for p in (result / "runs").rglob("*") if p.is_file()}}
 (result / "receipt.json").write_text(json.dumps(receipt, indent=2))
-print("PASS: two sealed real-provider/recorder originals and action replays; four unresolved refusals; exact channel mutation; another run's host report refused;", result / "receipt.json")
+print("PASS: three sealed real-provider/recorder originals (one with device discovery and loss/reopen) and action replays; four unresolved refusals; exact channel mutation; another run's host report refused;", result / "receipt.json")

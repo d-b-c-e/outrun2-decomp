@@ -20,4 +20,10 @@ run.seal(out, proc, created, receipt, dll)
 seal = receipt.get("seal")
 if proc.returncode != 0 or not created or not isinstance(seal, dict) or seal["exit"] != 0 or "PASS validated export" not in seal["output"]:
     raise SystemExit("FAIL seal step: exit %s created %s seal %r" % (proc.returncode, created, seal))
-print("PASS runner seal step: observed exit and held identity sealed the capture;", seal["output"].splitlines()[-1])
+# The verdict: this receipt passes; each unmet condition alone fails it.
+good = dict(receipt, phase="end", exitCode=0, host={"state": "resolved"}, journal={"qualifies": True})
+if run.verdict(dict(good)): raise SystemExit("FAIL verdict refused a passing receipt: %r" % run.verdict(dict(good)))
+for change in [dict(phase="steer-left"), dict(exitCode=1), dict(forced=True), dict(host={"state": "unresolved"}), dict(journal={"qualifies": False}),
+               dict(seal={"exit": 1, "output": ""}), dict(seal="no capture"), dict(errors=["cleanup inject.on: not our bytes"])]:
+    if not run.verdict(dict(good, **change)): raise SystemExit("FAIL verdict passed %r" % change)
+print("PASS runner seal step and verdict: observed exit and held identity sealed the capture;", seal["output"].splitlines()[-1])

@@ -57,7 +57,10 @@ inline std::bitset<128> bits(const Channels& c,const std::string& key){
         for(int b=0;b<32;++b)bs[32*k+b]=(w&(1u<<b))!=0;}
     return bs;
 }
-inline Channels encode(const Frame& f){
+// `slots`: a fixed sample slot count, one per profile device (Astra 16741), so device discovery, loss and reopen never
+// change a capture's channel set; slots past sampleCount carry a default sample. 0: exactly the frame's samples.
+inline Channels encode(const Frame& f,std::size_t slots=0){
+    if(slots&&f.samples.size()>slots)throw std::invalid_argument("more samples than sample slots");
     Channels c;
     u64(c,"frame",f.seq);u64(c,"tickUs",std::uint64_t(f.tick_us));
     u64(c,"boundaryUs",std::uint64_t(f.boundary_us));u64(c,"eventSeq",f.event_seq);
@@ -68,8 +71,9 @@ inline Channels encode(const Frame& f){
         const auto p="action."+std::string(action_name(k))+".";const auto& a=f.action[k];
         c[p+"value"]=a.value;c[p+"status"]=int(a.status);c[p+"sample"]=a.sample;c[p+"injected"]=a.injected;
     }
-    for(std::size_t k=0;k<f.samples.size();++k){
-        const auto p="sample."+std::to_string(k)+".";const auto& s=f.samples[k];
+    const DeviceSample none{};
+    for(std::size_t k=0;k<(slots>f.samples.size()?slots:f.samples.size());++k){
+        const auto p="sample."+std::to_string(k)+".";const auto& s=k<f.samples.size()?f.samples[k]:none;
         c[p+"device"]=s.device;c[p+"epoch"]=s.epoch;u64(c,p+"seq",s.seq);
         u64(c,p+"readStartUs",std::uint64_t(s.read_start_us));u64(c,p+"readEndUs",std::uint64_t(s.read_end_us));
         c[p+"poll"]=int(s.poll);c[p+"state"]=int(s.state);c[p+"valid"]=s.valid;c[p+"stale"]=s.stale;
@@ -83,6 +87,7 @@ inline Channels encode(const Frame& f){
     return c;
 }
 inline Frame decode(const Channels& c){
+    std::size_t slots=0;while(slots<32&&c.count("sample."+std::to_string(slots)+".device"))++slots;
     Frame f;
     f.seq=u64(c,"frame");f.tick_us=std::int64_t(u64(c,"tickUs"));f.boundary_us=std::int64_t(u64(c,"boundaryUs"));
     if(f.tick_us<0||f.boundary_us<f.tick_us)throw std::runtime_error("invalid frame times");
@@ -114,7 +119,8 @@ inline Frame decode(const Channels& c){
             for(int b=0;b<4;++b)s.injected.hash[word*4+b]=std::uint8_t(v>>(8*b));}
     }
     // Reject extensions or missing fields rather than silently omitting provenance.
-    if(encode(f)!=c)throw std::runtime_error("noncanonical/missing/unknown frame channels");
+    // Padding slots must be exactly the default sample (the re-encode compares them too).
+    if(slots<f.samples.size()||encode(f,slots)!=c)throw std::runtime_error("noncanonical/missing/unknown frame channels");
     return f;
 }
 }

@@ -29,6 +29,10 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
     wheel.unacquire_delay_ms = mode == "release-within" ? 100 : -1;
     check(wheel.acquire_entered && wheel.acquire_release && wheel.unacquire_entered && wheel.unacquire_release, "driver barriers created");
     const auto wi = input->add(wheel), si = input->add(shifter);
+    // discovery (Astra 16741): rows from the very first tick, the shifter attached late, then lost and reacquired
+    // mid-capture, so the sample count goes 0/1 -> 2 -> 1 -> 2 inside one fixed-schema capture.
+    const bool discovery = mode == "discovery";
+    if (discovery) { std::lock_guard<std::mutex> lock(input->m); input->attached[si] = false; }
     // The fence's run nonce form (letters/digits); the finalizer binds the host report to it through the capture metadata.
     const std::string run_nonce = "p21combined" + std::to_string(GetCurrentProcessId());
     auto barrier = std::make_shared<Barrier>(); barrier->resume = mode != "writer-stuck";   // a blocked writer never returns
@@ -38,16 +42,26 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
     // Ordinary physical reads over FAKE COM, no injection admission or real device.
     auto host = std::make_unique<CombinedHost>(dir.parent_path().wstring(), run_nonce, input, fixture_profile(), false,
         std::make_unique<outrun::desktop::ShimRecorder>(settings), outrun_capability());
+    host->recorder().set_devices(host->device_reports());   // before the first row, as the desktop does: one slot per device
+    Adapter adapter("Sequential");
+    std::vector<Snapshot> original;
+    auto record = [&](const Frame& frame, const GameView& view) {
+        NativeInputState sink{}; adapter.apply(frame, view, sink);
+        original.push_back({frame, adapter.signals(), sink, view});
+        host->recorder().push(original.back());
+    };
+    auto both_valid = [](const Frame& f) { return f.samples.size() == 2 && f.samples[0].valid && f.samples[1].valid; };
     bool ready = false;
     for (int n = 0; n < 400 && !ready; ++n) {
-        const auto& f = host->tick();
-        ready = f.samples.size() == 2 && f.samples[0].valid && f.samples[1].valid;
+        const Frame f = host->tick();
+        ready = both_valid(f);
+        if (discovery) record(f, GameView{});   // every tick: rows are consecutive frames
+        if (discovery && n == 10) { std::lock_guard<std::mutex> lock(input->m); input->attached[si] = true; }
         if (!ready) Sleep(5);
     }
     check(ready, "both devices opened and sampled through the real provider");
-    host->recorder().set_devices(host->device_reports());
-    Adapter adapter("Sequential");
-    std::vector<Snapshot> original;
+    if (discovery) check(!original.empty() && original.front().frame.samples.size() < 2, "rows recorded before every device was open");
+    const auto base = original.size();
     for (int t = 0; t < 16; ++t) {
         {
             std::lock_guard<std::mutex> lock(input->m);
@@ -60,23 +74,29 @@ static int combined_child(const std::string& mode, const fs::path& dir) {
             s.rgbButtons[11] = (t == 2 || t == 3 || t == 5) ? 0x80 : 0;
             if (t == 4) input->scripts[si].reads.push_back({E_PENDING, DI_OK});
             if (t == 6) input->scripts[si].reads.push_back({DI_OK, E_PENDING});
+            if (discovery && t == 9) input->scripts[si].reads.push_back({DI_OK, DIERR_INPUTLOST});   // lost mid-capture
         }
         GameView view; view.mode = t >= 11 && t <= 12 ? 3 : 16; view.car = t != 13; view.gear = 2;
         view.speed = float(t * 2); view.consumed_steer = t - 8; view.consumed_accel = t * 10;
-        NativeInputState sink{}; const Frame frame = host->tick();
-        adapter.apply(frame, view, sink);
-        original.push_back({frame, adapter.signals(), sink, view});
-        host->recorder().push(original.back());
+        record(host->tick(), view);
     }
-    check(host->recorder().pushed() == 16 && host->recorder().refusal().empty(), "production recorder accepted every real-provider frame");
-    check(original[4].frame.samples[1].poll == Call::Pending && original[6].frame.samples[1].state == Call::Pending,
+    if (discovery) {   // until the provider has reacquired the shifter, still one row per tick
+        bool back = false;
+        for (int n = 0; n < 400 && !back; ++n) { const Frame f = host->tick(); back = both_valid(f); record(f, GameView{}); if (!back) Sleep(5); }
+        bool dropped = false;
+        for (std::size_t i = base + 10; i < original.size(); ++i) dropped = dropped || original[i].frame.samples.size() < 2;
+        check(back && dropped, "the lost shifter left the frame and came back inside the same capture");
+    }
+    check(host->recorder().pushed() == original.size() && host->recorder().refusal().empty(), "production recorder accepted every real-provider frame (" +
+        std::to_string(host->recorder().pushed()) + "/" + std::to_string(original.size()) + " " + host->recorder().refusal() + ")");
+    check(original[base + 4].frame.samples[1].poll == Call::Pending && original[base + 6].frame.samples[1].state == Call::Pending,
         "real provider Pending survives into the recorder's original snapshots");
-    check(original[5].frame.action[action_index("shiftUp")].status == Status::Rearming,
+    check(original[base + 5].frame.action[action_index("shiftUp")].status == Status::Rearming,
         "real provider held button rearms after Pending");
     // Independent producer-side snapshots, outside the capture seal, compare every recorded numeric field later.
     auto rows = dbce::session::jsonStream();
     for (const auto& s : original) {
-        const auto c = channels(s); rows << "ROW " << c.size() << '\n';
+        const auto c = channels(s, 2); rows << "ROW " << c.size() << '\n';   // the recorder's two device slots
         for (const auto& v : c) rows << v.first << ' ' << v.second << '\n';
     }
     write_new(dir.parent_path() / "producer.tsv", rows.str());
@@ -113,15 +133,15 @@ int wmain(int argc, wchar_t** argv) {
             const fs::path dir(argv[2]);
             const auto rows = read_export(dir.parent_path() / "validated.tsv");
             const auto producer = read_export(dir.parent_path() / "producer.tsv");
-            check(rows.size() == 16 && rows == producer, "recorded bytes preserve every real-provider producer channel");
-            check(rows[0].size() == 382, "real provider has the complete two-device schema");
+            check(rows.size() >= 16 && rows == producer, "recorded bytes preserve every real-provider producer channel");
+            for (const auto& row : rows) check(row.size() == 382, "real provider has the complete two-device schema");
             Adapter adapter("Sequential");
             for (const auto& row : rows) {
                 const auto f = decode(frame_channels(row));
                 NativeInputState sink{}; adapter.apply(f, decoded_view(row), sink);
                 same_signals(adapter.signals(), decoded_signals(row));
             }
-            std::cout << "PASS real-provider recording and action replay: 16 frames, " << checks << " checks\n";
+            std::cout << "PASS real-provider recording and action replay: " << rows.size() << " frames, " << checks << " checks\n";
             return 0;
         }
         if (argc == 4 && std::wstring(argv[1]) == L"--child") {
@@ -130,9 +150,9 @@ int wmain(int argc, wchar_t** argv) {
         check(argc == 2, "usage: p21_combined <new result folder>");
         const fs::path root(argv[1]); check(fs::create_directory(root), "new combined result folder");
         wchar_t self[MAX_PATH]; check(GetModuleFileNameW(nullptr, self, MAX_PATH) > 0, "own executable known");
-        for (const std::string mode : {"resolved", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"}) {
+        for (const std::string mode : {"resolved", "discovery", "release-within", "writer-stuck", "provider-stuck", "ordinary-provider-stuck", "release-stuck"}) {
             const auto r = supervise(self, mode, root / mode, true);
-            if (mode == "resolved" || mode == "release-within") check(r.code == 0 && !r.forced && r.state == "resolved", "combined resolved host normal exit");
+            if (mode == "resolved" || mode == "discovery" || mode == "release-within") check(r.code == 0 && !r.forced && r.state == "resolved", "combined resolved host normal exit");
             else if (mode == "ordinary-provider-stuck") check(r.code == p21::ForcedExitCode && !r.forced && r.state == "unresolved", "combined ordinary unresolved forced exit");
             else check(r.forced && r.state == "unresolved", "combined unresolved host stays parked for its supervisor");
         }

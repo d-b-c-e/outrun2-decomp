@@ -3,6 +3,8 @@
 // - Lazy, as the host requires: nothing starts before the first push. The first push fixes the channel schema, runs the
 //   worst-case preflight, creates the capture folder and starts the reviewed P20 worker (windows/host/recorder).
 // - One push per tick, on the input thread (the producer); the worker alone runs the session writer.
+// - One sample slot per profile device (the device table set before the first push), so the fixed schema survives
+//   device discovery, loss and reopen (Astra 16741).
 // - The host's stop: finish (the producer declares its tail), then a bounded drain and the worker thread's own join.
 //   Only an eligible, joined result writes the members (worker report, exact profile bytes, contract, budget, devices);
 //   anything else reports a non-Complete outcome, so the host stays unresolved rather than claiming a capture.
@@ -33,7 +35,7 @@ class ShimRecorder {
     std::unique_ptr<rec::Controller> controller_;
     std::optional<rec::Producer> producer_;
     std::vector<std::string> names_;
-    std::uint64_t first_{},last_{};std::int64_t origin_{};
+    std::uint64_t first_{},last_{};std::int64_t origin_{};std::size_t slots_{};
     bool started_{},refused_{},finished_{};
     std::uint64_t pushed_{},rejected_{};
     std::string refusal_;
@@ -74,7 +76,9 @@ public:
         try{
             if(!started_){
                 started_=true;
-                names_=rec::schema(channels(s));
+                if(devices_.empty())throw std::runtime_error("device table required before the first capture row");
+                slots_=devices_.size();
+                names_=rec::schema(channels(s,slots_));
                 rec::preflight(names_,cfg_.hz,cfg_.seconds,cfg_.limits);
                 if(!CreateDirectoryW(cfg_.folder.c_str(),nullptr))throw std::runtime_error("capture folder exists or cannot be created");
                 first_=s.frame.seq;origin_=s.frame.tick_us;
@@ -87,7 +91,7 @@ public:
                     std::make_unique<rec::QueuedSink>(cfg_.folder/"source.jsonl",names_,id_,origin_,std::move(m),cfg_.limits,cfg_.before_write),first_);
                 producer_.emplace(controller_->producer());
             }
-            if(producer_->push(packet(s,names_))){last_=s.frame.seq;++pushed_;}else ++rejected_;
+            if(producer_->push(packet(s,names_,slots_))){last_=s.frame.seq;++pushed_;}else ++rejected_;
         }catch(const std::exception& e){refused_=true;refusal_=e.what();}
     }
     void finish(){

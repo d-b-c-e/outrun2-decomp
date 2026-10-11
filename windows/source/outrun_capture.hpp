@@ -20,8 +20,8 @@ inline rec::Channels signal_channels(const Signals& s){
     c["adapter.recordButtons"]=s.record_buttons;c["adapter.nativeSuppressed"]=s.native_suppressed;c["adapter.gearbox"]=int(s.gearbox);
     return c;
 }
-inline rec::Channels channels(const Snapshot& s){
-    auto c=rec::encode(s.frame);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
+inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots: rec::encode's fixed sample slots
+    auto c=rec::encode(s.frame,slots);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
     c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
     c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;
     return c;
@@ -53,7 +53,7 @@ inline Signals decoded_signals(const rec::Channels& c){
     s.gearbox=HPattern::State(rec::number(c,"adapter.gearbox",0,int(HPattern::State::AtTarget)));
     return s;
 }
-inline rec::Packet packet(const Snapshot& s,const std::vector<std::string>& names){
-    return rec::packet_of(channels(s),names,s.frame.seq,s.frame.tick_us);
+inline rec::Packet packet(const Snapshot& s,const std::vector<std::string>& names,std::size_t slots=0){
+    return rec::packet_of(channels(s,slots),names,s.frame.seq,s.frame.tick_us);
 }
 }

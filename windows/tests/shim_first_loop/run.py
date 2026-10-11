@@ -83,6 +83,20 @@ def seal(out, proc, created, receipt, finalizer):
     receipt["seal"] = dict(exit=q.returncode, output=(q.stdout + q.stderr).strip()[-600:])
 
 
+def verdict(receipt):
+    """Astra 16766: diagnostics are saved either way; any unmet condition fails the run."""
+    failures = ["error: %s" % e for e in receipt["errors"]]
+    if receipt.get("phase") != "end": failures.append("workload unfinished (phase %s)" % receipt.get("phase"))
+    if receipt.get("forced") or receipt.get("exitCode") != 0:
+        failures.append("exit not normal (code %r, forced %r)" % (receipt.get("exitCode"), receipt.get("forced")))
+    if (receipt.get("host") or {}).get("state") != "resolved": failures.append("host shutdown not resolved")
+    if not (receipt.get("journal") or {}).get("qualifies"): failures.append("control journal does not qualify")
+    seal_result = receipt.get("seal")
+    if not (isinstance(seal_result, dict) and seal_result.get("exit") == 0): failures.append("capture not sealed: %s" % str(seal_result)[:200])
+    receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
+    return failures
+
+
 def lease(action, purpose=""):
     cmd = ["pwsh", "-NoProfile", "-File", str(HUB_LEASE), "-" + action]
     if action == "Enter": cmd += ["-Purpose", purpose, "-IdleMinutes", "5"]
@@ -204,18 +218,22 @@ def main():
                 except Exception as e: receipt["errors"].append(repr(e))
         try: seal(out, proc, created, receipt, o.finalizer)
         except Exception as e: receipt["errors"].append("seal: %r" % e)
-        if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
-        if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
+        try:
+            if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
+            if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
+        except Exception as e: receipt["errors"].append("evidence read: %r" % e)
         sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
         sig = [m for m in sig if m]
         receipt["modes"] = sorted({int(m.group(3)) for m in sig})
         receipt["maxRecordSteer"] = max([abs(int(m.group(5))) for m in sig], default=0)
         receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
         receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
+        failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
-        print(json.dumps({k: receipt.get(k) for k in ("pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer", "maxConsumedSteer",
-                                                     "maxConsumedAccel", "seal", "errors")}, indent=1))
+        print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",
+                                                     "maxConsumedSteer", "maxConsumedAccel", "seal")}, indent=1))
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
