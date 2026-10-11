@@ -17,17 +17,29 @@ It never touches the owner's game folder; it runs from a dedicated test copy.
 
 ```
 py -3 -B run.py --candidate <OutRunDesktop.exe> --prepare-from E:\Games\SaveBackups\Outrun   # once: builds E:\Games\OutRunShimTest
-py -3 -B run.py --candidate <OutRunDesktop.exe> --result <fresh dir> --check-only            # preflight, no launch
-py -3 -B run.py --candidate <OutRunDesktop.exe> --result <fresh dir>                         # the live run
+py -3 -B run.py --candidate <OutRunDesktop.exe> --finalizer <P21Finalizer.dll> --replay-tool <capture_replay.exe>     --result <fresh dir> --check-only                                                       # preflight, no launch
+py -3 -B run.py ... --result <fresh dir>                                                     # R1: the first loop, captured
+py -3 -B run.py ... --result <fresh dir> --replay-of <passing R1 result>                     # R3: the cold replay run
 ```
 
 The test profile in the test copy binds the R12's real axes (steer 0, throttle 2, brake 5, as in
 readonly-provider-live-03). Menu actions go to otherwise unused R12 buttons (20-24), injected only.
 
 Receipt: the run folder (`runtime.log`, `controls-journal.jsonl` with the strict reader's verdict,
-`host-shutdown.json`), the modes seen, and the largest record and consumed steer and accelerator values.
+`host-shutdown.json`), the modes seen, the largest record and consumed steer and accelerator values, and
+`result` pass/fail with every unmet condition in `failures` (the exit code is nonzero on fail).
+
+Capture and replay (Astra 16553/16754):
+- R1: the run's capture (`run\capture`) is sealed in the evidence copy by the reviewed P21 finalizer: the final host
+  report is copied in and `exit.json` is written only for an exit this runner observed, with the identity it held.
+- R2: `capture_replay` replays every sealed row's recorded Frame and GameView through a fresh adapter; the signals must
+  match (the native-input field is reported, not claimed).
+- R3 (`--replay-of`): a second, cold latched run plays the first run's recorded Frame actions at the adapter boundary
+  from the live race entry, while the live session is Running (`source/outrun_replay.hpp`; the test copy's ini names the
+  tape for that run only). `compare_replay.py` reports intended and consumed agreement and race progression against the
+  first run; the verdict requires the whole tape played and the race progressing. Adapter/action replay: not physical
+  input, not a raw-to-Core replay, no route claim.
 
 First-loop limits:
-- no recorder or replay yet;
 - no observer mapping;
 - the identity's executable and schema hashes are reported as null.

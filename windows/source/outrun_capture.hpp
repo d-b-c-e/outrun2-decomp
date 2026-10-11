@@ -11,7 +11,9 @@ namespace outrun::desktop {
 namespace rec=dbce::shim::recorder;
 constexpr const char* CaptureContract="dbce.shim.outrun-capture@1\n";   // bundle.meta of a desktop capture
 
-struct Snapshot { dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; };
+// tape_row: in an R3 replay run (outrun_replay.hpp) the tape row the adapter played, or -1; NotReplay elsewhere (no channel).
+constexpr std::int64_t NotReplay=-2;
+struct Snapshot { dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay; };
 
 inline rec::Channels signal_channels(const Signals& s){
     rec::Channels c;rec::u64(c,"adapter.frame",s.frame_seq);
@@ -24,11 +26,14 @@ inline rec::Channels signal_channels(const Signals& s){
 inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots: rec::encode's fixed sample slots
     auto c=rec::encode(s.frame,slots);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
     c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
+    if(s.tape_row!=NotReplay)c["replay.tapeRow"]=double(s.tape_row);
     c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;
     return c;
 }
 inline rec::Channels frame_channels(const rec::Channels& all){
-    rec::Channels c;for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0)c.insert(v);return c;
+    rec::Channels c;
+    for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0&&v.first.rfind("replay.",0)!=0)c.insert(v);
+    return c;
 }
 inline GameView decoded_view(const rec::Channels& c){
     GameView v;v.mode=std::uint32_t(rec::number(c,"gameInput.mode",0,UINT32_MAX));v.car=rec::number(c,"gameInput.car",0,1)!=0;

@@ -5,6 +5,7 @@
 #include "native_window.hpp"
 #include "outrun_adapter.hpp"
 #include "outrun_recorder.hpp"
+#include "outrun_replay.hpp"
 #include "provider_host.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
@@ -26,6 +27,8 @@ struct State {
     bool configured{},started{},stopped{};
     std::unique_ptr<h::ProviderHost<ShimRecorder>> host;
     std::unique_ptr<Adapter> adapter;
+    bool replay_run{};                         // [ShimReplay] Tape= names a tape: an R3 replay run (outrun_replay.hpp)
+    std::unique_ptr<Tape> tape;                // null in a replay run whose tape was refused: nothing is played
     Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{};
 };
 State g;
@@ -122,6 +125,17 @@ void shim_input_configure(const fence::Plan& plan,const Ini& settings){
     for(const auto& line:settings.section_lines("Controls"))g.profile+=line+"\n";
     const auto parsed=sh::read_profile(g.profile);
     g.transmission=parsed.ok?parsed.section.transmission:"";
+    // R3: a replay run loads its tape before the game loop starts. A refused tape plays nothing (the run stays neutral).
+    const auto tape=settings.text("ShimReplay","Tape");
+    if(!tape.empty()){
+        g.replay_run=true;
+        try{
+            g.tape=std::make_unique<Tape>(std::filesystem::u8path(tape));
+            std::printf("input shim: replay tape %s: %zu race rows (from %llu rows, frames %llu..%llu)\n",tape.c_str(),g.tape->size(),
+                (unsigned long long)g.tape->source_rows(),(unsigned long long)g.tape->row(0).seq,(unsigned long long)g.tape->row(g.tape->size()-1).seq);
+        }catch(const std::exception& e){std::printf("input shim: replay tape refused: %s; nothing is played\n",e.what());}
+        std::fflush(stdout);
+    }
     g.configured=true;
 }
 
@@ -129,11 +143,22 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     if(!g.configured||g.stopped)return;
     if(!g.started)start();
     if(!g.host)return;
-    const auto& frame=g.host->tick();
+    const auto& live=g.host->tick();
     const auto v=view(runtime);
-    g.adapter->apply(frame,v,out);
-    g.host->recorder().push(Snapshot{frame,g.adapter->signals(),out,v});   // one capture row per tick, copied now
-    log_signals(g.adapter->signals(),frame.run);
+    std::int64_t row=NotReplay;const sh::Frame* frame=&live;
+    if(g.replay_run){
+        row=-1;
+        if(g.tape){
+            const bool was=g.tape->started(),done=g.tape->ended();
+            frame=&g.tape->play(live,v.car,row);
+            if(!was&&g.tape->started())std::printf("input shim: replay start: tape row 0 at live frame %llu mode %u\n",(unsigned long long)live.seq,v.mode);
+            if(!done&&g.tape->ended())std::printf("input shim: replay end at live frame %llu: %zu of %zu tape rows played (%s)\n",
+                (unsigned long long)live.seq,g.tape->played(),g.tape->size(),g.tape->end_reason().c_str());
+        }
+    }
+    g.adapter->apply(*frame,v,out);
+    g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
+    log_signals(g.adapter->signals(),live.run);
 }
 
 void shim_input_shutdown(){

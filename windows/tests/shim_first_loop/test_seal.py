@@ -30,5 +30,15 @@ for change in [dict(phase="steer-left"), dict(exitCode=1), dict(forced=True), di
                dict(seal={"exit": 1, "output": ""}), dict(seal="no capture"), dict(replay={"exit": 1, "output": ""}), dict(replay="not sealed"),
                dict(errors=["cleanup inject.on: not our bytes"])]:
     if not run.verdict(dict(good, **change)): raise SystemExit("FAIL verdict passed %r" % change)
+# R3: a complete playback with race progression passes; an incomplete playback, a missing comparison or no progression fails.
+cmp = {"playedRows": 9, "progression": {"replayInGameRows": 9, "replayMaxSpeed": 12.5}}
+r3 = dict(good, r3={"playbackComplete": True, "playbackEnd": "end line", "compare": cmp})
+if run.verdict(dict(r3)): raise SystemExit("FAIL verdict refused a passing R3 receipt: %r" % run.verdict(dict(r3)))
+for change in [dict(playbackComplete=False), dict(compare="comparison failed"),
+               dict(compare={"playedRows": 9, "progression": {"replayInGameRows": 9, "replayMaxSpeed": 0.0}}),
+               dict(compare={"playedRows": 9, "progression": {"replayInGameRows": 8, "replayMaxSpeed": 12.5}})]:
+    if not run.verdict(dict(r3, r3=dict(r3["r3"], **change))): raise SystemExit("FAIL R3 verdict passed %r" % change)
+m = run.REPLAY_END.search("input shim: replay end at live frame 900: 9 of 9 tape rows played (tape complete)")
+if not (m and m.group(2) == m.group(3) == "9" and m.group(4) == "tape complete"): raise SystemExit("FAIL replay end line not parsed")
 print("PASS runner seal, replay and verdict: observed exit and held identity sealed the capture;", seal["output"].splitlines()[-1],
       "; replay", receipt["replay"]["output"])

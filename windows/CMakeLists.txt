@@ -43,6 +43,15 @@ target_compile_features(capture_replay PRIVATE cxx_std_17)
 target_compile_options(capture_replay PRIVATE /W4 /WX)
 target_link_libraries(capture_replay PRIVATE bcrypt)
 
+# R3 (Astra 16754): the replay tape (source/outrun_replay.hpp) on synthetic latched frames through the real adapter/codec.
+add_executable(test_outrun_replay tests/test_outrun_replay.cpp source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp
+    ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_outrun_replay PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_outrun_replay PRIVATE cxx_std_17)
+target_compile_options(test_outrun_replay PRIVATE /W4 /WX)
+target_link_libraries(test_outrun_replay PRIVATE bcrypt)
+add_test(NAME outrun_replay COMMAND test_outrun_replay)
+
 # The test fence (source/test_fence), slice 2b: a temporary game tree, the real game-free writers (options, profiles,
 # the EXE setup, the log), success and fault paths, the complete game-tree inventory compared before and after.
 add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp shim/parse.cpp)

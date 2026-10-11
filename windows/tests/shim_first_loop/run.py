@@ -17,6 +17,7 @@ import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, rand
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
+sys.path.insert(0, str(HERE)); import compare_replay
 DBCE = pathlib.Path(os.environ["LOCALAPPDATA"]) / "dbce" / "outrun2006-decomp"
 HUB_LEASE = pathlib.Path(r"E:\Source\dbce-project-mgmt\tools\Rig-Lease.ps1")
 # Test-only bindings on the rig's real DirectInput identities (readonly-provider-live-03): the axes as the owner's
@@ -30,6 +31,7 @@ PROFILE = "\n".join([
     "brake = axis 5 %s range=0..65535 rest=0 travel=+1" % WHEEL,
     "confirm = button 20 %s" % WHEEL, "start = button 21 %s" % WHEEL, "back = button 22 %s" % WHEEL,
     "navUp = button 23 %s" % WHEEL, "navDown = button 24 %s" % WHEEL, ""])
+REPLAY_END = re.compile(r"input shim: replay end at live frame (\d+): (\d+) of (\d+) tape rows played \(([^)]*)\)")
 SIGNAL = re.compile(r"input shim: frame (\d+) run (\w+) mode (\d+)( race)? record steer (-?\d+) accel (\d+) brake (\d+) "
                     r"buttons ([0-9a-f]+) consumed steer (-?\d+) accel (-?\d+) brake (-?\d+)")
 
@@ -101,6 +103,13 @@ def verdict(receipt):
     if not (receipt.get("journal") or {}).get("qualifies"): failures.append("control journal does not qualify")
     seal_result = receipt.get("seal")
     if not (isinstance(seal_result, dict) and seal_result.get("exit") == 0): failures.append("capture not sealed: %s" % str(seal_result)[:200])
+    r3 = receipt.get("r3")
+    if r3 is not None:   # an R3 replay run: the whole tape played, and the race progressed while it did
+        if not r3.get("playbackComplete"): failures.append("replay playback incomplete: %s" % r3.get("playbackEnd"))
+        cmp = r3.get("compare")
+        if not isinstance(cmp, dict): failures.append("no R3 comparison: %s" % str(cmp)[:200])
+        elif not (cmp["progression"]["replayInGameRows"] == cmp["playedRows"] and cmp["progression"]["replayMaxSpeed"] > 0):
+            failures.append("no race progression during playback: %s" % json.dumps(cmp["progression"]))
     replay_result = receipt.get("replay")
     if not (isinstance(replay_result, dict) and replay_result.get("exit") == 0): failures.append("adapter replay did not reconstruct: %s" % str(replay_result)[:300])
     receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
@@ -130,6 +139,7 @@ def main():
     a.add_argument("--result", type=pathlib.Path, help="a fresh result folder (runs and preflight)")
     a.add_argument("--finalizer", type=pathlib.Path, help="the reviewed P21Finalizer.dll (p21_recorder_integration/managed)")
     a.add_argument("--replay-tool", type=pathlib.Path, help="capture_replay.exe (R2), built with the candidate")
+    a.add_argument("--replay-of", type=pathlib.Path, help="R3: a passing first-loop result folder whose sealed capture is played")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     o = a.parse_args()
@@ -146,6 +156,14 @@ def main():
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
     if not o.replay_tool or not o.replay_tool.exists(): problems.append("no --replay-tool capture_replay.exe to replay the capture")
+    tape = None; tape_rows = 0
+    if o.replay_of:   # R3: only a passing, sealed first run is played
+        first = o.replay_of.resolve(); tape = first / "validated.tsv"
+        try:
+            if json.loads((first / "receipt.json").read_text()).get("result") != "pass": problems.append("--replay-of is not a passing run")
+            if not (first / "run" / "capture" / "complete.tsv").exists(): problems.append("--replay-of has no sealed capture")
+            tape_rows = len(compare_replay.tape(str(tape)))
+        except (OSError, ValueError, SystemExit) as e: problems.append("--replay-of unusable: %s" % e)
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
@@ -153,6 +171,8 @@ def main():
     plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
+                replayOf=str(o.replay_of) if o.replay_of else None, tape=str(tape) if tape else None,
+                tapeSha256=sha(tape) if tape and tape.exists() else None, tapeRows=tape_rows,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
@@ -160,13 +180,19 @@ def main():
     receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[],
                    injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
                              "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")
+    if tape:
+        receipt["r3"] = dict(playbackComplete=False, playbackEnd=None, compare=None,
+            label="menus: injected presses as above; race: the first run's recorded normalized Frame actions, played at the adapter "
+                  "boundary while the live latched session is Running (Astra 16754): not physical input, not a raw-to-Core replay, no route claim")
     nonce = "".join(random.choices(string.ascii_letters + string.digits, k=16))
-    proc = None; run_root = None; leased = False; created = 0
+    proc = None; run_root = None; leased = False; created = 0; wrote_ini = False
     published = {}                               # only files this invocation wrote, with their last bytes
     def publish(name, data):
         replace_file(DBCE / name, data); published[name] = data
     try:
         lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
+        if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it
+            wrote_ini = True; ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n" % tape).encode("utf-8"))
         DBCE.mkdir(parents=True, exist_ok=True)
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
@@ -185,7 +211,12 @@ def main():
                 for l in new:
                     m = SIGNAL.search(l)
                     if m: mode = int(m.group(3)); race = m.group(4) is not None
+                    e = REPLAY_END.search(l)
+                    if e and tape:
+                        receipt["r3"]["playbackEnd"] = l.strip()
+                        receipt["r3"]["playbackComplete"] = e.group(2) == e.group(3) and int(e.group(3)) == tape_rows and e.group(4) == "tape complete"
             if phase == "menus":
+                if race and tape: phase, phase_at = "replay", time.time(); continue   # the shim plays the tape from the race entry
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
                 if time.time() - last_press > 1.5 and len(receipt["presses"]) < 40:
                     action = "start" if len(receipt["presses"]) % 3 == 0 else "confirm"
@@ -193,6 +224,8 @@ def main():
             elif phase == "steer-right" and time.time() - phase_at > 3.5:
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:
+                phase = "end"; batch(["end"]); break
+            elif phase == "replay" and (receipt["r3"]["playbackEnd"] or time.time() - phase_at > tape_rows / 30 + 15):
                 phase = "end"; batch(["end"]); break
         receipt["phase"] = phase; receipt["race"] = race
         time.sleep(1.0)
@@ -222,6 +255,11 @@ def main():
                         except FileNotFoundError: pass
                         except OSError as e: receipt["errors"].append("cleanup %s: %r" % (f, e))
             finally:
+                if wrote_ini:
+                    try:
+                        ini.write_bytes(PROFILE.encode("utf-8"))
+                        if ini.read_bytes() != PROFILE.encode("utf-8"): receipt["errors"].append("test profile not restored")
+                    except OSError as e: receipt["errors"].append("test profile restore: %r" % e)
                 try:
                     if run_root and run_root.exists(): shutil.copytree(run_root, out / "run", dirs_exist_ok=True)
                 except Exception as e: receipt["errors"].append("evidence copy: %r" % e)
@@ -233,6 +271,11 @@ def main():
         except Exception as e: receipt["errors"].append("seal: %r" % e)
         try: replay(out, receipt, o.replay_tool)
         except Exception as e: receipt["errors"].append("replay: %r" % e)
+        if tape and isinstance(receipt.get("replay"), dict) and receipt["replay"].get("exit") == 0:
+            q = subprocess.run([sys.executable, "-B", str(HERE / "compare_replay.py"), str(tape), str(out / "validated.tsv")],
+                               capture_output=True, text=True, timeout=600)
+            try: receipt["r3"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
+            except ValueError: receipt["r3"]["compare"] = (q.stdout + q.stderr).strip()[-400:]
         try:
             if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
             if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
@@ -246,7 +289,7 @@ def main():
         failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
         print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",
-                                                     "maxConsumedSteer", "maxConsumedAccel", "seal", "replay")}, indent=1))
+                                                     "maxConsumedSteer", "maxConsumedAccel", "seal", "replay", "r3")}, indent=1))
     return 1 if failures else 0
 
 
