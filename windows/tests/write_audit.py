@@ -101,7 +101,15 @@ def argument(args, shape):
     counts, index = shape
     return args[index] if len(args) in counts else None
 
+# A flags or mode argument is exempt only when it is names joined by single bitwise ORs, with optional parentheses
+# (2b.3 audit review: splitting on "|" alone read `_O_RDONLY || _O_BINARY`, which is 1, _O_WRONLY, as read only).
+NAME = r"\s*\(*\s*(?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*\s*\)*\s*"
+BITWISE_OR_OF_NAMES = re.compile(NAME + r"(?:\|" + NAME + r")*")
+
 def tokens(arg):
+    """The names of a bitwise OR of names, or [] for anything else (a candidate)."""
+    if not BITWISE_OR_OF_NAMES.fullmatch(arg):
+        return []
     return [t for t in re.split(r"[\s|()]+", arg) if t]
 
 def read_only_open(name, args):
@@ -408,6 +416,10 @@ def selftest(repo, entries):
     cases.append(("O_RDONLY in the filename position", mutated(rank, lambda t: t + '\nstatic void d3(int mode){_open("O_RDONLY",mode);}\n')))
     cases.append(("_sopen_s with O_RDONLY OR an unknown mode", mutated(rank, lambda t: t + '\nstatic void d4(const char* p,int mode){int fh=-1;_sopen_s(&fh,p,_O_RDONLY|mode,_SH_DENYNO,0);}\n')))
     cases.append(("a read-only mode literal in the filename position", mutated(rank, lambda t: t + '\nstatic void d5(const char* m){std::fopen("rb",m);}\n')))
+    # The 2b.3 audit review (artifacts/outrun-fence-review-1a2d2e9): a logical OR is not a bitwise one.
+    cases.append(("_open with a logical OR of read-only flags", mutated(rank, lambda t: t + '\nstatic void d7(const char* p){_open(p,_O_RDONLY || _O_BINARY);}\n')))
+    cases.append(("a stream open with a logical OR", mutated(rank, lambda t: t + '\nstatic void d8(std::fstream& s,const char* p){s.open(p,std::ios::in||std::ios::binary);}\n')))
+    cases.append(("_open with flags in a conditional", mutated(rank, lambda t: t + '\nstatic void d9(const char* p,bool w){_open(p,w?_O_RDONLY:_O_BINARY);}\n')))
     cases.append(("an fopen with an argument count it does not take", mutated(rank, lambda t: t + '\nstatic void d6(const char* p){std::fopen(p,"rb","wb");}\n')))
     cases.append(("a removed writer (stale entry)", mutated(rank, lambda t: t.replace('std::fopen((dir+"/rankings.dat").c_str(),"wb")', 'nullptr'))))
     failures = []
