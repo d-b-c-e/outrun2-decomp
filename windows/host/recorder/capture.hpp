@@ -10,7 +10,9 @@
 #include "worker.hpp"
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <locale>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -92,6 +94,24 @@ inline void write_new(const fs::path& path,const std::string& text){
     DWORD n=0;const bool ok=WriteFile(h,text.data(),DWORD(text.size()),&n,nullptr)&&n==text.size();
     const bool closed=CloseHandle(h)!=FALSE;
     if(!ok||!closed)throw std::runtime_error("capture member write failed: "+path.string());
+}
+// The finalizer's validated export (P21Finalizer --seal-export): per row "ROW <n>", then n "<channel> <value>" lines with
+// round-trip values. Streamed one row at a time (a long capture is far larger as maps than the file); strict: a malformed
+// header, an oversized row, a non-numeric or duplicate channel throws. Returns the row count.
+inline std::uint64_t read_export(const fs::path& path,const std::function<void(const Channels&)>& row){
+    std::ifstream in(path);in.imbue(std::locale::classic());
+    if(!in)throw std::runtime_error("validated export unreadable: "+path.string());
+    std::uint64_t rows=0;std::string tag;
+    while(in>>tag){
+        std::size_t n=0;
+        if(tag!="ROW"||!(in>>n)||n==0||n>MaxValues)throw std::runtime_error("export row header at row "+std::to_string(rows));
+        Channels c;
+        for(std::size_t k=0;k<n;++k){std::string key;double v=0;
+            if(!(in>>key>>v)||!c.emplace(key,v).second)throw std::runtime_error("export channel at row "+std::to_string(rows));}
+        row(c);++rows;
+    }
+    if(!in.eof())throw std::runtime_error("export read failed after row "+std::to_string(rows));
+    return rows;
 }
 // The worker's final, quiescent report, only for an eligible result.
 inline void report(const fs::path& root,const Report& r,const Identity& id,std::uint64_t first,std::int64_t origin){

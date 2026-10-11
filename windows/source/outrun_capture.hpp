@@ -9,6 +9,7 @@
 #include <vector>
 namespace outrun::desktop {
 namespace rec=dbce::shim::recorder;
+constexpr const char* CaptureContract="dbce.shim.outrun-capture@1\n";   // bundle.meta of a desktop capture
 
 struct Snapshot { dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; };
 
@@ -52,6 +53,25 @@ inline Signals decoded_signals(const rec::Channels& c){
     s.native_suppressed=std::uint32_t(rec::number(c,"adapter.nativeSuppressed",0,UINT32_MAX));
     s.gearbox=HPattern::State(rec::number(c,"adapter.gearbox",0,int(HPattern::State::AtTarget)));
     return s;
+}
+// The adapter signal fields that differ between two ticks (replay comparisons; empty when every field is equal).
+inline std::vector<const char*> signal_differences(const Signals& a,const Signals& b){
+    std::vector<const char*> d;
+    if(a.frame_seq!=b.frame_seq)d.push_back("frame");
+    if(a.mode!=b.mode)d.push_back("mode");
+    if(a.in_gameplay!=b.in_gameplay)d.push_back("inGame");
+    if(a.speed!=b.speed)d.push_back("speed");
+    if(a.gear!=b.gear)d.push_back("gear");
+    if(a.consumed_steer!=b.consumed_steer)d.push_back("consumedSteer");
+    if(a.consumed_accel!=b.consumed_accel)d.push_back("consumedAccel");
+    if(a.consumed_brake!=b.consumed_brake)d.push_back("consumedBrake");
+    if(a.record_steer!=b.record_steer)d.push_back("recordSteer");
+    if(a.record_accel!=b.record_accel)d.push_back("recordAccel");
+    if(a.record_brake!=b.record_brake)d.push_back("recordBrake");
+    if(a.record_buttons!=b.record_buttons)d.push_back("recordButtons");
+    if(a.native_suppressed!=b.native_suppressed)d.push_back("nativeSuppressed");
+    if(a.gearbox!=b.gearbox)d.push_back("gearbox");
+    return d;
 }
 inline rec::Packet packet(const Snapshot& s,const std::vector<std::string>& names,std::size_t slots=0){
     return rec::packet_of(channels(s,slots),names,s.frame.seq,s.frame.tick_us);

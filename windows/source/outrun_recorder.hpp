@@ -15,7 +15,6 @@
 #include <optional>
 namespace outrun::desktop {
 
-constexpr const char* CaptureContract="dbce.shim.outrun-capture@1\n";
 constexpr const char* CaptureInputContract="shim-frame-audit-2-pending-unadopted";   // the frame codec's contract
 
 struct CaptureSettings {

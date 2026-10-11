@@ -83,6 +83,14 @@ def seal(out, proc, created, receipt, finalizer):
     receipt["seal"] = dict(exit=q.returncode, output=(q.stdout + q.stderr).strip()[-600:])
 
 
+def replay(out, receipt, tool):
+    """R2: the adapter/action replay of the sealed capture (capture_replay): every recorded Frame and GameView through a
+    fresh Adapter must give the recorded signals. Only a sealed capture is replayed."""
+    if not (isinstance(receipt.get("seal"), dict) and receipt["seal"].get("exit") == 0): receipt["replay"] = "not sealed"; return
+    q = subprocess.run([str(tool), str(out / "run" / "capture"), str(out / "validated.tsv")], capture_output=True, text=True, timeout=600)
+    receipt["replay"] = dict(exit=q.returncode, output=(q.stdout + q.stderr).strip()[-600:])
+
+
 def verdict(receipt):
     """Astra 16766: diagnostics are saved either way; any unmet condition fails the run."""
     failures = ["error: %s" % e for e in receipt["errors"]]
@@ -93,6 +101,8 @@ def verdict(receipt):
     if not (receipt.get("journal") or {}).get("qualifies"): failures.append("control journal does not qualify")
     seal_result = receipt.get("seal")
     if not (isinstance(seal_result, dict) and seal_result.get("exit") == 0): failures.append("capture not sealed: %s" % str(seal_result)[:200])
+    replay_result = receipt.get("replay")
+    if not (isinstance(replay_result, dict) and replay_result.get("exit") == 0): failures.append("adapter replay did not reconstruct: %s" % str(replay_result)[:300])
     receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
     return failures
 
@@ -119,6 +129,7 @@ def main():
     a.add_argument("--prepare-from", type=pathlib.Path, help="build --game as a copy of this game folder first")
     a.add_argument("--result", type=pathlib.Path, help="a fresh result folder (runs and preflight)")
     a.add_argument("--finalizer", type=pathlib.Path, help="the reviewed P21Finalizer.dll (p21_recorder_integration/managed)")
+    a.add_argument("--replay-tool", type=pathlib.Path, help="capture_replay.exe (R2), built with the candidate")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     o = a.parse_args()
@@ -134,12 +145,14 @@ def main():
     if not ini.exists() or ini.read_text(encoding="utf-8") != PROFILE:
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
+    if not o.replay_tool or not o.replay_tool.exists(): problems.append("no --replay-tool capture_replay.exe to replay the capture")
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
     if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
     plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
+                replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
@@ -218,6 +231,8 @@ def main():
                 except Exception as e: receipt["errors"].append(repr(e))
         try: seal(out, proc, created, receipt, o.finalizer)
         except Exception as e: receipt["errors"].append("seal: %r" % e)
+        try: replay(out, receipt, o.replay_tool)
+        except Exception as e: receipt["errors"].append("replay: %r" % e)
         try:
             if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
             if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
@@ -231,7 +246,7 @@ def main():
         failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
         print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",
-                                                     "maxConsumedSteer", "maxConsumedAccel", "seal")}, indent=1))
+                                                     "maxConsumedSteer", "maxConsumedAccel", "seal", "replay")}, indent=1))
     return 1 if failures else 0
 
 
