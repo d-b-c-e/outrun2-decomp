@@ -10,11 +10,12 @@ constexpr std::uint32_t DomainMagic=0x4442534f, DomainVersion=2;
 constexpr std::size_t MaxSamples=8, MaxSignals=16;
 struct Identity {
     std::uint32_t process{};
+    std::uint32_t profile_devices{}; // exact immutable profile device-table size
     std::uint64_t process_start{}; // Windows process creation FILETIME
     std::array<std::uint8_t,16> nonce{};
     Sha256 executable{},build{},profile{};
     bool operator==(const Identity& x) const noexcept {
-        return process==x.process && process_start==x.process_start && nonce==x.nonce &&
+        return process==x.process && profile_devices==x.profile_devices && process_start==x.process_start && nonce==x.nonce &&
             executable==x.executable && build==x.build && profile==x.profile;
     }
 };
@@ -41,14 +42,14 @@ struct Document {
 
 namespace domain_detail {
 template<class A> inline bool any(const A& a) { for(auto v:a) if(v) return true; return false; }
-inline bool identity_ok(const Identity& i) { return i.process && i.process_start && any(i.nonce) && any(i.executable) && any(i.build) && any(i.profile); }
+inline bool identity_ok(const Identity& i) { return i.process && i.profile_devices<=ActionCount && i.process_start && any(i.nonce) && any(i.executable) && any(i.build) && any(i.profile); }
 inline bool valid(const Document& d) {
     if(!identity_ok(d.identity) || !d.frame || d.tick_us<0 || d.boundary_us<d.tick_us ||
        unsigned(d.run)>unsigned(Run::Inert) || d.sample_count>MaxSamples || d.signal_count>MaxSignals || d.event_count>EventRingSize ||
        (d.down>>ActionCount) || (d.up>>ActionCount)) return false;
     for(std::size_t i=0;i<d.sample_count;++i) {
         const auto& s=d.samples[i];
-        if(s.device>=ActionCount || !s.epoch || !s.seq || s.read_start_us<d.tick_us || s.read_end_us<s.read_start_us || s.read_end_us>d.boundary_us ||
+        if(s.device>=d.identity.profile_devices || !s.epoch || !s.seq || s.read_start_us<d.tick_us || s.read_end_us<s.read_start_us || s.read_end_us>d.boundary_us ||
            unsigned(s.poll)>unsigned(Call::Pending) || unsigned(s.state)>unsigned(Call::Pending) || s.injected.povs>15 ||
            (s.valid && (s.poll!=Call::Ok || s.state!=Call::Ok)) || (s.stale && !s.valid) ||
            (s.injected.any() && (!s.valid || s.stale || !s.injected.batch || !any(s.injected.hash)))) return false;
@@ -72,7 +73,7 @@ inline bool valid(const Document& d) {
     for(std::size_t i=0;i<d.event_count;++i) {
         const auto& e=d.events[i];
         if(e.seq!=d.event_seq-d.event_count+i+1 || e.us<0 || e.us>d.boundary_us || unsigned(e.kind)>unsigned(EventKind::ReadPending) ||
-           e.device< -1 || e.device>=ActionCount) return false;
+           e.device< -1 || (e.device>=0 && unsigned(e.device)>=d.identity.profile_devices)) return false;
     }
     return true;
 }
@@ -99,7 +100,7 @@ template<class C,std::size_t N> void bytes(C& c,std::array<std::uint8_t,N>& a) {
 }
 template<class C> void raw(C& c,RawState& r) {for(auto& a:r.axes)value(c,a);bytes(c,r.buttons);for(auto& p:r.povs)value(c,p);}
 template<class C> void fields(C& c,Document& d) {
-    auto& id=d.identity;value(c,id.process);value(c,id.process_start);bytes(c,id.nonce);bytes(c,id.executable);bytes(c,id.build);bytes(c,id.profile);
+    auto& id=d.identity;value(c,id.process);value(c,id.profile_devices);value(c,id.process_start);bytes(c,id.nonce);bytes(c,id.executable);bytes(c,id.build);bytes(c,id.profile);
     value(c,d.frame);value(c,d.tick_us);value(c,d.boundary_us);value(c,d.event_seq);value(c,d.down);value(c,d.up);enumeration(c,d.run);
     value(c,d.latched);value(c,d.suppress_native);value(c,d.fences_verified);value(c,d.force_absent);value(c,d.status_dropped);value(c,d.events_dropped);
     value(c,d.sample_count);value(c,d.signal_count);value(c,d.event_count);
@@ -132,10 +133,12 @@ inline bool decode(const Payload& in,Document& out) {
 // Adapt the actual Core frame and ring on the input thread. Never silently drop
 // devices, events or signals to fit a bound; a false result is an observer fault.
 inline bool compose(const Identity& identity,const Frame& f,const std::array<Event,EventRingSize>& ring,
-                    const Signal* signals,std::size_t count,bool fences,bool force_absent,Document& out) {
+                    const Signal* signals,std::size_t count,bool fences,bool force_absent,
+                    std::uint64_t status_dropped,std::uint64_t events_dropped,Document& out) {
     if(f.samples.size()>MaxSamples || count>MaxSignals || (count && !signals))return false;
     Document d;d.identity=identity;d.frame=f.seq;d.tick_us=f.tick_us;d.boundary_us=f.boundary_us;d.event_seq=f.event_seq;d.down=f.down;d.up=f.up;
     d.run=f.run;d.latched=f.latched;d.suppress_native=f.suppress_native;d.fences_verified=fences;d.force_absent=force_absent;d.actions=f.action;
+    d.status_dropped=status_dropped;d.events_dropped=events_dropped;
     d.sample_count=std::uint32_t(f.samples.size());d.signal_count=std::uint32_t(count);
     for(std::size_t i=0;i<f.samples.size();++i)d.samples[i]=f.samples[i];
     for(std::size_t i=0;i<count;++i)d.signals[i]=signals[i];
@@ -153,6 +156,8 @@ class Cursor {
     Identity expected_;std::uint64_t frame_{},event_{};
 public:
     explicit Cursor(Identity expected):expected_(expected){}
+    // now_us MUST share DInputProvider::now_us()'s system-wide QPC origin and
+    // integer microsecond conversion. Never use a per-process Stopwatch origin.
     ReadResult accept(const Payload& p,std::int64_t now_us,std::int64_t freshness_us,Document& out) {
         Document next;if(!decode(p,next))return {Acceptance::Malformed};
         if(!(next.identity==expected_))return {Acceptance::WrongIdentity};
