@@ -128,6 +128,13 @@ FENCE = [
      "if(exe_image_load_cache(cache,&e,!game_dir_read_only))return true;", "if(exe_image_load_cache(cache,&e))return true;"),
     ("the loader ignores the rewrite flag (nene 10191 #1)", "../src/system/exe_image.cpp",
      "if(rewrite_in_place){std::string ignored;exe_image_write_cache(path,image,&ignored);}", "{std::string ignored;exe_image_write_cache(path,image,&ignored);}"),
+    ("a refusal written into a planted symlink or folder (nene 10329 #2)", "source/test_fence.cpp",
+     "        if(existing&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))return false;\n", ""),
+    ("a refusal written into an existing file (nene 10329 #2)", "source/test_fence.cpp",
+     "        if(!DeleteFileW(path.c_str()))return false;\n", ""),
+    ("a planted name not refused at the create (nene 10329 #2)", "source/test_fence.cpp",
+     "GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);",
+     "GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);"),
     ("seed copy not verified (no fixture produces a differing copy)", "source/test_fence.cpp",
      "if(!ra||!rb||ha!=hb||a!=b){", "if(false){"),
 ]

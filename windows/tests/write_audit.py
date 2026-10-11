@@ -5,15 +5,21 @@
 # match a classified entry in write_audit.json exactly (file + the whole normalized line, so a destination change no
 # longer matches); an unclassified call, or an entry that no longer matches anything, fails.
 #
-# Flagged: the fopen family (including fopen_s / _wfopen_s / freopen_s) unless the mode is a visible read-only literal;
-# CRT descriptor opens (_open, _wopen, _sopen[_s], _wsopen[_s], _creat, open) unless the flags are visibly O_RDONLY;
-# every member .open() unless its mode is visibly ios::in only; every C++ output or read-write file stream; Win32 file
-# creation, move, replace, delete, copy, directories, attributes, links, WriteFile, private-profile writes and file
-# mappings; C rename/remove/unlink/mkdir/rmdir/tmpfile; std::filesystem mutations; writer wrappers; home() uses.
-# The key is the whole call: a finding whose parentheses stay open is joined with its continuation lines, so a changed
-# destination on a later line no longer matches. Textual matching only: an allowlisted writer still needs the actual
-# write-destination fixture (test_fence.cpp); argument dataflow outside the call is not established here.
-import json, pathlib, re, sys
+# Flagged: the fopen family (including fopen_s / _wfopen_s / freopen_s) unless its mode argument is a read-only
+# literal; CRT descriptor opens (_open, _wopen, _sopen[_s], _wsopen[_s], _creat, open) unless their flags argument is
+# made only of known read-only flags including O_RDONLY; every member .open() unless its mode argument is made only of
+# ios::in and ios::binary; every C++ output or read-write file stream; Win32 file creation, move, replace, delete, copy,
+# directories, attributes, links, WriteFile, private-profile writes and file mappings; C rename/remove/unlink/mkdir/
+# rmdir/tmpfile; std::filesystem mutations; writer wrappers; home() uses.
+# Only the argument at the function's own mode or flags position is read (2b.2 audit review): a read-only token in the
+# filename, or a read-only flag OR'd with anything unknown, leaves the call a candidate, and so does an argument count
+# the function does not take. The key is the whole call: every call on the line is followed to its closing parenthesis
+# and the key spans all of its lines, so a changed destination on any later line no longer matches. A call that does not
+# close within MAX_JOIN lines is INCOMPLETE, an error no entry can classify.
+# An ofstream adds ios::out to any mode it is opened with; every ofstream is flagged where it is declared, and that
+# classification covers its opens. Textual matching only: an allowlisted writer still needs the actual write-destination
+# fixture (test_fence.cpp); argument dataflow outside the call is not established here.
+import bisect, json, pathlib, re, sys
 
 # Everything linked into OutRunDesktop.exe: all of src (conservative), the Xbox core's sources and headers, windows/.
 ROOTS = ["src", "xbox/source", "windows/source", "windows/shim"]
@@ -49,66 +55,74 @@ WRAP_RE = re.compile(r"(?<![\w.>])(?:\w+::)*(" + "|".join(WRAPPERS) + r")\s*\(")
 def normalize(line):
     return " ".join(line.strip().split())
 
-def call_args(text, start):
-    """The text inside the call's parentheses starting at text[start] == '(' (may span joined lines)."""
-    depth, i = 0, start
-    while i < len(text):
-        c = text[i]
-        if c == '"':
-            j = i + 1
-            while j < len(text) and text[j] != '"':
-                j += 2 if text[j] == "\\" else 1
-            i = j
-        elif c == "(":
+# A call is followed to its closing parenthesis over at most this many further lines; beyond that it is INCOMPLETE.
+MAX_JOIN = 100
+
+# (argument counts the function takes, index of its mode or flags argument).
+FOPEN_MODE = {"fopen": ((2,), 1), "_wfopen": ((2,), 1), "fopen_s": ((3,), 2), "_wfopen_s": ((3,), 2),
+              "freopen": ((3,), 1), "_wfreopen": ((3,), 1), "freopen_s": ((4,), 2), "_wfreopen_s": ((4,), 2),
+              "_fsopen": ((3,), 1), "_wfsopen": ((3,), 1), "fdopen": ((2,), 1), "_fdopen": ((2,), 1)}
+DESC_FLAGS = {"_open": ((2, 3), 1), "_wopen": ((2, 3), 1), "open": ((2, 3), 1), "_sopen": ((3, 4), 1),
+              "_wsopen": ((3, 4), 1), "_sopen_s": ((5,), 2), "_wsopen_s": ((5,), 2)}   # _creat, _wcreat, creat: always
+READ_ONLY_DESC_FLAGS = {"_O_RDONLY", "O_RDONLY", "_O_BINARY", "O_BINARY", "_O_TEXT", "O_TEXT", "_O_NOINHERIT",
+                        "O_NOINHERIT", "O_CLOEXEC", "O_DIRECTORY", "_O_SEQUENTIAL", "_O_RANDOM"}
+READ_ONLY_IOS = re.compile(r"(?:std::)?ios(?:_base)?::(in|binary)")
+MEMBER_OPEN_ARGS = (2, 3)            # (path, mode) and MSVC's (path, mode, protection)
+
+def call_span(code, start):
+    """The index of the ')' closing the '(' at code[start], or -1. String and char contents in code are blank."""
+    depth = 0
+    for i in range(start, len(code)):
+        c = code[i]
+        if c == "(":
             depth += 1
         elif c == ")":
             depth -= 1
             if depth == 0:
-                return text[start + 1:i]
-        i += 1
-    return text[start + 1:]
+                return i
+    return -1
 
-def last_arg(args):
-    depth, cur, parts, i = 0, "", [], 0
-    while i < len(args):
-        c = args[i]
-        if c == '"':
-            j = i + 1
-            while j < len(args) and args[j] != '"':
-                j += 2 if args[j] == "\\" else 1
-            cur += args[i:j + 1]
-            i = j + 1
-            continue
+def split_args(code, text, start, end):
+    """The call's top-level arguments, split on code (contents blank) and taken from text (column aligned)."""
+    parts, depth, cur = [], 0, start + 1
+    for i in range(start + 1, end):
+        c = code[i]
         if c in "([{":
             depth += 1
         elif c in ")]}":
             depth -= 1
-        if c == "," and depth == 0:
-            parts.append(cur)
-            cur = ""
-        else:
-            cur += c
-        i += 1
-    parts.append(cur)
-    return parts[-1].strip() if parts else ""
+        elif c == "," and depth == 0:
+            parts.append(text[cur:i].strip())
+            cur = i + 1
+    last = text[cur:end].strip()
+    return parts + [last] if parts or last else []
 
-def read_only_open(text, m):
-    mode = last_arg(call_args(text, m.end() - 1))
-    lit = re.fullmatch(r'L?"([^"]*)"', mode)
+def argument(args, shape):
+    counts, index = shape
+    return args[index] if len(args) in counts else None
+
+def tokens(arg):
+    return [t for t in re.split(r"[\s|()]+", arg) if t]
+
+def read_only_open(name, args):
+    mode = argument(args, FOPEN_MODE[name])
+    lit = re.fullmatch(r'L?"([^"]*)"', mode or "")
     if not lit:
-        return False                      # a variable or computed mode: a candidate
+        return False                      # a variable, computed or misplaced mode: a candidate
     flags = lit.group(1)
     return "w" not in flags and "a" not in flags and "+" not in flags and flags.startswith("r")
 
-def read_only_desc(text, m):
-    if m.group(1) in ("_creat", "_wcreat", "creat"):
-        return False
-    args = call_args(text, m.end() - 1)
-    return bool(re.search(r"\b_?O_RDONLY\b", args)) and not re.search(r"\b_?O_(WRONLY|RDWR|CREAT|TRUNC|APPEND)\b", args)
+def read_only_desc(name, args):
+    if name not in DESC_FLAGS:
+        return False                      # _creat, _wcreat, creat always create
+    flags = argument(args, DESC_FLAGS[name])
+    t = [x[2:] if x.startswith("::") else x for x in tokens(flags or "")]
+    return bool(t) and all(x in READ_ONLY_DESC_FLAGS for x in t) and any(x.endswith("O_RDONLY") for x in t)
 
-def read_only_member_open(text, m):
-    args = call_args(text, m.end() - 1)
-    return bool(re.search(r"\bios(?:_base)?::in\b", args)) and not re.search(r"\bios(?:_base)?::(out|app|trunc)\b", args)
+def read_only_member_open(args):
+    mode = args[1] if len(args) in MEMBER_OPEN_ARGS else None
+    t = [READ_ONLY_IOS.fullmatch(x) for x in tokens(mode or "")]
+    return bool(t) and all(t) and any(x.group(1) == "in" for x in t)
 
 def strip_comment_and_strings(line):
     out, i, in_str = [], 0, False
@@ -154,6 +168,8 @@ def preprocess(text):
             newline()
             i += 1
             continue
+        if c == "\r":                                   # kept in both, so a CRLF line inside a literal stays aligned
+            cur_nc.append(c); cur_code.append(c); i += 1; continue
         if state == "code":
             if text.startswith("//", i):
                 state = "line"; i += 2; continue
@@ -202,39 +218,68 @@ def preprocess(text):
     return list(zip(nocomment, code))
 
 def scan_text(rel, text):
-    raws = text.splitlines()
     pre = preprocess(text)
+    raws = [l.rstrip("\r") for l in text.split("\n")][:len(pre)]    # the same line breaks as the lexer
+    # The whole file as one string twice, column aligned: comments removed (for argument text) and with string and char
+    # contents blank as well (for parentheses and commas).
+    flat = "\n".join(p[0] for p in pre)
+    code_all = "\n".join(p[1] for p in pre)
+    if len(flat) != len(code_all) or any(len(a) != len(b) for a, b in pre):
+        raise SystemExit(f"write audit: the lexer lost column alignment in {rel}")
+    starts, off = [], 0
+    for _, code in pre:
+        starts.append(off)
+        off += len(code) + 1
     findings = []
     for i, (line, code) in enumerate(pre):
         if not code.strip() or code.lstrip().startswith("#"):
             continue
-        # The whole call: extend over continuation lines while this line's parentheses stay open (2b audit review: a
-        # destination on the next line is part of the key).
+        kinds, incomplete = [], False
+        # The line's own parentheses (a stream constructed on this line takes its path on the next).
         j, depth = i, code.count("(") - code.count(")")
-        while depth > 0 and j + 1 < len(pre) and j - i < 12:
+        while depth > 0 and j + 1 < len(pre) and j - i < MAX_JOIN:
             j += 1
             depth += pre[j][1].count("(") - pre[j][1].count(")")
-        joined = " ".join(pre[k][0] for k in range(i, j + 1))
-        kinds = []
+        if depth > 0:
+            incomplete = True
+        end = j
+        def call(m):
+            """Follow the call opened by m's '(' to its close; its arguments, or None when it does not close."""
+            nonlocal end, incomplete
+            at = starts[i] + m.end() - 1
+            close = call_span(code_all, at)
+            last = bisect.bisect_right(starts, close) - 1 if close >= 0 else -1
+            if close < 0 or last - i > MAX_JOIN:
+                incomplete = True
+                return None
+            end = max(end, last)
+            return split_args(code_all, flat, at, close)
         for m in OPEN_RE.finditer(code):
-            if not read_only_open(joined, OPEN_RE.search(joined, m.start()) or m):
+            args = call(m)
+            if args is None or not read_only_open(m.group(1), args):
                 kinds.append(m.group(1))
         for m in DESC_RE.finditer(code):
-            if not read_only_desc(joined, DESC_RE.search(joined, m.start()) or m):
+            args = call(m)
+            if args is None or not read_only_desc(m.group(1), args):
                 kinds.append(m.group(1))
         for m in MEMBER_OPEN_RE.finditer(code):
-            if not read_only_member_open(joined, MEMBER_OPEN_RE.search(joined, m.start()) or m):
+            args = call(m)
+            if args is None or not read_only_member_open(args):
                 kinds.append(".open")
         if STREAM_RE.search(code):
             kinds.append(STREAM_RE.search(code).group(1))
-        kinds += [m.group(1) for m in WIN_RE.finditer(code)]
-        kinds += [m.group(1) for m in C_RE.finditer(code)]
-        kinds += [m.group(1) or m.group(2) for m in FS_RE.finditer(code)]
-        kinds += ["wrapper:" + m.group(1) for m in WRAP_RE.finditer(code)]
-        kinds += ["home:" + m.group(1) for m in HOME_RE.finditer(code)]
+        for pattern, name in ((WIN_RE, lambda m: m.group(1)), (C_RE, lambda m: m.group(1)),
+                              (FS_RE, lambda m: m.group(1) or m.group(2)), (WRAP_RE, lambda m: "wrapper:" + m.group(1)),
+                              (HOME_RE, lambda m: "home:" + m.group(1))):
+            for m in pattern.finditer(code):
+                call(m)
+                kinds.append(name(m))
         if kinds:
-            key = normalize(" ".join(raws[k] for k in range(i, j + 1)))
-            findings.append({"file": rel, "line": key, "number": i + 1, "kinds": sorted(set(kinds))})
+            key = normalize(" ".join(raws[k] for k in range(i, end + 1)))
+            finding = {"file": rel, "line": key, "number": i + 1, "kinds": sorted(set(kinds))}
+            if incomplete:
+                finding["incomplete"] = True
+            findings.append(finding)
     return findings
 
 def scan_tree(repo):
@@ -258,6 +303,10 @@ def audit(findings, entries):
         budget[key] = budget.get(key, 0) + int(e.get("count", 1))
     used = {}
     for f in findings:
+        if f.get("incomplete"):
+            errors.append(f"INCOMPLETE {f['file']}:{f['number']} [{', '.join(f['kinds'])}] a call that does not close "
+                          f"within {MAX_JOIN} lines cannot be classified: {f['line'][:160]}")
+            continue
         key = (f["file"], f["line"])
         used[key] = used.get(key, 0) + 1
         if used[key] > budget.get(key, 0):
@@ -353,6 +402,13 @@ def selftest(repo, entries):
     cases.append(("a writer after a \"/*\" string literal", mutated(rank, lambda t: t + '\nstatic const char* g="/*";\nstatic void w2(){std::FILE* f=std::fopen("x","wb");}\n')))
     cases.append(("a writer after a quote char literal", mutated(rank, lambda t: t + "\nstatic const char q='\"';\nstatic void w3(){std::FILE* f=std::fopen(\"y\",\"wb\");}\n")))
     cases.append(("a writer after a raw string holding /*", mutated(rank, lambda t: t + '\nstatic const char* r=R"(/* not a comment)";\nstatic void w4(){std::FILE* f=std::fopen("z","wb");}\n')))
+    # The 2b.2 audit review's reproductions (artifacts/outrun-fence-review-26e8d47): only the real flags argument counts.
+    cases.append(("_open with O_RDONLY OR an unknown mode", mutated(rank, lambda t: t + '\nstatic void d1(const char* p,int mode){_open(p,_O_RDONLY|mode);}\n')))
+    cases.append(("a stream open with ios::in OR an unknown mode", mutated(rank, lambda t: t + '\ntemplate<class S,class M> void d2(S& s,const char* p,M mode){s.open(p,std::ios::in|mode);}\n')))
+    cases.append(("O_RDONLY in the filename position", mutated(rank, lambda t: t + '\nstatic void d3(int mode){_open("O_RDONLY",mode);}\n')))
+    cases.append(("_sopen_s with O_RDONLY OR an unknown mode", mutated(rank, lambda t: t + '\nstatic void d4(const char* p,int mode){int fh=-1;_sopen_s(&fh,p,_O_RDONLY|mode,_SH_DENYNO,0);}\n')))
+    cases.append(("a read-only mode literal in the filename position", mutated(rank, lambda t: t + '\nstatic void d5(const char* m){std::fopen("rb",m);}\n')))
+    cases.append(("an fopen with an argument count it does not take", mutated(rank, lambda t: t + '\nstatic void d6(const char* p){std::fopen(p,"rb","wb");}\n')))
     cases.append(("a removed writer (stale entry)", mutated(rank, lambda t: t.replace('std::fopen((dir+"/rankings.dat").c_str(),"wb")', 'nullptr'))))
     failures = []
     if audit(base, entries) or check_guards(repo):
@@ -381,13 +437,40 @@ def selftest(repo, entries):
     changed = multi.replace("safe_run_path", "original_game_path")
     if not audit(scan_text("windows/source/x.cpp", changed), approved):
         failures.append("NOT CAUGHT: a multiline call whose destination changed on the continuation line")
+    # A call longer than any line bound: the key still spans the whole call (2b.2 audit review: an approved fopen whose
+    # destination changes after 14 continuation lines).
+    long_call = ('void f(){auto* p=std::fopen(\n' + "".join(f" // continuation {k}\n" for k in range(14)) +
+                 ' safe_run_path.c_str(),"wb");}\n')
+    approved = [{"file": "windows/source/x.cpp", "line": f["line"], "class": "redirected"} for f in scan_text("windows/source/x.cpp", long_call)]
+    if len(approved) != 1 or audit(scan_text("windows/source/x.cpp", long_call), approved):
+        failures.append("the long multiline control does not pass unmodified")
+    if not audit(scan_text("windows/source/x.cpp", long_call.replace("safe_run_path", "original_game_path")), approved):
+        failures.append("NOT CAUGHT: a call whose destination changed after 14 continuation lines")
+    # A call opened after a ')' on the same line: the line's own parentheses balance, so only following the call itself
+    # reaches its destination.
+    after_close = 'static void m2(){\n    run([]{\n    }); auto* f=std::fopen(\n        safe_run_path.c_str(),"wb");\n}\n'
+    approved = [{"file": "windows/source/x.cpp", "line": f["line"], "class": "redirected"} for f in scan_text("windows/source/x.cpp", after_close) if "fopen" in f["kinds"]]
+    if len(approved) != 1 or audit([f for f in scan_text("windows/source/x.cpp", after_close) if "fopen" in f["kinds"]], approved):
+        failures.append("the call-after-close control does not pass unmodified")
+    if not audit([f for f in scan_text("windows/source/x.cpp", after_close.replace("safe_run_path", "original_game_path")) if "fopen" in f["kinds"]], approved):
+        failures.append("NOT CAUGHT: a call opened after a closing parenthesis whose destination changed on the next line")
+    # A call that does not close within MAX_JOIN lines, or at all, is INCOMPLETE even when an entry names its key.
+    for name, text in (("a call beyond the join bound", 'void g(){auto* p=std::fopen(\n' + " x\n" * (MAX_JOIN + 5) + ' safe.c_str(),"wb");}\n'),
+                       ("a call that never closes", 'void h(){auto* p=std::fopen(\n safe.c_str(),"wb";\n')):
+        found = scan_text("windows/source/x.cpp", text)
+        named = [{"file": "windows/source/x.cpp", "line": f["line"], "class": "redirected"} for f in found]
+        if not found or not all(f.get("incomplete") for f in found) or not audit(found, named):
+            failures.append("NOT CAUGHT: " + name + " (classified despite being incomplete)")
     # Read-only counterparts are not flagged.
     ro = scan_text("x.cpp", 'void r(const char* p,std::ifstream& s){std::fopen(p,"rb");std::fopen(p,"r");std::FILE* f=nullptr;fopen_s(&f,p,"rb");'
                             '_open(p,_O_RDONLY|_O_BINARY);s.open(p,std::ios::in|std::ios::binary);}\n'
-                            'void r2(const char* p){std::FILE* f=std::fopen(\n    p,"rb");}\n')
+                            'void r2(const char* p){std::FILE* f=std::fopen(\n    p,"rb");}\n'
+                            'void r3(const char* p){int fh=-1;_sopen_s(&fh,p,_O_RDONLY|_O_BINARY,_SH_DENYWR,_S_IREAD);'
+                            '_open(p,(_O_RDONLY|_O_BINARY));_wopen(L"O_WRONLY",_O_RDONLY);}\n'
+                            'void r4(const char* p){std::FILE* f=_fsopen(p,"rb",_SH_DENYWR);std::freopen(p,"r",stdin);}\n')
     if ro:
         failures.append("a read-only open was flagged: " + "; ".join(f["line"] for f in ro))
-    return failures, len(cases) + 1
+    return failures, len(cases) + len(guard_cases) + 6
 
 def main():
     repo = pathlib.Path(sys.argv[1])
@@ -400,7 +483,7 @@ def main():
         failures, n = selftest(repo, entries)
         for f in failures:
             print(f)
-        print(f"write audit selftest: {n + 4} mutations plus read-only controls, {len(failures)} failure(s)")
+        print(f"write audit selftest: {n} mutations plus read-only controls, {len(failures)} failure(s)")
         return 1 if failures else 0
     errors = audit(scan_tree(repo), entries) + check_guards(repo)
     for e in errors:

@@ -186,11 +186,22 @@ Plan prepare_run(const std::wstring& folder_in,const std::wstring& game_root_in,
     return plan;
 }
 
+RefusalCreateHook& refusal_create_hook(){static RefusalCreateHook hook=nullptr;return hook;}
+
 bool write_refusal(const Plan& plan,std::uint32_t pid){
     // Never through a link: the refusal might be the link itself, and its target could be the game folder.
     if(plan.dbce_folder.empty()||has_reparse_point_on_path(plan.dbce_folder))return false;
     const std::wstring path=plan.dbce_folder+L"\\refused-"+std::to_wstring(pid)+L".txt";
-    const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    // Nor through anything already at the name (nene 10329, note 2): a link or folder planted there refuses, touching
+    // nothing. An ordinary file (a note left by an earlier process with this id, or a hard link) loses only its name,
+    // which never writes its data; the note is then always a new file, and creating it fails if anything reappeared.
+    const DWORD existing=GetFileAttributesW(path.c_str());
+    if(existing!=INVALID_FILE_ATTRIBUTES){
+        if(existing&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))return false;
+        if(!DeleteFileW(path.c_str()))return false;
+    }else if(GetLastError()!=ERROR_FILE_NOT_FOUND)return false;
+    if(const auto hook=refusal_create_hook())hook(path);
+    const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
     if(h==INVALID_HANDLE_VALUE)return false;
     const std::string text="test run refused before the game initialized: "+plan.refusal+"\r\n";
     DWORD written=0;

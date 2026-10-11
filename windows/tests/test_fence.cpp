@@ -18,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 namespace fs=std::filesystem;
 namespace fence=outrun::desktop::fence;
 using namespace outrun::platform;
@@ -78,6 +79,26 @@ struct Tree {
     void session(const std::string& text){write(dbce/"inject.on",text);}
 };
 std::string valid_session(){return "nonce="+Nonce+"\nexpires="+std::to_string(std::uint64_t(std::time(nullptr))+600)+"\n";}
+
+// This process token's SeBackupPrivilege: "enabled", "held, disabled", "not held" or "unknown" (nene 10329, note 1).
+std::string backup_privilege_state(){
+    HANDLE token{};
+    if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token))return "unknown";
+    std::string state="unknown";
+    LUID backup{};
+    DWORD size=0;
+    GetTokenInformation(token,TokenPrivileges,nullptr,0,&size);
+    std::vector<std::uint8_t> buffer(size);
+    if(LookupPrivilegeValueW(nullptr,L"SeBackupPrivilege",&backup)&&size&&GetTokenInformation(token,TokenPrivileges,buffer.data(),size,&size)){
+        state="not held";
+        const auto* p=reinterpret_cast<const TOKEN_PRIVILEGES*>(buffer.data());
+        for(DWORD i=0;i<p->PrivilegeCount;++i)
+            if(p->Privileges[i].Luid.LowPart==backup.LowPart&&p->Privileges[i].Luid.HighPart==backup.HighPart)
+                state=(p->Privileges[i].Attributes&SE_PRIVILEGE_ENABLED)?"enabled":"held, disabled";
+    }
+    CloseHandle(token);
+    return state;
+}
 
 void test_latch_and_run(){
     Tree t("run");t.seed_owner();
@@ -222,8 +243,9 @@ void test_denied_listing(){
      check(plan.refusal.find("cannot list SaveGame")!=std::string::npos,"an unlistable SaveGame refuses at the listing: "+plan.refusal);
      check(!fs::exists(fs::path(plan.run_root)/"run.json"),"no receipt");
      DeleteFileW((prefix+(saves/"a.dat").wstring()).c_str());}
-    // An access-denied subfolder, as in nene's reproduction. An elevated token holding SeBackupPrivilege lists it anyway
-    // (FindFirstFile opens folders for backup intent), so the case runs only where the deny rule is effective.
+    // An access-denied subfolder, as in nene's reproduction. A token with SeBackupPrivilege enabled lists it anyway
+    // (FindFirstFile opens folders for backup intent; merely holding the privilege disabled is not enough), so the case
+    // runs only where the deny rule is effective, and a skip prints the privilege state.
     {Tree t("denied");t.seed_owner();t.session(valid_session());
      write(t.game/"SaveGame"/"locked"/"inside.dat","x");
      const auto before=inventory(t.game);
@@ -239,7 +261,8 @@ void test_denied_listing(){
      if(effective){
          check(plan.refusal.find("cannot list")!=std::string::npos,"an access-denied subfolder refuses: "+plan.refusal);
          check(inventory(t.game)==before,"denied listing: game tree unchanged");
-     }else std::cout<<"  (access-denied case skipped: this token lists through a deny rule)\n";}
+     }else std::cout<<"  (access-denied case skipped: this token lists through a deny rule; SeBackupPrivilege "
+                    <<backup_privilege_state()<<")\n";}
 }
 
 // nene 10191, finding 4: a refusal is never written through a link, even when the link targets the game tree.
@@ -253,6 +276,45 @@ void test_refusal_never_through_a_link(){
     check(plan.refusal.find("link")!=std::string::npos,"the linked test folder refuses: "+plan.refusal);
     check(!fence::write_refusal(plan,21),"and the refusal is not written through the link");
     check(inventory(t.game)==before,"the game tree is unchanged: no refusal note, no run folder");
+}
+
+// Plants a hard link to the game's options.ini at the note's name, between write_refusal's check and its create.
+fs::path planted_target;
+void plant_hard_link(const std::wstring& path){CreateHardLinkW(path.c_str(),planted_target.c_str(),nullptr);}
+
+// nene 10329, note 2: refused-<pid>.txt is always a new file. A hard link to a game file loses only its name, a stale
+// note is replaced, and a folder or a file symlink at the name refuses, touching nothing.
+void test_refusal_never_into_an_existing_name(){
+    Tree t("refusalname");t.seed_owner();
+    fence::Plan plan;plan.latched=true;plan.dbce_folder=t.dbce.wstring();plan.refusal="a planted name";
+    const auto note=[&](int pid){return t.dbce/("refused-"+std::to_string(pid)+".txt");};
+    const auto before=inventory(t.game);
+    check(CreateHardLinkW(note(31).c_str(),(t.game/"options.ini").c_str(),nullptr)!=0,"made a hard link to a game file");
+    check(fence::write_refusal(plan,31),"hard link: the refusal is written");
+    check(inventory(t.game)==before,"hard link: the game file is unchanged:"+diff(before,inventory(t.game)));
+    check(read(note(31)).find("a planted name")!=std::string::npos,"hard link: the note holds the reason");
+    {const HANDLE h=CreateFileW(note(31).c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
+     BY_HANDLE_FILE_INFORMATION info{};
+     check(h!=INVALID_HANDLE_VALUE&&GetFileInformationByHandle(h,&info)&&info.nNumberOfLinks==1,"hard link: the note is a new file of one link");
+     if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}
+    write(note(32),"an earlier process's note\n");
+    check(fence::write_refusal(plan,32),"stale note: the refusal is written");
+    check(read(note(32)).find("a planted name")!=std::string::npos&&read(note(32)).find("earlier")==std::string::npos,"stale note: replaced");
+    fs::create_directories(note(33));
+    check(!fence::write_refusal(plan,33)&&fs::is_directory(note(33)),"a folder at the name refuses and is left as it was");
+    // Something planted after the check (a hard link, which needs no privilege): the create fails rather than opening it.
+    planted_target=t.game/"options.ini";
+    fence::refusal_create_hook()=plant_hard_link;
+    const bool raced=fence::write_refusal(plan,35);
+    fence::refusal_create_hook()=nullptr;
+    check(!raced&&fs::exists(note(35)),"a hard link planted after the check: the create fails");
+    check(inventory(t.game)==before,"planted after the check: the game file is unchanged:"+diff(before,inventory(t.game)));
+    // A file symlink needs the symbolic-link privilege or developer mode; without either the case is skipped, and says so.
+    if(CreateSymbolicLinkW(note(34).c_str(),(t.game/"options.ini").c_str(),SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)){
+        check(!fence::write_refusal(plan,34),"a file symlink at the name refuses");
+        check((GetFileAttributesW(note(34).c_str())&FILE_ATTRIBUTE_REPARSE_POINT)!=0,"symlink: the link is left as it was");
+        check(inventory(t.game)==before,"symlink: its target in the game tree is unchanged:"+diff(before,inventory(t.game)));
+    }else std::cout<<"  (file-symlink case skipped: cannot create a symbolic link here, error "<<GetLastError()<<")\n";
 }
 
 // nene 10191, finding 1: the game folder's cache built for another range table is loaded but never rewritten when the
@@ -293,7 +355,8 @@ void test_switches(){
 
 int main(){
     // test_cache_for_another_range_table installs an EXE image, after which exe_setup_prepare returns at once: last.
-    try{test_latch_and_run();test_fault_paths();test_denied_listing();test_refusal_never_through_a_link();test_switches();
+    try{test_latch_and_run();test_fault_paths();test_denied_listing();test_refusal_never_through_a_link();
+        test_refusal_never_into_an_existing_name();test_switches();
         test_cache_for_another_range_table();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"test fence: "<<checks<<" checks passed\n";

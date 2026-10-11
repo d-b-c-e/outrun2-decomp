@@ -697,9 +697,15 @@
  },
  {
   "file": "windows/source/test_fence.cpp",
-  "line": "const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "line": "if(!DeleteFileW(path.c_str()))return false;",
   "class": "fence",
-  "reason": "refused-<pid>.txt in %LOCALAPPDATA%\\dbce\\outrun2006-decomp"
+  "reason": "an ordinary file at refused-<pid>.txt loses its name, never written through (a link or folder there refuses first)"
+ },
+ {
+  "file": "windows/source/test_fence.cpp",
+  "line": "const HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);",
+  "class": "fence",
+  "reason": "refused-<pid>.txt in %LOCALAPPDATA%\\dbce\\outrun2006-decomp, always a new file"
  },
  {
   "file": "windows/source/test_fence.cpp",

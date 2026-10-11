@@ -33,8 +33,13 @@ bool latch_requested(const std::wstring& dbce_folder);
 // Step 2. `pid` names the run folder together with the nonce (or "nononce" when inject.on does not parse).
 Plan prepare_run(const std::wstring& dbce_folder,const std::wstring& game_root,std::uint32_t pid,const SeedLimits& limits={});
 // The reason, in %LOCALAPPDATA%\dbce\outrun2006-decomp\refused-<pid>.txt (never in the game folder). Returns false,
-// writing nothing, when that folder or one above it is a link.
+// writing nothing, when that folder or one above it is a link, or a link or folder is already at that name. Always a
+// new file: an ordinary file already there (a hard link included) loses only its name.
 bool write_refusal(const Plan&,std::uint32_t pid);
+// Tests only: called with the note's path between write_refusal's check of the name and its create, so a fixture can
+// plant something in that window (null: nothing).
+using RefusalCreateHook=void(*)(const std::wstring& path);
+RefusalCreateHook& refusal_create_hook();
 
 // Effective paths under the plan (ordinary: the game folder; latched: the run folder).
 std::wstring home_of(const Plan&,const std::wstring& game_root);
