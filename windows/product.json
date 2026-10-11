@@ -29,6 +29,7 @@
   },
   "legacy": {
     "settingsImport": "the OutRun2006Tweaks [DirectInput] keys (this file's, else the folder's OutRun2006Tweaks.ini) are imported once into [Controls]; backup OutRunDesktop.ini.pre-controls-import, marker [ControlsImport]",
-    "relation": "a separate product from dbce-mods-outrun-2006 (the Tweaks fork) until the owner decides otherwise (STD-001)"
+    "relation": "a separate product from dbce-mods-outrun-2006 (the Tweaks fork) for now; owner decision 2026-10-10: it will eventually replace the Tweaks mod entirely (STD-001)",
+    "successorOf": "outrun-2006"
   }
 }

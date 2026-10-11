@@ -7,7 +7,7 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 
 | Standard | Title | Status | Notes |
 |---|---|---|---|
-| STD-001 | One mod per game | pending | Separate product `outrun-2006-decomp` beside `dbce-mods-outrun-2006` (Wheelkit variant ID agreed with Astra 2026-10-10); how the two relate is the owner's call. |
+| STD-001 | One mod per game | partial | Owner, 2026-10-10: a separate product (`outrun-2006-decomp`) beside `dbce-mods-outrun-2006` for now; the decomp will eventually replace the Tweaks mod entirely. The one-time Tweaks `[DirectInput]` import is the settings migration path. |
 | STD-002 | Recording and playback from launch | n/a | Superseded by STD-012. |
 | STD-003 | Normalized FFB strength | pending | No force feedback yet. |
 | STD-004 | Consistent settings UX | pending | No F6 panel yet. |
