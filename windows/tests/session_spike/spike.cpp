@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <tuple>
 namespace fs=std::filesystem;
 using Channels=dbce::session::Channels;
 
@@ -83,6 +84,7 @@ Frame decode(const Channels& c){
     f.seq=u64(c,"frame");f.tick_us=std::int64_t(u64(c,"tickUs"));f.boundary_us=std::int64_t(u64(c,"boundaryUs"));
     if(f.tick_us<0||f.boundary_us<f.tick_us)throw std::runtime_error("invalid frame times");
     f.event_seq=u64(c,"eventSeq");f.down=u64(c,"down");f.up=u64(c,"up");
+    if((f.down>>ActionCount)||(f.up>>ActionCount))throw std::runtime_error("unknown action edge bits");
     f.run=Run(number(c,"run",0,int(Run::Inert)));f.latched=number(c,"latched",0,1)!=0;
     f.suppress_native=number(c,"suppressNative",0,1)!=0;
     f.samples.resize(std::size_t(number(c,"sampleCount",0,31)));
@@ -98,6 +100,8 @@ Frame decode(const Channels& c){
         const auto p="sample."+std::to_string(k)+".";auto& s=f.samples[k];
         s.device=std::uint32_t(number(c,p+"device",0,30));s.epoch=std::uint32_t(number(c,p+"epoch",0,UINT32_MAX));
         s.seq=u64(c,p+"seq");s.read_start_us=std::int64_t(u64(c,p+"readStartUs"));s.read_end_us=std::int64_t(u64(c,p+"readEndUs"));
+        if(s.read_start_us<f.tick_us||s.read_end_us<s.read_start_us||s.read_end_us>f.boundary_us)
+            throw std::runtime_error("sample time outside its frame");
         s.poll=Call(number(c,p+"poll",0,int(Call::NotCalled)));s.state=Call(number(c,p+"state",0,int(Call::NotCalled)));
         s.valid=number(c,p+"valid",0,1)!=0;s.stale=number(c,p+"stale",0,1)!=0;
         s.physical=raw(c,p+"physical");s.delivered=raw(c,p+"delivered");
@@ -121,6 +125,7 @@ std::vector<Frame> capture(){
         wheel.state.axes[2]=t==0?0:t<5?32768:0;
         wheel.state.axes[5]=t==5?65535:0;
         wheel.state.buttons[5]=(t==3||t==4)?0x80:0;
+        wheel.state.buttons[7]=(t==9||t==10)?0x80:0;
         // A low bit in an unbound button is preserved, even though it is not a press.
         wheel.state.buttons[127]=std::uint8_t(1+t);
         shifter.state.buttons[11]=(t==2||t==3||t>=7)?0x80:0;
@@ -131,13 +136,23 @@ std::vector<Frame> capture(){
     check(result[3].action[action_index("camera")].value==1,"captured camera press");
     check(result[6].action[action_index("shiftUp")].status==Status::ReadFailed,"capture includes failed shifter read");
     check(result[7].action[action_index("shiftUp")].status==Status::Rearming,"held shift waits for release after reopen");
+    check(result[9].action[action_index("navLeft")].value==1,"captured navigation press");
     return result;
 }
 void same_sink(const NativeInputState& a,const NativeInputState& b){
-    check(a.steering==b.steering&&a.accelerator==b.accelerator&&a.brake==b.brake&&
-        a.pc_device.axes_94==b.pc_device.axes_94&&a.pc_device.buttons_04==b.pc_device.buttons_04&&
-        a.shift_up==b.shift_up&&a.shift_down==b.shift_down&&a.frontend.feature_mask==b.frontend.feature_mask,
-        "action replay matches actual adapter sink");
+    auto fields=[](const NativeInputState& v){return std::tie(v.frontend.axes,v.frontend.feature_mask,v.frontend.device_held,
+        v.pc_device.buttons_04,v.pc_device.axes_94,v.pc_pad.axes,v.pc_pad.pov,v.pc_pad.buttons,
+        v.pc_input_layer,v.pc_record_used,v.connected,v.steering,v.accelerator,v.brake,v.shift_up,v.shift_down,
+        v.menu_left,v.menu_right,v.menu_up,v.menu_down,v.menu_confirm,v.menu_cancel,v.menu_preview,v.menu_start_probe,
+        v.start,v.exit_requested,v.raw_buttons_held,v.raw_buttons_down,v.raw_buttons_up,
+        v.left_stick_x,v.left_stick_y,v.right_stick_x,v.right_stick_y);};
+    check(fields(a)==fields(b),"action replay matches every NativeInputState field");
+}
+void same_signals(const Signals& a,const Signals& b){
+    auto fields=[](const Signals& v){return std::tie(v.frame_seq,v.mode,v.in_gameplay,v.speed,v.gear,
+        v.consumed_steer,v.consumed_accel,v.consumed_brake,v.record_steer,v.record_accel,v.record_brake,
+        v.record_buttons,v.native_suppressed,v.gearbox);};
+    check(fields(a)==fields(b),"action replay matches every adapter signal");
 }
 void expect_decode_refused(Channels c){bool refused=false;try{decode(c);}catch(const std::exception&){refused=true;}
     check(refused,"semantic corruption refused");}
@@ -167,7 +182,7 @@ void generate(const fs::path& root){
       Channels c;const auto big=UINT64_C(9007199254740993);c["unsafeDouble"]=double(big);u64(c,"safe",big);
       u64(c,"max",UINT64_MAX);c["povNeutral"]=UINT32_MAX;c["signedMin"]=INT32_MIN;
       check(ids.sample(0,c)&&ids.stop(),"ids write");}
-    // The writer cannot see an upstream queue drop. This is an intentionally wrong caller, retained as a counterexample.
+    // The native writer cannot COUNT upstream loss. v1 completion means closed, not lossless.
     { dbce::session::Writer dropped;check(dropped.open((root/"drop-then-stop.jsonl").wstring(),m),"drop open");
       check(dropped.sample(0,encode(frames[0])),"drop first");
       check(dropped.sample(.032,encode(frames[2])),"drop third");check(dropped.stop(),"writer reports complete despite upstream drop");}
@@ -195,7 +210,8 @@ void replay(const fs::path& root){
     for(std::size_t k=0;k<rows.size();++k){
         check(rows[k]==encode(expected[k]),"every original channel survived native/managed round trip");
         const Frame f=decode(rows[k]);
-        NativeInputState x,y;a.apply(expected[k],view,x);b.apply(f,view,y);same_sink(x,y);
+        NativeInputState x,y;a.apply(expected[k],view,x);b.apply(f,view,y);same_sink(x,y);same_signals(a.signals(),b.signals());
+        check(x.menu_left==(k==9),"navigation edge occurs exactly on press");
         for(const auto& s:f.samples){check(s.device<2,"fixture device slot");auto& d=raw_rig.dev(s.device);
             d.state=s.physical;d.script.push_back({s.poll,s.state});}
         raw_rig.tick(f.tick_us-raw_rig.p.clock);
@@ -206,22 +222,29 @@ void replay(const fs::path& root){
         const auto bad_profile=profile({wrong_shift?Steer:Steer+" inverted",Throttle,Brake,
             sb("shiftUp",wrong_shift?10:11),wb("camera",5),wb("navLeft",7)});
         Rig wrong(false,bad_profile,true);wrong.view=view;
-        int mismatches=0;
-        for(const auto& row:rows){const auto f=decode(row);
+        std::vector<std::size_t> mismatches;
+        for(std::size_t k=0;k<rows.size();++k){const auto f=decode(rows[k]);
             for(const auto& s:f.samples){auto& d=wrong.dev(s.device);d.state=s.physical;d.script.push_back({s.poll,s.state});}
             wrong.tick(f.tick_us-wrong.p.clock);
             const int action=action_index(wrong_shift?"shiftUp":"steer");
-            if(wrong.frame->action[action].value!=f.action[action].value)++mismatches;
+            if(wrong.frame->action[action].value!=f.action[action].value)mismatches.push_back(k);
         }
-        check(mismatches>0,"wrong binding must fail raw replay comparison");
-        std::cout<<"Negative profile control "<<(wrong_shift?"wrong shifter button":"inverted steering")<<": "<<mismatches<<" mismatched frames\n";
+        const std::vector<std::size_t> wanted=wrong_shift?std::vector<std::size_t>{2,3}:std::vector<std::size_t>{0,1,2,3,4,5,6,7,8,9,10,11};
+        check(mismatches==wanted,"wrong binding must fail on the exact expected frames");
+        std::cout<<"Negative profile control "<<(wrong_shift?"wrong shifter button":"inverted steering")<<": "<<mismatches.size()<<" mismatched frames\n";
     }
     auto corrupt=rows[0];corrupt["action.steer.status"]=99;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt.erase("sample.0.physical.axis0");expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["action.steer.sample"]=31;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["frame.lo"]=-1;expect_decode_refused(corrupt);
     corrupt=rows[0];corrupt["unknown"]=1;expect_decode_refused(corrupt);
-    std::cout<<"PASS: 12 raw and action replay frames through production core/adapter, exact full-channel comparison; 2 wrong-profile controls detected; 5 semantic corruptions refused\n";
+    corrupt=rows[0];corrupt["frame.lo"]=1.5;expect_decode_refused(corrupt);
+    corrupt=rows[0];u64(corrupt,"down",UINT64_C(1)<<ActionCount);expect_decode_refused(corrupt);
+    corrupt=rows[0];u64(corrupt,"up",UINT64_C(1)<<63);expect_decode_refused(corrupt);
+    corrupt=rows[0];u64(corrupt,"sample.0.readEndUs",u64(corrupt,"tickUs")-1);expect_decode_refused(corrupt);
+    corrupt=rows[0];u64(corrupt,"sample.0.readStartUs",u64(corrupt,"tickUs")-1);expect_decode_refused(corrupt);
+    corrupt=rows[0];u64(corrupt,"sample.0.readEndUs",u64(corrupt,"boundaryUs")+1);expect_decode_refused(corrupt);
+    std::cout<<"PASS: 12 physical raw and action replay frames through production core/adapter, exact full-channel/sink/signals comparison; 2 wrong-profile controls detected; 11 semantic corruptions refused\n";
 }
 int main(int argc,char** argv){try{
     check(argc==3,"usage: spike generate|replay absent-output-directory");

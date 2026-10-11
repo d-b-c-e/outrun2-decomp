@@ -16,8 +16,12 @@ Run from this checkout, with a new result directory:
 Requires MSVC/CMake and .NET 8. The script pins the native writer by SHA-256
 `A9DE5D49C55B9B4BE464FB173178D20A97972EACFF500AEE0267E30FB44D19DB`
 (introduced at toolkit `85147b8`, unchanged at audited `4ead536`). No native DLL
-is loaded. Results never overwrite prior evidence. `audit-receipt.json` records
-source/executable/evidence hashes. Build output stays in ignored `build-*`/`bin`/`obj`.
+is loaded. Results never overwrite prior evidence. The decomp tree and relevant
+toolkit subtrees must be committed and clean, and are rechecked after the run.
+`source-pins.before.json` hashes every tracked decomp file and the relevant toolkit
+writer/reader/build files; `audit-receipt.json` pins that manifest, commits, binaries
+and evidence. All native and managed build outputs (including the toolkit's)
+are under `<Result>/build`; generated tapes are in `<Result>/capture`.
 
 ## What passes
 
@@ -30,17 +34,29 @@ edges. A failed shifter read and a held shift after reopening are included.
 
 - Every decoded channel equals the original frame.
 - Raw replay through a fresh real core reproduces all twelve frames, including
-  rearm, epochs and edges. The fake provider is replayed; no hardware is read.
+  rearm, epochs and edges. These twelve frames have **physical input only**, no
+  injected values. The fake provider and its deterministic clock are replayed;
+  no hardware is read. Exact clock equality is fixture evidence only, not a live
+  acceptance rule. Real runs compare semantic outputs separately from original
+  source clocks and newly observed replay clocks; do not copy timestamps to pass.
 - Two intentionally wrong profiles (inverted steering and a different shifter
   button) produce mismatches, proving this raw replay exercises the actual binding
   resolver instead of simply returning the saved actions. These are deliberate
   fixture mutations; live replay must refuse an unexpected profile mismatch.
-- Action replay through the real OutRun adapter reproduces its steering, pedal,
-  shift, frontend and record-word outputs under the same **fixed fake game state**.
+- Action replay through the real OutRun adapter compares every `NativeInputState`
+  field and every adapter signal under the same **fixed fake game state**, with
+  neutral native-pad input. Every bound action is stimulated, including navLeft;
+  its menu edge occurs exactly on frame 9. This remains a fixed race-context
+  fixture, not a menu-navigation or scene-transition qualification.
 - A separate actual core injection frame preserves both devices' object marks and
   batch `999999999999999`, the parser's current 15-digit maximum.
-- Invalid status, missing raw channel, invalid source index, negative ID limb and
-  unknown extra channel are refused by the fixture decoder.
+- Eleven C++ corruption controls cover invalid status, missing raw channel,
+  source index, negative/fractional ID limbs, extra channels, unknown edge bits
+  and sample times outside the frame. Five managed limb controls cover fractions,
+  sign, range and non-finite values.
+- Existing v1 counted-drop and gap-marker variants are accepted by the production
+  reader, while lossless qualification refuses them; invalid counters/custom
+  stop reasons are rejected. No writer/reader API has been changed.
 - Abandoned and oversized files are rejected by the production managed reader.
 
 This does not establish route playback, mid-session checkpoints, game physics,
@@ -51,20 +67,22 @@ inputs; this is not yet a self-contained portable replay bundle.
 
 ## Design findings before the production recorder
 
-1. **Upstream loss is invisible to this writer.** `drop-then-stop.jsonl` deliberately
+1. **Upstream loss is uncounted by this native API.** `drop-then-stop.jsonl` deliberately
    omits one producer frame, then calls `stop()`. Both writer and generic reader
    report completed, zero drops, because their own row sequence is contiguous.
-   The recorded core sequence exposes the gap. This is a caller-integration
-   counterexample, not a defect in the synchronous writer's documented scope.
-   Section 10's promise of gap markers and an incomplete footer is not available
-   from this pin: it has neither a marker API nor an upstream-count/abort-footer
-   API. The immediate compatible policy is sticky capture failure plus `abandon()`
-   (missing footer), retaining the failure reason and dropped count in run evidence.
-   Do not call `stop()` after an ingress drop, event loss or drain timeout. Check
-   final producer counts and first/last sequence as well as internal gaps: a drop
-   before the first row or after the last row is otherwise invisible. A future
-   toolkit API change needs native and managed-reader compatibility tests together;
-   inventing a custom footer reason alone fails today's reader.
+   The core sequence exposes the gap. In v1 **completed means normally closed,
+   not lossless**. The format, managed recorder and reader already support counted
+   drops with a completed footer and gap markers. The native pin hard-codes those
+   counts to zero and has no marker method. Target a compatible native API that
+   accepts caller-reported rejection counts and marker records, tested against
+   today's reader; no format change is needed. Lossless qualification must refuse
+   nonzero drops and verify final producer counts and first/last sequences (not
+   merely internal gaps). Section 10's promise that every drop makes the footer
+   incomplete must be corrected. An interim `abandon()` on ingress/event loss is
+   safe but leaves no footer and keeps the reason/count only in outer run evidence.
+   A flush timeout has no adopted completion; an invented `upstreamDrop` footer
+   reason is rejected by today's reader. Do not disguise counted loss as a
+   successful lossless replay, or normal stream closure as proof of completeness.
 
 2. **Numeric precision must be explicit.** All v1 channel values are doubles.
    `ids.jsonl` shows a standalone uint64 value of 9007199254740993 rounded down
@@ -82,7 +100,15 @@ inputs; this is not yet a self-contained portable replay bundle.
    checking the budget. Do not silently trim buttons or device samples. The 4 MiB
    queue bound must count actual owned snapshot memory, not just row count; a
    1024-row limit is not a guarantee that 1024 full snapshots fit. The current
-   JSON size also needs a declared maximum before recording starts.
+   JSON size also needs a declared maximum before recording starts. The measured
+   two-device rows are about 10 KiB: at a hypothetical 60 Hz, 64 MiB lasts only
+   about 110 seconds, not 600. Eight-device rows approach 29 KiB / about 39 seconds.
+   `budget.json` measures this fixture and refuses a 600-second estimate under the
+   default; a larger explicitly selected file limit can fit (writer maximum 1 GiB).
+   Production preflight must use a defensible worst-case serialized row size,
+   declared tick-rate bound, metadata/footer reserve and requested duration, not
+   this fixture's observed maximum. Refuse or disclose a shorter capture before
+   starting, and retain the runtime file-size limit. Never silently trim data.
 
 4. **An exact profile hash alone is insufficient for raw replay.** Pin the exact
    profile bytes, device-slot identities, every epoch's verified objects/ranges,
@@ -151,3 +177,10 @@ attempt to send an over-15-digit batch was correctly refused; final fixture uses
 the parser's true limit and keeps the >2^53 test explicitly synthetic.
 The follow-up `shim-recording-audit-20261010-04` adds the two wrong-profile
 controls: inverted steering differs on 12 frames, the wrong shift button on two.
+Three steering mismatches are the one-LSB centre asymmetry; the other nine are
+deflected input. The corrected fixture asserts the exact frames: steering 0-11,
+shift 2-3. Nene independently reproduced clean `43782f8`, matching the original
+-04 numeric export byte-for-byte. Earlier -03/-04 were run before committing:
+their `sourceCommit` is only the base, and their partial source-file hashes are
+not complete provenance. Keep them as historical exploration evidence, not clean
+source receipts. Use a new run of the corrected committed harness for review.
