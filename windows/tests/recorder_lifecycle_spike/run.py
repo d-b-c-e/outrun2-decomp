@@ -32,6 +32,7 @@ build=result/'build'; managed=result/'managed'; capture=result/'capture'
 run('configure',['cmake','-S',here,'-B',build,'-G','Visual Studio 17 2022','-T','ClangCL','-A','x64','-DTOOLKIT_ROOT='+str(toolkit)])
 run('build',['cmake','--build',build,'--config','Debug'])
 run('lifecycle',[build/'Debug/recorder_lifecycle_test.exe'])
+run('lifecycle-portable',[build/'Debug/recorder_lifecycle_test_portable.exe'])   # r2.3: the bounded join without a platform handle
 run('native',[build/'Debug/recorder_lifecycle_native.exe',capture])
 run('managed-build',['dotnet','build',here/'managed/LifecycleConformance.csproj','--configuration','Release','--artifacts-path',managed,'-p:ToolkitRoot='+str(toolkit)])
 run('reader',['dotnet',managed/'bin/LifecycleConformance/release/LifecycleConformance.dll',capture])
@@ -47,6 +48,8 @@ if args.mutations:
       'omit-owned-copy': [('s_->ring[std::size_t(write%s_->ring.size())]=p;','/* snapshot copy omitted */')],
       'post-end-refusal-called-loss': [('if(ended_){++s_->after_end;return false;}','if(ended_){++s_->after_end;s_->rejected(p,s_->outcome.load());return false;}')],
       'writer-limit-called-io-error': [('sink->stopped_at_limit()?Outcome::WriterLimit:Outcome::WriteFailure','Outcome::WriteFailure')],
+      # r2.3 (Astra 13816): the old join, unbounded once worker_done is published; a thread-exit tail holds it.
+      'join-ignores-thread-exit': [('        return join_thread_until(worker_,deadline);','        if(worker_.joinable())worker_.join();return true;')],
     }
     for name,edits in variants.items():
         source=result/'mutations'/name; source.mkdir(parents=True)

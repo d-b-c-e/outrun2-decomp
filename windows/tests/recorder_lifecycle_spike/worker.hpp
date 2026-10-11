@@ -13,8 +13,39 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#if defined(_WIN32) && !defined(RECORDER_SPIKE_PORTABLE_JOIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace recorder_spike {
+// P21 r2.3 (Astra 13545/13816): a worker's last state change precedes its thread's end. Thread-exit work (thread_local,
+// FLS and pthread-key destructors, DLL thread-detach code) runs after the function returns, and std::thread::join waits
+// for it without a bound. So the thread itself is waited for against the caller's deadline. On Windows: its handle,
+// then join (at once) or detach. Elsewhere (or with RECORDER_SPIKE_PORTABLE_JOIN): the standard library has no timed
+// join, so a helper joins it and is waited for; the helper, owning the worker thread object, is always detached.
+inline bool join_thread_until(std::thread& t,std::chrono::steady_clock::time_point deadline){
+    if(!t.joinable())return true;
+#if defined(_WIN32) && !defined(RECORDER_SPIKE_PORTABLE_JOIN)
+    const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
+    const DWORD ms=left<=0?0:left>=0x7FFFFFFE?0x7FFFFFFE:DWORD(left);
+    if(WaitForSingleObject(static_cast<HANDLE>(t.native_handle()),ms)==WAIT_OBJECT_0){t.join();return true;}
+    t.detach();return false;
+#else
+    struct Joined{std::mutex m;std::condition_variable cv;bool done=false;};
+    auto j=std::make_shared<Joined>();
+    std::thread helper([j,w=std::move(t)]()mutable{w.join();{std::lock_guard<std::mutex> l(j->m);j->done=true;}j->cv.notify_all();});
+    bool joined;
+    {std::unique_lock<std::mutex> l(j->m);joined=j->cv.wait_until(l,deadline,[&]{return j->done;});}
+    helper.detach();   // never joined: its own exit could wait behind the same exit work
+    return joined;
+#endif
+}
 constexpr std::size_t MaxValues=1024;
 struct Packet {
     std::uint64_t sequence{};
@@ -223,14 +254,14 @@ public:
     // A facade destroyed with the worker unfinished still leaves it running on its own State (detached, as before).
     ~Controller(){s_->fail(Outcome::Cancelled);if(worker_.joinable())worker_.detach();}
     // P21: proof that the worker THREAD finished, separate from its published outcome. worker_done is its last state
-    // change (after sink destruction); nothing after it can block, so the join is immediate. False at the deadline.
+    // change (after sink destruction), but thread-exit work can still run after it (a sink's thread_local or FLS
+    // destructor, r2.3), so the thread is waited for against the same deadline. False at the deadline.
     bool join_until(std::chrono::steady_clock::time_point deadline){
         {
             std::unique_lock<std::mutex> lock(s_->wait_mutex);
             if(!s_->changed.wait_until(lock,deadline,[&]{return s_->worker_done.load();}))return false;
         }
-        if(worker_.joinable())worker_.join();
-        return true;
+        return join_thread_until(worker_,deadline);
     }
     Producer producer(){if(producer_taken_)throw std::logic_error("one producer");producer_taken_=true;return Producer(s_);}
     Report report()const{return s_->report();}

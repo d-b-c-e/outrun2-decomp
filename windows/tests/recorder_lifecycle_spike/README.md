@@ -206,3 +206,12 @@ If the input thread is stuck, P21 cannot substitute a supervisor finish.
 
 No launch, installation, merge into the game runtime or promotion to the shared
 toolkit follows from these tests alone. The second game remains the reuse gate.
+## r2.3: the join waits for the thread, not only worker_done (Astra 13816)
+
+`worker_done` is the worker's last state change, but its thread can still run exit work afterwards: a sink's `thread_local` or FLS destructor, or DLL thread-detach code. `std::thread::join` waits for that without a bound. Astra's private reproduction at 20d466a: a sink registering an 1800 ms TLS tail kept `join_until` at 1.81 s against a 200 ms budget, with Complete published and joined.
+
+`Controller::join_until` now waits for the thread itself, against the same deadline (`join_thread_until`):
+- **Windows:** the thread handle, then join or detach.
+- **Elsewhere, or with `RECORDER_SPIKE_PORTABLE_JOIN`:** a helper joins it and is waited for, and the helper is always detached.
+
+Both builds run here: `recorder_lifecycle_test` and `recorder_lifecycle_test_portable`. Each runs the tail cases (50 ms joined; 1500 ms and an endless, releasable tail not joined), every join returns in under 700 ms against a 300 ms deadline, and the published Complete is unchanged. The mutant `join-ignores-thread-exit` (the old join) is caught.

@@ -24,11 +24,24 @@ struct Trace {
     const std::thread::id owner=std::this_thread::get_id();
     std::string fail_at,throw_at;
     bool writer_limit{};
+    // Thread tail (Astra 13816): stop() adds exit work to the worker thread, a sink's thread_local destructor, and
+    // returns normally: tail_ms (bounded) or, when negative, until tail_release.
+    bool tail{};int tail_ms{};
+    std::shared_ptr<std::atomic<bool>> tail_release=std::make_shared<std::atomic<bool>>(false),tail_finished=std::make_shared<std::atomic<bool>>(false);
     void call(){if(std::this_thread::get_id()==owner)++owner_calls;}
     void release(){write_gate.released=true;stop_gate.released=true;}
 };
 std::vector<std::weak_ptr<Trace>> traces;
 std::shared_ptr<Trace> trace(){auto t=std::make_shared<Trace>();traces.push_back(t);return t;}
+struct ThreadTail {
+    int ms=0;std::shared_ptr<std::atomic<bool>> release,finished;
+    ~ThreadTail(){
+        if(!finished)return;
+        if(ms>=0)std::this_thread::sleep_for(std::chrono::milliseconds(ms));else while(!release->load())std::this_thread::sleep_for(1ms);
+        finished->store(true);
+    }
+};
+void add_thread_tail(const Trace& t){static thread_local ThreadTail tail;tail.ms=t.tail_ms;tail.release=t.tail_release;tail.finished=t.tail_finished;}
 struct FakeSink final:Sink {
     std::shared_ptr<Trace> t;
     explicit FakeSink(std::shared_ptr<Trace> s):t(std::move(s)){}
@@ -37,7 +50,7 @@ struct FakeSink final:Sink {
     bool open()override{++t->opens;return step("open");}
     bool write(const Packet& p)override{t->write_gate.arrive();if(!step("write")||t->writer_limit)return false;t->rows.push_back(p);++t->writes;return true;}
     bool stopped_at_limit()const override{return t->writer_limit;}
-    bool stop()override{++t->stops;t->stop_gate.arrive();if(!step("stop"))return false;t->inner_complete=true;return true;}
+    bool stop()override{++t->stops;t->stop_gate.arrive();if(!step("stop"))return false;if(t->tail)add_thread_tail(*t);t->inner_complete=true;return true;}
     void abandon()noexcept override{t->call();++t->abandons;}
     std::string reason()const override{return t->fail_at.empty()?(t->inner_complete?"stopped":"abandoned"):t->fail_at+"Failure";}
 };
@@ -152,9 +165,26 @@ void producer_disappears(){
     auto t=trace();auto c=controller(t);{auto p=c->producer();p.push(packet(1));}
     const auto r=c->drain(2s);check(r.outcome==Outcome::ProducerAbandoned&&!r.may_seal()&&t->stops==0,"abandoned producer cannot complete");reconcile(r);
 }
+// r2.3: the worker publishes Complete and worker_done, then its thread still runs exit work. join_until waits for the
+// thread itself against the same deadline: a short tail is waited for, a long or endless one makes it false in time.
+void thread_tail(int tail_ms,bool joined){
+    auto t=trace();t->tail=true;t->tail_ms=tail_ms;auto c=controller(t);auto p=c->producer();
+    check(p.push(packet(1)),"tail fixture accepted");p.finish(1);
+    const auto r=c->drain(2s);done(p);
+    check(r.may_seal(),"the outcome is published Complete before the thread's exit work");
+    const auto t0=std::chrono::steady_clock::now();
+    const bool ok=c->join_until(t0+300ms);
+    const auto took=std::chrono::steady_clock::now()-t0;
+    check(ok==joined,joined?"a tail inside the deadline is waited for: joined":"a tail past the deadline: not joined");
+    check(took<700ms,"join_until returns within its deadline whatever the exit work does");
+    check(c->report().may_seal(),"the published outcome is unchanged by the join");
+    // Let the exit work end before the process does (a stuck exit callback must not meet process exit here).
+    t->tail_release->store(true);wait([&]{return t->tail_finished->load();});
+}
 }
 int main(){
-    try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();}
+    try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
+        thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);}
     catch(const std::exception& e){for(auto& w:traces)if(auto t=w.lock())t->release();std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"Recorder lifecycle: "<<checks<<" checks passed\n";
 }
