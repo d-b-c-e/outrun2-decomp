@@ -6,8 +6,8 @@
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp)
-target_include_directories(OutRunDesktop PRIVATE source shim host vendor/controls)
-target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid)
+target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session)
+target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt)
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 

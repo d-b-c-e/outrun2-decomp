@@ -4,6 +4,7 @@
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "outrun_adapter.hpp"
+#include "outrun_recorder.hpp"
 #include "provider_host.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
@@ -16,12 +17,6 @@ namespace {
 namespace h=dbce::shim::hosting;
 namespace c=dbce::shim::control;
 namespace sh=dbce::shim;
-// The first in-game loop has no capture yet; the host still requires its lazy recorder contract.
-struct NoCapture {
-    void finish(){}
-    struct Drained{h::RecOutcome outcome;bool joined;};
-    Drained drain(h::Clock::time_point){return {h::RecOutcome::Complete,true};}
-};
 constexpr const char* CoreVersion="input-shim core (fe120fe line)";
 constexpr const char* AdapterVersion="outrun adapter slice 2a.1";
 struct State {
@@ -29,7 +24,7 @@ struct State {
     std::string profile;                       // the exact [Controls] bytes Core parses; their hash is the identity
     std::string transmission;
     bool configured{},started{},stopped{};
-    std::unique_ptr<h::ProviderHost<NoCapture>> host;
+    std::unique_ptr<h::ProviderHost<ShimRecorder>> host;
     std::unique_ptr<Adapter> adapter;
     Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{};
 };
@@ -71,11 +66,15 @@ void start(){
     if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
         std::printf("input shim: DirectInput8Create failed; the latched run has no shim input\n");return;}
     try{
-        g.host=std::make_unique<h::ProviderHost<NoCapture>>(g.plan.run_root,g.plan.nonce,input,g.profile,true,std::make_unique<NoCapture>(),
-            outrun_capability(),hwnd);
+        CaptureSettings capture;
+        capture.folder=std::filesystem::path(g.plan.run_root)/L"capture";capture.profile=g.profile;
+        capture.run_nonce=g.plan.nonce;capture.adapter_version=AdapterVersion;
+        g.host=std::make_unique<h::ProviderHost<ShimRecorder>>(g.plan.run_root,g.plan.nonce,input,g.profile,true,
+            std::make_unique<ShimRecorder>(capture),outrun_capability(),hwnd);
     }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());return;}
     g.adapter=std::make_unique<Adapter>(g.transmission);
     (void)g.host->tick();   // the first frame: the start report follows the device checks
+    g.host->recorder().set_devices(g.host->device_reports());
     const auto start=g.host->start_report();
     std::printf("%s\n",start.line.c_str());
     for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
@@ -131,18 +130,23 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     if(!g.started)start();
     if(!g.host)return;
     const auto& frame=g.host->tick();
-    g.adapter->apply(frame,view(runtime),out);
+    const auto v=view(runtime);
+    g.adapter->apply(frame,v,out);
+    g.host->recorder().push(Snapshot{frame,g.adapter->signals(),out,v});   // one capture row per tick, copied now
     log_signals(g.adapter->signals(),frame.run);
 }
 
 void shim_input_shutdown(){
     if(!g.host||g.stopped)return;
     g.stopped=true;
+    g.host->recorder().set_devices(g.host->device_reports());   // the final device table for the capture members
     g.host->close_control_admission();
     (void)g.host->tick();                      // the final neutral Core tick after the close (host order)
     platform::NativeInputState neutral{};g.adapter->apply_neutral(true,neutral);
     const auto report=g.host->stop();
-    std::printf("input shim: host stop %s%s\n",report.resolved?"resolved":"UNRESOLVED",report.control_complete?"":" (control journal incomplete)");
+    std::printf("input shim: host stop %s%s; capture %llu rows%s%s\n",report.resolved?"resolved":"UNRESOLVED",
+        report.control_complete?"":" (control journal incomplete)",(unsigned long long)g.host->recorder().pushed(),
+        g.host->recorder().refusal().empty()?"":", refused: ",g.host->recorder().refusal().c_str());
     std::fflush(stdout);
     if(!report.resolved)g.host->park_for_supervisor();   // the supervisor ends a latched process that did not resolve (P21)
 }
