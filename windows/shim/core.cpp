@@ -133,6 +133,7 @@ void Core::request_admission(const Session& s,std::uint64_t now_unix,bool fences
     // The session's end is latched on the monotonic clock now, so a slow admission never extends it (slice 1 review 2).
     const auto now=p_.now_us();
     std::lock_guard<std::mutex> l(m_);
+    if(control_closed_)return;
     if(admission_requested_||admission_refused_){++admission_repeats_;return;}   // never refreshed, never a new nonce
     if(s.expires_unix<=now_unix){admission_refused_=true;admission_why_="the session has already ended";return;}
     const auto remaining=s.expires_unix-now_unix;
@@ -147,12 +148,22 @@ void Core::push_control_event(Event e){
 }
 void Core::refuse_admission(const std::string& why){
     std::lock_guard<std::mutex> l(m_);
+    if(control_closed_)return;
     admission_refused_=true;admission_why_=why;
 }
+Core::ControlState Core::control_state()const{
+    std::lock_guard<std::mutex> l(m_);return {published_run_,control_closed_};
+}
+void Core::fail_control(const std::string& why){
+    std::lock_guard<std::mutex> l(m_);
+    if(!control_closed_&&!control_failed_){control_failed_=true;control_failure_=why.substr(0,512);}
+}
+void Core::close_control(){std::lock_guard<std::mutex> l(m_);control_closed_=true;}
 BatchResult Core::offer_batch(const std::string& bytes){
     BatchContext ctx;
     Run run;
     {std::lock_guard<std::mutex> l(m_);
+     if(control_closed_){BatchResult closed;closed.verdict=BatchVerdict::Refused;closed.why="control admission is closed";return closed;}
      run=published_run_;ctx.nonce=session_.nonce;ctx.owned=workload_snapshot_;}
     ctx.have_last=have_last_;ctx.last_n=last_n_;ctx.last_hash=last_hash_;ctx.profile=&profile_.section;
     BatchResult r;
@@ -168,6 +179,10 @@ BatchResult Core::offer_batch(const std::string& bytes){
     r=check_batch(bytes,ctx);
     r.generation.accepted_us=now;
     std::lock_guard<std::mutex> l(m_);
+    // The host may have stopped, or the input thread ended the run, while parsing.
+    if(control_closed_||(published_run_!=Run::Waiting&&published_run_!=Run::Running)){
+        r.verdict=BatchVerdict::Refused;r.why="control admission closed while checking batch";return r;
+    }
     if(r.verdict==BatchVerdict::Accepted&&generations_.size()>=cfg_.generation_queue){
         r.verdict=BatchVerdict::Refused;r.why="the activation queue is full";
     }
@@ -220,6 +235,10 @@ const Frame& Core::tick(){
     const auto now=p_.now_us();
     frame_.boundary_us=now;
     for(auto& s:frame_.samples)if(s.valid&&now-s.read_end_us>cfg_.fresh_us)s.stale=true;
+    {bool closed,failed;std::string why;
+     {std::lock_guard<std::mutex> l(m_);closed=control_closed_;failed=control_failed_;why=control_failure_;}
+     if((closed||failed)&&(run_==Run::Latched||run_==Run::Waiting||run_==Run::Running))
+         set_run(Run::Failed,failed?"control I/O failed: "+why:"control admission closed",now);}
     if(run_==Run::Latched)evaluate_admission(now);
     {bool failed=false,overflow=false;std::string why;
      {std::lock_guard<std::mutex> l(m_);failed=batch_failed_;why=batch_failed_why_;overflow=control_events_dropped_>0;}

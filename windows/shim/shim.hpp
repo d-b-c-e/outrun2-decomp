@@ -233,6 +233,11 @@ public:
     void request_admission(const Session&,std::uint64_t now_unix,bool fences_verified,bool force_absent);
     void refuse_admission(const std::string& why);       // inject.on unreadable or refused, fences, ...
     BatchResult offer_batch(const std::string& bytes);  // checked, then queued for activation
+    // Cross-thread control handoff. Never read input-thread run() from a worker.
+    struct ControlState { Run run; bool closed; };
+    ControlState control_state()const;
+    void fail_control(const std::string& why);           // first I/O/journal failure; next tick is terminal neutral
+    void close_control();                              // host stop gate; late I/O cannot enqueue or rearm
     std::vector<Event> drain_events();
     std::vector<StatusChange> drain_status();
     std::uint64_t status_dropped()const;
@@ -298,6 +303,8 @@ private:
     std::uint64_t control_events_dropped_{},duplicates_pending_{},duplicate_last_n_{},refusals_after_failure_{},admission_repeats_{};
     std::int64_t admission_deadline_us_{};            // the session's end on the monotonic clock, latched at the request
     bool admission_requested_{},admission_refused_{},batch_failed_{};
+    bool control_closed_{},control_failed_{};
+    std::string control_failure_;
     std::string admission_why_,batch_failed_why_;
     Session session_;
     std::uint64_t session_now_unix_{};
