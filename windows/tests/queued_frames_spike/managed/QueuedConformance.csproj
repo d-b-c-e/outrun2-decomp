@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup><ProjectReference Include="$(ToolkitRoot)/dotnet/Dbce.Wheel.Recording/Dbce.Wheel.Recording.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="$(ToolkitRoot)/dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs" Link="Production/ArtifactSeal.cs" /></ItemGroup>
+</Project>
