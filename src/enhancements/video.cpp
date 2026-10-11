@@ -1,7 +1,9 @@
 #include "enhancements/video.hpp"
 #include <cstdio>
 #include <cstdlib>
+#ifdef _WIN32
 #include <filesystem>
+#endif
 #include <fstream>
 #include <sstream>
 
@@ -76,10 +78,14 @@ bool write_options(const std::string& path,const std::vector<std::pair<std::stri
     std::ostringstream out;for(const auto& l:lines)out<<l<<'\n';
     const auto temp=path+".tmp";
     {std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f)return false;f<<out.str();if(!f.flush())return false;}
-    // std::filesystem::rename replaces an existing file on every platform; the C rename does not on Windows, where
-    // every save after the first (options.ini exists from the first launch) failed.
-    std::error_code ec;std::filesystem::rename(temp,path,ec);
-    if(ec){std::remove(temp.c_str());return false;}
+#ifdef _WIN32
+    // The C rename does not replace an existing file on Windows, so every save after the first (options.ini exists
+    // from the first launch) failed; std::filesystem::rename replaces it.
+    std::error_code ec;std::filesystem::rename(temp,path,ec);const bool moved=!ec;
+#else
+    const bool moved=std::rename(temp.c_str(),path.c_str())==0;   // POSIX rename replaces the destination
+#endif
+    if(!moved){std::remove(temp.c_str());return false;}
     return true;
 }
 }
