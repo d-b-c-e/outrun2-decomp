@@ -130,8 +130,20 @@ bool Core::service_devices(){
 
 // ---------------------------------------------------------------- control worker
 void Core::request_admission(const Session& s,std::uint64_t now_unix,bool fences_verified,bool force_absent){
+    // The session's end is latched on the monotonic clock now, so a slow admission never extends it (slice 1 review 2).
+    const auto now=p_.now_us();
     std::lock_guard<std::mutex> l(m_);
+    if(admission_requested_||admission_refused_){++admission_repeats_;return;}   // never refreshed, never a new nonce
+    if(s.expires_unix<=now_unix){admission_refused_=true;admission_why_="the session has already ended";return;}
+    const auto remaining=s.expires_unix-now_unix;
+    if(remaining>3600){admission_refused_=true;admission_why_="the session ends more than an hour from now";return;}
     admission_requested_=true;session_=s;session_now_unix_=now_unix;fences_verified_=fences_verified;force_absent_=force_absent;
+    admission_deadline_us_=now+std::int64_t(remaining)*1000000;
+}
+// m_ held. Bounded: an overflow is counted, and the input thread fails a running test on it (slice 1 review 4).
+void Core::push_control_event(Event e){
+    if(pending_events_.size()>=cfg_.control_event_queue){++control_events_dropped_;return;}
+    pending_events_.push_back(std::move(e));
 }
 void Core::refuse_admission(const std::string& why){
     std::lock_guard<std::mutex> l(m_);
@@ -144,33 +156,39 @@ BatchResult Core::offer_batch(const std::string& bytes){
      run=published_run_;ctx.nonce=session_.nonce;ctx.owned=workload_snapshot_;}
     ctx.have_last=have_last_;ctx.last_n=last_n_;ctx.last_hash=last_hash_;ctx.profile=&profile_.section;
     BatchResult r;
+    const auto now=p_.now_us();
     if(run!=Run::Waiting&&run!=Run::Running){
         r.verdict=BatchVerdict::Refused;
         r.why=std::string("no test run is accepting batches (run ")+run_name(run)+")";
-        // A terminal run stays terminal; this is logged, never a reason to rearm.
+        // A terminal run stays terminal: logged once, then only counted; never a reason to rearm.
         std::lock_guard<std::mutex> l(m_);
-        pending_events_.push_back({0,p_.now_us(),EventKind::BatchRefused,-1,0,0,r.why});
+        if(refusals_after_failure_++==0)push_control_event({0,now,EventKind::BatchRefused,-1,0,0,r.why});
         return r;
     }
     r=check_batch(bytes,ctx);
-    r.generation.accepted_us=p_.now_us();
+    r.generation.accepted_us=now;
     std::lock_guard<std::mutex> l(m_);
     if(r.verdict==BatchVerdict::Accepted&&generations_.size()>=cfg_.generation_queue){
         r.verdict=BatchVerdict::Refused;r.why="the activation queue is full";
     }
-    Event e{0,r.generation.accepted_us,EventKind::BatchRefused,-1,0,r.generation.n,r.why};
     switch(r.verdict){
     case BatchVerdict::Accepted:
+        // Bounded by the generation queue; each one is accounted for again at activation or as superseded.
         generations_.push_back(r.generation);
         have_last_=true;last_n_=r.generation.n;last_hash_=r.generation.hash;
-        e.kind=EventKind::BatchAccepted;
-        e.detail=hex(r.generation.hash)+" commands "+std::to_string(r.generation.commands.size())+(r.generation.end?" end":"")+
-                 (r.generation.used_raw?" raw":"")+(r.generation.used_action?" action":"");
+        push_control_event({0,now,EventKind::BatchAccepted,-1,0,r.generation.n,
+            hex(r.generation.hash)+" commands "+std::to_string(r.generation.commands.size())+(r.generation.end?" end":"")+
+            (r.generation.used_raw?" raw":"")+(r.generation.used_action?" action":"")});
         break;
-    case BatchVerdict::Duplicate:e.kind=EventKind::BatchDuplicate;break;
-    case BatchVerdict::Refused:batch_failed_=true;batch_failed_why_=r.why;break;
+    case BatchVerdict::Duplicate:
+        // Coalesced into one event per tick with a count, so a flood costs a counter, not memory.
+        ++duplicates_pending_;duplicate_last_n_=r.generation.n;
+        break;
+    case BatchVerdict::Refused:
+        if(!batch_failed_){batch_failed_=true;batch_failed_why_=r.why;push_control_event({0,now,EventKind::BatchRefused,-1,0,r.generation.n,r.why});}
+        else ++refusals_after_failure_;
+        break;
     }
-    pending_events_.push_back(e);
     return r;
 }
 std::vector<Event> Core::drain_events(){
@@ -186,20 +204,27 @@ std::vector<StatusChange> Core::drain_status(){
 std::uint64_t Core::status_dropped()const{std::lock_guard<std::mutex> l(m_);return status_dropped_;}
 std::uint64_t Core::status_coalesced()const{std::lock_guard<std::mutex> l(m_);return status_coalesced_;}
 std::uint64_t Core::events_dropped()const{std::lock_guard<std::mutex> l(m_);return events_dropped_;}
+std::uint64_t Core::control_events_dropped()const{std::lock_guard<std::mutex> l(m_);return control_events_dropped_;}
 
 // ---------------------------------------------------------------- input thread
 const Frame& Core::tick(){
-    const auto now=p_.now_us();
+    const auto start=p_.now_us();
     frame_.seq++;
-    frame_.tick_us=now;
+    frame_.tick_us=start;
     frame_.samples.clear();
     frame_.down=frame_.up=0;
-    adopt_worker_changes(now);
-    read_devices(now);
+    adopt_worker_changes(start);
+    read_devices(start);
+    // The decision time is re-read after every device read (slice 1 review 1): a slow read must not let an older sample
+    // or an expired command through. Admission, expiry, activation, delivery and freshness all use it.
+    const auto now=p_.now_us();
+    frame_.boundary_us=now;
+    for(auto& s:frame_.samples)if(s.valid&&now-s.read_end_us>cfg_.fresh_us)s.stale=true;
     if(run_==Run::Latched)evaluate_admission(now);
-    {bool failed=false;std::string why;
-     {std::lock_guard<std::mutex> l(m_);failed=batch_failed_;why=batch_failed_why_;}
-     if(failed&&(run_==Run::Waiting||run_==Run::Running))set_run(Run::Failed,"batch refused: "+why,now);}
+    {bool failed=false,overflow=false;std::string why;
+     {std::lock_guard<std::mutex> l(m_);failed=batch_failed_;why=batch_failed_why_;overflow=control_events_dropped_>0;}
+     if(failed&&(run_==Run::Waiting||run_==Run::Running))set_run(Run::Failed,"batch refused: "+why,now);
+     if(overflow&&(run_==Run::Waiting||run_==Run::Running))set_run(Run::Failed,"control events overflowed (the test evidence would be incomplete)",now);}
     if(run_==Run::Waiting||run_==Run::Running){
         std::string why;
         if(!workload_intact(why))set_run(Run::Failed,why,now);
@@ -221,9 +246,11 @@ const Frame& Core::tick(){
 void Core::adopt_worker_changes(std::int64_t now){
     std::vector<Opened> op;
     std::vector<Event> control_events;
+    std::uint64_t duplicates=0,duplicate_n=0;
     {std::lock_guard<std::mutex> l(m_);
      op.swap(opened_);
      control_events.swap(pending_events_);
+     duplicates=duplicates_pending_;duplicate_n=duplicate_last_n_;duplicates_pending_=0;
      for(auto& d:devs_)if(d.state!=DevState::Open){
          // An epoch the input thread handed back stays read-failed until the worker reopens or gives up on it.
          if(d.state==DevState::ReadFailed&&d.worker_state==DevState::ReadFailed)continue;
@@ -231,6 +258,7 @@ void Core::adopt_worker_changes(std::int64_t now){
          d.reason=d.worker_reason;
      }}
     for(auto& e:control_events)emit_event(e);
+    if(duplicates)emit(EventKind::BatchDuplicate,now,-1,0,duplicate_n,std::to_string(duplicates)+" exact duplicate(s), ignored");
     for(const auto& o:op){
         auto& d=devs_[std::size_t(o.device)];
         d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.reason.clear();
@@ -278,18 +306,41 @@ bool Core::owned_ready()const{
     if(devs_.empty())return false;
     for(const auto& d:devs_){
         if(d.state!=DevState::Open||!d.fresh_seen||d.sample<0)return false;
-        if(!frame_.samples[std::size_t(d.sample)].valid)return false;
+        const auto& s=frame_.samples[std::size_t(d.sample)];
+        if(!s.valid||s.stale)return false;
     }
     return true;
 }
+// Supported bindings whose object exists, with a readable range for axes, on a device with a fresh valid read in this
+// frame (slice 1 review 3: device readiness alone admitted a profile whose only binding was missing).
+int Core::usable_bindings()const{
+    int n=0;
+    for(const auto& b:bound_){
+        const auto& d=devs_[std::size_t(b.device)];
+        if(d.state!=DevState::Open||d.sample<0)continue;
+        const auto& s=frame_.samples[std::size_t(d.sample)];
+        if(!s.valid||s.stale)continue;
+        const auto i=std::size_t(b.binding.index);
+        switch(b.binding.kind){
+        case ctl::Kind::Axis:if(d.caps.axis[i]&&d.caps.range_ok[i]&&d.caps.max[i]>d.caps.min[i])++n;break;
+        case ctl::Kind::Button:if(d.caps.button.test(i))++n;break;
+        case ctl::Kind::Hat:if(d.caps.pov[i])++n;break;
+        default:break;
+        }
+    }
+    return n;
+}
 
 void Core::evaluate_admission(std::int64_t now){
-    bool requested,refused,fences,force;Session s;std::uint64_t now_unix;std::string why;
+    bool requested,refused,fences,force;std::int64_t deadline;std::string why;
     {std::lock_guard<std::mutex> l(m_);
-     requested=admission_requested_;refused=admission_refused_;fences=fences_verified_;force=force_absent_;s=session_;now_unix=session_now_unix_;why=admission_why_;}
+     requested=admission_requested_;refused=admission_refused_;fences=fences_verified_;force=force_absent_;
+     deadline=admission_deadline_us_;why=admission_why_;}
     if(refused){set_run(Run::Failed,"admission refused: "+why,now);return;}
     const bool late=now-start_us_>=cfg_.admission_us;
     if(!requested){if(late)set_run(Run::Failed,"no admission request",now);return;}
+    // The deadline was latched when the request arrived; waiting for devices never extends it (slice 1 review 2).
+    if(now>=deadline){set_run(Run::Failed,"admission refused: the session ended before admission",now);return;}
     if(!fences){set_run(Run::Failed,"admission refused: a fence is not verified",now);return;}
     if(!force){set_run(Run::Failed,"admission refused: a force path exists",now);return;}
     if(!owned_ready()){
@@ -300,13 +351,14 @@ void Core::evaluate_admission(std::int64_t now){
         }
         return;
     }
+    if(!usable_bindings()){set_run(Run::Failed,"admission refused: no usable binding (every applied action's object is missing or unqualified)",now);return;}
     workload_.clear();
     std::vector<OwnedDevice> snapshot;
     for(std::size_t i=0;i<devs_.size();++i){workload_.push_back({int(i),devs_[i].epoch});snapshot.push_back({devs_[i].id.dev,devs_[i].caps});}
     admitted_us_=now;
-    expires_us_=now+std::int64_t(s.expires_unix-now_unix)*1000000;
+    expires_us_=deadline;
     {std::lock_guard<std::mutex> l(m_);workload_snapshot_=snapshot;}
-    set_run(Run::Waiting,"admitted ("+std::to_string(workload_.size())+" device(s))",now);
+    set_run(Run::Waiting,"admitted ("+std::to_string(workload_.size())+" device(s), "+std::to_string(usable_bindings())+" usable binding(s))",now);
 }
 
 bool Core::workload_intact(std::string& why)const{
@@ -317,6 +369,11 @@ bool Core::workload_intact(std::string& why)const{
             return false;
         }
         if(d.sample<0||!frame_.samples[std::size_t(d.sample)].valid){why="no valid read of "+d.id.dev+" in this frame";return false;}
+        if(frame_.samples[std::size_t(d.sample)].stale){
+            why="the sample of "+d.id.dev+" is "+std::to_string((frame_.boundary_us-frame_.samples[std::size_t(d.sample)].read_end_us)/1000)+
+                " ms old at the frame's decision time (bound "+std::to_string(cfg_.fresh_us/1000)+" ms)";
+            return false;
+        }
     }
     return true;
 }
@@ -393,7 +450,8 @@ void Core::resolve(std::int64_t now){
         case DevState::ReadFailed:a.status=Status::ReadFailed;continue;
         case DevState::Open:break;
         }
-        if(!d.fresh_seen||d.sample<0||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::ReadPending;continue;}
+        if(!d.fresh_seen||d.sample<0){a.status=Status::ReadPending;continue;}
+        if(frame_.samples[std::size_t(d.sample)].stale||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::Stale;continue;}
         const auto& k=b.binding;const auto idx=std::size_t(k.index);
         if(k.kind==ctl::Kind::Axis){
             if(!d.caps.axis[idx]){a.status=Status::ObjectMissing;continue;}
@@ -483,6 +541,8 @@ void Core::track_status(std::int64_t now){
             why=std::string(st==Status::ObjectMissing?"no ":"unreadable or empty range on ")+ctl::kindName(k.kind)+" "+std::to_string(k.index)+
                 " of "+device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
         }
+        else if(st==Status::Stale)why="the sample is older than "+std::to_string(cfg_.fresh_us/1000)+" ms at the frame's decision time: "+
+                                     device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
         else if(is_unavailable(st))why=device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
         else if(st==Status::Rearming)why=pedal_waits_for_rest(i)?"waiting for rest":"waiting for release";
         if(st!=last_status_[std::size_t(i)]||why!=last_reason_[std::size_t(i)]){

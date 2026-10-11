@@ -64,7 +64,7 @@ public:
 // ---- statuses (section 7)
 enum class Status : std::uint8_t {
     Unbound,Invalid,Unsupported,
-    DeviceMissing,ProductMismatch,ObjectMissing,RangeUnqualified,Opening,ReadPending,ReadFailed,   // unavailable
+    DeviceMissing,ProductMismatch,ObjectMissing,RangeUnqualified,Opening,ReadPending,ReadFailed,Stale,   // unavailable
     Rearming,Live,TestNeutral                                                                       // applied
 };
 const char* status_name(Status);
@@ -134,6 +134,7 @@ struct DeviceSample {
     std::int64_t read_start_us{},read_end_us{};
     Call poll{Call::NotCalled},state{Call::NotCalled};
     bool valid{};
+    bool stale{};                 // valid, but older than the freshness bound at the frame's decision time
     RawState physical;            // as read
     RawState delivered;           // after injection (equal to physical when nothing was injected)
     InjectionMark injected;
@@ -149,7 +150,8 @@ const char* run_name(Run);
 bool run_terminal(Run);
 struct Frame {
     std::uint64_t seq{};
-    std::int64_t tick_us{};
+    std::int64_t tick_us{};       // when tick() began
+    std::int64_t boundary_us{};   // re-read after every device read: admission, expiry, activation and freshness use it
     std::uint64_t event_seq{};    // the last event's sequence when this frame was built
     Run run{Run::None};
     bool latched{},suppress_native{};
@@ -194,7 +196,7 @@ struct CoreConfig {
     std::int64_t admission_us=10000000;       // LATCHED: devices ready for admission
     int reacquire_tries=3;
     int max_opens_per_pass=4;
-    std::size_t status_queue=256,event_queue=1024,generation_queue=8;
+    std::size_t status_queue=256,event_queue=1024,generation_queue=8,control_event_queue=64;
 };
 
 struct StartReport { std::string line; std::vector<std::string> notes; };
@@ -218,6 +220,7 @@ public:
     std::uint64_t status_dropped()const;
     std::uint64_t status_coalesced()const;
     std::uint64_t events_dropped()const;
+    std::uint64_t control_events_dropped()const;
 
     // Game input thread.
     const Frame& tick();
@@ -270,7 +273,9 @@ private:
     std::vector<Opened> opened_;                      // worker -> input
     std::vector<Returned> returned_;                  // input -> worker
     std::deque<Generation> generations_;              // control -> input, first in first out, bounded
-    std::vector<Event> pending_events_;               // control -> input (written to the ring by the input thread)
+    std::vector<Event> pending_events_;               // control -> input, bounded by control_event_queue
+    std::uint64_t control_events_dropped_{},duplicates_pending_{},duplicate_last_n_{},refusals_after_failure_{},admission_repeats_{};
+    std::int64_t admission_deadline_us_{};            // the session's end on the monotonic clock, latched at the request
     bool admission_requested_{},admission_refused_{},batch_failed_{};
     std::string admission_why_,batch_failed_why_;
     Session session_;
@@ -320,6 +325,8 @@ private:
     void queue_status(StatusChange);
     void track_status(std::int64_t now);
     bool owned_ready()const;
+    int usable_bindings()const;
+    void push_control_event(Event);                   // m_ held
     std::string device_status(const Device&)const;
     std::string device_reason(const Device&)const;
 };

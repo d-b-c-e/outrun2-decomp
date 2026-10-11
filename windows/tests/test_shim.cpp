@@ -420,6 +420,127 @@ void test_generations(){
     int superseded=0;for(const auto& e:r.core->drain_events())if(e.kind==EventKind::BatchSuperseded)++superseded;
     check(r.core->run()==Run::Failed&&superseded==2,"the run failed with batches 3 and 4 queued: both superseded, with events");
 }
+
+// Slice 1 review, finding 1: decisions use the time after every read, never the tick's start.
+void test_decision_time(){
+    const auto prof=profile({"steer = axis 0 dev="+W+" prod="+WP+" range=0..65535 rest=32768 travel=+1",shifter("shiftUp = button 1")});
+    {// A slow last device makes the first device's sample stale: the test fails, neutral.
+     Rig r(true,prof,true);
+     r.admit();r.step();
+     r.core->offer_batch(batch(1,{"inject raw axis 0 dev="+W+" value=65535 ms=1000"}));r.step();
+     r.dev(r.s).state_advance_us.push_back(200000);
+     const auto& f=r.step();
+     check(r.core->run()==Run::Failed&&r.core->run_reason().find("ms old")!=std::string::npos,"a stale workload sample fails the run: "+r.core->run_reason());
+     check(!act(f,"steer").injected&&act(f,"steer").value==0,"and the stale frame delivers nothing");
+     check(f.samples[0].stale&&f.boundary_us-f.samples[0].read_end_us>=200000,"the first sample is marked stale against the boundary");}
+    {// A slow first device: the samples are fresh, but a 50 ms command activated earlier has expired by the boundary.
+     Rig r(true,prof,true);
+     r.admit();r.step();
+     r.core->offer_batch(batch(1,{"inject raw axis 0 dev="+W+" value=65535 ms=50"}));r.step(1000);
+     r.dev(r.w).state_advance_us.push_back(200000);
+     const auto& f=r.step(1000);
+     check(r.core->run()==Run::Running,"fresh samples: the run continues");
+     check(!act(f,"steer").injected&&act(f,"steer").status==Status::TestNeutral,"the expired command is not delivered after a slow read");}
+    {// Ordinary play: the first device's actions become unavailable (stale); the second device stays live.
+     Rig r(false,prof,true);
+     r.step();r.step();
+     r.dev(r.s).state_advance_us.push_back(200000);
+     const auto& f=r.step();
+     check(act(f,"steer").status==Status::Stale&&act(f,"steer").value==0,"ordinary: a stale action is unavailable");
+     check(act(f,"shiftUp").status==Status::Live,"the fresh device stays live");}
+    {// Session expiry is judged at the boundary.
+     Rig r(true,profile({wheel("confirm = button 0")}));
+     r.core->request_admission(Session{Nonce,1000000001ull},1000000000ull,true,true);
+     r.step();
+     r.core->offer_batch(batch(1,{"inject raw button 0 dev="+W+" value=1 ms=15000"}));r.step();
+     r.p.advance(900000);
+     r.dev(r.w).state_advance_us.push_back(200000);   // the deadline passes during the read
+     const auto& f=r.step(0);
+     check(r.core->run()==Run::Expired&&act(f,"confirm").value==0,"expiry at the boundary, not at the tick's start");}
+    {// A batch accepted before the delay, not yet activated, is superseded when the stale frame fails the run.
+     Rig r(true,prof,true);
+     r.admit();r.step();
+     r.core->drain_events();
+     r.core->offer_batch(batch(1,{"inject raw axis 0 dev="+W+" value=65535 ms=1000"}));
+     r.dev(r.s).state_advance_us.push_back(200000);
+     const auto& f=r.step();
+     bool activated=false,superseded=false;
+     for(const auto& e:r.core->drain_events()){if(e.kind==EventKind::BatchActivated)activated=true;if(e.kind==EventKind::BatchSuperseded&&e.batch==1)superseded=true;}
+     check(r.core->run()==Run::Failed&&!activated&&superseded&&!act(f,"steer").injected,"the pending batch is superseded, never activated or delivered");}
+}
+
+// Slice 1 review, finding 2: the session deadline is latched when admission is requested.
+void test_admission_deadline(){
+    {Rig r(true,profile({wheel("confirm = button 0")}));
+     r.dev(r.w).attached=false;   // the wheel is missing for two seconds
+     r.core->request_admission(Session{Nonce,1000000001ull},1000000000ull,true,true);   // one second left
+     for(int i=0;i<20;++i)r.step(100000);
+     r.dev(r.w).attached=true;
+     for(int i=0;i<3;++i)r.step();
+     check(r.core->run()==Run::Failed&&r.core->run_reason().find("ended before admission")!=std::string::npos,"a late admission never extends the session: "+r.core->run_reason());}
+    {Rig r(true,profile({wheel("confirm = button 0")}));
+     r.dev(r.w).attached=false;
+     r.core->request_admission(Session{Nonce,1000000001ull},1000000000ull,true,true);
+     r.core->request_admission(Session{"otherNonce99",1000003000ull},1000000000ull,true,true);   // ignored
+     for(int i=0;i<15;++i)r.step(100000);
+     r.dev(r.w).attached=true;r.step();r.step();
+     check(r.core->run()==Run::Failed,"a repeated request neither refreshes the deadline nor replaces the nonce");}
+    {Rig r(true,profile({wheel("confirm = button 0")}));
+     r.core->request_admission(Session{Nonce,1000000000ull},1000000000ull,true,true);
+     r.step();
+     check(r.core->run()==Run::Failed&&r.core->run_reason().find("already ended")!=std::string::npos,"an ended session is refused without underflow");}
+}
+
+// Slice 1 review, finding 3: admission needs at least one usable binding, not just ready devices.
+void test_admission_usable(){
+    {Rig r(true,profile({"brake = "+axis(1,0)}));   // axis 1 does not exist on the X/Z/Rz wheel
+     r.admit();r.step();
+     check(r.core->run()==Run::Failed&&r.core->run_reason().find("no usable binding")!=std::string::npos,"object-missing only: refused");}
+    {Rig r(true,profile({"brake = "+axis(5,0)}));
+     r.dev(r.w).caps.range_ok[5]=false;
+     r.admit();r.step();
+     check(r.core->run()==Run::Failed,"range-unqualified only: refused");}
+    {Rig r(true,profile({"brake = "+axis(1,0),"throttle = "+axis(2,0)}));
+     r.admit();r.step();
+     check(r.core->run()==Run::Waiting,"mixed usable and unavailable: admitted");
+     check(act(r.core->tick(),"brake").status==Status::ObjectMissing,"the unavailable action stays reported");}
+    {Rig r(true,profile({wheel("horn = button 4")}));   // only an action the adapter does not support
+     r.step();
+     check(r.core->run()==Run::Inert,"unsupported-only: inert");}
+}
+
+// Slice 1 review, finding 4: the control-to-input inbox is bounded.
+void test_control_flood(){
+    {Rig r(true,profile({wheel("confirm = button 0")}));
+     r.admit();r.step();
+     const auto b1=batch(1,{"inject raw button 0 dev="+W+" value=1 ms=5000"});
+     r.core->offer_batch(b1);r.step();
+     r.core->drain_events();
+     for(int i=0;i<10000;++i)r.core->offer_batch(b1);   // the input thread is stalled meanwhile
+     r.step();
+     auto events=r.core->drain_events();
+     int duplicates=0;std::string detail;
+     for(const auto& e:events)if(e.kind==EventKind::BatchDuplicate){++duplicates;detail=e.detail;}
+     check(duplicates==1&&detail.find("10000")!=std::string::npos,"10000 duplicates: one coalesced event with the count");
+     check(events.size()<10&&r.core->control_events_dropped()==0&&r.core->run()==Run::Running,"bounded work; duplicates are not a failure");}
+    {Rig r(true,profile({wheel("confirm = button 0")}));
+     r.admit();r.step();
+     r.core->offer_batch(batch(2,{"inject raw button 0 dev="+W+" value=1 ms=5000"}));r.step();
+     r.core->drain_events();
+     for(int i=0;i<10000;++i)r.core->offer_batch(batch(1,{"inject raw button 0 dev="+W+" value=1 ms=50"}));   // regressions
+     r.step();
+     const auto events=r.core->drain_events();
+     check(r.core->run()==Run::Failed&&events.size()<10&&r.core->control_events_dropped()==0,"10000 refusals: the first fails the run, the rest are counted");}
+    {CoreConfig cfg;cfg.control_event_queue=4;
+     Rig r(true,profile({wheel("confirm = button 0")}),false,cfg);
+     r.admit();r.step();
+     r.core->drain_events();
+     for(std::uint64_t n=1;n<=6;++n)r.core->offer_batch(batch(n,{"inject raw button 0 dev="+W+" value=1 ms=50"}));
+     r.step();
+     int superseded=0;for(const auto& e:r.core->drain_events())if(e.kind==EventKind::BatchSuperseded)++superseded;
+     check(r.core->control_events_dropped()==2&&r.core->run()==Run::Failed&&r.core->run_reason().find("overflowed")!=std::string::npos,"an overflow fails the run");
+     check(superseded==6,"and every accepted generation is still accounted for (superseded)");}
+}
 }
 
 int main(){
@@ -427,6 +548,7 @@ int main(){
         test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
+        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim slice 1: "<<checks<<" checks passed\n";
     return 0;

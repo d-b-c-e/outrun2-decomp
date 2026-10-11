@@ -20,6 +20,7 @@ struct Device {
     RawState state;                       // the physical state reads return
     std::deque<std::pair<Call,Call>> script;   // the next reads' (poll, state) results; empty: (Ok, Ok)
     std::deque<Call> reacquire_script;    // empty: Ok
+    std::deque<std::int64_t> state_advance_us;   // the next state reads each take this long on the fake clock
     int opens=0,closes=0,polls=0,state_reads=0,reacquires=0;
 };
 class Provider final:public shim::Provider {
@@ -96,6 +97,7 @@ public:
         if(!d){if(closed_.count(h))++misuse;}
         else{
             ++d->state_reads;
+            if(!d->state_advance_us.empty()){clock+=d->state_advance_us.front();d->state_advance_us.pop_front();}
             const auto p=pending_state_.find(h);
             c=p==pending_state_.end()?Call::Ok:p->second;
             if(c==Call::Ok)out=d->state;

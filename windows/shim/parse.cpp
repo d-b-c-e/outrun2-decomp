@@ -32,12 +32,12 @@ const char* status_name(Status s){
     case Status::Unbound:return "unbound";case Status::Invalid:return "invalid";case Status::Unsupported:return "unsupported";
     case Status::DeviceMissing:return "device-missing";case Status::ProductMismatch:return "product-mismatch";
     case Status::ObjectMissing:return "object-missing";case Status::RangeUnqualified:return "range-unqualified";
-    case Status::Opening:return "opening";case Status::ReadPending:return "read-pending";case Status::ReadFailed:return "read-failed";
+    case Status::Opening:return "opening";case Status::ReadPending:return "read-pending";case Status::ReadFailed:return "read-failed";case Status::Stale:return "stale";
     case Status::Rearming:return "rearming";case Status::Live:return "live";case Status::TestNeutral:return "test-neutral";
     }
     return "?";
 }
-bool is_unavailable(Status s){return s>=Status::DeviceMissing&&s<=Status::ReadFailed;}
+bool is_unavailable(Status s){return s>=Status::DeviceMissing&&s<=Status::Stale;}
 bool is_applied(Status s){return s==Status::Rearming||s==Status::Live||s==Status::TestNeutral;}
 const char* run_name(Run r){
     switch(r){
