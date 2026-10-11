@@ -311,6 +311,32 @@ return result;
 
 P28's rerun of P21 through the real provider over fake COM objects stays as written.
 
+### October 11 combined provider/recorder proof
+
+`windows/tests/p21_combined` now composes both real implementations inside the
+same `BasicProviderHost`. The default recorder keeps P21k unchanged; the combined
+fixture supplies the actual Controller/Producer/session Writer. The existing
+P21j finalizer gains an explicit seal/export entry point that reuses its exact
+validator. No production host, physical device or game was changed.
+
+Source `0474b8f` passes two originals (normal and within-budget release), each
+with 16 real-provider/Core/OutRun-adapter frames sealed and replayed exactly.
+Stuck writer, stuck provider, ordinary forced exit and stuck Unacquire never
+seal. A one-ULP altered channel fails against the retained producer snapshot.
+Original proof: hub `artifacts/p21-combined-03/receipt.json`. Earlier attempts
+01/02 retain harness failures (expected missing-member name, then assumed
+zero-center mutation anchor), with successful original captures unaltered.
+
+The prior P21k suite remains green: 129 host checks, 84 provider checks, lexical
+and compiler teardown audits and all six host mutations. The prior P21j suite
+remains green: 26 supervised checks, 5,257 finalizer checks and five mutations.
+Receipts: `artifacts/p21-combined-provider-regression/receipt.json` and
+`artifacts/p21-combined-recorder-regression/receipt.json` in the hub.
+
+Independent review is pending. Desktop adoption, real COM/device qualification,
+portable replay and WM_ENDSESSION remain separate boundaries. Synchronous
+report I/O still relies on the external fixture deadline.
+
 ## 7. Questions for Astra
 
 1. **D4, ordinary process.** Is a self-`TerminateProcess` acceptable for the owner's process when a driver call hangs
