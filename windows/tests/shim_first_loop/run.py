@@ -163,6 +163,14 @@ def main():
     if not (o.game / "OR2006C2C.exe").exists(): problems.append("no game data in %s (use --prepare-from)" % o.game)
     if not (o.game / "OutRunDesktop.exe").exists() or sha(o.game / "OutRunDesktop.exe") != sha(o.candidate):
         problems.append("the test folder's OutRunDesktop.exe is not the candidate")
+    # The x64 exe imports DINPUT8.dll statically and the loader searches its own folder first: any dinput8.dll there
+    # (the copied Tweaks proxy is x86) would be loaded instead of the system one (Astra 17238, zero 17223).
+    proxy = o.game / "dinput8.dll"
+    if proxy.exists():
+        head = proxy.read_bytes()[:4096]; pe = int.from_bytes(head[60:64], "little") if len(head) >= 64 else 0
+        machine = int.from_bytes(head[pe + 4:pe + 6], "little") if head[:2] == b"MZ" and head[pe:pe + 4] == b"PE\0\0" else None
+        problems.append("dinput8.dll beside the exe (machine %s, sha %s) would load instead of the system DirectInput: move it out of the test copy"
+                        % ({0x14c: "x86", 0x8664: "x64"}.get(machine, machine), sha(proxy)[:16]))
     ini = o.game / "OutRunDesktop.ini"
     if not ini.exists() or ini.read_text(encoding="utf-8") != PROFILE:
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
