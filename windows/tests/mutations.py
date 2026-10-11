@@ -123,7 +123,32 @@ FENCE = [
      "if(!ra||!rb||ha!=hb||a!=b){", "if(false){"),
 ]
 
-SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER), "fence": ("test_fence", FENCE)}
+DINPUT = [
+    ("close allowed during a read", "shim/dinput_provider.cpp",
+     "if(!s->state.compare_exchange_strong(idle,-1)){++misuse_;return;}   // a read is in progress (or already closed)",
+     "s->state.store(-1);"),
+    ("stale handle accepted (no generation check)", "shim/dinput_provider.cpp",
+     "return s->used.load()&&s->generation.load()==std::uint32_t(h>>8)?s:nullptr;", "return s->used.load()?s:nullptr;"),
+    ("state copied out of a failed read", "shim/dinput_provider.cpp",
+     "if(c!=Call::Ok)return c;   // nothing is copied from a failed read", ""),
+    ("requested range assumed, not read back", "shim/dinput_provider.cpp",
+     "if(SUCCEEDED(d->GetProperty(DIPROP_RANGE,&back.diph))&&back.lMax>back.lMin){",
+     "back.lMin=0;back.lMax=65535;if(true){"),
+    ("objects assumed, not checked by offset", "shim/dinput_provider.cpp",
+     "r.caps.axis[i]=has(AxisOffsets[a]);", "r.caps.axis[i]=true;"),
+    ("identity taken from the listing, not the handle", "shim/dinput_provider.cpp",
+     "r.opened={guid_text(di.guidInstance),guid_text(di.guidProduct),narrow(di.tszProductName)};", "r.opened=listed;"),
+    ("shutdown releases a device being read", "shim/dinput_provider.cpp",
+     "if(s.state.compare_exchange_strong(idle,-1)){s.device->Unacquire();", "if(s.state.exchange(-1),true){s.device->Unacquire();"),
+    ("acquisition loss classified as gone", "shim/dinput_provider.cpp",
+     "if(hr==DIERR_INPUTLOST||hr==DIERR_NOTACQUIRED)return Call::AcquisitionLost;", ""),
+    ("a refused open handle not released", "shim/dinput_provider.cpp",
+     "auto fail=[&](const std::string& why){d->Release();r=OpenResult{};r.why=why;return r;};",
+     "auto fail=[&](const std::string& why){r=OpenResult{};r.why=why;return r;};"),
+]
+
+SETS = {"core": ("test_shim", CORE), "adapter": ("test_outrun_adapter", ADAPTER), "fence": ("test_fence", FENCE),
+        "dinput": ("test_dinput_provider", DINPUT)}
 
 def run(target, mutations):
     build = ["cmake", "--build", str(repo / "build-xbox-pc"), "--config", "Release", "--target", target]

@@ -49,3 +49,12 @@ if(Python3_FOUND)
     add_test(NAME write_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 endif()
+
+# The DirectInput provider (shim/dinput_provider), slice 3: through the core, over fake COM devices.
+add_executable(test_dinput_provider tests/test_dinput_provider.cpp shim/dinput_provider.cpp shim/parse.cpp shim/core.cpp)
+target_include_directories(test_dinput_provider PRIVATE shim tests vendor/controls)
+target_compile_features(test_dinput_provider PRIVATE cxx_std_17)
+target_compile_options(test_dinput_provider PRIVATE /W4)
+target_compile_definitions(test_dinput_provider PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_dinput_provider PRIVATE dinput8 dxguid)
+add_test(NAME dinput_provider COMMAND test_dinput_provider)
