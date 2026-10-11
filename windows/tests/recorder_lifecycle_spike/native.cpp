@@ -1,0 +1,70 @@
+#include "worker.hpp"
+#include "session_writer.h"
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+using namespace recorder_spike;
+using namespace std::chrono_literals;
+namespace fs=std::filesystem;
+struct Gate {std::atomic<bool> entered{false},resume{false};};
+struct NativeSink final:Sink {
+    dbce::session::Writer writer;
+    fs::path path;
+    dbce::session::Limits limits;
+    std::shared_ptr<Gate> write_gate,stop_gate;
+    explicit NativeSink(fs::path p):path(std::move(p)){}
+    bool open()override{
+        dbce::session::Metadata m;m.game="outrun-recorder-lifecycle-fixture";m.pluginVersion="spike-only";m.toolkitVersion="writer-85147b8";
+        m.properties["qualification"]="offline worker lifecycle, no game or device";
+        return writer.open(path.wstring(),m,limits);
+    }
+    static void gate(const std::shared_ptr<Gate>& g){if(g){g->entered=true;while(!g->resume)std::this_thread::yield();}}
+    bool write(const Packet& p)override{
+        gate(write_gate);
+        dbce::session::Channels channels;
+        channels["source.seq.lo"]=std::uint32_t(p.sequence);channels["source.seq.hi"]=std::uint32_t(p.sequence>>32);
+        channels["source.us.lo"]=std::uint32_t(p.source_us);channels["source.us.hi"]=std::uint32_t(std::uint64_t(p.source_us)>>32);
+        for(std::uint32_t i=0;i<p.width;++i)channels["value."+std::to_string(i)]=p.values[i];
+        return writer.sample(double(p.source_us)/1000000.0,channels);
+    }
+    bool stop()override{gate(stop_gate);return writer.stop();}
+    void abandon()noexcept override{writer.abandon();}
+    std::string reason()const override{return writer.reason();}
+};
+void await(std::atomic<bool>& signal){
+    const auto deadline=std::chrono::steady_clock::now()+5s;
+    while(!signal){if(std::chrono::steady_clock::now()>deadline)throw std::runtime_error("native fixture barrier timeout");std::this_thread::yield();}
+}
+Packet row(unsigned i){Packet p;p.sequence=i;p.source_us=std::int64_t(i)*100000;p.width=2;p.values[0]=i;p.values[1]=-double(i);return p;}
+int main(int argc,char** argv){
+    if(argc!=2)return 2;
+    try{
+        fs::path root=argv[1];if(fs::exists(root))throw std::runtime_error("new result directory required");fs::create_directories(root);
+        std::ofstream reports(root/"outcomes.tsv");
+        for(const std::string mode:{"normal","abandoned","limited","late"}){
+            auto sink=std::make_unique<NativeSink>(root/(mode+".jsonl"));
+            auto block=std::make_shared<Gate>();
+            if(mode=="abandoned")sink->write_gate=block;
+            if(mode=="late")sink->stop_gate=block;
+            if(mode=="limited")sink->limits.seconds=0.15;
+            Controller c(2,2,2*sizeof(Packet),std::move(sink));auto producer=c.producer();
+            producer.push(row(1));
+            if(mode=="abandoned")await(block->entered);
+            producer.push(row(2));
+            if(mode=="abandoned")producer.push(row(3));
+            producer.finish(mode=="abandoned"?3:2);
+            if(mode=="late"){
+                await(block->entered);const auto timeout=c.drain(5ms);
+                if(timeout.outcome!=Outcome::TimedOut||timeout.may_seal())throw std::runtime_error("late footer timeout missed");
+            }
+            block->resume=true;
+            // For late: repeated drain only waits for cleanup; it cannot erase the timeout.
+            auto r=c.drain(5s);
+            if(!r.worker_done)throw std::runtime_error("worker has not released its writer");
+            reports<<mode<<'\t'<<int(r.outcome)<<'\t'<<r.may_seal()<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.sink_reason<<'\n';
+            const auto expected=mode=="normal"?Outcome::Complete:mode=="abandoned"?Outcome::QueueFull:mode=="limited"?Outcome::WriteFailure:Outcome::TimedOut;
+            if(r.outcome!=expected)throw std::runtime_error("wrong native outcome: "+mode);
+        }
+        std::cout<<"Native worker: normal, abandon, writer limit, late complete footer exercised\n";
+    }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+}
