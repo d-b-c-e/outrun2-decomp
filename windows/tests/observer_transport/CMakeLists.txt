@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(shim_observer_transport CXX)
+set(WIN ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+add_executable(observer_transport main.cpp)
+target_include_directories(observer_transport PRIVATE ${WIN}/shim ${WIN}/host)
+target_compile_features(observer_transport PRIVATE cxx_std_17)
+target_compile_definitions(observer_transport PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(observer_transport PRIVATE /W4 /WX /EHsc)
