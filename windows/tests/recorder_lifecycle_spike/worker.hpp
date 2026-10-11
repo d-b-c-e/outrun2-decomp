@@ -164,6 +164,7 @@ public:
 
 class Controller {
     std::shared_ptr<State> s_;
+    std::thread worker_;
     bool producer_taken_{};
     static void run(std::shared_ptr<State> s,std::unique_ptr<Sink> sink){
         bool stopped=false;
@@ -215,11 +216,22 @@ public:
             throw std::invalid_argument("recorder preflight");
         s_=std::make_shared<State>(capacity,width,first,std::move(hooks));
         if(s_->ring.capacity()>payload_budget/sizeof(Packet))throw std::invalid_argument("allocated payload budget");
-        std::thread(run,s_,std::move(sink)).detach();
+        worker_=std::thread(run,s_,std::move(sink));
     }
     Controller(const Controller&)=delete;
     Controller& operator=(const Controller&)=delete;
-    ~Controller(){s_->fail(Outcome::Cancelled);}
+    // A facade destroyed with the worker unfinished still leaves it running on its own State (detached, as before).
+    ~Controller(){s_->fail(Outcome::Cancelled);if(worker_.joinable())worker_.detach();}
+    // P21: proof that the worker THREAD finished, separate from its published outcome. worker_done is its last state
+    // change (after sink destruction); nothing after it can block, so the join is immediate. False at the deadline.
+    bool join_until(std::chrono::steady_clock::time_point deadline){
+        {
+            std::unique_lock<std::mutex> lock(s_->wait_mutex);
+            if(!s_->changed.wait_until(lock,deadline,[&]{return s_->worker_done.load();}))return false;
+        }
+        if(worker_.joinable())worker_.join();
+        return true;
+    }
     Producer producer(){if(producer_taken_)throw std::logic_error("one producer");producer_taken_=true;return Producer(s_);}
     Report report()const{return s_->report();}
     void cancel(){s_->fail(Outcome::Cancelled);}
