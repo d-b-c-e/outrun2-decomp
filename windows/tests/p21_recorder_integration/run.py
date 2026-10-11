@@ -15,7 +15,8 @@ def pin(root, scopes):
     return dict(commit=git(root, 'rev-parse', 'HEAD'), sha256={p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in git(root, 'ls-files', '--', *scopes).splitlines()})
 tk_scopes = ['native/session', 'dotnet/Dbce.Wheel.Recording', 'dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs', 'Directory.*', 'global.json', 'NuGet.Config']
 before = dict(source=pin(repo, ['.']), toolkit=pin(toolkit, tk_scopes))
-if before['toolkit']['sha256']['native/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or \n   before['source']['sha256']['windows/vendor/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
+if before['toolkit']['sha256']['native/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or \
+   before['source']['sha256']['windows/vendor/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
     raise RuntimeError('Unreviewed native writer.')
 result.mkdir(parents=True); (result / 'source-before.json').write_text(json.dumps(before, indent=2)); commands = []
 def run(name, cmd, expected=0):
