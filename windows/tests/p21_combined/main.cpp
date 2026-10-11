@@ -1,11 +1,9 @@
 // Offline composition: the SAME reviewed provider host owns the real recorder.
 // Reuse the prior fixture's codec, writer and identity-bound supervisor verbatim.
-// Its fake-provider child is compiled for regression tooling but never selected here.
-#define child p21j_fixture_child
-#define wmain p21j_fixture_wmain
+// Omit only its entry points; never rename identifiers in included SDK headers.
+#define P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
 #include "p21_recorder_integration/integration.cpp"
-#undef wmain
-#undef child
+#undef P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
 #include "p21_provider_host/host.hpp"
 #include "shim_fake_com.hpp"
 

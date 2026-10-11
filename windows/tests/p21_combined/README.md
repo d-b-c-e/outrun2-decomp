@@ -21,5 +21,11 @@ during a call, or use after release. A changed channel must fail exact replay.
 This remains an offline fixture. It does not demonstrate real hardware, game
 host adoption, portable replay, WM_ENDSESSION or force feel. Synchronous report
 I/O retains the existing outer process-timeout limitation. The fixture reuses
-the original P21j supervisor and codec by compiling that fixture with its entry
-points renamed; those older entry points are not invoked by this proof.
+the original P21j supervisor and codec with an explicit entry-point guard;
+no `child` or `wmain` macro can change identifiers in SDK headers.
+
+The reviewed native writer's content pin accepts LF or CRLF checkout bytes.
+Only CRLF-to-LF normalization is allowed; a BOM, lone CR or any content change
+refuses. The original byte hash is still pinned before and after the run.
+`writer-pin.json` retains both hashes; five changed-content controls accompany
+the two accepted checkout representations.

@@ -108,6 +108,7 @@ public:
     ~IntegratedHost() { if (report_ != INVALID_HANDLE_VALUE) CloseHandle(report_); }   // never stops, never waits (D9)
 };
 
+#ifndef P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
 static int child(const std::string& mode, const fs::path& capture_dir) {
     const bool latched = mode.find("ordinary") == std::string::npos;
     auto provider_gate = std::make_shared<p21::Gate>();
@@ -120,6 +121,7 @@ static int child(const std::string& mode, const fs::path& capture_dir) {
     host.reset();
     return 0;                            // normal CRT teardown: the recorder and every worker joined
 }
+#endif
 
 struct Observed { DWORD code = 0; bool forced = false; std::string state; };
 static std::string read_text(const fs::path& p) { std::ifstream f(p, std::ios::binary); std::stringstream s; s << f.rdbuf(); return s.str(); }
@@ -169,6 +171,7 @@ static Observed supervise(const std::wstring& self, const std::string& mode, con
     return o;
 }
 
+#ifndef P21_RECORDER_INTEGRATION_NO_ENTRY_POINTS
 int wmain(int argc, wchar_t** argv) {
     try {
         if (argc == 4 && std::wstring(argv[1]) == L"--child") {
@@ -191,3 +194,4 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }
+#endif

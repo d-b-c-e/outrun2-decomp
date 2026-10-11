@@ -6,6 +6,7 @@ import math
 import pathlib
 import shutil
 import subprocess
+from writer_pin import verify_writer
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("result", type=pathlib.Path)
@@ -36,9 +37,11 @@ def pin(root, scopes):
 
 tk_scopes = ["native/session", "dotnet/Dbce.Wheel.Recording", "dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs", "Directory.*", "global.json", "NuGet.Config"]
 before = {"source": pin(repo, ["."]), "toolkit": pin(toolkit, tk_scopes)}
-if before["toolkit"]["sha256"]["native/session/session_writer.h"] != "a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db":
-    raise RuntimeError("Unreviewed native writer")
+writer_pin = verify_writer((toolkit / "native/session/session_writer.h").read_bytes())
+if before["toolkit"]["sha256"]["native/session/session_writer.h"] != writer_pin["rawSha256"]:
+    raise RuntimeError("Native writer changed during preflight")
 result.mkdir(parents=True)
+(result / "writer-pin.json").write_text(json.dumps(writer_pin, indent=2))
 (result / "source-before.json").write_text(json.dumps(before, indent=2))
 commands = []
 
@@ -52,6 +55,7 @@ def run(name, command, expected=0):
     return outcome
 
 
+run("writer-pin-tests", ["py", "-3", "-B", here / "test_writer_pin.py", toolkit / "native/session/session_writer.h"])
 run("configure", ["cmake", "-S", here, "-B", result / "build", "-G", "Visual Studio 17 2022", "-T", "ClangCL", "-A", "x64", "-DTOOLKIT_ROOT=" + str(toolkit)])
 run("build", ["cmake", "--build", result / "build", "--config", "Release"])
 run("finalizer-build", ["dotnet", "build", here.parent / "p21_recorder_integration/managed/P21Finalizer.csproj", "-c", "Release", "--artifacts-path", result / "managed", "-p:ToolkitRoot=" + str(toolkit)])
