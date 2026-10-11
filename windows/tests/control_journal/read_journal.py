@@ -72,7 +72,7 @@ def read(path):
     def settle_drain():
         for s in pending_status:
             if s["epoch"] != 0 and (s["device"], s["epoch"]) not in begun:
-                err("status epoch %d of device %d has no EpochBegin in this or an earlier drain" % (s["epoch"], s["device"]))
+                err("%s epoch %d of device %d has no EpochBegin in this or an earlier drain" % (s["what"], s["epoch"], s["device"]))
         pending_status.clear()
 
     for n, r in enumerate(rows[1 + devices:], start=1 + devices):
@@ -99,6 +99,9 @@ def read(path):
                     err("epoch of device %s does not increase at line %d" % (dev, n))
                 last_epoch[dev] = ep
                 begun.add((dev, ep))
+            elif isinstance(ep, int) and ep != 0:
+                # Every other epoch-bearing event (epoch end, read pending, ...) needs its epoch begun too (Astra 16397).
+                pending_status.append({"device": dev, "epoch": ep, "what": "event"})
             if r.get("kindName") == "run-changed" and str(r.get("detail", "")).split(":")[0] in TERMINAL:
                 v["terminal"] += 1
                 v["terminalDetail"] = r.get("detail")
@@ -109,7 +112,7 @@ def read(path):
             dev = r.get("device")
             if not isinstance(dev, int) or dev < -1 or dev >= devices:
                 err("status device index invalid at line %d" % n)
-            pending_status.append({"device": dev, "epoch": r.get("epoch", 0)})
+            pending_status.append({"device": dev, "epoch": r.get("epoch", 0), "what": "status"})
             if r.get("of") == "action" and len(v["reasons"]) < 2:
                 v["reasons"].append(str(r.get("reason", "")).encode("utf-8").hex())
         elif t == "counters":

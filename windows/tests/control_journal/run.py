@@ -34,7 +34,14 @@ rt = next(c["file"] for c in cases if c["case"] == "roundtrip"); text = pathlib.
 drift = out / "drift.jsonl"; seqgap = out / "seqgap.jsonl"
 d = json.loads(text[2]); d["pid"] = d["pid"] + 1; drift.write_bytes(b"\n".join(text[:2] + [json.dumps(d).encode()] + text[3:]))
 seqgap.write_bytes(b"\n".join(text[:2] + text[3:]))
-for name, path, want in (("identity-drift", drift, "identity differs"), ("seq-gap", seqgap, "seq gap")):
+# An event with an epoch that never began (Astra 16397): inserted before the end, seq and end counts made valid.
+rows = [json.loads(x) for x in text if x]; ev = dict(next(x for x in rows if x.get("type") == "event")); end = rows[-1]
+ev.update(kindName="epoch-end", kind=1, device=0, epoch=999, detail="unknown epoch"); body = rows[:-1] + [ev]
+for i, x in enumerate(body): x["seq"] = i
+lines = [json.dumps(x, separators=(",", ":")).encode() for x in body]
+end = dict(end, seq=len(body), lines=len(body) + 1, bytes=sum(len(x) + 1 for x in lines))
+unknown = out / "unknown-event-epoch.jsonl"; unknown.write_bytes(b"\n".join(lines + [json.dumps(end, separators=(",", ":")).encode()]) + b"\n")
+for name, path, want in (("identity-drift", drift, "identity differs"), ("seq-gap", seqgap, "seq gap"), ("unknown-event-epoch", unknown, "event epoch 999")):
     v = read_journal.read(str(path)); ok = (not v["qualifies"]) and any(want in e for e in v["errors"])
     results.append(dict(case=name, verdict=v, problems=[] if ok else ["reader accepted a %s" % name]))
 problems = [(r["case"], r["problems"]) for r in results if r["problems"]]
