@@ -21,14 +21,15 @@ using Clock = std::chrono::steady_clock;
 
 // A worker's "done" precedes its thread's end: thread-exit work (thread_local and FLS destructors, DLL thread-detach
 // code) runs after the function returns, and std::thread::join waits for all of it without a bound (Astra 13545). So
-// the thread object itself is waited for against the same absolute deadline; then join, which returns at once, or
-// detach, leaving the thread its own state.
+// the thread object itself is waited for against the same absolute deadline; then join, which returns at once. On a
+// timeout the thread stays owned and joinable, never detached here, so a later call waits again and is true only once
+// the end is proven (Astra 13978); destructors detach whatever still runs (D9).
 inline bool join_by(std::thread& t, Clock::time_point deadline) {
     if (!t.joinable()) return true;
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
     const DWORD ms = left <= 0 ? 0 : left >= 0x7FFFFFFE ? 0x7FFFFFFE : DWORD(left);
     if (WaitForSingleObject(static_cast<HANDLE>(t.native_handle()), ms) == WAIT_OBJECT_0) { t.join(); return true; }
-    t.detach(); return false;
+    return false;
 }
 constexpr DWORD ForcedExitCode = 0xDBCE0021;   // ordinary process, unresolved stop (D4)
 
@@ -69,10 +70,11 @@ public:
     }
     Worker(const Worker&) = delete; Worker& operator=(const Worker&) = delete;
     void request_stop() { s_->stop = true; s_->cv.notify_all(); }
-    // True: joined before the deadline. False: still running, detached; it owns its state and ends with the process.
+    // True: joined before the deadline. False: still running, still owned (a later call waits again); the destructor
+    // detaches it, and it owns its state and ends with the process.
     bool join_until(Clock::time_point deadline) {
         std::unique_lock<std::mutex> l(s_->m);
-        if (!s_->cv.wait_until(l, deadline, [&] { return s_->done; })) { l.unlock(); if (t_.joinable()) t_.detach(); return false; }
+        if (!s_->cv.wait_until(l, deadline, [&] { return s_->done; })) return false;
         l.unlock(); return join_by(t_, deadline);   // done, but the thread may still be in its exit work
     }
     const std::string& name() const { return s_->name; }

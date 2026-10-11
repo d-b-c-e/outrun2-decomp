@@ -24,28 +24,52 @@
 #endif
 
 namespace recorder_spike {
-// P21 r2.3 (Astra 13545/13816): a worker's last state change precedes its thread's end. Thread-exit work (thread_local,
-// FLS and pthread-key destructors, DLL thread-detach code) runs after the function returns, and std::thread::join waits
-// for it without a bound. So the thread itself is waited for against the caller's deadline. On Windows: its handle,
-// then join (at once) or detach. Elsewhere (or with RECORDER_SPIKE_PORTABLE_JOIN): the standard library has no timed
-// join, so a helper joins it and is waited for; the helper, owning the worker thread object, is always detached.
-inline bool join_thread_until(std::thread& t,std::chrono::steady_clock::time_point deadline){
-    if(!t.joinable())return true;
+// P21 r2.3 (Astra 13545/13816/13978): proof that a thread has ENDED, not only that its function reported done.
+// Thread-exit work (thread_local, FLS and pthread-key destructors, DLL thread-detach code) runs after the function
+// returns, and std::thread::join waits for it without a bound. wait_until waits for the thread itself against the
+// caller's deadline and may be called again: it is true only once the end is proven. A timeout leaves the thread owned
+// here, never detached, so a later call waits again. The destructor never waits: it detaches whatever still runs.
+// Windows: the thread's handle. Elsewhere (or with RECORDER_SPIKE_PORTABLE_JOIN), with no timed join in the standard
+// library: one helper joins the thread, and is detached at once (its own exit could wait behind the same work). The
+// thread object lives in a shared holder, so a failed helper creation cannot destroy a joinable thread (terminate); the
+// end then stays unproven, and a later call retries.
+class ThreadEnd {
+public:
+    explicit ThreadEnd(std::thread t):thread_(std::make_shared<std::thread>(std::move(t))){}
+    ThreadEnd(const ThreadEnd&)=delete;
+    ThreadEnd& operator=(const ThreadEnd&)=delete;
+    bool wait_until(std::chrono::steady_clock::time_point deadline){
+        if(ended_)return true;
 #if defined(_WIN32) && !defined(RECORDER_SPIKE_PORTABLE_JOIN)
-    const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
-    const DWORD ms=left<=0?0:left>=0x7FFFFFFE?0x7FFFFFFE:DWORD(left);
-    if(WaitForSingleObject(static_cast<HANDLE>(t.native_handle()),ms)==WAIT_OBJECT_0){t.join();return true;}
-    t.detach();return false;
+        if(!thread_->joinable()){ended_=true;return true;}
+        const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
+        const DWORD ms=left<=0?0:left>=0x7FFFFFFE?0x7FFFFFFE:DWORD(left);
+        if(WaitForSingleObject(static_cast<HANDLE>(thread_->native_handle()),ms)!=WAIT_OBJECT_0)return false;
+        thread_->join();ended_=true;return true;
 #else
-    struct Joined{std::mutex m;std::condition_variable cv;bool done=false;};
-    auto j=std::make_shared<Joined>();
-    std::thread helper([j,w=std::move(t)]()mutable{w.join();{std::lock_guard<std::mutex> l(j->m);j->done=true;}j->cv.notify_all();});
-    bool joined;
-    {std::unique_lock<std::mutex> l(j->m);joined=j->cv.wait_until(l,deadline,[&]{return j->done;});}
-    helper.detach();   // never joined: its own exit could wait behind the same exit work
-    return joined;
+        if(!helper_){
+            if(!thread_->joinable()){ended_=true;return true;}
+            try{
+                auto holder=thread_;auto joined=joined_;
+                std::thread helper([holder,joined]{holder->join();{std::lock_guard<std::mutex> l(joined->m);joined->done=true;}joined->cv.notify_all();});
+                helper.detach();helper_=true;
+            }catch(...){return false;}   // no helper yet: unproven; the thread is still owned here
+        }
+        std::unique_lock<std::mutex> l(joined_->m);
+        if(!joined_->cv.wait_until(l,deadline,[&]{return joined_->done;}))return false;
+        ended_=true;return true;
 #endif
-}
+    }
+    ~ThreadEnd(){
+        // A started helper owns the join; otherwise detach the thread itself. Never wait (D9).
+        if(!helper_&&thread_->joinable())thread_->detach();
+    }
+private:
+    struct Joined{std::mutex m;std::condition_variable cv;bool done=false;};
+    std::shared_ptr<std::thread> thread_;
+    std::shared_ptr<Joined> joined_=std::make_shared<Joined>();
+    bool helper_=false,ended_=false;
+};
 constexpr std::size_t MaxValues=1024;
 struct Packet {
     std::uint64_t sequence{};
@@ -195,7 +219,7 @@ public:
 
 class Controller {
     std::shared_ptr<State> s_;
-    std::thread worker_;
+    std::unique_ptr<ThreadEnd> worker_;   // the worker thread, and proof of its end (r2.3)
     bool producer_taken_{};
     static void run(std::shared_ptr<State> s,std::unique_ptr<Sink> sink){
         bool stopped=false;
@@ -247,12 +271,12 @@ public:
             throw std::invalid_argument("recorder preflight");
         s_=std::make_shared<State>(capacity,width,first,std::move(hooks));
         if(s_->ring.capacity()>payload_budget/sizeof(Packet))throw std::invalid_argument("allocated payload budget");
-        worker_=std::thread(run,s_,std::move(sink));
+        worker_=std::make_unique<ThreadEnd>(std::thread(run,s_,std::move(sink)));
     }
     Controller(const Controller&)=delete;
     Controller& operator=(const Controller&)=delete;
     // A facade destroyed with the worker unfinished still leaves it running on its own State (detached, as before).
-    ~Controller(){s_->fail(Outcome::Cancelled);if(worker_.joinable())worker_.detach();}
+    ~Controller(){s_->fail(Outcome::Cancelled);worker_.reset();}   // ThreadEnd never waits: it detaches what still runs
     // P21: proof that the worker THREAD finished, separate from its published outcome. worker_done is its last state
     // change (after sink destruction), but thread-exit work can still run after it (a sink's thread_local or FLS
     // destructor, r2.3), so the thread is waited for against the same deadline. False at the deadline.
@@ -261,7 +285,7 @@ public:
             std::unique_lock<std::mutex> lock(s_->wait_mutex);
             if(!s_->changed.wait_until(lock,deadline,[&]{return s_->worker_done.load();}))return false;
         }
-        return join_thread_until(worker_,deadline);
+        return worker_->wait_until(deadline);   // true only once the thread's end is proven; a later call waits again
     }
     Producer producer(){if(producer_taken_)throw std::logic_error("one producer");producer_taken_=true;return Producer(s_);}
     Report report()const{return s_->report();}

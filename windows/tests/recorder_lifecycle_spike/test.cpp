@@ -178,8 +178,16 @@ void thread_tail(int tail_ms,bool joined){
     check(ok==joined,joined?"a tail inside the deadline is waited for: joined":"a tail past the deadline: not joined");
     check(took<700ms,"join_until returns within its deadline whatever the exit work does");
     check(c->report().may_seal(),"the published outcome is unchanged by the join");
+    if(!joined){
+        // Astra 13978: a later call while the exit work still runs is still false (nothing was detached), in time.
+        const auto t1=std::chrono::steady_clock::now();
+        check(!c->join_until(t1+100ms),"a second call while the exit work still runs stays false");
+        check(std::chrono::steady_clock::now()-t1<500ms,"the second call returns within its deadline");
+    }
     // Let the exit work end before the process does (a stuck exit callback must not meet process exit here).
     t->tail_release->store(true);wait([&]{return t->tail_finished->load();});
+    check(c->join_until(std::chrono::steady_clock::now()+2s),"once the exit work has ended, a later call proves the thread's end");
+    check(c->join_until(std::chrono::steady_clock::now()),"and the proof stays true");
 }
 }
 int main(){
