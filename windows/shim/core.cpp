@@ -1,0 +1,532 @@
+// Input shim core (INPUT-SHIM.md r3.1 sections 6, 7, 9 and 12): device epochs and rearm, the resolver, the test run.
+#include "shim.hpp"
+#include <algorithm>
+#include <cstring>
+namespace dbce::shim {
+namespace {
+bool pedal_waits_for_rest(int action){const std::string a=action_name(action);return a=="throttle"||a=="handbrake";}
+long pov_raw(std::uint32_t v){return v==0xFFFFFFFFu||(v&0xFFFFu)==0xFFFFu?-1L:long(v);}
+const char* call_name(Call c){
+    switch(c){case Call::Ok:return "ok";case Call::AcquisitionLost:return "acquisition lost";case Call::Gone:return "device gone";case Call::NotCalled:return "not called";}
+    return "?";
+}
+}
+
+Core::Core(Provider& p,CoreConfig cfg):p_(p),cfg_(std::move(cfg)){
+    bound_of_.fill(-1);
+    start_us_=p_.now_us();
+    run_=cfg_.latched?Run::Latched:Run::None;
+    published_run_=run_;
+    frame_.latched=cfg_.latched;
+    frame_.suppress_native=cfg_.latched;
+    frame_.run=run_;
+}
+
+void Core::set_profile(const Profile& profile){
+    profile_=profile;
+    const auto& s=profile_.section;
+    for(int i=0;i<ActionCount;++i){
+        const char* why=cfg_.capability.unsupported[std::size_t(i)];
+        base_[std::size_t(i)]=why?Status::Unsupported:Status::Unbound;
+        base_reason_[std::size_t(i)]=why?why:"";
+    }
+    usable_=profile_.ok&&s.error.empty();
+    if(usable_){
+        for(const auto& [key,why]:s.invalid){
+            invalid_keys_.push_back(key);
+            const int i=action_index(key);
+            if(i>=0&&!cfg_.capability.unsupported[std::size_t(i)]){base_[std::size_t(i)]=Status::Invalid;base_reason_[std::size_t(i)]=why;}
+        }
+        for(const auto& e:s.bound){
+            const int i=action_index(e.action);
+            if(i<0)continue;
+            in_profile_[std::size_t(i)]=true;
+            if(cfg_.capability.unsupported[std::size_t(i)])continue;
+            // One device per instance. Bindings that disagree on the instance's product are invalid, never merged.
+            int d=-1;
+            for(std::size_t k=0;k<devs_.size();++k)if(devs_[k].id.dev==e.binding.dev)d=int(k);
+            if(d>=0&&devs_[std::size_t(d)].id.prod!=e.binding.prod){
+                base_[std::size_t(i)]=Status::Invalid;
+                base_reason_[std::size_t(i)]="prod "+e.binding.prod+" differs from the other bindings of "+e.binding.dev;
+                invalid_keys_.push_back(e.action);
+                continue;
+            }
+            if(d<0){
+                Device dev;dev.id={e.binding.dev,e.binding.prod,e.binding.name};
+                devs_.push_back(dev);d=int(devs_.size())-1;
+            }
+            bound_of_[std::size_t(i)]=int(bound_.size());
+            bound_.push_back({i,e.binding,d});
+            base_[std::size_t(i)]=Status::Opening;
+        }
+    }
+    worker_epochs_.assign(devs_.size(),0);
+    worker_caps_.assign(devs_.size(),ObjectCaps{});
+    last_dev_status_.assign(devs_.size(),std::string());
+    last_status_.fill(Status::Unbound);
+    if(cfg_.latched&&(!usable_||bound_.empty())){
+        const std::string why=!profile_.ok?profile_.error:!s.error.empty()?s.error:"no applied action";
+        set_run(Run::Inert,"the profile is not usable: "+why,start_us_);
+    }
+}
+
+// ---------------------------------------------------------------- provider worker
+bool Core::service_devices(){
+    std::vector<Returned> back;
+    {std::lock_guard<std::mutex> l(m_);back.swap(returned_);}
+    bool did=!back.empty();
+    for(const auto& r:back){
+        // The input thread handed this handle back, so nothing reads it any more: reacquire (a new epoch) or close.
+        bool again=false;
+        if(r.why==Call::AcquisitionLost)
+            for(int t=0;t<cfg_.reacquire_tries&&!again;++t)again=p_.reacquire(r.handle)==Call::Ok;
+        if(!again)p_.close(r.handle);
+        std::lock_guard<std::mutex> l(m_);
+        auto& d=devs_[std::size_t(r.device)];
+        if(again){
+            const auto epoch=++worker_epochs_[std::size_t(r.device)];
+            opened_.push_back({r.device,r.handle,worker_caps_[std::size_t(r.device)],epoch});
+            d.worker_state=DevState::Open;d.worker_reason.clear();
+        }else{
+            d.worker_state=DevState::Missing;d.worker_reason=std::string("read failed (")+call_name(r.why)+"), reopening";
+        }
+    }
+    std::vector<int> need;
+    {std::lock_guard<std::mutex> l(m_);
+     for(std::size_t i=0;i<devs_.size();++i){
+         const auto st=devs_[i].worker_state;
+         if(st==DevState::Missing||st==DevState::ProductMismatch)need.push_back(int(i));
+     }}
+    if(need.empty())return did;
+    const auto listed=p_.enumerate();   // outside the lock: it may be slow
+    did=true;
+    int opens=0;
+    for(const int i:need){
+        auto& d=devs_[std::size_t(i)];
+        const DeviceInfo* found=nullptr;
+        for(const auto& x:listed)if(x.dev==d.id.dev)found=&x;
+        auto set=[&](DevState st,const std::string& why){std::lock_guard<std::mutex> l(m_);d.worker_state=st;d.worker_reason=why;};
+        if(!found){set(DevState::Missing,"not attached");continue;}
+        if(found->prod!=d.id.prod){set(DevState::ProductMismatch,"instance "+d.id.dev+" is product "+found->prod+", the binding names "+d.id.prod);continue;}
+        if(opens>=cfg_.max_opens_per_pass)break;
+        ++opens;
+        set(DevState::Opening,"opening");
+        auto o=p_.open(*found);
+        if(!o.ok){set(DevState::Missing,"open failed: "+o.why);continue;}
+        if(o.opened.dev!=found->dev||o.opened.prod!=found->prod){
+            p_.close(o.handle);
+            set(DevState::ProductMismatch,"the identity changed during the open (now "+o.opened.dev+" "+o.opened.prod+")");
+            continue;
+        }
+        for(int a=0;a<8;++a)if(o.caps.max[std::size_t(a)]<=o.caps.min[std::size_t(a)])o.caps.range_ok[std::size_t(a)]=false;
+        const auto epoch=++worker_epochs_[std::size_t(i)];
+        worker_caps_[std::size_t(i)]=o.caps;
+        std::lock_guard<std::mutex> l(m_);
+        opened_.push_back({i,o.handle,o.caps,epoch});
+        d.worker_state=DevState::Open;d.worker_reason.clear();
+    }
+    return did;
+}
+
+// ---------------------------------------------------------------- control worker
+void Core::request_admission(const Session& s,std::uint64_t now_unix,bool fences_verified,bool force_absent){
+    std::lock_guard<std::mutex> l(m_);
+    admission_requested_=true;session_=s;session_now_unix_=now_unix;fences_verified_=fences_verified;force_absent_=force_absent;
+}
+void Core::refuse_admission(const std::string& why){
+    std::lock_guard<std::mutex> l(m_);
+    admission_refused_=true;admission_why_=why;
+}
+BatchResult Core::offer_batch(const std::string& bytes){
+    BatchContext ctx;
+    Run run;
+    {std::lock_guard<std::mutex> l(m_);
+     run=published_run_;ctx.nonce=session_.nonce;ctx.owned=workload_snapshot_;}
+    ctx.have_last=have_last_;ctx.last_n=last_n_;ctx.last_hash=last_hash_;ctx.profile=&profile_.section;
+    BatchResult r;
+    if(run!=Run::Waiting&&run!=Run::Running){
+        r.verdict=BatchVerdict::Refused;
+        r.why=std::string("no test run is accepting batches (run ")+run_name(run)+")";
+        // A terminal run stays terminal; this is logged, never a reason to rearm.
+        std::lock_guard<std::mutex> l(m_);
+        pending_events_.push_back({0,p_.now_us(),EventKind::BatchRefused,-1,0,0,r.why});
+        return r;
+    }
+    r=check_batch(bytes,ctx);
+    r.generation.accepted_us=p_.now_us();
+    std::lock_guard<std::mutex> l(m_);
+    if(r.verdict==BatchVerdict::Accepted&&generations_.size()>=cfg_.generation_queue){
+        r.verdict=BatchVerdict::Refused;r.why="the activation queue is full";
+    }
+    Event e{0,r.generation.accepted_us,EventKind::BatchRefused,-1,0,r.generation.n,r.why};
+    switch(r.verdict){
+    case BatchVerdict::Accepted:
+        generations_.push_back(r.generation);
+        have_last_=true;last_n_=r.generation.n;last_hash_=r.generation.hash;
+        e.kind=EventKind::BatchAccepted;
+        e.detail=hex(r.generation.hash)+" commands "+std::to_string(r.generation.commands.size())+(r.generation.end?" end":"")+
+                 (r.generation.used_raw?" raw":"")+(r.generation.used_action?" action":"");
+        break;
+    case BatchVerdict::Duplicate:e.kind=EventKind::BatchDuplicate;break;
+    case BatchVerdict::Refused:batch_failed_=true;batch_failed_why_=r.why;break;
+    }
+    pending_events_.push_back(e);
+    return r;
+}
+std::vector<Event> Core::drain_events(){
+    std::lock_guard<std::mutex> l(m_);
+    std::vector<Event> out(event_q_.begin(),event_q_.end());event_q_.clear();
+    return out;
+}
+std::vector<StatusChange> Core::drain_status(){
+    std::lock_guard<std::mutex> l(m_);
+    std::vector<StatusChange> out(status_q_.begin(),status_q_.end());status_q_.clear();
+    return out;
+}
+std::uint64_t Core::status_dropped()const{std::lock_guard<std::mutex> l(m_);return status_dropped_;}
+std::uint64_t Core::status_coalesced()const{std::lock_guard<std::mutex> l(m_);return status_coalesced_;}
+std::uint64_t Core::events_dropped()const{std::lock_guard<std::mutex> l(m_);return events_dropped_;}
+
+// ---------------------------------------------------------------- input thread
+const Frame& Core::tick(){
+    const auto now=p_.now_us();
+    frame_.seq++;
+    frame_.tick_us=now;
+    frame_.samples.clear();
+    frame_.down=frame_.up=0;
+    adopt_worker_changes(now);
+    read_devices(now);
+    if(run_==Run::Latched)evaluate_admission(now);
+    {bool failed=false;std::string why;
+     {std::lock_guard<std::mutex> l(m_);failed=batch_failed_;why=batch_failed_why_;}
+     if(failed&&(run_==Run::Waiting||run_==Run::Running))set_run(Run::Failed,"batch refused: "+why,now);}
+    if(run_==Run::Waiting||run_==Run::Running){
+        std::string why;
+        if(!workload_intact(why))set_run(Run::Failed,why,now);
+        else if(now>=expires_us_)set_run(Run::Expired,"the session expired",now);
+        else if(run_==Run::Waiting&&now-admitted_us_>=cfg_.wait_first_us)set_run(Run::Failed,"no command within the first-batch wait",now);
+    }
+    activate_generations(now);
+    deliver(now);
+    resolve(now);
+    std::uint64_t digital=0;
+    for(int i=0;i<ActionCount;++i)if(is_digital(i)&&frame_.action[std::size_t(i)].value>=0.5f)digital|=1ull<<i;
+    frame_.down=digital&~prev_digital_;frame_.up=prev_digital_&~digital;prev_digital_=digital;
+    track_status(now);
+    frame_.run=run_;
+    frame_.event_seq=event_seq_;
+    return frame_;
+}
+
+void Core::adopt_worker_changes(std::int64_t now){
+    std::vector<Opened> op;
+    std::vector<Event> control_events;
+    {std::lock_guard<std::mutex> l(m_);
+     op.swap(opened_);
+     control_events.swap(pending_events_);
+     for(auto& d:devs_)if(d.state!=DevState::Open){
+         // An epoch the input thread handed back stays read-failed until the worker reopens or gives up on it.
+         if(d.state==DevState::ReadFailed&&d.worker_state==DevState::ReadFailed)continue;
+         d.state=d.worker_state==DevState::Open?DevState::Opening:d.worker_state;
+         d.reason=d.worker_reason;
+     }}
+    for(auto& e:control_events)emit_event(e);
+    for(const auto& o:op){
+        auto& d=devs_[std::size_t(o.device)];
+        d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.reason.clear();
+        emit(EventKind::EpochBegin,now,o.device,o.epoch,0,d.id.dev);
+        // Rearm (section 6): physical values in an ordinary process only.
+        for(const auto& b:bound_)if(b.device==o.device){
+            auto& r=rearm_[std::size_t(b.action)];
+            r.need_release=is_digital(b.action);
+            r.need_rest=pedal_waits_for_rest(b.action);
+        }
+    }
+}
+
+void Core::read_devices(std::int64_t now){
+    for(std::size_t i=0;i<devs_.size();++i){
+        auto& d=devs_[i];
+        d.sample=-1;
+        if(d.state!=DevState::Open)continue;
+        DeviceSample s;
+        s.device=std::uint32_t(i);s.epoch=d.epoch;s.seq=++d.seq;
+        s.read_start_us=p_.now_us();
+        RawState st;                                  // initialized: axes 0, buttons up, POVs centred
+        s.poll=p_.poll(d.handle);
+        if(s.poll==Call::Ok)s.state=p_.state(d.handle,st);   // Poll fills nothing; only a complete state read counts
+        s.read_end_us=p_.now_us();
+        s.valid=s.poll==Call::Ok&&s.state==Call::Ok;
+        if(s.valid){
+            s.physical=st;s.delivered=st;
+            d.fresh_seen=true;d.last_valid_us=s.read_end_us;
+        }else{
+            const Call why=s.poll!=Call::Ok?s.poll:s.state;
+            emit(EventKind::EpochEnd,now,int(i),d.epoch,0,std::string("read failed: ")+call_name(why));
+            {std::lock_guard<std::mutex> l(m_);
+             returned_.push_back({int(i),d.handle,why,d.epoch});
+             d.worker_state=DevState::ReadFailed;d.worker_reason=std::string("read failed (")+call_name(why)+")";}
+            d.state=DevState::ReadFailed;d.reason=std::string("read failed (")+call_name(why)+")";
+            d.handle=0;d.fresh_seen=false;
+        }
+        d.sample=int(frame_.samples.size());
+        frame_.samples.push_back(s);
+    }
+}
+
+bool Core::owned_ready()const{
+    if(devs_.empty())return false;
+    for(const auto& d:devs_){
+        if(d.state!=DevState::Open||!d.fresh_seen||d.sample<0)return false;
+        if(!frame_.samples[std::size_t(d.sample)].valid)return false;
+    }
+    return true;
+}
+
+void Core::evaluate_admission(std::int64_t now){
+    bool requested,refused,fences,force;Session s;std::uint64_t now_unix;std::string why;
+    {std::lock_guard<std::mutex> l(m_);
+     requested=admission_requested_;refused=admission_refused_;fences=fences_verified_;force=force_absent_;s=session_;now_unix=session_now_unix_;why=admission_why_;}
+    if(refused){set_run(Run::Failed,"admission refused: "+why,now);return;}
+    const bool late=now-start_us_>=cfg_.admission_us;
+    if(!requested){if(late)set_run(Run::Failed,"no admission request",now);return;}
+    if(!fences){set_run(Run::Failed,"admission refused: a fence is not verified",now);return;}
+    if(!force){set_run(Run::Failed,"admission refused: a force path exists",now);return;}
+    if(!owned_ready()){
+        if(late){
+            std::string which;
+            for(const auto& d:devs_)if(d.state!=DevState::Open||!d.fresh_seen)which+=(which.empty()?"":", ")+d.id.dev+" "+device_status(d);
+            set_run(Run::Failed,"admission refused: devices not ready ("+which+")",now);
+        }
+        return;
+    }
+    workload_.clear();
+    std::vector<OwnedDevice> snapshot;
+    for(std::size_t i=0;i<devs_.size();++i){workload_.push_back({int(i),devs_[i].epoch});snapshot.push_back({devs_[i].id.dev,devs_[i].caps});}
+    admitted_us_=now;
+    expires_us_=now+std::int64_t(s.expires_unix-now_unix)*1000000;
+    {std::lock_guard<std::mutex> l(m_);workload_snapshot_=snapshot;}
+    set_run(Run::Waiting,"admitted ("+std::to_string(workload_.size())+" device(s))",now);
+}
+
+bool Core::workload_intact(std::string& why)const{
+    for(const auto& [i,epoch]:workload_){
+        const auto& d=devs_[std::size_t(i)];
+        if(d.state!=DevState::Open||d.epoch!=epoch){
+            why="epoch "+std::to_string(epoch)+" of "+d.id.dev+" ended ("+device_status(d)+(d.reason.empty()?"":": "+d.reason)+")";
+            return false;
+        }
+        if(d.sample<0||!frame_.samples[std::size_t(d.sample)].valid){why="no valid read of "+d.id.dev+" in this frame";return false;}
+    }
+    return true;
+}
+
+void Core::activate_generations(std::int64_t now){
+    if(run_terminal(run_)){
+        // Every accepted batch gets an event: anything still queued is superseded, never silently dropped.
+        std::deque<Generation> left;
+        {std::lock_guard<std::mutex> l(m_);left.swap(generations_);}
+        for(const auto& g:left)emit(EventKind::BatchSuperseded,now,-1,0,g.n,std::string("run ")+run_name(run_)+" before activation");
+        return;
+    }
+    if(run_!=Run::Waiting&&run_!=Run::Running)return;
+    Generation g;bool have=false;
+    {std::lock_guard<std::mutex> l(m_);
+     if(!generations_.empty()){g=std::move(generations_.front());generations_.pop_front();have=true;}}
+    if(!have)return;
+    emit(EventKind::BatchActivated,now,-1,0,g.n,hex(g.hash.data(),8));
+    running_.clear();
+    if(g.end){set_run(Run::Completed,"end command in batch "+std::to_string(g.n),now);return;}
+    for(const auto& c:g.commands){
+        Running r;r.cmd=c;r.deadline_us=now+std::int64_t(c.ms)*1000;r.batch=g.n;r.hash=g.hash;
+        for(std::size_t i=0;i<devs_.size();++i)if(devs_[i].id.dev==c.dev)r.device=int(i);
+        running_.push_back(r);
+    }
+    if(run_==Run::Waiting)set_run(Run::Running,"batch "+std::to_string(g.n)+" activated",now);
+}
+
+void Core::deliver(std::int64_t now){
+    for(auto it=running_.begin();it!=running_.end();){
+        if(now>=it->deadline_us){
+            const auto& d=devs_[std::size_t(it->device)];
+            emit(EventKind::ObjectExpired,now,it->device,d.epoch,it->batch,
+                 std::string(ctl::kindName(it->cmd.kind))+" "+std::to_string(it->cmd.index)+" after "+std::to_string(it->cmd.ms)+" ms");
+            it=running_.erase(it);
+        }else ++it;
+    }
+    if(run_!=Run::Running)return;
+    for(const auto& r:running_){
+        auto& d=devs_[std::size_t(r.device)];
+        if(d.sample<0)continue;
+        auto& s=frame_.samples[std::size_t(d.sample)];
+        if(!s.valid)continue;   // unreachable while the workload is intact (frame boundary)
+        const auto i=std::size_t(r.cmd.index);
+        switch(r.cmd.kind){
+        case ctl::Kind::Axis:
+            s.delivered.axes[i]=std::int32_t(ctl::rescale(r.cmd.raw,r.cmd.bind_min,r.cmd.bind_max,d.caps.min[i],d.caps.max[i]));
+            s.injected.axes|=std::uint8_t(1u<<i);break;
+        case ctl::Kind::Button:
+            s.delivered.buttons[i]=r.cmd.raw?0x80:0;s.injected.buttons.set(i);break;
+        case ctl::Kind::Hat:
+            s.delivered.povs[i]=r.cmd.raw<0?0xFFFFFFFFu:std::uint32_t(r.cmd.raw);s.injected.povs|=std::uint8_t(1u<<i);break;
+        default:break;
+        }
+        s.injected.batch=r.batch;
+        std::memcpy(s.injected.hash,r.hash.data(),8);
+    }
+}
+
+void Core::resolve(std::int64_t now){
+    const bool test=cfg_.latched;
+    for(int i=0;i<ActionCount;++i){
+        auto& a=frame_.action[std::size_t(i)];
+        a=ActionValue{};
+        const int bi=bound_of_[std::size_t(i)];
+        if(bi<0){a.status=base_[std::size_t(i)];continue;}
+        const auto& b=bound_[std::size_t(bi)];
+        const auto& d=devs_[std::size_t(b.device)];
+        a.sample=std::int16_t(d.sample);
+        switch(d.state){
+        case DevState::Missing:a.status=Status::DeviceMissing;continue;
+        case DevState::ProductMismatch:a.status=Status::ProductMismatch;continue;
+        case DevState::Opening:a.status=Status::Opening;continue;
+        case DevState::ReadFailed:a.status=Status::ReadFailed;continue;
+        case DevState::Open:break;
+        }
+        if(!d.fresh_seen||d.sample<0||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::ReadPending;continue;}
+        const auto& k=b.binding;const auto idx=std::size_t(k.index);
+        if(k.kind==ctl::Kind::Axis){
+            if(!d.caps.axis[idx]){a.status=Status::ObjectMissing;continue;}
+            if(!d.caps.range_ok[idx]||d.caps.max[idx]<=d.caps.min[idx]){a.status=Status::RangeUnqualified;continue;}
+        }else if(k.kind==ctl::Kind::Button){if(!d.caps.button.test(idx)){a.status=Status::ObjectMissing;continue;}}
+        else if(k.kind==ctl::Kind::Hat){if(!d.caps.pov[idx]){a.status=Status::ObjectMissing;continue;}}
+        const auto& s=frame_.samples[std::size_t(d.sample)];
+        const bool marked=k.kind==ctl::Kind::Axis?(s.injected.axes>>idx)&1u:k.kind==ctl::Kind::Button?s.injected.buttons.test(idx):(s.injected.povs>>idx)&1u;
+        auto raw_of=[&](const RawState& st)->long{
+            switch(k.kind){
+            case ctl::Kind::Axis:return ctl::rescale(st.axes[idx],d.caps.min[idx],d.caps.max[idx],k.min,k.max);
+            case ctl::Kind::Button:return ctl::diButtonDown(st.buttons[idx])?1L:0L;
+            case ctl::Kind::Hat:return pov_raw(st.povs[idx]);
+            default:return 0L;
+            }};
+        const char* name=action_name(i);
+        if(test){
+            // A latched process: only a delivered injected value reaches an action; physical values are observed in the
+            // sample but feed nothing, not even rearm (section 6, "which source the rules read").
+            if(run_==Run::Running&&marked){a.status=Status::Live;a.injected=true;a.value=float(ctl::normalize(name,k,raw_of(s.delivered)));}
+            else a.status=Status::TestNeutral;
+            continue;
+        }
+        const double n=ctl::normalize(name,k,raw_of(s.physical));
+        auto& r=rearm_[std::size_t(i)];
+        if(r.need_release){
+            if(n>=0.5){a.status=Status::Rearming;continue;}
+            r.need_release=false;
+        }
+        if(r.need_rest){
+            if(n>cfg_.rest_threshold){a.status=Status::Rearming;continue;}
+            r.need_rest=false;
+        }
+        a.status=Status::Live;a.value=float(n);
+    }
+}
+
+void Core::set_run(Run r,const std::string& why,std::int64_t now){
+    if(run_==r||run_terminal(run_))return;   // terminal states are final
+    run_=r;run_reason_=why;
+    if(run_terminal(r))running_.clear();
+    emit(EventKind::RunChanged,now,-1,0,0,std::string(run_name(r))+": "+why);
+    {std::lock_guard<std::mutex> l(m_);published_run_=r;}
+    queue_status({now,StatusChange::Of::Run,0,run_name(r),why});
+}
+
+void Core::emit(EventKind k,std::int64_t us,int device,std::uint32_t epoch,std::uint64_t batch,const std::string& detail){
+    emit_event({0,us,k,device,epoch,batch,detail});
+}
+void Core::emit_event(Event e){
+    e.seq=++event_seq_;
+    ring_[std::size_t(e.seq%EventRingSize)]=e;
+    std::lock_guard<std::mutex> l(m_);
+    if(event_q_.size()>=cfg_.event_queue){++events_dropped_;return;}
+    event_q_.push_back(std::move(e));
+}
+
+void Core::queue_status(StatusChange c){
+    std::lock_guard<std::mutex> l(m_);
+    for(auto& q:status_q_)if(q.of==c.of&&q.index==c.index){q=std::move(c);++status_coalesced_;return;}
+    if(status_q_.size()>=cfg_.status_queue){++status_dropped_;return;}
+    status_q_.push_back(std::move(c));
+}
+
+std::string Core::device_status(const Device& d)const{
+    switch(d.state){
+    case DevState::Missing:return "device-missing";case DevState::ProductMismatch:return "product-mismatch";
+    case DevState::Opening:return "opening";case DevState::ReadFailed:return "read-failed";
+    case DevState::Open:return d.fresh_seen?"live":"read-pending";
+    }
+    return "?";
+}
+std::string Core::device_reason(const Device& d)const{
+    std::string r=d.id.dev+(d.id.name.empty()?"":" \""+d.id.name+"\"");
+    if(!d.reason.empty())r+=": "+d.reason;
+    return r;
+}
+
+void Core::track_status(std::int64_t now){
+    for(int i=0;i<ActionCount;++i){
+        const auto st=frame_.action[std::size_t(i)].status;
+        std::string why;
+        const int bi=bound_of_[std::size_t(i)];
+        if(bi<0)why=base_reason_[std::size_t(i)];
+        else if(st==Status::ObjectMissing||st==Status::RangeUnqualified){
+            const auto& k=bound_[std::size_t(bi)].binding;
+            why=std::string(st==Status::ObjectMissing?"no ":"unreadable or empty range on ")+ctl::kindName(k.kind)+" "+std::to_string(k.index)+
+                " of "+device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
+        }
+        else if(is_unavailable(st))why=device_reason(devs_[std::size_t(bound_[std::size_t(bi)].device)]);
+        else if(st==Status::Rearming)why=pedal_waits_for_rest(i)?"waiting for rest":"waiting for release";
+        if(st!=last_status_[std::size_t(i)]||why!=last_reason_[std::size_t(i)]){
+            last_status_[std::size_t(i)]=st;last_reason_[std::size_t(i)]=why;
+            queue_status({now,StatusChange::Of::Action,i,status_name(st),why});
+        }
+    }
+    for(std::size_t i=0;i<devs_.size();++i){
+        const auto st=device_status(devs_[i])+" epoch "+std::to_string(devs_[i].epoch);
+        if(st!=last_dev_status_[i]){last_dev_status_[i]=st;queue_status({now,StatusChange::Of::Device,int(i),st,device_reason(devs_[i])});}
+    }
+}
+
+StartReport Core::start_report()const{
+    StartReport r;
+    if(!profile_.ok){r.line="controls: nothing applied via shim-ini-controls-1: "+profile_.error;return r;}
+    if(!profile_.section.error.empty()){r.line="controls: nothing applied via shim-ini-controls-1: "+profile_.section.error;return r;}
+    std::vector<std::string> applied,unsupported,unavailable;
+    for(int i=0;i<ActionCount;++i){
+        if(!in_profile_[std::size_t(i)])continue;
+        const auto& a=frame_.action[std::size_t(i)];
+        const auto why=last_reason_[std::size_t(i)];
+        if(cfg_.capability.unsupported[std::size_t(i)]){
+            unsupported.push_back(action_name(i));
+            r.notes.push_back(std::string("controls: ")+action_name(i)+" unsupported: "+cfg_.capability.unsupported[std::size_t(i)]);
+        }else if(a.status==Status::Invalid){
+            // counted with the invalid lines below
+        }else if(is_applied(a.status)){
+            applied.push_back(action_name(i));
+            if(a.status!=Status::Live&&a.status!=Status::TestNeutral)r.notes.push_back(std::string("controls: ")+action_name(i)+" "+status_name(a.status)+": "+why);
+        }else{
+            unavailable.push_back(action_name(i));
+            r.notes.push_back(std::string("controls: ")+action_name(i)+" "+status_name(a.status)+": "+why);
+        }
+    }
+    std::vector<std::string> invalid;
+    for(const auto& [key,why]:profile_.section.invalid){invalid.push_back(key);r.notes.push_back("controls: "+key+" invalid: "+why);}
+    for(int i=0;i<ActionCount;++i)if(base_[std::size_t(i)]==Status::Invalid&&std::find(invalid.begin(),invalid.end(),action_name(i))==invalid.end()){
+        invalid.push_back(action_name(i));r.notes.push_back(std::string("controls: ")+action_name(i)+" invalid: "+base_reason_[std::size_t(i)]);}
+    auto list=[](const std::vector<std::string>& v){std::string s;for(const auto& x:v)s+=(s.empty()?"":",")+x;return s;};
+    const auto& s=profile_.section;
+    r.line="controls: profile \""+s.profile+"\" revision "+(s.revision.empty()?std::string("-"):s.revision)+" via shim-ini-controls-1: applied "+
+           std::to_string(applied.size())+" ("+list(applied)+"); unsupported "+std::to_string(unsupported.size())+" ("+list(unsupported)+
+           "); invalid "+std::to_string(invalid.size())+" ("+list(invalid)+"); unavailable "+std::to_string(unavailable.size())+" ("+list(unavailable)+")";
+    return r;
+}
+}

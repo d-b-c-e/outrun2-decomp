@@ -17,3 +17,11 @@ target_compile_features(test_desktop_controls PRIVATE cxx_std_17)
 target_compile_definitions(test_desktop_controls PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_desktop_controls PRIVATE dxguid)
 add_test(NAME desktop_controls COMMAND test_desktop_controls)
+
+# The input shim's core (windows/shim, docs/INPUT-SHIM.md), slice 1: pure C++17 against a scripted device provider.
+add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)
+target_include_directories(test_shim PRIVATE shim tests vendor/controls)
+target_compile_features(test_shim PRIVATE cxx_std_17)
+target_compile_options(test_shim PRIVATE /W4)
+target_compile_options(test_shim PRIVATE /W4)
+add_test(NAME shim COMMAND test_shim)
