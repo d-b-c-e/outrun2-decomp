@@ -13,7 +13,7 @@ def git(*a): return subprocess.check_output(['git', '-C', str(repo), *a], text=T
 def pin():
     if git('status', '--porcelain'): raise RuntimeError('Uncommitted or untracked source; commit first.')
     return dict(commit=git('rev-parse', 'HEAD'), sha256={p: hashlib.sha256((repo / p).read_bytes()).hexdigest()
-                for p in git('ls-files', '--', 'windows/shim', 'windows/tests/shim_fake_com.hpp', 'windows/tests/test_dinput_provider.cpp',
+                for p in git('ls-files', '--', 'windows/shim', 'windows/host', 'windows/tests/shim_fake_com.hpp', 'windows/tests/test_dinput_provider.cpp',
                              'windows/tests/p21_host_spike/host.hpp', 'windows/tests/p21_provider_host', 'windows/tests/teardown_audit.py',
                              'windows/tests/teardown_objects.py', 'windows/vendor/controls').splitlines()})
 before = pin(); result.mkdir(parents=True); commands = []
@@ -49,16 +49,16 @@ if args.mutations:
         'host-waits-for-release': ('            returned = rs->cv.wait_until(l, release_deadline, [&] { return rs->done; });\n',
                                    '            rs->cv.wait(l, [&] { return rs->done; }); returned = true;\n', 'P21k unacquire-beyond: stop returns within its budgets'),
         # Astra 13545: joining a thread whose function reported done, without a bound.
-        'host-joins-release-thread': ('        else if (!p21_spike::join_by(release_, release_deadline)) r.unresolved.push_back("release thread did not end: its exit work (a driver\'s thread-exit callback) is still running");\n',
+        'host-joins-release-thread': ('        else if (!join_by(release_, release_deadline)) r.unresolved.push_back("release thread did not end: its exit work (a driver\'s thread-exit callback) is still running");\n',
                                       '        else release_.join();\n', 'P21k release-tail-beyond: stop returns within its budgets'),
-        'host-joins-worker-thread': ('        l.unlock(); return p21_spike::join_by(worker_, deadline);   // done, but the thread may still be in its exit work\n',
+        'host-joins-worker-thread': ('        l.unlock(); return join_by(worker_, deadline);   // done, but the thread may still be in its exit work\n',
                                      '        l.unlock(); worker_.join(); return true;\n', 'P21k worker-tail-beyond: stop returns within its budgets'),
     }
     for name, (old, new, reason) in plan.items():
         src = result / 'mutations' / name; shutil.copytree(here, src)
-        h = (src / 'host.hpp').read_text(encoding='utf-8')
+        h = (repo / 'windows/host/provider_host.hpp').read_text(encoding='utf-8')
         if h.count(old) != 1: raise RuntimeError('Mutation anchor changed: ' + name)
-        (src / 'host.hpp').write_text(h.replace(old, new), encoding='utf-8')
+        (src / 'provider_host.hpp').write_text(h.replace(old, new), encoding='utf-8')
         # The copy's main.cpp includes "p21_provider_host/host.hpp": point that include at the mutated copy.
         m = (src / 'main.cpp').read_text(encoding='utf-8').replace('#include "p21_provider_host/host.hpp"', '#include "host.hpp"')
         (src / 'main.cpp').write_text(m, encoding='utf-8')
