@@ -256,7 +256,8 @@ private:
         std::uint32_t epoch{};
         std::uint64_t seq{};
         bool fresh_seen{};        // a valid read in this epoch
-        std::int64_t pending_since_us{};   // the start of the current run of pending reads, 0 none
+        bool pending{};           // in a run of pending reads (an explicit flag: 0 is a valid clock reading)
+        std::int64_t pending_since_us{};   // the start of that run, valid while pending
         std::int64_t last_valid_us{};
         int sample{-1};           // this frame's sample index
     };

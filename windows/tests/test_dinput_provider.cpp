@@ -306,6 +306,76 @@ void test_stale_handle_admission_race(){
     delete in;
 }
 
+// Slice 3.1 review (nene 10389, request 1): a stale close never reaches the slot's next occupant.
+void test_stale_close(){
+    auto* in=new fakecom::Input;in->add(wheel());in->add(shifter());
+    {DInputProvider p(in,nullptr);
+     const auto list=p.enumerate();
+     const auto h1=p.open(list[0]);
+     p.close(h1.handle);
+     const auto h2=p.open(list[1]);
+     check(h2.ok&&(h2.handle&0xffu)==(h1.handle&0xffu)&&h2.handle!=h1.handle,"the slot reused for the second device");
+     const int misuse=p.misuse();
+     p.close(h1.handle);                                    // stale: the first device's handle
+     check(p.misuse()==misuse+1,"a stale close is misuse");
+     RawState st;
+     check(p.poll(h2.handle)==Call::Ok&&p.state(h2.handle,st)==Call::Ok,"the new occupant still reads");
+     check(in->made[0]->released()&&!in->made[1]->released(),"only the first device was released");}
+    delete in;
+}
+
+// Slice 3.1 review (nene 10389, request 2): bits above the 32-bit generation are refused, never truncated into it.
+void test_handle_high_bits(){
+    auto* in=new fakecom::Input;in->add(wheel());
+    {DInputProvider p(in,nullptr);
+     const auto o=p.open(p.enumerate()[0]);
+     const int polls=in->counters.polls.load(),misuse=p.misuse();
+     for(const Handle bad:{o.handle|(Handle(1)<<40),o.handle|(Handle(1)<<63)}){
+         check(p.poll(bad)==Call::Gone,"a handle with high bits is refused");
+         p.close(bad);
+     }
+     check(p.misuse()==misuse+4&&in->counters.polls==polls&&!in->made[0]->released(),"counted as misuse; the device untouched and still open");
+     check(p.poll(o.handle)==Call::Ok,"the real handle works");}
+    delete in;
+}
+
+// Slice 3.1 review (nene 10389, note on the stop): an open in flight when shutdown runs never returns a handle that
+// shutdown did not account for. Paused just before its publication, shutdown finishes first: the open sees the stop,
+// takes its slot back and releases its own device. Paused just after, shutdown's pass closes the published slot and
+// counts it: the open fails without releasing the device a second time.
+namespace openrace {
+std::atomic<int> point{-1};
+std::atomic<bool> paused{false},resume{false};
+void hook(int at,void*){
+    if(at!=point.load())return;
+    paused=true;
+    while(!resume.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+}
+void test_open_publication_races_shutdown(){
+    for(const int at:{int(DInputProvider::BeforePublish),int(DInputProvider::AfterPublish)}){
+        const std::string where=at==DInputProvider::BeforePublish?" (before publication)":" (after publication)";
+        auto* in=new fakecom::Input;in->add(wheel());
+        {DInputProvider p(in,nullptr);
+         const auto list=p.enumerate();
+         openrace::point=at;openrace::paused=false;openrace::resume=false;
+         DInputProvider::set_open_hook_for_tests(openrace::hook,nullptr);
+         OpenResult r;
+         std::thread opener([&]{r=p.open(list[0]);});
+         while(!openrace::paused.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));
+         const auto rep=p.shutdown(0);                     // the whole shutdown runs inside the window
+         openrace::resume=true;
+         opener.join();
+         DInputProvider::set_open_hook_for_tests(nullptr,nullptr);
+         check(!r.ok&&r.handle==0,"the open fails"+where+": "+r.why);
+         check(in->made.size()==1&&in->made[0]->released()&&in->counters.after_release==0,"its device released exactly once"+where);
+         if(at==DInputProvider::BeforePublish)check(rep.released==0&&!rep.input_released,"shutdown saw only a reserved slot and kept DirectInput"+where);
+         else check(rep.released==1,"shutdown released and counted the published device"+where);}
+        check(in->refs.load()==0&&in->counters.after_release==0,"DirectInput released with the provider"+where);
+        delete in;
+    }
+}
+
 // Finding 4: E_PENDING keeps the device open and is retried, within a bound.
 void test_pending_reads(){
     {// The first read of every new device object is pending: one device object, not one per tick.
@@ -379,6 +449,7 @@ void test_worker_never_blocks_tick(){
 int main(){
     try{test_classify_and_guids();test_open_caps();test_core_end_to_end();test_identity_change();test_two_devices();test_close_and_stale_handles();test_shutdown();
         test_destroyed_during_a_read();test_stop_is_terminal();test_shutdown_races_an_open();test_stale_handle_admission_race();test_pending_reads();
+        test_stale_close();test_handle_high_bits();test_open_publication_races_shutdown();
         test_worker_never_blocks_tick();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"dinput provider: "<<checks<<" checks passed\n";

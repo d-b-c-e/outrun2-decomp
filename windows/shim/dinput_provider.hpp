@@ -16,7 +16,10 @@
 // that checks the handle's generation, that the slot is open, and adds a reader, so a stale handle can never be
 // admitted to a reused slot. A slot is published (its generation advanced and CLOSED cleared) only after its device is
 // stored. close() is one compare-exchange from "open, no readers" to "closing". After shutdown(), nothing new is
-// admitted: reads, opens, listings and reacquisitions are refused.
+// admitted: reads, opens, listings and reacquisitions are refused. An open publishes its slot and then looks for a stop
+// (slice 3.1 review): an open in flight when shutdown began either fails and releases its own device, or published
+// first and is accounted for by shutdown. It never returns a handle shutdown missed. A handle with bits above its
+// 32-bit generation is refused as misuse.
 //
 // Lifetime (finding 2). All mutable state lives in a shared State; every call holds a reference to it for its whole
 // duration. Destroying the provider drops only the provider's reference: a read still inside a driver call keeps the
@@ -67,6 +70,11 @@ public:
     // to schedule a close / reopen exactly there.
     using AdmissionHook=void(*)(void* user);
     static void set_admission_hook_for_tests(AdmissionHook,void* user);
+    // Tests only: called inside open once a slot is reserved and its device stored, just before and just after the slot
+    // is published (null in production), to run a shutdown exactly there.
+    enum OpenPoint:int{BeforePublish=0,AfterPublish=1};
+    using OpenHook=void(*)(int point,void* user);
+    static void set_open_hook_for_tests(OpenHook,void* user);
 private:
     struct State;
     std::shared_ptr<State> state_;

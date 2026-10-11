@@ -261,7 +261,7 @@ void Core::adopt_worker_changes(std::int64_t now){
     if(duplicates)emit(EventKind::BatchDuplicate,now,-1,0,duplicate_n,std::to_string(duplicates)+" exact duplicate(s), ignored");
     for(const auto& o:op){
         auto& d=devs_[std::size_t(o.device)];
-        d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.reason.clear();
+        d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.pending=false;d.reason.clear();
         emit(EventKind::EpochBegin,now,o.device,o.epoch,0,d.id.dev);
         // Rearm (section 6): physical values in an ordinary process only.
         for(const auto& b:bound_)if(b.device==o.device){
@@ -288,12 +288,12 @@ void Core::read_devices(std::int64_t now){
         const bool pending=s.poll==Call::Pending||s.state==Call::Pending;
         if(s.valid){
             s.physical=st;s.delivered=st;
-            d.fresh_seen=true;d.last_valid_us=s.read_end_us;d.pending_since_us=0;
-        }else if(pending&&(!d.pending_since_us||now-d.pending_since_us<cfg_.pending_limit_us)){
+            d.fresh_seen=true;d.last_valid_us=s.read_end_us;d.pending=false;
+        }else if(pending&&(!d.pending||now-d.pending_since_us<cfg_.pending_limit_us)){
             // Data not yet available (E_PENDING): no sample, the epoch stays open and is read again next tick. The
             // device's actions are neutral this frame and rearm, so a held button never returns as a new press.
-            if(!d.pending_since_us){
-                d.pending_since_us=now;
+            if(!d.pending){
+                d.pending=true;d.pending_since_us=now;
                 emit(EventKind::ReadPending,now,int(i),d.epoch,0,d.id.dev);
                 for(const auto& b:bound_)if(b.device==int(i)){
                     auto& r=rearm_[std::size_t(b.action)];
@@ -304,7 +304,7 @@ void Core::read_devices(std::int64_t now){
         }else{
             // A lost or gone device, or pending for longer than pending_limit_us (then: reacquire the same handle).
             const Call why=pending?Call::AcquisitionLost:s.poll!=Call::Ok?s.poll:s.state;
-            d.pending_since_us=0;
+            d.pending=false;
             emit(EventKind::EpochEnd,now,int(i),d.epoch,0,std::string("read failed: ")+call_name(why));
             {std::lock_guard<std::mutex> l(m_);
              returned_.push_back({int(i),d.handle,why,d.epoch});

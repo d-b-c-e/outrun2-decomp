@@ -21,6 +21,8 @@ constexpr std::uint32_t generation_of(std::uint64_t w){return std::uint32_t(w>>3
 constexpr std::uint32_t low_of(std::uint64_t w){return std::uint32_t(w);}
 std::atomic<DInputProvider::AdmissionHook> g_hook{nullptr};
 std::atomic<void*> g_hook_user{nullptr};
+std::atomic<DInputProvider::OpenHook> g_open_hook{nullptr};
+std::atomic<void*> g_open_hook_user{nullptr};
 }
 
 std::string guid_text(const GUID& v){
@@ -61,12 +63,19 @@ struct DInputProvider::State {
         for(auto& s:slots)if(s.device){s.device->Unacquire();s.device->Release();s.device=nullptr;}
         if(input){input->Release();input=nullptr;}
     }
+    // A handle is generation << 8 | slot. Anything else is misuse: a slot out of range, or bits above the 32-bit
+    // generation, which would otherwise be truncated into a valid one (slice 3.1 review, nene 10389).
+    static bool decode(Handle h,std::size_t& index,std::uint32_t& generation){
+        const auto slot=h&0xffu;
+        if(slot<1||slot>Handle(MaxSlots)||(h>>40)!=0)return false;
+        index=std::size_t(slot-1);generation=std::uint32_t(h>>8);
+        return true;
+    }
     // One compare-exchange checks the generation and the open state and adds a reader.
     Slot* enter(Handle h){
-        const auto index=h&0xffu;
-        if(index<1||index>Handle(MaxSlots)){++misuse;return nullptr;}
-        const auto generation=std::uint32_t(h>>8);
-        auto& s=slots[std::size_t(index-1)];
+        std::size_t index{};std::uint32_t generation{};
+        if(!decode(h,index,generation)){++misuse;return nullptr;}
+        auto& s=slots[index];
         for(;;){
             std::uint64_t w=s.word.load(std::memory_order_acquire);
             if(const auto hook=g_hook.load())hook(g_hook_user.load());
@@ -96,6 +105,7 @@ struct DInputProvider::State {
 };
 
 void DInputProvider::set_admission_hook_for_tests(AdmissionHook hook,void* user){g_hook_user.store(user);g_hook.store(hook);}
+void DInputProvider::set_open_hook_for_tests(OpenHook hook,void* user){g_open_hook_user.store(user);g_open_hook.store(hook);}
 
 DInputProvider::DInputProvider(IDirectInput8W* input,HWND window):state_(std::make_shared<State>()){state_->input=input;state_->window=window;}
 DInputProvider::~DInputProvider(){if(!shut_)shutdown(0);state_.reset();}
@@ -157,9 +167,29 @@ OpenResult DInputProvider::open(const DeviceInfo& listed){
         const auto next=pack(generation_of(w)+1,Closed|Reserved);
         if(!s.word.compare_exchange_strong(w,next,std::memory_order_acq_rel))continue;
         s.device=d;
-        if(st->stopped.load()){s.device=nullptr;s.word.store(pack(generation_of(next),Closed),std::memory_order_release);return fail("the provider stopped during the open");}
-        s.word.store(pack(generation_of(next),0),std::memory_order_release);   // published: readers may now be admitted
-        r.ok=true;r.handle=(Handle(generation_of(next))<<8)|Handle(i+1);
+        const auto generation=generation_of(next);
+        if(const auto hook=g_open_hook.load())hook(BeforePublish,g_open_hook_user.load());
+        // Publish, then look for a stop (slice 3.1 review, nene 10389). Both the publication and the stop flag are
+        // sequentially consistent, and so is shutdown's read of the slot: a stop that came first is seen just below,
+        // and a stop that came later sees this slot in shutdown's own pass. So an open never returns a handle that
+        // shutdown has not accounted for.
+        s.word.store(pack(generation,0));   // published: readers may now be admitted
+        if(const auto hook=g_open_hook.load())hook(AfterPublish,g_open_hook_user.load());
+        if(st->stopped.load()){
+            // Take the slot back, unless shutdown has already closed it (then the device is shutdown's, and counted).
+            for(;;){
+                std::uint64_t w2=pack(generation,0);
+                if(s.word.compare_exchange_strong(w2,pack(generation,Closed|Reserved))){
+                    s.device=nullptr;s.word.store(pack(generation,Closed),std::memory_order_release);
+                    return fail("the provider stopped during the open");
+                }
+                if(generation_of(w2)!=generation||(low_of(w2)&(Closed|Reserved))){
+                    r=OpenResult{};r.why="the provider stopped during the open (shutdown released its device)";return r;
+                }
+                std::this_thread::yield();   // a reader backing out of an admission the stop refused
+            }
+        }
+        r.ok=true;r.handle=(Handle(generation)<<8)|Handle(i+1);
         return r;
     }
     return fail("no free device slot");
@@ -176,10 +206,10 @@ Call DInputProvider::reacquire(Handle h){
 
 void DInputProvider::close(Handle h){
     const auto st=state_;
-    const auto index=h&0xffu;
-    if(index<1||index>Handle(MaxSlots)){++st->misuse;return;}
-    auto& s=st->slots[std::size_t(index-1)];
-    std::uint64_t expect=pack(std::uint32_t(h>>8),0);   // this generation, open, no reader
+    std::size_t index{};std::uint32_t generation{};
+    if(!State::decode(h,index,generation)){++st->misuse;return;}
+    auto& s=st->slots[index];
+    std::uint64_t expect=pack(generation,0);            // this generation, open, no reader
     if(!st->close_idle(s,expect))++st->misuse;          // a read in progress, a stale handle, or already closed
 }
 
@@ -228,7 +258,7 @@ DInputProvider::ShutdownReport DInputProvider::shutdown(int wait_ms){
         for(int i=0;i<MaxSlots;++i){
             auto& s=st->slots[std::size_t(i)];
             for(;;){
-                const std::uint64_t w=s.word.load(std::memory_order_acquire);
+                const std::uint64_t w=s.word.load();   // sequentially consistent: pairs with open's publication
                 if(low_of(w)&(Closed|Reserved))break;   // free, closing, or an open that will see the stop and back out
                 if(st->close_idle(s,w)){++rep.released;break;}
                 if((low_of(w)&Readers)==0)continue;      // changed under us: look again
@@ -246,7 +276,7 @@ DInputProvider::ShutdownReport DInputProvider::shutdown(int wait_ms){
     while(st->worker_ops.load()>0&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(1));
     rep.held=pass(true);   // again, for a slot an in-flight open published just before the stop
     if(!rep.held&&st->worker_ops.load()==0&&st->input){st->input->Release();st->input=nullptr;rep.input_released=true;}
-    else if(st->input)rep.detail+="DirectInput is released when the last call leaves.";
+    else if(st->input)rep.detail+="DirectInput is released when the last call leaves; an open still in flight releases its own device.";
     return rep;
 }
 }
