@@ -28,6 +28,10 @@ struct NativeSink final:Sink {
         return writer.sample(double(p.source_us)/1000000.0,channels);
     }
     bool stop()override{gate(stop_gate);return writer.stop();}
+    bool stopped_at_limit()const override{
+        const auto& r=writer.reason();
+        return !writer.active()&&(r=="durationLimit"||r=="fileSizeLimit"||r=="recordSizeLimit");
+    }
     void abandon()noexcept override{writer.abandon();}
     std::string reason()const override{return writer.reason();}
 };
@@ -62,7 +66,7 @@ int main(int argc,char** argv){
             auto r=c.drain(5s);
             if(!r.worker_done)throw std::runtime_error("worker has not released its writer");
             reports<<mode<<'\t'<<int(r.outcome)<<'\t'<<r.may_seal()<<'\t'<<r.accepted<<'\t'<<r.written<<'\t'<<r.sink_reason<<'\n';
-            const auto expected=mode=="normal"?Outcome::Complete:mode=="abandoned"?Outcome::QueueFull:mode=="limited"?Outcome::WriteFailure:Outcome::TimedOut;
+            const auto expected=mode=="normal"?Outcome::Complete:mode=="abandoned"?Outcome::QueueFull:mode=="limited"?Outcome::WriterLimit:Outcome::TimedOut;
             if(r.outcome!=expected)throw std::runtime_error("wrong native outcome: "+mode);
         }
         std::cout<<"Native worker: normal, abandon, writer limit, late complete footer exercised\n";

@@ -41,10 +41,12 @@ if args.mutations:
     variants={
       'late-completion-overwrites-timeout': [('s->outcome.compare_exchange_strong(draining,Outcome::Complete);','s->outcome.store(Outcome::Complete);(void)draining;')],
       'overflow-not-sticky': [('s_->fail(Outcome::QueueFull);','/* dropped without latching failure */')],
-      'trust-accepted-tail': [('s_->declared_last=last_source_sequence;','s_->declared_last=next_-1;(void)last_source_sequence;'),('else if(last_source_sequence!=next_-1)s_->fail(Outcome::TrailingLoss);','/* ignore declared producer tail */')],
+      'trust-accepted-tail': [('s_->declared_last=last_source_sequence;','s_->declared_last=next_-1;(void)last_source_sequence;'),('else if(last_source_sequence!=next_-1)s_->fail(Outcome::DeclaredTailMismatch);','/* ignore declared producer tail */')],
       'ignore-producer-thread': [('correct=s.producer_thread==std::this_thread::get_id();','correct=true;')],
       'omit-final-publication-read': [('if(r!=s->write.load(std::memory_order_acquire))continue;','/* stale empty observation */')],
       'omit-owned-copy': [('s_->ring[std::size_t(write%s_->ring.size())]=p;','/* snapshot copy omitted */')],
+      'post-end-refusal-called-loss': [('if(ended_){++s_->after_end;return false;}','if(ended_){++s_->after_end;s_->rejected(p,s_->outcome.load());return false;}')],
+      'writer-limit-called-io-error': [('sink->stopped_at_limit()?Outcome::WriterLimit:Outcome::WriteFailure','Outcome::WriteFailure')],
     }
     for name,edits in variants.items():
         source=result/'mutations'/name; source.mkdir(parents=True)

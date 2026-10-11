@@ -23,6 +23,7 @@ struct Trace {
     std::atomic<bool> inner_complete{false};
     const std::thread::id owner=std::this_thread::get_id();
     std::string fail_at,throw_at;
+    bool writer_limit{};
     void call(){if(std::this_thread::get_id()==owner)++owner_calls;}
     void release(){write_gate.released=true;stop_gate.released=true;}
 };
@@ -34,7 +35,8 @@ struct FakeSink final:Sink {
     ~FakeSink()override{t->call();++t->destroys;}
     bool step(const char* name){t->call();if(t->throw_at==name)throw std::runtime_error(name);return t->fail_at!=name;}
     bool open()override{++t->opens;return step("open");}
-    bool write(const Packet& p)override{t->write_gate.arrive();if(!step("write"))return false;t->rows.push_back(p);++t->writes;return true;}
+    bool write(const Packet& p)override{t->write_gate.arrive();if(!step("write")||t->writer_limit)return false;t->rows.push_back(p);++t->writes;return true;}
+    bool stopped_at_limit()const override{return t->writer_limit;}
     bool stop()override{++t->stops;t->stop_gate.arrive();if(!step("stop"))return false;t->inner_complete=true;return true;}
     void abandon()noexcept override{t->call();++t->abandons;}
     std::string reason()const override{return t->fail_at.empty()?(t->inner_complete?"stopped":"abandoned"):t->fail_at+"Failure";}
@@ -66,6 +68,9 @@ void normal(){
     check(r.ring_bytes==4*sizeof(Packet),"actual fixed ring payload accounted");
     check(!p.push(packet(4)),"after finish refused");c->cancel();const auto after=p.report();
     check(after.outcome==Outcome::Complete&&after.after_end==1,"completion first is not downgraded by later cancellation");reconcile(after);
+    check(!after.first_rejected,"post-end refusal is not a lost capture frame");
+    std::thread other([&]{p.push(packet(5));});other.join();const auto foreign=p.report();
+    check(foreign.may_seal()&&foreign.wrong_producer==1&&!foreign.first_rejected,"foreign post-end call cannot label a clean tape lossy");reconcile(foreign);
 }
 
 void overflow(){
@@ -92,7 +97,7 @@ void validation(){
         check(r.outcome==Outcome::Invalid&&r.invalid==1&&!r.may_seal()&&t->stops==0,"invalid data cannot complete");reconcile(r);
     }
     {auto t=trace();auto c=controller(t);auto p=c->producer();p.finish(0);const auto r=c->drain(2s);done(p);check(r.outcome==Outcome::Empty&&!r.may_seal(),"empty capture refused");reconcile(r);}
-    {auto t=trace();auto c=controller(t);auto p=c->producer();p.push(packet(1));p.finish(2);const auto r=c->drain(2s);done(p);check(r.outcome==Outcome::TrailingLoss&&!r.may_seal()&&t->stops==0,"trailing loss refused");reconcile(r);}
+    for(const auto declared:{0ull,2ull}){auto t=trace();auto c=controller(t);auto p=c->producer();p.push(packet(1));p.finish(declared);const auto r=c->drain(2s);done(p);check(r.outcome==Outcome::DeclaredTailMismatch&&!r.may_seal()&&t->stops==0,"declared tail mismatch refused in either direction");reconcile(r);}
 }
 
 void wrong_thread(){
@@ -109,6 +114,11 @@ void sink_failures(){
         check(r.outcome==expected&&!r.may_seal(),"sink failure contained");
         check(t->abandons==1&&t->destroys==1&&t->owner_calls==0,"failure cleanup worker-owned");reconcile(r);
     }
+    {auto t=trace();t->writer_limit=true;auto c=controller(t);auto p=c->producer();p.push(packet(1));p.finish(1);
+     const auto r=c->drain(2s);done(p);check(r.outcome==Outcome::WriterLimit&&!r.may_seal()&&r.written==0,"configured writer bound is distinct from I/O failure");reconcile(r);}
+    {auto t=trace();auto c=controller(t);auto p=c->producer();p.push(packet(1));c->cancel();
+     check(!p.push(packet(2)),"post-cancel push refused");p.finish(2);const auto r=c->drain(2s);done(p);
+     check(r.outcome==Outcome::Cancelled&&r.after_failure==1&&!r.first_rejected,"post-failure refusal keeps causal outcome without inventing ingress loss");reconcile(r);}
 }
 
 void late_stop(bool cancel){

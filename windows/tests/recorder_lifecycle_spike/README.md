@@ -83,12 +83,28 @@ from private copies, never edits to the reviewed checkout.
 wrong_producer` after calls quiesce. Once producer and worker are both done,
 `accepted = written + discarded`. Reports retain the first rejected source
 sequence/time/reason, declared tail, last written tail, and the sink's own reason.
-Counters from a still-running worker are observations, not a final receipt.
-Post-end refusals remain diagnostic and cannot extend an already completed tape.
+Counters from a still-running worker are observations, not a final receipt. Reconcile
+them only after producer calls quiesce and `capture_counts_final` is true; live
+snapshots can interleave the attempted count and its accepted/refused category.
+Post-end diagnostic calls can still change their own counters after capture ends.
+They cannot extend an already completed tape. `first_rejected` describes the first
+pre-end ingress loss (queue full, invalid packet or wrong producer); post-end and
+post-failure refusals are counts only, not a fabricated lost capture frame.
 Sink open/write/stop/reason exceptions are contained; abandon and destructors
-are required to be noexcept. A native duration/file/row limit can already leave
-an incomplete inner footer; its reason is preserved rather than relabelled as
-an upstream drop.
+are required to be noexcept. A throwing destructor violates this contract and
+terminates the host. The final completion-mutex operation also assumes a valid
+live mutex; an exceptional OS/runtime synchronization failure there is outside
+the proof, not a promised recoverable sink failure.
+A native duration/file/row limit can already leave an incomplete inner footer;
+it is `WriterLimit`, distinct from `WriteFailure`, with its native reason kept.
+The sink's typed limit classification must only claim an intentional, successfully
+closed bound: native write/flush errors retain their error outcome. Both a missing
+tail and over-delivery are `DeclaredTailMismatch`; neither can seal.
+
+There is no independent idle watchdog in this fixture. If both producer and
+controller leak without ending or cancelling, the worker keeps polling. P21 must
+own their shutdown and bound idle/termination; it cannot depend on destructors
+running by accident.
 
 ## Required evidence
 
@@ -109,6 +125,13 @@ an upstream drop.
    or producer-end ordering and must be detected by the relevant fixture.
 7. A real native v1 writer success/abandon pair is read by the existing managed
    SessionReader. Existing `beba6b1` codec/enum evidence is unchanged.
+
+The `46845df` source proof passed nene's independent review (hcom 10726), with
+6,000 randomized slow/failing-sink iterations reported clean. Follow-up tests
+address its low findings: post-end and post-cancel refusals do not invent an
+ingress-loss packet, both declared-tail mismatch directions refuse, and a writer
+limit is distinct from I/O failure. The original receipt remains pinned to the
+original source; rerun the command above on this revision for new evidence.
 
 The native bridge additionally exercises `durationLimit` and an actual native
 stop delayed past timeout. The latter creates a complete inner file which the

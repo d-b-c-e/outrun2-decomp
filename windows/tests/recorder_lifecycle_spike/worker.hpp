@@ -23,12 +23,15 @@ struct Packet {
     std::array<double,MaxValues> values{};
 };
 static_assert(std::is_trivially_copyable<Packet>::value,"owned fixed snapshot");
-enum class Outcome { Open,Draining,Complete,QueueFull,Invalid,Empty,TrailingLoss,WrongProducer,OpenFailure,WriteFailure,StopFailure,SinkException,Cancelled,ProducerAbandoned,TimedOut };
+enum class Outcome { Open,Draining,Complete,QueueFull,Invalid,Empty,DeclaredTailMismatch,WrongProducer,OpenFailure,WriteFailure,StopFailure,SinkException,Cancelled,ProducerAbandoned,TimedOut,WriterLimit };
 inline bool failure(Outcome s){return s!=Outcome::Open&&s!=Outcome::Draining&&s!=Outcome::Complete;}
 struct Sink {
-    virtual ~Sink()=default;
+    // Cleanup must not throw: an exception from abandon/destruction terminates the host.
+    virtual ~Sink()noexcept=default;
     virtual bool open()=0;
     virtual bool write(const Packet&)=0;
+    // Only true when the failed write cleanly closed at an intentional bound, not an I/O/flush error.
+    virtual bool stopped_at_limit()const{return false;}
     virtual bool stop()=0;
     virtual void abandon()noexcept=0;
     virtual std::string reason()const{return {};}
@@ -36,11 +39,13 @@ struct Sink {
 // Fixture scheduling only. Null for real writer use. Storage must outlive the worker.
 struct Hooks {virtual ~Hooks()=default;virtual void after_empty_observation(){};};
 struct Report {
+    // Live reads are snapshots; reconcile only after capture_counts_final AND producer calls quiesce.
+    // Post-end diagnostic calls can still advance refusal counters after capture itself has finished.
     Outcome outcome{};
     std::uint64_t attempted{},accepted{},written{},queue_full{},invalid{},after_failure{},after_end{},wrong_producer{},declared_last{},last_written{};
     std::size_t ring_bytes{};
     bool producer_done{},worker_done{},drain_timed_out{};
-    bool first_rejected{},capture_counts_final{};
+    bool first_rejected{},capture_counts_final{}; // first pre-end loss rejection, not a later refusal
     std::uint64_t first_rejected_sequence{},discarded{};
     std::int64_t first_rejected_us{};
     Outcome first_rejected_reason{};
@@ -124,9 +129,9 @@ public:
     bool push(const Packet& p){
         ++s_->attempted;
         Entry entry(*s_);
-        if(!entry.correct){++s_->wrong_producer;s_->rejected(p,Outcome::WrongProducer);return false;}
-        if(ended_){++s_->after_end;s_->rejected(p,s_->outcome.load());return false;}
-        if(s_->outcome.load()!=Outcome::Open){++s_->after_failure;s_->rejected(p,s_->outcome.load());return false;}
+        if(!entry.correct){++s_->wrong_producer;if(!s_->producer_done.load())s_->rejected(p,Outcome::WrongProducer);return false;}
+        if(ended_){++s_->after_end;return false;}
+        if(s_->outcome.load()!=Outcome::Open){++s_->after_failure;return false;}
         bool valid=p.width==s_->width&&p.sequence==next_&&p.sequence!=UINT64_MAX&&p.source_us>=0&&p.source_us>last_us_;
         for(std::size_t i=0;valid&&i<p.width;++i)valid=std::isfinite(p.values[i]);
         if(!valid){++s_->invalid;s_->rejected(p,Outcome::Invalid);s_->fail(Outcome::Invalid);return false;}
@@ -144,7 +149,7 @@ public:
         ended_=true;
         s_->declared_last=last_source_sequence;
         if(last_us_<0)s_->fail(Outcome::Empty);
-        else if(last_source_sequence!=next_-1)s_->fail(Outcome::TrailingLoss);
+        else if(last_source_sequence!=next_-1)s_->fail(Outcome::DeclaredTailMismatch);
         auto open=Outcome::Open;s_->outcome.compare_exchange_strong(open,Outcome::Draining);
         s_->producer_done.store(true,std::memory_order_release);
         s_->changed.notify_all();
@@ -163,7 +168,7 @@ class Controller {
                 while(!failure(s->outcome.load())){
                     const auto r=s->read.load(std::memory_order_relaxed),w=s->write.load(std::memory_order_acquire);
                     if(r!=w){
-                        if(!sink->write(s->ring[std::size_t(r%s->ring.size())])){s->fail(Outcome::WriteFailure);break;}
+                        if(!sink->write(s->ring[std::size_t(r%s->ring.size())])){s->fail(sink->stopped_at_limit()?Outcome::WriterLimit:Outcome::WriteFailure);break;}
                         s->last_written=s->ring[std::size_t(r%s->ring.size())].sequence;
                         ++s->written;s->read.store(r+1,std::memory_order_release);
                         continue;
