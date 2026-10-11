@@ -698,36 +698,61 @@ in the status.
 - the consumed 7D6810 steer, accelerator and brake (offset: the previous tick);
 - the record words and buttons written (offset: this tick).
 
-**Fences under the latch** (R1-F9, R2-F8, N8). Each has an admission self-check: a writer that resolves outside the run
-folder refuses admission.
+**Fences under the latch** (R1-F9, R2-F8, N8; **slice 2b proposal, r3.2**). The game normally reads its data and writes
+its state in one folder: `application_home` returns the game folder as both `retail_root` and `rt::home()`.
+
+**Mechanism: split home from data.** Under the latch, the entry point gives the host two folders:
+- data is still read from the game folder (`retail_root`);
+- `rt::home()` becomes the run folder.
+
+Most writers derive from `home()` or from the save folder (`home + "/SaveGame"`), so they move with that one switch.
+The source audit classifies every writer, and the few that write into the game folder are each handled explicitly.
+Admission's self-check confirms the effective `home()`, save folder and log path are inside the run folder. A writer
+that resolves anywhere else refuses admission.
 
 **Run folder.** `%LOCALAPPDATA%\dbce\outrun2006-decomp\run-<nonce>-<pid>\`.
-- It is created exclusively (`CreateDirectoryW` fails if it exists). The folder and its parents refuse reparse points.
-- It is seeded with a verified copy of the owner's SaveGame and `options.ini`: real copies, never hard links or reparse
-  aliases.
-- The copy is bounded (at most 256 files and 64 MiB), each file's path is validated to stay inside, and every file's
-  SHA-256 is pinned in the run manifest (`run.json`).
-- An empty, first-run SaveGame is a separate qualification case, not a replacement for the owner-copy run.
+- It is created exclusively (`CreateDirectoryW` fails if it exists), and the folder and its parents refuse reparse
+  points.
+- It is seeded with a verified copy of the owner's SaveGame and `options.ini`: real copies, never links.
+- The copy is bounded (at most 256 files and 64 MiB), every path is validated to stay inside, and every file's
+  SHA-256 is pinned in `run.json`.
+- An empty, first-run SaveGame is a separate qualification case.
 
-| Writer | Source | Under the latch | Self-check |
+**Every file-writing call site** (inventory 2026-10-10, regex audit of `src`, `xbox/source`, `windows/source`,
+`windows/shim`):
+
+| Writer | Source | Base path | Under the latch |
 |---|---|---|---|
-| Saves, licences, results, ghosts | `diag.save_directory` (`xbox/source/main.cpp:195`), from which `frontend_save_directory` comes; `license_owners->persistence` (`game_host.cpp:1155`), `race_end_runtime.cpp:933/1154` and `race_ghosts_runtime.cpp:72` all derive from it | redirected to the run folder, seeded from a copy of the owner's SaveGame | the effective `frontend_save_directory` equals the run folder |
-| `options.ini` | `main.cpp:106`, `:308`; `gpu_backend.cpp:31` writes it | redirected to a run copy | the effective options path is in the run folder |
-| `crash.txt` | `main.cpp:177` | redirected | path check |
-| `runtime.log` (stdout) | window entry point | redirected to the run folder, so the owner's log is untouched | path check |
-| `trace.txt`, `replay.bin` | `game_host.cpp:91`, `:117` (development hooks) | refused (hooks disabled) | the hooks are off |
-| EXE image cache | `exe_setup_prepare` | kept: derived and deterministic, declared in the fence report | declared |
-| LAN | `native_network_set_platform` (`main.cpp:168`) | not installed: offline | the platform pointer is null |
-| Force | no producer in the decomp (no `CreateEffect` or vibration in `src`, `xbox/source`, `windows/source`; WGI `Gamepad.Vibration` never set) | n/a | grep evidence in the receipt |
+| Profiles and licences | `frontend_profiles.cpp:17-31` (temp, backup, rename), `:219` (remove) | save folder | redirected |
+| Rankings | `race_end_runtime.cpp:937` | save folder | redirected |
+| Ghosts and records | `race_ghosts_runtime.cpp:43` | save folder | redirected |
+| `options.ini` | `video.cpp:77-78` (temp and rename), `main.cpp:108` (default file) | `home()` | redirected (seeded copy) |
+| `crash.txt` | `main.cpp:177` | `home()` | redirected |
+| Result log | `game_host.cpp:1212` | `home()` | redirected |
+| `runtime.log` (stdout, stderr) | `window_desktop.cpp:95-96` | the executable's folder | redirected: the latched entry point opens it in the run folder |
+| `trace.txt`, `replay.bin` | `game_host.cpp:91`, `:118` | `home()` | redirected, and the development hooks are refused (`autoplay.txt` and `replay.txt` are not read in a latched process) |
+| EXE image cache | `exe_image.cpp:182-186` | game folder (`setup_screen.cpp:115`) | kept: derived and deterministic; written only when missing or stale; declared in the fence report |
+| Former-cache migration | `setup_screen.cpp:102-108` (renames and removes in old cache folders) | game folder | skipped in a latched process |
+| Write probe and SaveGame folder | `platform_api.cpp:41`, `:64` | game folder | the latched entry point probes and creates them in the run folder instead |
+| PNG and frame dumps | `pc_soft_d3d9.cpp:662`, `d3d11_display.cpp:147` | environment-chosen | refused in a latched process (diagnostic switches off) |
+| `OR2_EXE_TRACE` | `exe_image.cpp:39` | environment-chosen | refused in a latched process |
+| `OutRunDesktop.ini` creation and writes | `desktop_settings.cpp:131-143` (35a8aa3) | game folder | removed with the shim. The runtime never writes settings (section 5). Until then, refused in a latched process. |
+| LAN | `native_network_set_platform` (`main.cpp:168`) | — | not installed: offline |
+| Force | none in the decomp (no `CreateEffect` or vibration; WGI `Gamepad.Vibration` never set) | — | n/a, grep evidence |
 
-**Proof is by actual writes, not configured paths** (R2-F8):
-- The adapter fixture drives the real writer functions under a latched host configuration and checks where the bytes
-  land: a save write, `write_options`, the crash breadcrumb and the log.
-- **Undeclared writers are refused at build time.** A source-audit test lists every file-writing call site in `src`,
-  `xbox/source` and `windows/source`: `fopen` with a write mode, `ofstream`, `CreateFile*` with write access, `rename`,
-  `remove`, `std::filesystem` writes. It fails when one is missing from this table. The audit reruns on every upstream
-  merge.
-- At run time the harness's before-and-after snapshot of the game folder (STD-034 item 7) corroborates the result.
+**Proof** (R2-F8):
+- **Source audit, a build-time refusal.** `windows/tests/write_audit.py` scans for every write-capable call: `fopen`,
+  `freopen` or `_wfopen` with a write mode, `ofstream`, `fstream`, `CreateFile*`, `MoveFile*`, `ReplaceFile*`,
+  `DeleteFile*`, `rename`, `remove`, `std::filesystem` mutations, `CreateDirectory*`.
+  - Each call is matched against this table by file and a normalized snippet, not by line, so line moves do not
+    break it.
+  - An unclassified site fails the test. The audit reruns on every upstream merge.
+- **Actual writes, in a fixture.** A host-configuration fixture applies the latched split to a temporary game tree and
+  drives the real writer functions that can run without the game: `write_options` (`video.cpp`), the profile writer
+  (`frontend_profiles.cpp`), the result log, the crash breadcrumb and the `runtime.log` redirection. It then checks
+  that every byte landed in the run folder and that the game tree is byte-identical.
+- **What remains for the fenced live run.** Writers that need the running game (rankings, ghosts) are proven there by
+  the harness's before-and-after snapshot of the game folder (STD-034 item 7).
 
 **Unsupported, with reasons:**
 - clutch, handbrake, neutral and reverse: not in the game;
@@ -857,3 +882,4 @@ P23, P25, P26); 2b covers the fences and the run folder (P24, P27).
 | slice 1 review | 2026-10-10 | Astra | Four contract defects reproduced against `fe11a2b`: decisions used the tick's start time (stale input and expired injection got through after a slow read); a delayed admission extended the session; a profile with zero usable objects was admitted; the control-to-input event inbox was unbounded (hcom 9541). |
 | slice 1.1 | 2026-10-10 | zero | Fixes: the decision time is re-read after every device read, and stale samples fail a test (ordinary play: `stale`, unavailable); the session deadline is latched on the monotonic clock when admission is requested, and repeats never refresh it; admission requires at least one usable binding; the control inbox is bounded (64), duplicates are coalesced into one counted event per tick, refusals after the first are counted, and an overflow fails the run while generations stay accounted for. 134 checks. Mutation check 23 of 25 caught (the same 2 unreachable guards). Astra's four reproductions now show each defect gone. |
 | slice 2a | 2026-10-10 | zero | OutRun adapter on fakes (`windows/source/outrun_adapter.{hpp,cpp}`, `windows/tests/test_outrun_adapter.cpp`, 61 checks, clean at `/W4`). The chain is the game's own: fake pad, then `ps5::DualSenseInput`, then a shim frame from the core and fake provider, then the adapter, into `NativeInputState`. Covers P22 (sink, max-merge with the pad, pedals without steering, bits and edges), P23 (H-pattern on a monotonic clock: deadline, retries, ambiguous, unavailable, impossible, scene-change reset with a released tick), P25 (`select_pad` drops an owned WGI identity before the pad adapter; one consumer), P26 (native-only start, coexistence, latched and inert suppression), plus release and the stop frame. Mutation check (`windows/tests/mutations.py`, which replaces `shim_mutations.py`): adapter 15 of 16 caught; the miss is a redundant flag set that suppression already covers. P24 and P27 follow in 2b. |
+| r3.2 proposal | 2026-10-10 | zero | Slice 2b fence design: split `home()` (the run folder) from data (`retail_root`, the game folder) under the latch; a complete inventory of file writers, each classified (redirected, kept and declared, skipped, refused); a source-audit refusal matched by snippet, not line; a fixture driving the real writers that need no game; the game-dependent writers left to the live run's snapshot. For review before coding. |
