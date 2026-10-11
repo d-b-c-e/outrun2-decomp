@@ -61,14 +61,15 @@ public:
         : BasicProviderHost(folder, nonce, input, profile, latched,
             std::make_unique<RecorderType>(folder + L"\\worker.tsv", nonce, std::make_shared<Gate>(), std::make_shared<Gate>())) {}
     BasicProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched,
-        std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {})
+        std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {}, HWND window = nullptr,
+        std::int64_t freshness_us = 10'000'000)
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
           recorder_(std::move(recorder)),
           w_(std::make_shared<WorkerState>()) {
         if (!recorder_) throw std::invalid_argument("recorder required");
-        w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, nullptr);
+        w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, window);
         dbce::shim::CoreConfig cfg; cfg.latched = latched; cfg.capability = capability;
-        cfg.fresh_us = 10'000'000;   // real QPC time: a slow machine must not make samples stale (as test_dinput_provider)
+        cfg.fresh_us = freshness_us;   // offline default as test_dinput_provider; slice 4 uses the ordinary 100 ms bound
         w_->core = std::make_shared<dbce::shim::Core>(*w_->provider, cfg);
         w_->core->set_profile(dbce::shim::read_profile(profile));
         report_ = CreateFileW((folder_ + L"\\host-shutdown.json").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
