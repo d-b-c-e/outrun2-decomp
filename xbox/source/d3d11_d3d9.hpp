@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 namespace outrun::xbox_runtime {
@@ -22,6 +23,7 @@ public:
     void clear(std::uint32_t,std::uint32_t,float,std::uint32_t)override;
     void unlock_rect(std::uint32_t)override;
     void release(std::uint32_t)override;
+    std::uint8_t* lock(std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override;
     void begin_frame();void end_frame();
     // The frame the game drew (RGBA8), for the presenter.
     ID3D11ShaderResourceView* back_texture()const{return back_srv_.Get();}
@@ -39,10 +41,29 @@ public:
     void set_msaa(unsigned samples){msaa_=samples==2||samples==4?samples:1;}
     void finish_scene();
     std::uint32_t fxaa_passes{},msaa_resolves{};
+    std::uint64_t native_draws()const{return native_stats_.draws;}   // draws taken by the GPU vertex path
 private:
     struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
-    void flush();void bind_target();void apply_state();void bind_textures();
+    void flush();void pixel_pipeline();void bind_target();void apply_state();void bind_textures();
+    // The GPU vertex path (the PS5 native path's design): DrawIndexedPrimitive with a vertex shader runs the game's
+    // vertex program on the GPU (hlsl::native_vs specialized per blob list and input formats) from GPU copies of
+    // its vertex and index buffers, updated over the byte range locked since the last draw. Anything else, and
+    // every draw with OR2_D3D11_CPU_VERTEX set, keeps the CPU path (PcSoftD3D9Device::draw_indexed_primitive).
+    struct GpuBuffer { ComPtr<ID3D11Buffer> buffer;std::size_t bytes{},dirty_lo{~std::size_t(0)},dirty_hi{}; };
+    struct NativeProgram { ComPtr<ID3D11VertexShader> shader;std::vector<std::uint8_t> code; };
+    bool draw_native(std::uint32_t type,std::int32_t base,std::uint32_t start,std::uint32_t count);
+    ID3D11Buffer* gpu_buffer(std::uint32_t handle);
+    NativeProgram* native_program(const std::string& key,const platform::PcShaderProgram& program,unsigned provided,unsigned colours,unsigned bytes4);
+    std::map<std::uint32_t,GpuBuffer> gpu_buffers_;                       // by D3D9 buffer handle
+    std::map<std::uint32_t,std::map<std::uint64_t,std::uint32_t>> index_ranges_;   // index buffer -> (start, count) -> low | high << 16
+    std::map<std::string,NativeProgram> native_programs_;                 // by blob list and input formats
+    std::map<std::string,ComPtr<ID3D11InputLayout>> native_layouts_;
+    std::set<std::string> native_refused_layouts_;
+    ComPtr<ID3D11Buffer> vs_constants_;std::vector<float> vs_shadow_;      // C[256] and the pixel-centre fix (VS b0)
+    bool native_enabled_{true};
+    struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{}; double ms{};
+             std::map<std::string,std::uint64_t> refused; } native_stats_;
     Texture* texture(std::uint32_t);
     ID3D11RenderTargetView* colour_view();
     ID3D11DepthStencilView* depth_view(std::uint32_t);

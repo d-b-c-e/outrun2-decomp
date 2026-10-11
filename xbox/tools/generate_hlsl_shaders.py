@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Translate the retained pixel shaders (switch/shaders GLSL) to HLSL 5.0.
+"""Translate the retained pixel shaders (switch/shaders GLSL) to HLSL 5.0, and the vertex blob equations
+(pc_vs_uber_vsh.glsl) for the GPU vertex path.
 
 Only the already generated expressions are rewritten, as for the Metal
 build (mac/tools/generate_metal_shaders.py). Unknown layout or constructs
@@ -28,6 +29,9 @@ float2 mk2(float a,float b){return float2(a,b);}
 int4 imk4(int a){return int4(a,a,a,a);}
 int4 imk4(int a,int b,int c,int d){return int4(a,b,c,d);}
 bool4 greaterThan(float4 a,float4 b){return a>b;}
+bool4 lessThan(float4 a,float4 b){return a<b;}
+bool4 greaterThanEqual(float4 a,float4 b){return a>=b;}
+bool4 lessThanEqual(float4 a,float4 b){return a<=b;}
 '''
 
 # The vertex stage only forwards the vertices the CPU already transformed
@@ -86,6 +90,41 @@ def translate(name, source):
     return PRELUDE + VERTEX + smp + statics + source + '\n' + entry
 
 
+# The GPU vertex path (D3D11D3D9Device::native_program): the recovered vertex blob functions and run() of the
+# Switch uber shader. The device appends each program's input struct (its declared registers only) and vs_main,
+# whose blob list is literal run() calls, so the compiler keeps only that program's blobs (as the PS5
+# specialization constants). The constants and the D3D9 pixel-centre fix share one buffer (VS b0).
+VERTEX_OUT = r'''struct Varying{float4 p:SV_Position;float4 d0:COLOR0;float4 d1:COLOR1;
+ float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;
+ float4 t4:TEXCOORD4;float4 t5:TEXCOORD5;float4 t6:TEXCOORD6;float4 t7:TEXCOORD7;float fog:TEXCOORD8;};
+'''
+
+
+def native_vertex():
+    source = (root / 'switch/shaders/pc_vs_uber_vsh.glsl').read_text()
+    source = source[:source.index('void main(){')]
+    source = re.sub(r'^#version[^\n]*\n', '', source, flags=re.M)
+    for glsl, hlsl in [('layout(std140,binding=0) uniform VsConstants{vec4 C[256];vec4 P[4];};',
+                        'cbuffer VsConstants : register(b0) {float4 C[256];float4 clip_fix;};'),
+                       ('layout(std140,binding=2) uniform VsFix{vec4 clip_fix;};', '')]:
+        if glsl not in source:
+            raise ValueError('pc_vs_uber_vsh.glsl layout changed: ' + glsl)
+        source = source.replace(glsl, hlsl)
+    source = re.sub(r'^layout\(location=\d+\) (?:in|out) (?:vec4|float) \w+;\n', '', source, flags=re.M)
+    source = re.sub(r'^((?:vec4|float) \w+(?:\[\d+\])?(?:[;,]\w+(?:\[\d+\])?)*;(?:(?:vec4|float) \w+(?:\[\d+\])?;)*)$',
+                    lambda m: re.sub(r'(^|;)((?:vec4|float) )', r'\1static \2', m[1]), source, flags=re.M)
+    source = re.sub(r'\bivec4\(', 'imk4(', source)
+    source = re.sub(r'\bvec([234])\(', r'mk\1(', source)
+    for glsl, hlsl in [('ivec4', 'int4'), ('vec4', 'float4'), ('vec3', 'float3'), ('vec2', 'float2')]:
+        source = re.sub(r'\b' + glsl + r'\b', hlsl, source)
+    source = re.sub(r'\bmix\(', 'lerp(', source)
+    source = source.replace('inversesqrt(', 'rsqrt(').replace('uintBitsToFloat(', 'asfloat(')
+    source = re.sub(r'\bfor\(', '[unroll] for(', source)
+    if re.search(r'layout\(|\bgl_|\bin_v\d|\bout_\w|\bP\[|\btexture\(', source):
+        raise ValueError('untranslated vertex shader construct')
+    return PRELUDE + VERTEX_OUT + source
+
+
 def programs():
     for name, file in [('ffp', 'pc_ffp_fsh.glsl'), ('ps11', 'pc_ps11_uber_fsh.glsl'), ('ps14', 'pc_ps14_uber_fsh.glsl')]:
         yield name, translate(name, (root / 'switch/shaders' / file).read_text())
@@ -96,10 +135,12 @@ def main():
         out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
         for name, text in programs():
             (out / f'pc_{name}.hlsl').write_text(text + VERTEX_MAIN)
+        (out / 'pc_native_vs.hlsl').write_text(native_vertex())
         return
     parts = ['#pragma once\nnamespace outrun::xbox_runtime::hlsl {\n']
     for name, text in programs():
         parts.append(f'inline constexpr const char* {name}=R"OR2HLSL({text}{VERTEX_MAIN})OR2HLSL";\n')
+    parts.append(f'inline constexpr const char* native_vs=R"OR2HLSL({native_vertex()})OR2HLSL";\n')
     parts.append('}\n')
     out = Path(sys.argv[1]); out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(''.join(parts))

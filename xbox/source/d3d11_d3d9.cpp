@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <vector>
 #include <cfloat>
 #include <cstdio>
@@ -16,7 +17,7 @@
 namespace outrun::xbox_runtime {
 using namespace platform::d3d9;
 namespace {
-constexpr unsigned KTexture=5,KSurface=6;
+constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
     ComPtr<ID3DBlob> code,errors;
@@ -82,6 +83,10 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     const UINT sizes[3]{8*16,512,48};
     for(unsigned k=0;k<3;++k){D3D11_BUFFER_DESC d{};d.ByteWidth=sizes[k];d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_CONSTANT_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         check(device_->CreateBuffer(&d,nullptr,&ubo_[k]),"CreateBuffer(constants)");}
+    {   D3D11_BUFFER_DESC d{};d.ByteWidth=257*16;d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_CONSTANT_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        check(device_->CreateBuffer(&d,nullptr,&vs_constants_),"CreateBuffer(vertex constants)");}
+    native_enabled_=std::getenv("OR2_D3D11_CPU_VERTEX")==nullptr;
+    std::printf("D3D11 vertex path: %s\n",native_enabled_?"GPU (CPU for draws it cannot take)":"CPU (OR2_D3D11_CPU_VERTEX)");
     allocate_back(w,h);
     {   const auto fvs=compile(hlsl::fxaa,"vs_main","vs_4_1"),fps=compile(hlsl::fxaa,"ps_main","ps_4_1");
         check(device_->CreateVertexShader(fvs->GetBufferPointer(),fvs->GetBufferSize(),nullptr,&fxaa_vertex_),"CreateVertexShader(FXAA)");
@@ -109,6 +114,10 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
+    std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache (%.0f ms); %llu buffer uploads (%llu bytes)\n",
+                (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.ms,
+                (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
+    for(const auto& r:native_stats_.refused)std::printf("  CPU vertex path: %s (%llu draws)\n",r.first.c_str(),(unsigned long long)r.second);
 }
 void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     if(!w||!h||w>16384||h>16384)throw std::runtime_error("invalid GPU back buffer size");
@@ -228,7 +237,7 @@ void D3D11D3D9Device::bind_target(){
 }
 void D3D11D3D9Device::release(std::uint32_t handle){
     PcSoftD3D9Device::release(handle);if(object(handle))return;
-    textures_.erase(handle);depth_views_.erase(handle);shader_programs_.erase(handle);
+    textures_.erase(handle);depth_views_.erase(handle);shader_programs_.erase(handle);gpu_buffers_.erase(handle);index_ranges_.erase(handle);
     for(auto it=colour_views_.begin();it!=colour_views_.end();)it=std::uint32_t(it->first>>32)==handle?colour_views_.erase(it):std::next(it);
 }
 void D3D11D3D9Device::unlock_rect(std::uint32_t handle){
@@ -254,7 +263,143 @@ void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
     for(unsigned k=1;k+1<count;++k){push(vertices[0]);push(vertices[k]);push(vertices[k+1]);++triangles_drawn;}
 }
 std::uint32_t D3D11D3D9Device::draw_indexed_primitive(std::uint32_t type,std::int32_t base,std::uint32_t min,std::uint32_t vertices,std::uint32_t start,std::uint32_t count){
+    if(!count_only&&draw_native(type,base,start,count)){note_dip_state(count);return 0;}
+    ++native_stats_.cpu_draws;
     batch_.clear();const auto result=PcSoftD3D9Device::draw_indexed_primitive(type,base,min,vertices,start,count);flush();return result;
+}
+std::uint8_t* D3D11D3D9Device::lock(std::uint32_t h,std::uint32_t offset,std::uint32_t size,std::uint32_t flags){
+    auto* p=PcSoftD3D9Device::lock(h,offset,size,flags);
+    if(p){   // D3D9: size 0 locks to the end. The GPU copy takes the range at the next draw; index bounds are rescanned.
+        index_ranges_.erase(h);
+        if(auto it=gpu_buffers_.find(h);it!=gpu_buffers_.end()){auto& g=it->second;const std::size_t end=size?std::size_t(offset)+size:object(h)->bytes.size();
+            g.dirty_lo=std::min<std::size_t>(g.dirty_lo,offset);g.dirty_hi=std::max(g.dirty_hi,end);}
+    }
+    return p;
+}
+ID3D11Buffer* D3D11D3D9Device::gpu_buffer(std::uint32_t h){
+    const auto& bytes=object(h)->bytes;auto& g=gpu_buffers_[h];
+    if(!g.buffer||g.bytes!=bytes.size()){
+        D3D11_BUFFER_DESC d{};d.ByteWidth=UINT((bytes.size()+15)&~std::size_t(15));d.Usage=D3D11_USAGE_DEFAULT;
+        d.BindFlags=D3D11_BIND_VERTEX_BUFFER|D3D11_BIND_INDEX_BUFFER;
+        std::vector<std::uint8_t> initial(d.ByteWidth);std::memcpy(initial.data(),bytes.data(),bytes.size());
+        D3D11_SUBRESOURCE_DATA s{initial.data(),0,0};g.buffer.Reset();
+        check(device_->CreateBuffer(&d,&s,&g.buffer),"CreateBuffer(D3D9 buffer)");
+        g.bytes=bytes.size();g.dirty_lo=~std::size_t(0);g.dirty_hi=0;++native_stats_.uploads;native_stats_.upload_bytes+=bytes.size();
+    }else if(g.dirty_hi>g.dirty_lo){
+        const std::size_t lo=g.dirty_lo,hi=std::min(g.dirty_hi,bytes.size());
+        if(hi>lo){const D3D11_BOX box{UINT(lo),0,0,UINT(hi),1,1};context_->UpdateSubresource(g.buffer.Get(),0,&box,bytes.data()+lo,0,0);
+            ++native_stats_.uploads;native_stats_.upload_bytes+=hi-lo;}
+        g.dirty_lo=~std::size_t(0);g.dirty_hi=0;
+    }
+    return g.buffer.Get();
+}
+D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::string& key,const platform::PcShaderProgram& program,
+                                                              unsigned provided,unsigned colours,unsigned bytes4){
+    if(auto it=native_programs_.find(key);it!=native_programs_.end())return &it->second;
+    // The program: its declared input registers (D3DCOLOR as RGBA, UBYTE4 as 0..255, the others (0,0,0,1)) and
+    // its blob list as literal run() calls, then the D3D9 pixel-centre fix as in raster() (x + w/vw, y - w/vh).
+    std::string source=hlsl::native_vs;source+="struct NativeIn{";
+    for(unsigned r=0;r<16;++r)if(provided&(1u<<r))source+="float4 v"+std::to_string(r)+":V"+std::to_string(r)+";";
+    if(!provided)source+="uint vertex:SV_VertexID;";   // a program without declared inputs: no input layout element
+    source+="};\n";
+    source+="Varying vs_main(NativeIn i){\n [unroll] for(int k=0;k<12;++k)R[k]=mk4(0.0);\n [unroll] for(int j=0;j<16;++j)V[j]=float4(0,0,0,1);\n";
+    for(unsigned r=0;r<16;++r)if(provided&(1u<<r)){const auto n=std::to_string(r);
+        source+=" V["+n+"]="+(colours&(1u<<r)?"i.v"+n+".zyxw":bytes4&(1u<<r)?"round(i.v"+n+"*255.0)":"i.v"+n)+";\n";}
+    source+=" oPos=mk4(0.0);oFog=mk4(1.0);oPts=mk4(0.0);oD[0]=mk4(0.0);oD[1]=mk4(0.0);\n [unroll] for(int t=0;t<8;++t)oT[t]=mk4(0.0);\n";
+    for(const auto blob:program.blobs)source+=" run("+std::to_string(blob)+");\n";
+    source+=" Varying o;o.p=float4(oPos.x+clip_fix.x*oPos.w,oPos.y-clip_fix.y*oPos.w,oPos.z,oPos.w);\n"
+            " o.d0=saturate(oD[0]);o.d1=saturate(oD[1]);o.t0=oT[0];o.t1=oT[1];o.t2=oT[2];o.t3=oT[3];o.t4=oT[4];o.t5=oT[5];o.t6=oT[6];o.t7=oT[7];\n"
+            " o.fog=saturate(oFog.x);return o;}\n";
+    const auto started=std::chrono::steady_clock::now();
+    NativeProgram p;const std::string path=shader_cache_path(source,"vs_4_1");
+    p.code=read_shader_cache(path);
+    const bool loaded=!p.code.empty()&&SUCCEEDED(device_->CreateVertexShader(p.code.data(),p.code.size(),nullptr,&p.shader));
+    if(!loaded){
+        // A program that does not compile stays on the CPU path (a null shader), logged once, never a frame failure.
+        try{
+            const auto code=compile(source,"vs_main","vs_4_1");
+            const auto* b=static_cast<const std::uint8_t*>(code->GetBufferPointer());p.code.assign(b,b+code->GetBufferSize());
+            check(device_->CreateVertexShader(p.code.data(),p.code.size(),nullptr,&p.shader),"CreateVertexShader(native)");
+            write_shader_cache(path,p.code.data(),p.code.size());
+        }catch(const std::exception& e){
+            std::printf("shader: vertex program %s stays on the CPU path: %.400s\n",key.c_str(),e.what());
+            p=NativeProgram{};
+        }
+    }
+    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+    ++(loaded?native_stats_.loaded:native_stats_.compiled);native_stats_.ms+=ms;
+    std::printf("shader: vertex program %zu (%zu blobs) %s in %.0f ms\n",native_programs_.size()+1,program.blobs.size(),loaded?"loaded":"compiled",ms);
+    return &(native_programs_[key]=std::move(p));
+}
+bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint32_t start,std::uint32_t count){
+    if(!native_enabled_)return false;
+    auto refuse=[this](const char* why){++native_stats_.refused[why];return false;};
+    auto* ib=object(indices);auto* decl=object(declaration);auto* vs=object(vertex_shader);
+    const std::size_t total=type==5?std::size_t(count)+2:type==4?std::size_t(count)*3:0;
+    if(!ib||ib->kind!=KBuffer||!decl||decl->kind!=KDecl||!vs||vs->kind!=KVs)return refuse("no index buffer, declaration or vertex shader");
+    if(!total||(std::size_t(start)+total)*2>ib->bytes.size())return refuse("primitive type or index range");
+    if(vs->program.blobs.size()>32)return refuse("vertex program over 32 blobs");
+    if(!targets_consistent())return refuse("render target and depth surface sizes differ");
+    // The indices' bounds, as the CPU path would read the vertices (cached until the index buffer is locked).
+    auto& ranges=index_ranges_[indices];const std::uint64_t range_key=(std::uint64_t(start)<<32)|total;
+    auto range=ranges.find(range_key);
+    if(range==ranges.end()){std::uint32_t low=0xffff,high=0;
+        for(std::size_t k=start;k<std::size_t(start)+total;++k){std::uint16_t i;std::memcpy(&i,ib->bytes.data()+k*2,2);low=std::min<std::uint32_t>(low,i);high=std::max<std::uint32_t>(high,i);}
+        if(ranges.size()>=256)ranges.clear();
+        range=ranges.emplace(range_key,low|(high<<16)).first;}
+    const std::int64_t low=range->second&0xffffu,high=range->second>>16;
+    if(std::int64_t(base)+low<0)return refuse("negative base vertex");
+    // D3D9 draws index 0xFFFF like any other; D3D11 takes it as a strip cut (the triangle is dropped, lists too).
+    if(high==0xffff)return refuse("index 0xFFFF (a D3D11 strip cut)");
+    // The declaration's elements by the program's input registers (a later element wins, as shade_vertex).
+    int element_of[16];std::fill(std::begin(element_of),std::end(element_of),-1);
+    for(std::size_t k=0;k<decl->elements.size();++k){const auto& e=decl->elements[k];
+        if(e.stream==platform::PcDeclEndStream)break;
+        if(e.type>5)return refuse("declaration type");
+        if(e.stream>=streams.size())return refuse("declaration stream");
+        const auto& st=streams[e.stream];auto* b=object(st.buffer);if(!b||b->kind!=KBuffer)return refuse("stream without a buffer");
+        const std::uint64_t need=e.type<=3?4u*(e.type+1u):4u;
+        if(std::uint64_t(st.offset)+std::uint64_t(std::int64_t(base)+high)*st.stride+e.offset+need>b->bytes.size())return refuse("vertex outside its stream");
+        for(const auto& in:vs->program.inputs)if(in.usage==e.usage&&in.usage_index==e.usage_index){
+            if(in.reg>=16)return refuse("input register");element_of[in.reg]=int(k);}
+    }
+    static constexpr DXGI_FORMAT formats[6]{DXGI_FORMAT_R32_FLOAT,DXGI_FORMAT_R32G32_FLOAT,DXGI_FORMAT_R32G32B32_FLOAT,
+        DXGI_FORMAT_R32G32B32A32_FLOAT,DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R8G8B8A8_UNORM};
+    unsigned provided=0,colours=0,bytes4=0,slots=0;D3D11_INPUT_ELEMENT_DESC elements[16];UINT n=0;
+    std::string key;for(const auto blob:vs->program.blobs)key+=std::to_string(blob)+",";
+    for(unsigned r=0;r<16;++r)if(element_of[r]>=0){const auto& e=decl->elements[std::size_t(element_of[r])];
+        provided|=1u<<r;if(e.type==4)colours|=1u<<r;if(e.type==5)bytes4|=1u<<r;slots|=1u<<e.stream;
+        elements[n++]={"V",r,formats[e.type],e.stream,e.offset,D3D11_INPUT_PER_VERTEX_DATA,0};}
+    key+="|"+std::to_string(provided)+"|"+std::to_string(colours)+"|"+std::to_string(bytes4);
+    auto* program=native_program(key,vs->program,provided,colours,bytes4);
+    if(!program->shader)return refuse("vertex program did not compile");
+    std::string layout_key=key;for(UINT k=0;k<n;++k)layout_key+=";"+std::to_string(elements[k].SemanticIndex)+":"+std::to_string(elements[k].Format)+":"+
+        std::to_string(elements[k].InputSlot)+":"+std::to_string(elements[k].AlignedByteOffset);
+    auto& layout=native_layouts_[layout_key];   // a refused layout stays null: its draws keep the CPU path
+    if(!layout&&!native_refused_layouts_.count(layout_key)&&FAILED(device_->CreateInputLayout(n?elements:nullptr,n,program->code.data(),program->code.size(),&layout))){
+        std::printf("shader: input layout %s refused; its draws stay on the CPU path\n",layout_key.c_str());
+        native_refused_layouts_.insert(layout_key);layout.Reset();}
+    if(!layout)return refuse("input layout refused");
+    // The pixel side, then the vertex side: constants, streams, indices, program.
+    batch_rhw_=false;pretransformed_=false;
+    pixel_pipeline();
+    if(vs_shadow_.size()!=257*4)vs_shadow_.assign(257*4,std::numeric_limits<float>::quiet_NaN());
+    float constants[257*4];std::memcpy(constants,vs_constants.data(),256*16);
+    constants[1024]=1.f/soft_viewport_.w;constants[1025]=1.f/soft_viewport_.h;constants[1026]=0.f;constants[1027]=0.f;
+    if(std::memcmp(constants,vs_shadow_.data(),sizeof constants)!=0){
+        D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vs_constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertex constants)");
+        std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);}
+    for(unsigned s=0;s<streams.size()&&s<16;++s)if(slots&(1u<<s)){
+        ID3D11Buffer* b=gpu_buffer(streams[s].buffer);const UINT stride=streams[s].stride,offset=streams[s].offset;
+        context_->IASetVertexBuffers(s,1,&b,&stride,&offset);}
+    context_->IASetIndexBuffer(gpu_buffer(indices),DXGI_FORMAT_R16_UINT,0);
+    context_->IASetInputLayout(layout.Get());
+    context_->IASetPrimitiveTopology(type==5?D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);
+    context_->VSSetShader(program->shader.Get(),nullptr,0);
+    context_->DrawIndexed(UINT(total),start,base);
+    ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
+    return true;
 }
 void D3D11D3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,const void* data,std::uint32_t stride){
     batch_.clear();PcSoftD3D9Device::draw_primitive_up(type,count,data,stride);flush();
@@ -354,7 +499,20 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
     return (shader_programs_[pixel_shader]=shader).Get();
 }
 void D3D11D3D9Device::flush(){
-    if(batch_.empty()||count_only)return;bind_target();apply_state();bind_textures();
+    if(batch_.empty()||count_only)return;
+    pixel_pipeline();
+    const std::size_t bytes=batch_.size()*sizeof(Vertex);
+    if(bytes>vbo_bytes_){vbo_bytes_=std::max<std::size_t>(bytes,std::size_t(1)<<20);vbo_.Reset();
+        D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(vbo_bytes_);d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_VERTEX_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        check(device_->CreateBuffer(&d,nullptr,&vbo_),"CreateBuffer(vertices)");}
+    D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vbo_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertices)");std::memcpy(m.pData,batch_.data(),bytes);context_->Unmap(vbo_.Get(),0);
+    const UINT stride=sizeof(Vertex),offset=0;ID3D11Buffer* vb=vbo_.Get();context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+    context_->IASetInputLayout(layout_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->VSSetShader(vertex_.Get(),nullptr,0);
+    context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
+}
+// The pixel side of a draw: target, states, textures, pixel program and its constants.
+void D3D11D3D9Device::pixel_pipeline(){
+    bind_target();apply_state();bind_textures();
     auto* ps=object(pixel_shader);const unsigned kind=ps&&ps->kind==4?(ps->program.version==0xffff0101u?1:2):0;
     context_->PSSetShader(kind?pixel_program(kind,&ps->program):ffp_.Get(),nullptr,0);
     uniform(0,ps_constants.data(),8*4*sizeof(float));
@@ -373,13 +531,5 @@ void D3D11D3D9Device::flush(){
     if(render[RS_FOGENABLE])fixed[4]=render[RS_FOGTABLEMODE]?float(render[RS_FOGTABLEMODE]):4.f;
     fixed[5]=f(render[RS_FOGSTART]);fixed[6]=f(render[RS_FOGDENSITY]);fixed[7]=1;fixed[8]=render[RS_ALPHATESTENABLE]?1.f:0.f;fixed[9]=float(render[RS_ALPHAREF]&255);fixed[10]=float(render[RS_ALPHAFUNC]);uniform(2,fixed,sizeof fixed);
     ID3D11Buffer* constants[3]{ubo_[0].Get(),ubo_[1].Get(),ubo_[2].Get()};context_->PSSetConstantBuffers(0,3,constants);
-    const std::size_t bytes=batch_.size()*sizeof(Vertex);
-    if(bytes>vbo_bytes_){vbo_bytes_=std::max<std::size_t>(bytes,std::size_t(1)<<20);vbo_.Reset();
-        D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(vbo_bytes_);d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_VERTEX_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
-        check(device_->CreateBuffer(&d,nullptr,&vbo_),"CreateBuffer(vertices)");}
-    D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vbo_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertices)");std::memcpy(m.pData,batch_.data(),bytes);context_->Unmap(vbo_.Get(),0);
-    const UINT stride=sizeof(Vertex),offset=0;ID3D11Buffer* vb=vbo_.Get();context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
-    context_->IASetInputLayout(layout_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->VSSetShader(vertex_.Get(),nullptr,0);
-    context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
 }
 }

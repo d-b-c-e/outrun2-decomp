@@ -47,6 +47,11 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
         endforeach()
         target_link_libraries(outrun_xbox_core PUBLIC bcrypt)
     endif()
+    # The D3D11 GPU vertex path against its CPU path, headless on WARP (no game data).
+    add_executable(test_d3d11_vertex_path tests/test_d3d11_vertex_path.cpp)
+    target_link_libraries(test_d3d11_vertex_path PRIVATE outrun_xbox_core)
+    target_link_options(test_d3d11_vertex_path PRIVATE /STACK:16777216)   # as the game executables
+    add_test(NAME d3d11_vertex_path COMMAND test_d3d11_vertex_path)
     add_executable(OutRunXboxPC WIN32 source/window_win32.cpp)
     target_link_libraries(OutRunXboxPC PRIVATE outrun_xbox_core shell32)
     # A PDB with the public symbols, to name the function of a crash address.
