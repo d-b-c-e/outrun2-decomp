@@ -3,7 +3,9 @@
 #include <iostream>
 #include <limits>
 #include <string>
+#include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <new>
 using namespace recorder_spike;
 using namespace std::chrono_literals;
@@ -224,6 +226,8 @@ void thread_tail(int tail_ms,bool joined){
 }
 }
 int main(){
+    // A destroyed joinable thread calls std::terminate: report it and exit 3, never a crash dialog (Astra 14097).
+    std::set_terminate([]{std::fputs("FAIL: std::terminate (a joinable thread was destroyed or an exception escaped)\n",stderr);std::_Exit(3);});
     try{normal();overflow();validation();wrong_thread();sink_failures();late_stop(false);late_stop(true);missing_finish();end_publication();producer_disappears();
         thread_tail(50,true);thread_tail(1500,false);thread_tail(-1,false);allocation_failures();}
     catch(const std::exception& e){for(auto& w:traces)if(auto t=w.lock())t->release();std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
