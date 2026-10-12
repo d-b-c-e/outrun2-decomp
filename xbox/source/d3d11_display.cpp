@@ -15,7 +15,7 @@ namespace {
 // OR2_FRAME_LATENCY=1..3 (opt-in, a measured experiment): the swap chain's frame latency waitable object with that
 // many frames queued at most, waited at the top of the frame before the input sample (wait_for_frame_latency).
 // Unset: the default chain, as before (up to 3 frames queued, Present blocks).
-HANDLE g_latency_wait=nullptr;
+HANDLE g_latency_wait=nullptr;   // owned by the process, like the swap chain (graphics(), never torn down): closed at exit
 unsigned frame_latency_request(){
     const char* v=std::getenv("OR2_FRAME_LATENCY");if(!v)return 0u;
     const unsigned n=unsigned(std::strtoul(v,nullptr,10));return n>=1u&&n<=3u?n:0u;
