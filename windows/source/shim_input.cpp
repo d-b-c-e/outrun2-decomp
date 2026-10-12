@@ -11,11 +11,13 @@
 #include "journal_identity.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 namespace outrun::desktop {
 namespace {
 namespace h=dbce::shim::hosting;
@@ -24,7 +26,9 @@ namespace sh=dbce::shim;
 constexpr const char* CoreVersion="input-shim core (fe120fe line)";
 constexpr const char* AdapterVersion="outrun adapter slice 2a.1";
 // The signals line's own throttle (log_signals): the last line written, per path.
-struct SignalLog { Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{}; };
+struct SignalLog { Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{};std::string last_extra; };
+// The start reports (initial_report / resolved_report below): when the first was printed, and whether the resolved one has.
+struct StartReports { bool resolved{};std::chrono::steady_clock::time_point since{}; };
 struct State {
     fence::Plan plan;
     std::string profile;                       // the exact [Controls] bytes Core parses; their hash is the identity
@@ -35,6 +39,7 @@ struct State {
     bool replay_run{};                         // [ShimReplay] Tape= names a tape: an R3 replay run (outrun_replay.hpp)
     std::unique_ptr<Tape> tape;                // null in a replay run whose tape was refused: nothing is played
     SignalLog log;
+    StartReports reports;
 };
 State g;
 
@@ -50,8 +55,42 @@ struct Ordinary {
     std::unique_ptr<h::ProviderHost<NoCapture>> host;
     std::unique_ptr<Adapter> adapter;
     bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
+    Steering steering;                         // [Wheel], as the native wheel path reads it
+    StartReports reports;
 };
 Ordinary o;
+
+// The start report at the first tick comes before the provider's first open, so it lists every bound action as
+// device-missing. It is labelled initial, and a resolved report follows once every profile device is open, or after
+// ResolveMs with the devices still missing named (romi 25546; DRIVE logs resolved identities after adoption too).
+constexpr long long ResolveMs=3000;
+template<class Host> void initial_report(const Host& host,StartReports& r){
+    r.since=std::chrono::steady_clock::now();
+    const auto start=host.start_report();
+    std::printf("input shim: initial start report, at the first tick before any device open (the resolved report follows)\n");
+    std::printf("%s\n",start.line.c_str());
+    for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
+}
+template<class Host> void resolved_report(const Host& host,StartReports& r){
+    if(r.resolved)return;
+    const auto devices=host.device_reports();
+    std::string missing;
+    for(const auto& d:devices)if(!d.opened)missing+=(missing.empty()?"":", ")+("\""+d.identity.name+"\" "+d.identity.dev);
+    const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-r.since).count();
+    if(!missing.empty()&&ms<ResolveMs)return;
+    r.resolved=true;
+    const auto start=host.start_report();
+    if(missing.empty())std::printf("input shim: resolved start report: all %zu profile devices open after %lld ms\n",devices.size(),ms);
+    else std::printf("input shim: resolved start report after %lld ms; not open: %s\n",ms,missing.c_str());
+    std::printf("%s\n",start.line.c_str());
+    for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
+    for(std::size_t i=0;i<devices.size();++i){
+        const auto& d=devices[i];
+        std::printf("input shim: device %zu \"%s\" instance %s product %s: %s, epoch %u%s%s\n",i,d.identity.name.c_str(),d.identity.dev.c_str(),
+            d.identity.prod.c_str(),d.status.c_str(),unsigned(d.epoch),d.identity.interface_path.empty()?"":", path ",d.identity.interface_path.c_str());
+    }
+    std::fflush(stdout);
+}
 
 // The journal identity (host/journal_identity.hpp, shared with dbce_shim.dll).
 std::shared_ptr<const c::JournalIdentity> identity(){
@@ -74,9 +113,7 @@ void start(){
     g.adapter=std::make_unique<Adapter>(g.transmission);
     (void)g.host->tick();   // the first frame: the start report follows the device checks
     g.host->recorder().set_devices(g.host->device_reports());
-    const auto start=g.host->start_report();
-    std::printf("%s\n",start.line.c_str());
-    for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
+    initial_report(*g.host,g.reports);
     c::JournalLimits limits;limits.cap_bytes=c::LatchedJournalCap;
     auto io=std::make_shared<c::FileIo>(g.plan.dbce_folder+L"\\inject.on",g.plan.dbce_folder+L"\\inject.txt",g.plan.run_root,false,identity(),limits);
     // The fence verified the run folder before the game started; this build sends no force at all.
@@ -92,12 +129,12 @@ void log_signals(const Signals& s,const char* run,SignalLog& l,const std::string
     const auto now=std::chrono::steady_clock::now();
     const bool moved=!l.logged||s.record_steer!=l.last.record_steer||s.record_accel!=l.last.record_accel||s.record_brake!=l.last.record_brake||
         s.record_buttons!=l.last.record_buttons||s.consumed_steer!=l.last.consumed_steer||s.consumed_accel!=l.last.consumed_accel||
-        s.consumed_brake!=l.last.consumed_brake||s.gear!=l.last.gear;
+        s.consumed_brake!=l.last.consumed_brake||s.gear!=l.last.gear||extra!=l.last_extra;   // the keyboard state too (romi 25597)
     if(l.logged&&s.mode==l.last.mode&&(!moved||now-l.last_log<std::chrono::milliseconds(250)))return;
     std::printf("input shim: frame %llu run %s mode %u%s record steer %d accel %d brake %d buttons %08x consumed steer %d accel %d brake %d gear %u speed %.1f suppressed %08x%s\n",
         (unsigned long long)s.frame_seq,run,s.mode,s.in_gameplay?" race":"",s.record_steer,s.record_accel,s.record_brake,s.record_buttons,
         s.consumed_steer,s.consumed_accel,s.consumed_brake,s.gear,double(s.speed),s.native_suppressed,extra.c_str());
-    l.last=s;l.logged=true;l.last_log=now;
+    l.last=s;l.logged=true;l.last_log=now;l.last_extra=extra;
 }
 
 GameView view(const platform::NativeRuntimeContext* runtime){
@@ -153,6 +190,7 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
                 (unsigned long long)live.seq,g.tape->played(),g.tape->size(),g.tape->end_reason().c_str());
         }
     }
+    resolved_report(*g.host,g.reports);
     g.adapter->apply(*frame,v,out);
     g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
     log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
@@ -169,6 +207,8 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     const auto parsed=sh::read_profile(o.profile);
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.folder=folder;
+    o.steering.sensitivity=settings.number("Wheel","SteeringSensitivity",1.f);
+    o.steering.dead_zone=std::clamp(settings.number("Wheel","SteeringDeadZone",0.f),0.f,0.9f);
     o.debug=std::getenv("OR2_INPUT_DEBUG")!=nullptr;
     o.configured=true;
 }
@@ -177,7 +217,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     if(!o.configured||o.stopped)return;
     if(!o.started){
         o.started=true;
-        o.adapter=std::make_unique<Adapter>(o.transmission);   // before the host: the keyboard fallback needs it (romi 25245)
+        o.adapter=std::make_unique<Adapter>(o.transmission,HPattern::Config{},o.steering);   // before the host: the keyboard fallback needs it (romi 25245)
         IDirectInput8W* input=nullptr;
         if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
             std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);return;}
@@ -186,10 +226,9 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
                 std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd));
         }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
         (void)o.host->tick();
-        const auto start=o.host->start_report();
-        std::printf("%s\n",start.line.c_str());
-        for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
-        std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths\n");
+        initial_report(*o.host,o.reports);
+        std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths; "
+            "steering sensitivity %g, dead zone %g ([Wheel])\n",double(o.steering.sensitivity),double(o.steering.dead_zone));
         std::fflush(stdout);
     }
     using outrun::desktop::desktop_key;
@@ -198,6 +237,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     // No host (DirectInput or the host refused): the keyboard keeps its path anyway. An empty frame (every action
     // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
     static const sh::Frame no_shim{};
+    if(o.host)resolved_report(*o.host,o.reports);
     o.adapter->apply(o.host?o.host->tick():no_shim,view(runtime),out,&kb);
     // The record is the wheel's (the adapter's); with "keyboard 1" the race reads the PC layer's (the keyboard's) instead.
     if(o.debug)log_signals(o.adapter->signals(),"ordinary",o.log,std::string(" keyboard ")+(out.pc_overlay_yield?"1":"0")+" layer "+(out.pc_input_layer?"1":"0")+

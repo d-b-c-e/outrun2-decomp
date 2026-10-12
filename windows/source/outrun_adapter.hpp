@@ -77,9 +77,14 @@ struct Keyboard {
     bool enter{},esc{},up{},down{},left{},right{};
 };
 
+// [Wheel] SteeringSensitivity and SteeringDeadZone (OutRunDesktop.ini), applied to the steering value exactly as the
+// native wheel path applies them (wheel_input.cpp): a dead zone around the centre rescaled to the full range, then the
+// sensitivity, clamped to full lock. Ordinary play only; the defaults (1, 0) leave the value unchanged.
+struct Steering { float sensitivity{1.f},dead_zone{0.f}; };
+
 class Adapter {
 public:
-    explicit Adapter(std::string transmission,HPattern::Config gearbox={});
+    explicit Adapter(std::string transmission,HPattern::Config gearbox={},Steering steering={});
     // Applies a frame to `out`, which holds the pad adapter's native input for this tick. With `keyboard` (ordinary play
     // on the shim backend, never a latched process) the desktop keyboard keeps its own path, exactly as with the native
     // wheel path (wheel_input.cpp, ea34c8b / 45658a0):
@@ -98,6 +103,7 @@ public:
 private:
     bool hpattern_;
     HPattern gearbox_;
+    Steering steering_;
     std::uint32_t last_mode_{};
     std::uint32_t pulse_prev_{};          // shift bits the gearbox held last tick (its own edges)
     bool keyboard_drives_{};std::int32_t keyboard_anchor_{};   // ordinary play: the race follows the keyboard

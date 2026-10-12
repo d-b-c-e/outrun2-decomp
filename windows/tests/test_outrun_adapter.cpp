@@ -5,6 +5,7 @@
 #include "outrun_adapter.hpp"
 #include "shim_fake_provider.hpp"
 #include "input/dual_sense.hpp"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -391,6 +392,30 @@ void test_keyboard_without_host(){
     check(!out.menu_confirm,"no host: one edge per press");
 }
 
+// [Wheel] SteeringSensitivity / SteeringDeadZone in ordinary play, as wheel_input.cpp applies them: the same frame
+// through a default adapter and a shaped one. The defaults leave the steering word bit-exact.
+void test_steering_shaping(){
+    Rig r(false,profile({Steer,Throttle,Brake}));
+    r.view.mode=16;
+    auto& d=r.dev(r.w);
+    Adapter plain("Sequential",{},Steering{1.f,0.f});
+    Adapter shaped("Sequential",{},Steering{1.5f,0.1f});
+    auto word=[&](Adapter& a){NativeInputState o{};a.apply(*r.frame,r.view,o);return std::int32_t(o.pc_device.axes_94[0x0e]);};
+    auto expect=[](std::int32_t w0){double n=w0/32767.0;n=std::fabs(n)<0.1?0.0:(n>0?1.0:-1.0)*(std::fabs(n)-0.1)/0.9;
+        return std::int32_t(std::lround(std::clamp(n*1.5,-1.0,1.0)*32767.0));};
+    d.state.axes[0]=32768;for(int i=0;i<3;++i)r.tick();   // open and seen at rest: live
+    for(const int raw:{49152,34406,3277,32768,60000}){
+        d.state.axes[0]=raw;
+        const auto out=r.tick();
+        const std::int32_t w0=out.pc_device.axes_94[0x0e];
+        if(raw==49152)check(w0>16000,"the steer is live (half right)");
+        check(word(plain)==w0,"Steering{1,0} is bit-exact with the default adapter (raw "+std::to_string(raw)+")");
+        check(std::abs(word(shaped)-expect(w0))<=2,"dead zone 0.1, sensitivity 1.5 as wheel_input (raw "+std::to_string(raw)+")");
+    }
+    d.state.axes[0]=34406;r.tick();check(word(shaped)==0,"inside the dead zone: centred");
+    d.state.axes[0]=3277;r.tick();check(word(shaped)==-32767,"past full lock after the sensitivity: clamped");
+}
+
 // A latched frame never takes the keyboard, even if the glue passes one: the test path is unchanged.
 void test_keyboard_latched(){
     Rig r(true,profile({Steer,Throttle,wb("confirm",0)}));
@@ -404,7 +429,7 @@ void test_keyboard_latched(){
 
 int main(){
     try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
-        test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();}
+        test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;

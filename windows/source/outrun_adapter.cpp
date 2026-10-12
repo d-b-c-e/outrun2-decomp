@@ -100,7 +100,8 @@ int HPattern::step(const bool gates[6],bool race,bool car,std::uint32_t gear,std
 }
 
 // ---------------------------------------------------------------- the sink
-Adapter::Adapter(std::string transmission,HPattern::Config gearbox):hpattern_(transmission=="H-pattern"),gearbox_(gearbox){}
+Adapter::Adapter(std::string transmission,HPattern::Config gearbox,Steering steering)
+    :hpattern_(transmission=="H-pattern"),gearbox_(gearbox),steering_(steering){}
 
 void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInputState& out,const Keyboard* keyboard){
     const bool race=g.mode==16u||g.mode==18u;
@@ -125,7 +126,11 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     else if(steer||throttle||brake||f.suppress_native)out.pc_input_layer=false;
     std::int32_t steer_word=0;
     if(steer){
-        steer_word=std::int32_t(std::lround(double(value(f,"steer"))*32767.0));
+        double n=double(value(f,"steer"));
+        const double zone=steering_.dead_zone;
+        if(zone>0.0)n=std::fabs(n)<zone?0.0:(n>0?1.0:-1.0)*(std::fabs(n)-zone)/(1.0-zone);
+        n=std::clamp(n*double(steering_.sensitivity),-1.0,1.0);
+        steer_word=std::int32_t(std::lround(n*32767.0));
         d.axes_94[0x0e]=std::int16_t(steer_word);
         out.steering=std::clamp(steer_word/256,-128,127);
     }else if(f.suppress_native)d.axes_94[0x0e]=0;
