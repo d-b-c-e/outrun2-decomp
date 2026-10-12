@@ -27,6 +27,7 @@ Contract 1 and generic capture admission are unchanged.
 ```powershell
 dotnet P21Finalizer.dll --seal-recording <capture-dir> <request-id> <exe-sha256> <pid> <creation-filetime> <result-dir>/recording-verified.json
 dotnet P21Finalizer.dll --read-recording <capture-dir> <request-id> <exe-sha256> <pid> <creation-filetime> <new-receipt-path>
+dotnet P21Finalizer.dll --export-recording <capture-dir> <request-id> <exe-sha256> <pid> <creation-filetime> <new-export-path>
 ```
 
 Request is 32 lower-case hex, executable SHA is 64 lower-case hex, PID and
@@ -37,6 +38,16 @@ those four identities, `artifactSha256`, `sealSha256`, `recordingSaved: true`,
 Saving / complete-not-verified until this matching receipt exists. A failure
 never produces a success receipt. A seal is never overwritten; after a receipt
 write failure, use `--read-recording` to validate it again and write a fresh receipt.
+
+`--export-recording` applies the same recording seal, stream and expected-identity
+checks as `--read-recording`, holding all seven members and the seal read-only
+through export. It needs no process seal or exit report and never creates either.
+Its output must be a new file outside the capture, with no directory aliases.
+The format is the same as P21 `--read-export`: `ROW <channel-count>`, then every
+channel in ordinal name order as `<name> <invariant round-trip number>`, repeated
+for every row. Additive channels (including `final.pcDrive` and PC axes when
+recorded) are preserved; missing channels are never synthesized. An export
+validates saved input data, not deterministic route playback or a normal exit.
 
 Device-free checks:
 

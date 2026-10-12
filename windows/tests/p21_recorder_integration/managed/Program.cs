@@ -139,9 +139,15 @@ static partial class Program {
     }
     static bool Refused(Action action,string because){string why;try{action();return false;}catch(InvalidDataException e){why=e.Message;}catch(IOException e){why=e.Message;}
         Console.WriteLine("   refused ("+because+"): "+why);return why.Contains(because,StringComparison.Ordinal);}
+    static void WriteExport(SessionSample[] captured,string output){
+        using var writer=new StreamWriter(new FileStream(output,FileMode.CreateNew,FileAccess.Write));
+        foreach(var row in captured){writer.WriteLine("ROW "+row.Channels.Count);
+            foreach(var value in row.Channels.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                writer.WriteLine(value.Key+" "+value.Value.ToString("R",CultureInfo.InvariantCulture));}
+    }
     static int Main(string[] args){try{
-        if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording")){
-            RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6]);return 0;
+        if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording"||args[0]=="--export-recording")){
+            RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6],args[0]=="--export-recording");return 0;
         }
         // Reuse the exact reviewed validator for a capture from the combined
         // real-provider/recorder fixture. The export is outside the sealed bundle.
@@ -149,10 +155,7 @@ static partial class Program {
         // stream) and exported fresh, so a reused capture's export is always regenerated from its sealed source.
         if(args.Length==3&&(args[0]=="--seal-export"||args[0]=="--read-export")){
             var dir=Path.GetFullPath(args[1]);if(args[0]=="--seal-export")Finalize(dir);var captured=Read(dir);
-            using var output=new StreamWriter(new FileStream(args[2],FileMode.CreateNew,FileAccess.Write));
-            foreach(var row in captured){output.WriteLine("ROW "+row.Channels.Count);
-                foreach(var value in row.Channels.OrderBy(x=>x.Key,StringComparer.Ordinal))
-                    output.WriteLine(value.Key+" "+value.Value.ToString("R",CultureInfo.InvariantCulture));}
+            WriteExport(captured,args[2]);
             Console.WriteLine($"PASS validated export: {captured.Length} rows; {checks} checks");return 0;
         }
         var root=args.Single();string Capture(string mode)=>Path.Combine(root,mode,"capture");
