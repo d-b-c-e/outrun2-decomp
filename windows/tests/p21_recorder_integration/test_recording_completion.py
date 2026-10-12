@@ -79,6 +79,12 @@ def command(d, name, expected=0, mode='--seal-recording', overrides=None):
     (a.result/(name+'.log')).write_text(p.stdout+p.stderr, encoding='utf-8')
     assert (p.returncode == 0) == (expected == 0), (name, p.stdout, p.stderr)
     assert receipt.exists() == (expected == 0), name
+    if expected == 0 and mode in ('--seal-recording', '--read-recording'):
+        # The native saved-badge reader accepts only a flat object of strings,
+        # integers and booleans. Null/nested admission fields break that ABI.
+        value = json.loads(receipt.read_text())
+        assert all(type(v) in (str, int, bool) for v in value.values()), (name, 'non-flat native receipt', value)
+        assert 'pose' not in value and 'playbackEligible' not in value, (name, 'admission leaked into saved receipt')
     checks.append(dict(name=name, refused=p.returncode!=0))
     return receipt
 

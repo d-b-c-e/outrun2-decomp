@@ -1,6 +1,7 @@
 // A stopped recorder can save while its host is alive. This checkpoint never asserts a normal process exit;
 // P21's separate complete.tsv still requires host-shutdown.json and the supervisor's exit.json.
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -97,10 +98,16 @@ static partial class Program {
                 WriteExport(rows,output);
                 Console.WriteLine($"PASS recording export: {rows.Length} rows; process exit not asserted; {checks} checks");return;
             }
-            var result=new {schema="outrun.recording-verified@1",requestId=request,processId=pid,processCreationFileTime=creation,
-                exeSha256=exe,artifactSha256=artifact,sealSha256=ArtifactSeal.Hash(Path.Combine(dir,RecordingSeal)),
-                playbackEligible=forPlayback,pose=motion==null?null:new {validRows=motion.ValidRows,pathLength=motion.PathLength,range=motion.Range},
-                recordingSaved=true,rows=rows.Length,scope="recording saved; process exit not asserted"};
+            // Native observe_receipt deliberately accepts a flat scalar object only. Preserve the
+            // ordinary seal/read receipt; admission details belong only to the companion's reader.
+            var result=new Dictionary<string,object>{
+                ["schema"]="outrun.recording-verified@1",["requestId"]=request,["processId"]=pid,["processCreationFileTime"]=creation,
+                ["exeSha256"]=exe,["artifactSha256"]=artifact,["sealSha256"]=ArtifactSeal.Hash(Path.Combine(dir,RecordingSeal)),
+                ["recordingSaved"]=true,["rows"]=rows.Length,["scope"]="recording saved; process exit not asserted"};
+            if(forPlayback){
+                result["playbackEligible"]=true;
+                result["pose"]=new {validRows=motion.ValidRows,pathLength=motion.PathLength,range=motion.Range};
+            }
             using(var stream=new FileStream(output,FileMode.CreateNew,FileAccess.Write))JsonSerializer.Serialize(stream,result);
             Console.WriteLine($"PASS recording saved: {rows.Length} rows; process exit not asserted; {checks} checks");
         }finally{foreach(var f in held)f.Dispose();}
