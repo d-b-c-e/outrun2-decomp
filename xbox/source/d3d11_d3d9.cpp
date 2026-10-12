@@ -262,7 +262,7 @@ void D3D11D3D9Device::end_frame(){
     // Development: OR2_TRIPLE_TRACE=1 logs each frame's three-view counts (its time, draws replicated, kept single by
     // reason, into other targets), to line up with a clip of the window (sana 35918 / 35955: localization only, equal
     // counts can hide different object sets).
-    static const bool trace=std::getenv("OR2_TRIPLE_TRACE")!=nullptr;
+    static const bool trace=[]{const char* v=std::getenv("OR2_TRIPLE_TRACE");return v&&std::string(v)=="1";}();   // =1 only (nene 36096)
     if(trace&&platform::g_pc_triple_corrections){
         static std::uint64_t frame=0,last[6]{};static const auto t0=std::chrono::steady_clock::now();
         const std::uint64_t now[6]{triple_draws,triple_single_rhw,triple_single_unmatched,triple_single_refused,triple_single_topology,triple_single_target};

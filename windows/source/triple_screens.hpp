@@ -64,8 +64,9 @@ inline std::optional<TripleProjection> parse_triple_projection(std::string_view 
     if(s=="angled")return TripleProjection::angled;
     return std::nullopt;
 }
-// What applies when Angled is asked for, and why not otherwise (nullptr: it applies). A latched or test process reads no
-// [Triple] keys at all. Angled needs the borderless window and a span the selector admitted: Surround over a window wider
+// What applies when Angled is asked for, and why not otherwise (nullptr: it applies). A latched or test process applies
+// no [Triple] key: it records Views as asked for and refuses it here. Angled needs the borderless window and a span the
+// selector admitted: Surround over a window wider
 // than 16:9, or Separate monitors whose three-monitor span was found (sana 35719: a failed Separate span falls back to
 // the primary monitor, which may itself be wider than 16:9, and must not get three panels).
 inline const char* triple_projection_refusal(bool latched,bool borderless,TripleScreens mode,bool separate_span,float aspect){
