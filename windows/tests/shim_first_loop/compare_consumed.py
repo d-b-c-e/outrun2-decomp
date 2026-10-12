@@ -13,7 +13,13 @@ words are compared too, as plumbing only. This is an input and startup proof: ro
 import json, math, sys
 
 GAME = ("gameInput.mode", "gameInput.gear", "gameInput.speed", "gameInput.consumedSteer", "gameInput.consumedAccel", "gameInput.consumedBrake")
-TOL = {"gameInput.speed": 0.01}
+# The pose observer (outrun_capture.hpp CarPose; sana 35853), compared when the reference carries it: raw game values,
+# position in native units, the full 3x3 rotation (no Euler convention), the identity exactly.
+POSE = (("gameInput.poseValid", "gameInput.posX", "gameInput.posY", "gameInput.posZ", "gameInput.vec20X", "gameInput.vec20Y", "gameInput.vec20Z")
+        + tuple("gameInput.rot%d%d" % (r, c) for r in range(3) for c in range(3)) + ("gameInput.carModel", "gameInput.stageKey", "gameInput.courseGate"))
+TOL = {"gameInput.speed": 0.01, "gameInput.posX": 1e-3, "gameInput.posY": 1e-3, "gameInput.posZ": 1e-3,
+       "gameInput.vec20X": 1e-4, "gameInput.vec20Y": 1e-4, "gameInput.vec20Z": 1e-4}
+TOL.update({"gameInput.rot%d%d" % (r, c): 1e-5 for r in range(3) for c in range(3)})
 COUNTS_ZERO = ("droppedSamples", "droppedMarkers", "queueFullCount", "contentionCount", "invalidCount", "limitCount", "errorCount", "rejectedAfterStop")
 
 def stream(path, problems, name):
@@ -63,18 +69,33 @@ def compare(ref_path, rep_path):
         if r != expected: problems.append("replay row %d: tape row %d, expected %d (in order, each once)" % (i, r, expected)); break
         played.append(c); expected += 1
     if ref and len(played) != len(ref): problems.append("%d of %d reference rows played" % (len(played), len(ref)))
-    out = dict(referenceRows=len(ref), replayRows=len(rep), playedRows=len(played), fedChannels=len(fed), valid=False, problems=problems,
+    # The pose is compared only when the reference has it; an older input-only tape stays input-only (never default-filled).
+    pose = bool(ref) and "gameInput.poseValid" in ref[0]
+    channels = GAME + (POSE if pose else ())
+    out_pose = dict(compared=pose, scope="input, startup and pose" if pose else "input and startup only (the reference has no pose channels)")
+    if pose:   # admission: real racing rows with the car present, and how far it moved
+        racing = [c for c in ref if number(c, "gameInput.poseValid") == 1]
+        if not racing: problems.append("the reference has no racing rows with a valid pose")
+        else:
+            xs = [(number(c, "gameInput.posX"), number(c, "gameInput.posY"), number(c, "gameInput.posZ")) for c in racing]
+            if any(v is None for xyz in xs for v in xyz): problems.append("a racing row has a missing or non-finite position")
+            else:
+                path = sum(math.dist(a, b) for a, b in zip(xs, xs[1:]))
+                out_pose.update(racingRows=len(racing), pathLength=round(path, 3),
+                                range=[[round(min(x[i] for x in xs), 3), round(max(x[i] for x in xs), 3)] for i in range(3)])
+                if path <= 0: problems.append("the car never moved in the reference's racing rows")
+    out = dict(referenceRows=len(ref), replayRows=len(rep), playedRows=len(played), fedChannels=len(fed), valid=False, problems=problems, pose=out_pose,
                fedEqualRows=0, fedFirstDifference=None, followed=False, firstDivergence=None,
                referenceModes=modes(ref), replayModes=modes(played))
     for r in range(min(len(ref), len(played))):
         a, b = ref[r], played[r]
-        missing = [k for k in GAME + tuple(fed) if number(a, k) is None or number(b, k) is None]
+        missing = [k for k in channels + tuple(fed) if number(a, k) is None or number(b, k) is None]
         if missing: problems.append("row %d: missing or non-finite %s" % (r, ", ".join(missing[:4]))); break
         if all(a[k] == b[k] for k in fed): out["fedEqualRows"] += 1
         elif out["fedFirstDifference"] is None:
             k = next(k for k in fed if a[k] != b[k]); out["fedFirstDifference"] = dict(row=r, channel=k, reference=a[k], replay=b[k])
         if out["firstDivergence"] is None:
-            for k in GAME:
+            for k in channels:
                 if abs(a[k] - b[k]) > TOL.get(k, 0):
                     out["firstDivergence"] = dict(row=r, channel=k, reference=a[k], replay=b[k], referenceMode=a["gameInput.mode"], replayMode=b["gameInput.mode"]); break
     out["valid"] = not problems

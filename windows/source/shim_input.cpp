@@ -182,6 +182,24 @@ GameView view(const platform::NativeRuntimeContext* runtime){
     v.consumed_steer=a[0];v.consumed_accel=a[1];v.consumed_brake=a[2];
     return v;
 }
+// The player car's pose and identity for an @2 row (outrun_capture.hpp CarPose): the same car record as view(), in the
+// race modes only.
+CarPose car_pose(const platform::NativeRuntimeContext* runtime){
+    CarPose p{};
+    if(!runtime)return p;
+    const auto mode=runtime->mode_state.current;
+    if(mode!=16u&&mode!=18u)return p;
+    const auto& rec=runtime->event_function36.car_select.car_799d18;
+    if(rec.size()<0xb0u)return p;
+    const auto* car=rec.data();
+    const auto f=[&](std::size_t at){float v;std::memcpy(&v,car+at,4);return v;};
+    const auto u=[&](std::size_t at){std::uint32_t v;std::memcpy(&v,car+at,4);return v;};
+    for(std::size_t i=0;i<3;++i){p.position[i]=f(0x14+i*4);p.vec20[i]=f(0x20+i*4);}
+    for(std::size_t r=0;r<3;++r)for(std::size_t c=0;c<3;++c)p.rotation[r*3+c]=f(0x70+(r*4+c)*4);
+    p.model=car[0x11];p.stage_key=u(0x68);p.course_gate=u(0x5c);
+    p.valid=true;
+    return p;
+}
 
 // Play with Recording, on the input thread (the producer): the stop, with the final device table for the members.
 void stop_recording(const char* by){
@@ -299,7 +317,7 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     g.adapter->apply(*frame,v,out);
     if(g.consumed_run){   // the row is completed and pushed at the consumed seam (on_consumed_latched)
         if(g.consumed_pending&&!g.consumed_missed_logged){g.consumed_missed_logged=true;std::printf("input shim: a tick missed the consumed seam\n");}
-        g.consumed_pending=Snapshot{*frame,g.adapter->signals(),out,v,-1};
+        g.consumed_pending=Snapshot{*frame,g.adapter->signals(),out,v,-1};g.consumed_pending->pose=car_pose(runtime);
     }else g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
     log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
 }
@@ -412,7 +430,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         o.f11=f11;
         if(o.ticks%30==0&&o.rec.recording()&&stop_requested())stop_recording("stop-request");
         if(o.rec.recording()){
-            Snapshot s{frame,o.adapter->signals(),out,v,NotReplay};
+            Snapshot s{frame,o.adapter->signals(),out,v,NotReplay};s.pose=car_pose(runtime);
             s.keyboard={kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right,kb.any,out.pc_overlay_yield};
             o.pending=std::move(s);
         }

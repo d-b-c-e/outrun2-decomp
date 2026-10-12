@@ -21,11 +21,22 @@ struct KeyboardProvenance { bool enter{},esc{},up{},down{},left{},right{},any{},
 
 // tape_row: in an R3 replay run (outrun_replay.hpp) the tape row the adapter played, or -1; NotReplay elsewhere (no channel).
 constexpr std::int64_t NotReplay=-2;
+// The player car's pose and identity (@2 rows only; sana 35817): the car record 799D18 (a 0x10F0 vehicle object, the
+// 7815A0 car works' layout: race_player_car.cpp 4A4D20 position +14, 487740 rotation +70, 40A270 translation +14),
+// read in the race modes only; zero and not valid elsewhere, as gear and speed. vec20 is the raw +20..28 vector (the
+// direction 4A4D20 reads, the source of the work velocity at 49FAD0): compared as raw values, not as a heading.
+struct CarPose {
+    bool valid{};
+    std::array<float,3> position{},vec20{};
+    std::array<float,9> rotation{};          // the 3x3 of the +70 matrix, row-major
+    std::uint32_t model{},stage_key{},course_gate{};   // +11 (byte), +68 (the key stage_property reads), +5C
+};
 // consumed / keyboard: an ordinary recording's @2 fields, written when has_consumed (every row of an @2 capture).
 struct Snapshot {
     dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay;
     bool has_consumed{}; platform::NativeInputState consumed{}; KeyboardProvenance keyboard{};
     bool pc_drive{};   // the race update's PC-layer argument at the seam (runtime_input.hpp InputConsumedHook)
+    CarPose pose{};
 };
 
 inline rec::Channels signal_channels(const Signals& s){
@@ -56,6 +67,13 @@ inline rec::Channels consumed_channels(const Snapshot& s){
     c["final.pcDrive"]=s.pc_drive;
     c["final.pcAxis01"]=f.pc_device.axes_94[0x01];c["final.pcAxis03"]=f.pc_device.axes_94[0x03];
     c["final.pcAxis17"]=f.pc_device.axes_94[0x17];c["final.pcAxis18"]=f.pc_device.axes_94[0x18];
+    // The pose observer (additive, @2 only): what the game made of the input, beside gear and speed.
+    const auto& p=s.pose;
+    c["gameInput.poseValid"]=p.valid;
+    c["gameInput.posX"]=p.position[0];c["gameInput.posY"]=p.position[1];c["gameInput.posZ"]=p.position[2];
+    c["gameInput.vec20X"]=p.vec20[0];c["gameInput.vec20Y"]=p.vec20[1];c["gameInput.vec20Z"]=p.vec20[2];
+    for(std::size_t i=0;i<9;++i)c["gameInput.rot"+std::to_string(i/3)+std::to_string(i%3)]=p.rotation[i];
+    c["gameInput.carModel"]=p.model;c["gameInput.stageKey"]=p.stage_key;c["gameInput.courseGate"]=p.course_gate;
     const auto& k=s.keyboard;
     c["keyboard.enter"]=k.enter;c["keyboard.esc"]=k.esc;c["keyboard.up"]=k.up;c["keyboard.down"]=k.down;
     c["keyboard.left"]=k.left;c["keyboard.right"]=k.right;c["keyboard.any"]=k.any;c["keyboard.drives"]=k.drives;

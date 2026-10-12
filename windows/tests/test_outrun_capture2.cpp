@@ -31,8 +31,19 @@ int main(){
     f.pc_input_layer=true;f.pc_record_used=true;f.pc_overlay=true;f.pc_overlay_yield=true;
     f.pc_device.buttons_04=0x182u;f.pc_device.axes_94[0x0e]=-12000;f.pc_device.axes_94[0x0d]=255;f.pc_device.axes_94[0x0c]=17;
     two.keyboard={true,false,true,false,false,true,true,true};
+    two.pose.valid=true;two.pose.position={1.5f,-2.0f,300.25f};two.pose.vec20={0.125f,0.0f,-1.0f};
+    two.pose.rotation={1,0,0, 0,0.5f,-0.75f, 0,0.75f,0.5f};two.pose.model=4;two.pose.stage_key=17;two.pose.course_gate=9;
     const auto c2=channels(two);
     check(prefixed(c2,"final.")&&prefixed(c2,"keyboard."),"an @2 row has both");
+    // The pose observer (sana 35853): every channel on an @2 row, none on @1, raw values (no default fill).
+    check(!c1.count("gameInput.poseValid")&&!c1.count("gameInput.posX")&&!c1.count("gameInput.rot22"),"an @1 row has no pose channel");
+    check(c2.at("gameInput.poseValid")==1&&c2.at("gameInput.posX")==1.5&&c2.at("gameInput.posY")==-2.0&&c2.at("gameInput.posZ")==300.25,"the position");
+    check(c2.at("gameInput.vec20X")==0.125&&c2.at("gameInput.vec20Y")==0.0&&c2.at("gameInput.vec20Z")==-1.0,"the raw +20 vector");
+    check(c2.at("gameInput.rot00")==1&&c2.at("gameInput.rot11")==0.5&&c2.at("gameInput.rot12")==-0.75&&c2.at("gameInput.rot21")==0.75&&
+          c2.at("gameInput.rot22")==0.5&&c2.at("gameInput.rot10")==0,"the full 3x3, row-major");
+    check(c2.at("gameInput.carModel")==4&&c2.at("gameInput.stageKey")==17&&c2.at("gameInput.courseGate")==9,"the identity");
+    {auto off=two;off.pose={};const auto c=channels(off);
+     check(c.at("gameInput.poseValid")==0&&c.count("gameInput.posX")&&c.count("gameInput.stageKey"),"outside a race: present, not valid");}
     check(c2.size()==c1.size()+consumed_channels(two).size(),"the @2 channels are only added");
     for(const auto& v:c1)check(c2.count(v.first)&&c2.at(v.first)==v.second,"every @1 channel unchanged in @2: "+v.first);
     check(frame_channels(c1)==frame_channels(c2),"the Core frame decoder sees the same channels (final.*/keyboard.* excluded)");

@@ -73,5 +73,29 @@ rep = copy.deepcopy(REP); rep[2]["final.steering"] = 99
 r = run(REF, rep)
 check(r["valid"] and r["fedEqualRows"] == N - 1 and r["fedFirstDifference"]["row"] == 2, "a fed-word difference is reported as plumbing (%s)" % r["fedFirstDifference"])
 
+# The pose observer: compared when the reference has it, with admission (racing rows, motion); input-only otherwise.
+check(not run(REF, REP)["pose"]["compared"] and "input and startup only" in run(REF, REP)["pose"]["scope"], "a reference without pose stays input-only")
+def posed(c, i):
+    c = dict(c); racing = c["gameInput.mode"] == 16
+    c.update({"gameInput.poseValid": int(racing), "gameInput.posX": 100.0 + 2.5 * i if racing else 0.0, "gameInput.posY": 3.0 if racing else 0.0,
+              "gameInput.posZ": -7.0 * i if racing else 0.0, "gameInput.vec20X": 0.1 * i, "gameInput.vec20Y": 0.0, "gameInput.vec20Z": 1.0,
+              "gameInput.carModel": 4 if racing else 0, "gameInput.stageKey": 17 if racing else 0, "gameInput.courseGate": i // 4})
+    for r in range(3):
+        for k in range(3): c["gameInput.rot%d%d" % (r, k)] = (1.0 if r == k else 0.0) if racing else 0.0
+    return c
+PREF = [posed(c, i) for i, c in enumerate(REF)]; PREP = [posed(c, min(i, N - 1)) for i, c in enumerate(REP)]
+r = run(PREF, PREP)
+check(r["valid"] and r["followed"] and r["pose"]["compared"] and r["pose"]["racingRows"] == N - 3 and r["pose"]["pathLength"] > 0, "a posed replay: valid, followed, pose compared (%s)" % r["pose"])
+rep = copy.deepcopy(PREP); rep[6]["gameInput.posX"] += 0.01
+r = run(PREF, rep); check(r["valid"] and not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.posX" and r["firstDivergence"]["row"] == 6, "a position divergence is named (%s)" % r["firstDivergence"])
+rep = copy.deepcopy(PREP); rep[7]["gameInput.rot01"] = 0.001
+r = run(PREF, rep); check(not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.rot01", "a rotation divergence is named")
+rep = copy.deepcopy(PREP); rep[4]["gameInput.stageKey"] = 18
+r = run(PREF, rep); check(not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.stageKey", "another stage key is a divergence")
+rep = copy.deepcopy(PREP); del rep[5]["gameInput.vec20Z"]; invalid("a missing pose channel in the replay", PREF, rep)
+invalid("no racing rows with a valid pose", [dict(c, **{"gameInput.poseValid": 0}) for c in PREF], [dict(c, **{"gameInput.poseValid": 0}) for c in PREP])
+still = [dict(c, **{"gameInput.posX": 1.0, "gameInput.posZ": 2.0}) for c in PREF]
+invalid("a car that never moved", still, [dict(c, **{"gameInput.posX": 1.0, "gameInput.posZ": 2.0}) for c in PREP])
+
 print("compare_consumed: %d failure(s)" % len(FAIL))
 sys.exit(1 if FAIL else 0)
