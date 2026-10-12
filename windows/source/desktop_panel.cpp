@@ -6,6 +6,7 @@
 #include "ffb_live.hpp"
 #include "native_window.hpp"
 #include "telemetry_forza.hpp"
+#include "shim_input.hpp"
 #include "triple_screens.hpp"
 #include "wheel_input.hpp"
 #include "platform/runtime_input.hpp"
@@ -43,28 +44,46 @@ int pct(float f){return int(std::lround(double(f)*100.0));}
 std::string fraction(int percent){char t[16];std::snprintf(t,sizeof t,"%.2f",percent/100.0);return t;}
 // The toolkit's own lines already start with "panel:"; ours get the prefix here.
 void log_line(const char* line){std::printf(std::strncmp(line,"panel:",6)==0?"%s\n":"panel: %s\n",line);std::fflush(stdout);}
-// One key into OutRunDesktop.ini (the file Wheelkit reads); never in a test run.
-void save(const char* section,const char* key,const std::string& value){
-    if(p.latched){dbce::panel::NoteSaved(false,"a test run saves nothing");return;}
+// A failed save's note, shown again at the next drawn frame: the toolkit's own Stop FFB path notes success after the
+// callback returns, which would hide a failure.
+std::string pending_failure,stop_error;
+// One key into OutRunDesktop.ini (the file Wheelkit reads); never in a test run. False: not saved (the caller puts
+// its control back to the saved value, so the page shows only what the next start will use).
+bool save(const char* section,const char* key,const std::string& value){
+    if(p.latched){pending_failure="a test run saves nothing";dbce::panel::NoteSaved(false,pending_failure.c_str());return false;}
     std::string error;
     const bool ok=write_key(p.ini,section,key,value,error);
-    dbce::panel::NoteSaved(ok,ok?"applies at the next game start":error.c_str());
-    std::printf("panel: [%s] %s = %s %s\n",section,key,value.c_str(),ok?"saved":("NOT saved: "+error).c_str());std::fflush(stdout);
+    if(ok)pending_failure.clear();else pending_failure="not saved: "+error;
+    dbce::panel::NoteSaved(ok,ok?"applies at the next game start":pending_failure.c_str());
+    std::printf("panel: [%s] %s = %s %s\n",section,key,value.c_str(),ok?"saved":pending_failure.c_str());std::fflush(stdout);
+    return ok;
 }
+// A control's change saved, or put back to the value it had (the saved one).
+template<class T,class S> void keep(T* value,T before,S saved){if(!saved())*value=before;}
 bool percent_key(const char* label,int* value,int max,int def,const char* key,const char* help=nullptr){
+    const int before=*value;
     if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
-    save("FFB",key,fraction(*value));return true;
+    keep(value,before,[&]{return save("FFB",key,fraction(*value));});return true;
 }
 void page_controls(bool){
-    dbce::panel::Status("Controls",wheel_input_status_text().c_str());
+    // The backend this process uses: [Input] Backend = Shim runs the shared input shim and never configures wheel_input.
+    const auto shim=shim_input_status_text();
+    dbce::panel::Status("Input",shim.empty()?"Native (the build's own wheel input)":"Shim (the shared input shim, [Input] Backend = Shim)");
+    dbce::panel::Status("Controls",(shim.empty()?wheel_input_status_text():shim).c_str());
     dbce::panel::Text("Bindings are set in Wheelkit ([Controls] of the settings file).");
-    if(dbce::panel::Slider("Steering sensitivity",&v.sensitivity,10,300,100,"%d%%"))save("Wheel","SteeringSensitivity",fraction(v.sensitivity));
-    if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))save("Wheel","SteeringDeadZone",fraction(v.dead_zone));
+    {const int before=v.sensitivity;
+     if(dbce::panel::Slider("Steering sensitivity",&v.sensitivity,10,300,100,"%d%%"))
+         keep(&v.sensitivity,before,[&]{return save("Wheel","SteeringSensitivity",fraction(v.sensitivity));});}
+    {const int before=v.dead_zone;
+     if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))
+         keep(&v.dead_zone,before,[&]{return save("Wheel","SteeringDeadZone",fraction(v.dead_zone));});}
 }
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    dbce::panel::Status("At the next start",v.output_next?"on":"off");
+    dbce::panel::Status("At the next start",v.output_next?"on":"off",v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
+    if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
+                                                 dbce::panel::Tone::Error);
     dbce::panel::Text("Turning the wheel output on is not offered in this panel yet. Stop FFB and F8 turn it off now and at "
                       "the next start.");
     const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
@@ -80,13 +99,15 @@ void page_ffb(bool advanced){
     percent_key("Road texture",&v.road,200,pct(d.road_texture),"FFBRoadTexture");
     percent_key("Tire slip",&v.slip,200,pct(d.tire_slip),"FFBTireSlip");
     percent_key("Engine idle",&v.idle,100,pct(d.engine_idle),"FFBEngineIdle");
-    if(dbce::panel::OffOn("Invert force",&v.invert))save("FFB","FFBInvertForce",v.invert?"true":"false");
+    {const bool before=v.invert;
+     if(dbce::panel::OffOn("Invert force",&v.invert))keep(&v.invert,before,[&]{return save("FFB","FFBInvertForce",v.invert?"true":"false");});}
 }
 void page_cameras(bool advanced){
     static const char* const modes[]{"Off","Surround","Separate monitors"};
-    if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
-        "Separate monitors: one window over three equal side-by-side monitors."))
-        save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));
+    {const int before=v.triple;
+     if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
+         "Separate monitors: one window over three equal side-by-side monitors."))
+         keep(&v.triple,before,[&]{return save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));});}
     const auto& st=triple_screens_status();
     char now[256];
     if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1 (planar, not three views)",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
@@ -95,19 +116,24 @@ void page_cameras(bool advanced){
     if(v.triple!=int(st.mode))dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
     static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
+    const int before=v.latency;
     if(dbce::panel::Choice("Frame latency",latency,4,&v.latency,"Frames the swap chain may queue; fewer is less input lag, more is smoother."))
-        save("Window","FrameLatency",std::to_string(v.latency));
+        keep(&v.latency,before,[&]{return save("Window","FrameLatency",std::to_string(v.latency));});
 }
 void page_telemetry(bool advanced){
-    if(dbce::panel::OffOn("Telemetry",&v.telemetry,"Forza Data Out to 127.0.0.1 and the OutRun 2006 mod's shared memory (SimHub, dashboards)."))
-        save("Telemetry","Enabled",v.telemetry?"true":"false");
+    {const bool before=v.telemetry;
+     if(dbce::panel::OffOn("Telemetry",&v.telemetry,"Forza Data Out to 127.0.0.1 and the OutRun 2006 mod's shared memory (SimHub, dashboards)."))
+         keep(&v.telemetry,before,[&]{return save("Telemetry","Enabled",v.telemetry?"true":"false");});}
     if(advanced){
         static const char* const layouts[]{"Forza Horizon (324 bytes)","Forza Motorsport 7 (311 bytes)"};
-        if(dbce::panel::Choice("Packet layout",layouts,2,&v.layout))save("Telemetry","Layout",v.layout?"FM7":"Horizon");
+        const int before=v.layout;
+        if(dbce::panel::Choice("Packet layout",layouts,2,&v.layout))
+            keep(&v.layout,before,[&]{return save("Telemetry","Layout",v.layout?"FM7":"Horizon");});
     }
     dbce::panel::Text("Changes apply at the next game start.");
 }
 void draw_page(dbce::panel::Page page,bool advanced){
+    if(!pending_failure.empty()){dbce::panel::NoteSaved(false,pending_failure.c_str());pending_failure.clear();}   // after the toolkit's own note
     switch(page){
     case dbce::panel::PAGE_CONTROLS:page_controls(advanced);break;
     case dbce::panel::PAGE_FFB:page_ffb(advanced);break;
@@ -120,10 +146,13 @@ void draw_page(dbce::panel::Page page,bool advanced){
     default:break;
     }
 }
-// Stop FFB (the header command and F8, STD-004): the wheel released for this session and [FFB] Output = none saved.
+// Stop FFB (the header command and F8, STD-004): the wheel released for this session and [FFB] Output = none saved; the
+// next-start state changes only when the save succeeded, else the FFB page says what failed.
 void stop_ffb(){
     ffb_stop_output();
-    if(!p.latched){save("FFB","Output","none");v.output_next=false;}
+    if(p.latched)return;
+    if(save("FFB","Output","none")){v.output_next=false;stop_error.clear();}
+    else stop_error=pending_failure;
 }
 bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
 void release_backend(){

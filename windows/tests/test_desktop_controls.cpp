@@ -114,6 +114,36 @@ void test_write_key(){
     Ini ini;ini.load(path);
     check(ini.text("FFB","FFBSpringStrength")=="0.30"&&ini.text("Controls","steer").rfind("axis 0",0)==0&&ini.text("Triple","Screens")=="Separate monitors",
           "the game's reader sees the new values and the controls untouched");
+    // Failures leave the file exactly as it was (romi 31154): a file that cannot be read is never taken as empty, and a
+    // replacement that cannot be published keeps the original (no delete before the move).
+    {const HANDLE lock=CreateFileA(path.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr);   // no sharing: unreadable
+     check(lock!=INVALID_HANDLE_VALUE,"lock the file");
+     check(!write_key(path,"FFB","FFBSpringStrength","0.99",error)&&error.find("cannot read")!=std::string::npos,"an unreadable file is refused: "+error);
+     check(!write_section(path,"Controls",{"Schema = 1"},error),"write_section refuses it too");
+     CloseHandle(lock);}
+    check(read()==want,"after the refused reads the file is unchanged, [Controls] included");
+    {const HANDLE hold=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr);   // readable, not replaceable
+     check(hold!=INVALID_HANDLE_VALUE,"hold the file without delete sharing");
+     check(!write_key(path,"FFB","FFBSpringStrength","0.99",error)&&error.find("unchanged")!=std::string::npos,"a refused replacement fails: "+error);
+     CloseHandle(hold);}
+    check(read()==want,"after the refused replacement the original is intact");
+    // A publish that fails after the temp file was written (the seam): the original must still be there, so nothing
+    // may delete or truncate it before the move.
+    {const auto real=settings_publish();
+     settings_publish()=[](const std::string&,const std::string&){return false;};
+     check(!write_key(path,"FFB","FFBSpringStrength","0.99",error)&&error.find("unchanged")!=std::string::npos,"a failed publish is reported: "+error);
+     settings_publish()=real;}
+    check(read()==want,"after the failed publish the original is intact");
+    check(GetFileAttributesA((path+".tmp").c_str())==INVALID_FILE_ATTRIBUTES,"the temp file is removed");
+    std::remove(path.c_str());
+    check(write_key(path,"Triple","Screens","Off",error)&&read()=="[Triple]\nScreens = Off\n","a missing file is created with the one key: "+error);
+    // A section that appears twice: Ini takes the last value, so writing one copy is refused instead (romi 31196).
+    const std::string twice=controls+"[FFB]\r\nFFBSpringStrength = 0.45\r\n[Window]\r\nFrameLatency = 2\r\n[ffb]\r\nFFBSpringStrength = 0.60\r\n";
+    {std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<twice;}
+    check(!write_key(path,"FFB","FFBSpringStrength","0.30",error)&&error.find("appears 2 times")!=std::string::npos,"duplicate [FFB] refused: "+error);
+    check(read()==twice,"the file with the duplicate is unchanged");
+    check(write_key(path,"Window","FrameLatency","1",error),"another section of that file still saves: "+error);
+    {Ini dup;dup.load(path);check(dup.text("Window","FrameLatency")=="1"&&dup.text("FFB","FFBSpringStrength")=="0.60","the reader's view after it");}
     std::remove(path.c_str());
 }
 void test_injection(){

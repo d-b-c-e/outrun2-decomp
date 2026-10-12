@@ -201,6 +201,17 @@ bool shim_backend_selected(const Ini& settings){
     return _stricmp(backend.c_str(),"Shim")==0;
 }
 
+std::string shim_input_status_text(){
+    if(!o.configured)return {};
+    if(!o.host)return o.started?"the shared input shim did not start (see runtime.log); the keyboard and the pad still drive"
+                               :"the shared input shim starts with the first frame";
+    const auto devices=o.host->device_reports();
+    std::size_t open=0;for(const auto& d:devices)if(d.opened)++open;
+    std::string s="shared input shim: "+std::to_string(open)+" of "+std::to_string(devices.size())+" profile devices open";
+    for(const auto& d:devices)s+="; \""+d.identity.name+"\" "+d.status;
+    return s;
+}
+
 void shim_input_configure_ordinary(const Ini& settings,const std::string& folder){
     o.profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))o.profile+=line+"\n";

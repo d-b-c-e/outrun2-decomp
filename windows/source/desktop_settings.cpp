@@ -1,4 +1,5 @@
 #include "desktop_settings.hpp"
+#include <windows.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -123,9 +124,51 @@ bool Ini::flag(const std::string& section,const std::string& key,bool fallback)c
     if(v=="false"||v=="0"||v=="no"||v=="off")return false;
     return fallback;
 }
-bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error){
+namespace {
+// The file's bytes. A missing file is empty; one that exists but cannot be read whole is refused (never treated as
+// empty, which would replace it with a single section).
+bool read_whole(const std::string& path,std::string& text,std::string& error){
+    text.clear();
+    const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE){
+        if(GetLastError()==ERROR_FILE_NOT_FOUND)return true;
+        error="cannot read "+path+" (Win32 "+std::to_string(GetLastError())+"); nothing written";return false;
+    }
+    LARGE_INTEGER size{};bool ok=GetFileSizeEx(h,&size)&&size.QuadPart>=0&&size.QuadPart<=16*1024*1024;
+    if(ok){
+        text.resize(std::size_t(size.QuadPart));
+        DWORD got=0;
+        ok=text.empty()||(ReadFile(h,text.data(),DWORD(text.size()),&got,nullptr)&&got==text.size());
+    }
+    CloseHandle(h);
+    if(!ok){text.clear();error="cannot read "+path+" whole; nothing written";}
+    return ok;
+}
+// Written whole to a sibling temp file, flushed, then moved over the original in one step (MoveFileEx
+// REPLACE_EXISTING | WRITE_THROUGH): a failure anywhere leaves the original exactly as it was.
+bool replace_whole(const std::string& path,const std::string& text,std::string& error){
+    const auto temp=path+".tmp";
+    const HANDLE h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE){error="cannot write "+temp+"; "+path+" is unchanged";return false;}
+    DWORD written=0;
+    const bool ok=(text.empty()||(WriteFile(h,text.data(),DWORD(text.size()),&written,nullptr)&&written==text.size()))&&FlushFileBuffers(h);
+    CloseHandle(h);
+    if(!ok){DeleteFileA(temp.c_str());error="cannot write "+temp+"; "+path+" is unchanged";return false;}
+    if(!settings_publish()(temp,path)){
+        error="cannot replace "+path+" (Win32 "+std::to_string(GetLastError())+"); it is unchanged";DeleteFileA(temp.c_str());return false;}
+    return true;
+}
+bool publish_by_move(const std::string& temp,const std::string& path){
+    return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+}
+}
+SettingsPublish& settings_publish(){static SettingsPublish publish=publish_by_move;return publish;}
+namespace {
+// [section]'s body replaced by edit(its current lines) in one read and one replacement of the file.
+template<class Edit> bool rewrite_section(const std::string& path,const std::string& section,Edit edit,std::string& error){
     std::string text;
-    {std::ifstream f(path,std::ios::binary);if(f){std::ostringstream s;s<<f.rdbuf();text=s.str();}}
+    if(!read_whole(path,text,error))return false;
     const std::string eol=text.find("\r\n")!=std::string::npos?"\r\n":"\n";
     // Lines with their own line ends, so untouched lines are copied byte for byte.
     std::vector<std::string> lines;
@@ -134,46 +177,51 @@ bool write_section(const std::string& path,const std::string& section,const std:
         lines.push_back(text.substr(pos,next-pos));pos=next;
     }
     if(!lines.empty()&&lines.back().back()!='\n')lines.back()+=eol;
-    std::vector<std::string> block{"["+section+"]"+eol};
-    for(const auto& l:body)block.push_back(l+eol);
-    // The section runs from its header to the next header or the end; its trailing blank lines stay in place.
+    // A section that appears more than once is refused: Ini reads every copy (the last value wins), so a write to one
+    // copy could report Saved and still not be what the game reads (romi 31196).
     const auto want=lower(section);
+    {std::size_t copies=0;for(const auto& l:lines)if(header(l)==want)++copies;
+     if(copies>1){error="["+section+"] appears "+std::to_string(copies)+" times in "+path+"; nothing written (merge them first)";return false;}}
+    // The section runs from its header to the next header or the end; its trailing blank lines stay in place.
     std::size_t start=lines.size(),end=lines.size();
     for(std::size_t i=0;i<lines.size();++i){
         const auto h=header(lines[i]);if(h.empty())continue;
         if(start!=lines.size()){end=i;break;}
         if(h==want)start=i;
     }
+    if(start!=lines.size())while(end>start+1&&trim(lines[end-1]).empty())--end;
+    std::vector<std::string> current;   // the section's lines as they are, without their line ends
+    if(start!=lines.size())for(std::size_t i=start+1;i<end;++i){
+        auto l=lines[i];while(!l.empty()&&(l.back()=='\n'||l.back()=='\r'))l.pop_back();current.push_back(l);}
+    std::vector<std::string> block{"["+section+"]"+eol};
+    for(const auto& l:edit(current))block.push_back(l+eol);
     if(start==lines.size()){
         if(!lines.empty())lines.push_back(eol);
         lines.insert(lines.end(),block.begin(),block.end());
     }else{
-        while(end>start+1&&trim(lines[end-1]).empty())--end;
         lines.erase(lines.begin()+std::ptrdiff_t(start),lines.begin()+std::ptrdiff_t(end));
         lines.insert(lines.begin()+std::ptrdiff_t(start),block.begin(),block.end());
     }
     text.clear();for(const auto& l:lines)text+=l;
-    const auto temp=path+".tmp";
-    {std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f){error="cannot write "+temp;return false;}
-     f<<text;if(!f){error="cannot write "+temp;return false;}}
-    std::remove(path.c_str());
-    if(std::rename(temp.c_str(),path.c_str())!=0){error="cannot replace "+path;return false;}
-    return true;
+    return replace_whole(path,text,error);
+}
+}
+bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error){
+    return rewrite_section(path,section,[&](const std::vector<std::string>&){return body;},error);
 }
 bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error){
-    Ini now;now.load(path);   // the file as it is now
-    auto lines=now.section_lines(section);
-    while(!lines.empty()&&trim(lines.back()).empty())lines.pop_back();   // write_section keeps the trailing blanks
-    bool found=false;
-    for(auto& l:lines){
-        const auto t=trim(l);
-        if(t.empty()||t[0]==';'||t[0]=='#')continue;
-        const auto eq=t.find('=');
-        if(eq==std::string::npos||lower(trim(t.substr(0,eq)))!=lower(key))continue;
-        l=key+" = "+value;found=true;
-    }
-    if(!found)lines.push_back(key+" = "+value);
-    return write_section(path,section,lines,error);
+    return rewrite_section(path,section,[&](std::vector<std::string> lines){
+        bool found=false;
+        for(auto& l:lines){
+            const auto t=trim(l);
+            if(t.empty()||t[0]==';'||t[0]=='#')continue;
+            const auto eq=t.find('=');
+            if(eq==std::string::npos||lower(trim(t.substr(0,eq)))!=lower(key))continue;
+            l=key+" = "+value;found=true;
+        }
+        if(!found)lines.push_back(key+" = "+value);
+        return lines;
+    },error);
 }
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     Ini ini;

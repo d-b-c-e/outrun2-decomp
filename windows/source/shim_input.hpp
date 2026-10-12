@@ -31,4 +31,7 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
 void shim_input_filter_ordinary(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 // The input thread, after the game loop: the final neutral tick and the host stop. Never parks: an ordinary process exits.
 void shim_input_shutdown_ordinary();
+// For the F6 panel's Controls page: the ordinary shim backend's devices (open / not, each one's state); empty when this
+// backend is not the one in use. Game thread (the input sample's thread).
+std::string shim_input_status_text();
 }

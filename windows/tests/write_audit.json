@@ -613,24 +613,6 @@
  },
  {
   "file": "windows/source/desktop_settings.cpp",
-  "line": "{std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f){error=\"cannot write \"+temp;return false;}",
-  "class": "wheel-off",
-  "reason": "write_section body; its only callers are the 35a8aa3 wheel import"
- },
- {
-  "file": "windows/source/desktop_settings.cpp",
-  "line": "std::remove(path.c_str());",
-  "class": "wheel-off",
-  "reason": "write_section body"
- },
- {
-  "file": "windows/source/desktop_settings.cpp",
-  "line": "if(std::rename(temp.c_str(),path.c_str())!=0){error=\"cannot replace \"+path;return false;}",
-  "class": "wheel-off",
-  "reason": "write_section body"
- },
- {
-  "file": "windows/source/desktop_settings.cpp",
   "line": "if(std::FILE* f=std::fopen(own.c_str(),\"wb\")){std::fputs(legacy?ImportHeader:Template,f);std::fclose(f);}",
   "class": "latched-skip",
   "reason": "load_desktop_settings(create_if_missing=false) in a latched process"
@@ -1026,15 +1008,45 @@
   "reason": "write_key, a watched writer wrapper (its call sites are audited)"
  },
  {
-  "file": "windows/source/desktop_settings.cpp",
-  "line": "return write_section(path,section,lines,error);",
-  "class": "definition",
-  "reason": "write_key's body: write_section on the path its caller passes"
- },
- {
   "file": "windows/source/desktop_settings.hpp",
   "line": "bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error);",
   "class": "definition",
   "reason": "write_key's declaration"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "read_whole: a read-only open (GENERIC_READ, OPEN_EXISTING) of the settings file before a rewrite; writes nothing"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "const HANDLE h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "definition",
+  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the sibling temp file"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "const bool ok=(text.empty()||(WriteFile(h,text.data(),DWORD(text.size()),&written,nullptr)&&written==text.size()))&&FlushFileBuffers(h);",
+  "class": "definition",
+  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the temp file's bytes, flushed"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "if(!ok){DeleteFileA(temp.c_str());error=\"cannot write \"+temp+\"; \"+path+\" is unchanged\";return false;}",
+  "class": "definition",
+  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the temp file removed after a failed write"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "error=\"cannot replace \"+path+\" (Win32 \"+std::to_string(GetLastError())+\"); it is unchanged\";DeleteFileA(temp.c_str());return false;}",
+  "class": "definition",
+  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the temp file removed after a refused publish"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;",
+  "class": "definition",
+  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the one-step publish of the temp file over the original"
  }
 ]
