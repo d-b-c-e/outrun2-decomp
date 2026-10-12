@@ -189,11 +189,11 @@ void screenshot(Graphics& g){
 // when it offers it; 60 / 120 fps are then paced by the present interval,
 // so a change in Settings applies at once without another mode switch.
 namespace { unsigned g_refresh=0,g_interval=1; }
-// The top of a frame with OR2_FRAME_LATENCY: wait until the swap chain takes another frame, so the input sampled
+// The top of a frame with a frame latency of 1..3 (the desktop's default 2): wait until the swap chain takes another frame, so the input sampled
 // next is as recent as the queue allows. Called through GameHost::frame_wait, first in each input sample and before
 // read_pad, so the pad snapshot, the wheel paths (DirectInput in the input filter) and the keyboard are all sampled
 // after it (romi 26392, nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
-// Present). Not alertable, so an APC cannot end it early. No effect without the variable.
+// Present). Not alertable, so an APC cannot end it early. A no-op with latency 0 (the plain chain).
 void wait_for_frame_latency(){
     if(!g_latency_wait)return;
     ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
