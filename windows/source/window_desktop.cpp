@@ -4,6 +4,7 @@
 // through DirectInput (wheel_input.hpp). The executable goes in the game
 // folder, like the original one; settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
+#include "d3d11_display.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -132,6 +133,16 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
+    // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
+    // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
+    // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
+    {   const auto text=settings.text("Window","FrameLatency");unsigned frames=2u;
+        if(text.size()==1u&&text[0]>='0'&&text[0]<='3')frames=unsigned(text[0]-'0');
+        else if(!text.empty())std::printf("settings: [Window] FrameLatency = %.32s refused (0, 1, 2 or 3); 2 applies\n",text.c_str());
+        // A latched (test) process keeps the plain chain: its tapes were recorded on it, and a display preference must not
+        // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
+        if(plan.latched)frames=0u;
+        outrun::xbox_runtime::set_frame_latency(frames);}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){

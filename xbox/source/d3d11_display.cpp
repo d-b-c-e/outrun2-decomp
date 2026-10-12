@@ -1,9 +1,10 @@
 #include "d3d11_display.hpp"
+#include "frame_profile.hpp"
 #include "native_window.hpp"
 #include "platform_api.hpp"
 #include "platform/pc_dds.hpp"
 #include <d3dcompiler.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +12,25 @@
 #include <stdexcept>
 namespace outrun::xbox_runtime {
 namespace {
+// Frame latency: 1..3 uses the swap chain's frame latency waitable object with that many frames queued at most,
+// waited at the top of the frame before the input sample (wait_for_frame_latency); 0 is the plain chain (up to 3 frames
+// queued, Present blocks). The host's setting (set_frame_latency: the desktop's [Window] FrameLatency, default 2) or
+// 0 for a host that sets none; OR2_FRAME_LATENCY overrides it (tests). Measured (perf P5 ETW, Present-to-scan-out
+// median): 0 61.7 ms, 2 28.5 ms, 1 11.8 ms, every race frame on cadence at each.
+unsigned g_latency_setting=0;
+HANDLE g_latency_wait=nullptr;   // owned by the process, like the swap chain (graphics(), never torn down): closed at exit
+std::uint64_t g_latency_waits=0,g_latency_timeouts=0,g_latency_failures=0;   // frames waited; 1 s cap hit; WAIT_FAILED
+// OR2_FRAME_LATENCY must be exactly 0, 1, 2 or 3; anything else (empty, "1junk", "+1", overflow) is refused and logged,
+// and the host's setting applies.
+unsigned frame_latency_request(){
+    const char* v=std::getenv("OR2_FRAME_LATENCY");
+    if(v&&v[0]>='0'&&v[0]<='3'&&v[1]=='\0'){
+        std::fprintf(stdout,"Xbox display: frame latency %c from OR2_FRAME_LATENCY (overrides the setting %u)\n",v[0],g_latency_setting);
+        return unsigned(v[0]-'0');
+    }
+    if(v)std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=\"%.32s\" refused (must be exactly 0, 1, 2 or 3); the setting %u applies\n",v,g_latency_setting);
+    return g_latency_setting;
+}
 constexpr const char* Shader=R"HLSL(
 struct VsIn{float2 p:POSITION;float4 c:COLOR0;float2 uv:TEXCOORD0;};
 struct Varying{float4 p:SV_Position;float4 c:COLOR0;float2 uv:TEXCOORD0;};
@@ -39,12 +59,25 @@ Graphics& graphics(){
     auto& w=native_window();
     DXGI_SWAP_CHAIN_DESC1 d{};d.Width=w.width;d.Height=w.height;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
     d.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;d.BufferCount=2;d.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;d.Scaling=DXGI_SCALING_STRETCH;
+    const unsigned latency=frame_latency_request();
+    if(latency)d.Flags|=DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     if(w.core_window)check(factory->CreateSwapChainForCoreWindow(g.device.Get(),static_cast<IUnknown*>(w.core_window),&d,nullptr,&g.swap_chain),"CreateSwapChainForCoreWindow");
     else check(factory->CreateSwapChainForHwnd(g.device.Get(),static_cast<HWND>(w.hwnd),&d,nullptr,nullptr,&g.swap_chain),"CreateSwapChainForHwnd");
     ComPtr<ID3D11Texture2D> back;check(g.swap_chain->GetBuffer(0,IID_PPV_ARGS(&back)),"GetBuffer");
     check(g.device->CreateRenderTargetView(back.Get(),nullptr,&g.target),"CreateRenderTargetView(swap chain)");
     g.width=w.width;g.height=w.height;
     std::fprintf(stdout,"Xbox display: Direct3D 11 feature level %x, swap chain %ux%u\n",unsigned(g.device->GetFeatureLevel()),g.width,g.height);
+    if(latency){
+        // A chain created with the waitable flag no longer throttles in Present, so its object is always waited on,
+        // even if SetMaximumFrameLatency is refused (the waitable default is then 1).
+        ComPtr<IDXGISwapChain2> chain2;check(g.swap_chain.As(&chain2),"IDXGISwapChain2 (OR2_FRAME_LATENCY)");
+        const bool set=SUCCEEDED(chain2->SetMaximumFrameLatency(latency));
+        g_latency_wait=chain2->GetFrameLatencyWaitableObject();
+        // A flagged chain without its object would run unthrottled: refuse rather than continue silently.
+        if(!g_latency_wait)throw std::runtime_error("OR2_FRAME_LATENCY: GetFrameLatencyWaitableObject returned no handle");
+        std::fprintf(stdout,"Xbox display: frame latency %u%s (waitable object, waited before the input sample; OR2_FRAME_LATENCY)\n",
+                     set?latency:1u,set?"":" (SetMaximumFrameLatency refused: the waitable default)");
+    }
     return g;
 }
 ComPtr<ID3DBlob> compile(const char* entry,const char* target){
@@ -57,7 +90,7 @@ struct QuadVertex {float p[2],c[4],uv[2];};
 }
 ID3D11Device* D3D11Display::device()const{return graphics().device.Get();}
 ID3D11DeviceContext* D3D11Display::context()const{return graphics().context.Get();}
-D3D11Display::~D3D11Display(){if(graphics().context)graphics().context->ClearState();}
+D3D11Display::~D3D11Display(){report_frame_latency();if(graphics().context)graphics().context->ClearState();}
 bool D3D11Display::open(unsigned w,unsigned h,std::string& error){
     try{
         width_=w;height_=h;auto* dev=graphics().device.Get();
@@ -156,6 +189,24 @@ void screenshot(Graphics& g){
 // when it offers it; 60 / 120 fps are then paced by the present interval,
 // so a change in Settings applies at once without another mode switch.
 namespace { unsigned g_refresh=0,g_interval=1; }
+// The top of a frame with a frame latency of 1..3 (the desktop's default 2): wait until the swap chain takes another frame, so the input sampled
+// next is as recent as the queue allows. Called through GameHost::frame_wait, first in each input sample and before
+// read_pad, so the pad snapshot, the wheel paths (DirectInput in the input filter) and the keyboard are all sampled
+// after it (romi 26392, nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
+// Present). Not alertable, so an APC cannot end it early. A no-op with latency 0 (the plain chain).
+void wait_for_frame_latency(){
+    if(!g_latency_wait)return;
+    ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
+    ++g_latency_waits;
+    const DWORD r=WaitForSingleObjectEx(g_latency_wait,1000,FALSE);
+    if(r==WAIT_TIMEOUT)++g_latency_timeouts;
+    else if(r==WAIT_FAILED)++g_latency_failures;
+}
+void report_frame_latency(){
+    if(g_latency_wait)std::fprintf(stdout,"frame latency waits: %llu frames, %llu timed out (1 s cap), %llu failed (WAIT_FAILED)\n",
+        (unsigned long long)g_latency_waits,(unsigned long long)g_latency_timeouts,(unsigned long long)g_latency_failures);
+}
+void set_frame_latency(unsigned frames){g_latency_setting=frames<=3u?frames:0u;}
 unsigned output_refresh(){
     if(!g_refresh){
         // Development: OR2_XBOX_REFRESH_HZ=N stands for the output's rate (120 Hz checks on a 60 Hz monitor).

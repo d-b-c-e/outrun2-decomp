@@ -129,6 +129,9 @@ struct GameHost {
     std::string save_directory;    // empty: <home>/SaveGame
     // ---- platform hooks of the input sample, in call order ----
     // The pad for this frame (per-frame platform settings applied first).
+    // Optional, first in every input sample (after frame_start, before read_pad): the xbox desktop's frame latency wait
+    // waits for its swap chain here, so the pad, the wheel paths and the keyboard are all sampled after the wait.
+    std::function<void()> frame_wait;
     std::function<PadSnapshot()> read_pad;
     // Platform keys, with the autoplay buttons merged (overlay, video settings).
     std::function<void(std::uint64_t held,std::uint64_t down)> platform_keys;
