@@ -1142,14 +1142,16 @@ void race_env_model_44cd30(PcRaceContext& c){
         const std::uint32_t list=m.u32(m.u32(0x7d3070u));
         const std::uint32_t section=std::uint32_t(m.u16(car+0x64));        // 44B8D0 (car +5C == 0)
         p.load(0x7d2da0u);
+        // The environment model's node lists are the car's section only: DrawDistanceIncrease / Behind (44DE10's union)
+        // never reach them. OR2_TRIPLE_WHOLE_STAGE (diagnostic) draws these objects whole too.
         if(m.u32(list)!=0u){
-            p.obj(m.u32(desc+0x60)<<16,0,list+m.u32(list+section*4u),0,None,0);
+            p.obj(m.u32(desc+0x60)<<16,0,triple_whole_stage()?0u:list+m.u32(list+section*4u),0,None,0);
         }else{
             const std::int32_t count=std::int32_t(p.call(0x448810u,{m.u32(desc+0x60)}));
             const std::uint32_t base=m.u32(desc+0x60)<<16;
             for(std::int32_t i=0;i<count;++i){
                 const std::uint32_t part=m.u32(list+8u+std::uint32_t(i)*4u)+list;
-                p.obj(std::uint32_t(i)|base,0,part+m.u32(part+section*4u),0,None,0);
+                p.obj(std::uint32_t(i)|base,0,triple_whole_stage()?0u:part+m.u32(part+section*4u),0,None,0);
             }
         }
         const std::uint32_t extra=m.u32(0x5d4ed0u+m.u32(desc)*4u);
