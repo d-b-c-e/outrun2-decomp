@@ -9,6 +9,8 @@
 #include "outrun_replay.hpp"
 #include "provider_host.hpp"
 #include "shim_steer.hpp"
+#include "wheelffb_bridge.hpp"
+#include "ffb_live.hpp"
 #include "journal_identity.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
@@ -51,6 +53,14 @@ struct NoCapture {
     struct Drained{h::RecOutcome outcome;bool joined;};
     Drained drain(h::Clock::time_point){return {h::RecOutcome::Complete,true};}
 };
+// The F4 delivery's hand-over of the wheel to and from WheelFfb (ffbdev::Owner over the bridge), on the game thread.
+struct BridgeOwner final:ffbdev::Owner {
+    sh::WheelFfbBridge* b{};
+    void begin_open()override{if(b)b->begin_promotion();}
+    void end_open(bool held)override{if(b)b->end_promotion(held);}
+    void begin_release()override{if(b)b->begin_release();}
+    void end_release()override{if(b)b->end_release();}
+};
 struct Ordinary {
     std::string profile,transmission,folder;
     bool configured{},started{},stopped{};
@@ -59,6 +69,9 @@ struct Ordinary {
     bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
     Steering steering;                         // [Wheel], as the native wheel path reads it
     std::optional<dbce::controls::Binding> steer;   // [Controls] steer from the parse of `profile` (shim_input_steer)
+    const sh::Frame* frame{};                  // Core's latest frame (the host's tick), for shim_input_steer's `live`
+    std::shared_ptr<sh::WheelFfbBridge> bridge;   // with the wheel output and Input = Shim (wheelffb_bridge.hpp)
+    BridgeOwner owner;
     StartReports reports;
 };
 Ordinary o;
@@ -213,7 +226,7 @@ std::string shim_input_status_text(){
 ShimSteer shim_input_steer(){
     if(!o.configured)return {};
     const auto* steer=o.steer?&*o.steer:nullptr;
-    if(o.host)return shim_steer(steer,o.host->device_reports());
+    if(o.host)return shim_steer(steer,o.host->device_reports(),o.frame);
     auto s=shim_steer(steer,{});
     if(steer)s.status=o.started?"the shared input shim did not start":"the shared input shim starts with the first frame";
     return s;
@@ -241,10 +254,26 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         IDirectInput8W* input=nullptr;
         if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
             std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);return;}
+        // The wheel output waits with Input = Shim: the steering wheel is read through the WheelFfb bridge, which hands
+        // it to WheelFfb for the force and back (INPUT-SHIM.md section 6, one owner at a time).
+        const WheelFfbApi* ffb=o.steer?ffb_shim_wheel_api():nullptr;
+        if(ffb&&!sh::WheelFfbBridge::usable(*ffb))ffb=nullptr;
+        std::function<std::shared_ptr<sh::Provider>(const std::shared_ptr<sh::DInputProvider>&)> front;
+        if(ffb){
+            const std::string dev=o.steer->dev;
+            front=[ffb,dev](const std::shared_ptr<sh::DInputProvider>& inner)->std::shared_ptr<sh::Provider>{
+                o.bridge=std::make_shared<sh::WheelFfbBridge>(inner,ffb,dev);return o.bridge;};
+        }
         try{
             o.host=std::make_unique<h::ProviderHost<NoCapture>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
-                std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd));
-        }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
+                std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd),100'000,front);
+        }catch(const std::exception& e){o.bridge.reset();std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
+        if(o.bridge){
+            o.owner.b=o.bridge.get();
+            ffb_set_shim_owner(&o.owner);
+            std::printf("input shim: the steering wheel %s is handed to WheelFfb while the wheel output holds it (WheelFfb bridge)\n",
+                o.steer->dev.c_str());
+        }
         (void)o.host->tick();
         initial_report(*o.host,o.reports);
         std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths; "
@@ -258,7 +287,9 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
     static const sh::Frame no_shim{};
     if(o.host)resolved_report(*o.host,o.reports);
-    o.adapter->apply(o.host?o.host->tick():no_shim,view(runtime),out,&kb);
+    const sh::Frame& frame=o.host?o.host->tick():no_shim;
+    o.frame=o.host?&frame:nullptr;
+    o.adapter->apply(frame,view(runtime),out,&kb);
     // The record is the wheel's (the adapter's); with "keyboard 1" the race reads the PC layer's (the keyboard's) instead.
     if(o.debug)log_signals(o.adapter->signals(),"ordinary",o.log,std::string(" keyboard ")+(out.pc_overlay_yield?"1":"0")+" layer "+(out.pc_input_layer?"1":"0")+
         " overlay "+(out.pc_overlay?"1":"0")+(o.host?"":" no-host"));
@@ -268,6 +299,8 @@ void shim_input_shutdown_ordinary(){
     if(!o.host||o.stopped)return;
     o.stopped=true;
     (void)o.host->tick();                      // a final poll before the stop (host order); Core is still ordinary live here
+    o.frame=nullptr;
+    if(o.bridge)o.bridge->shutdown();          // after the last tick: no read slot left, nothing opened through WheelFfb again
     const auto report=o.host->stop();
     std::printf("input shim: ordinary host stop %s\n",report.resolved?"resolved":"UNRESOLVED");std::fflush(stdout);
 }

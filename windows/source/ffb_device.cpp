@@ -41,7 +41,6 @@ std::string load_refusal(const Config& c){
     if(!c.output)return "[FFB] Output is not wheel (the default: no force output)";
     if(c.muted)return "DBCE_FFB_MUTE=1";
     if(c.latched)return "a latched (test) process";
-    if(c.shim)return ShimRefusal;
     if(c.steer_dev.empty())return "[Controls] steer names no device";
     GUID g;
     if(!parse_guid(c.steer_dev,g))return "[Controls] steer dev= is not an instance GUID";
@@ -80,6 +79,16 @@ bool Delivery::start(const WheelFfbApi& api,const Config& cfg){
         {reinterpret_cast<const void*>(api.PanicStop),"PanicStop"},
         {reinterpret_cast<const void*>(api.FreeDirectInput),"FreeDirectInput"}};
     for(const auto& u:used)if(!u.fn){why_=std::string("WheelFfb.dll has no ")+u.name;phase_=Phase::Released;return false;}
+    // The shim reads the wheel through the library's read slot while the library holds it (wheelffb_bridge.hpp).
+    const struct { const void* fn; const char* name; } shim[]{
+        {reinterpret_cast<const void*>(api.EnumerateAllDevices),"EnumerateAllDevices"},
+        {reinterpret_cast<const void*>(api.GetAnyDeviceGuid),"GetAnyDeviceGuid"},
+        {reinterpret_cast<const void*>(api.OpenReadDevice),"OpenReadDevice"},
+        {reinterpret_cast<const void*>(api.ReadDeviceStateWithPov),"ReadDeviceStateWithPov"},
+        {reinterpret_cast<const void*>(api.CloseReadDevices),"CloseReadDevices"},
+        {reinterpret_cast<const void*>(api.GetReadSlotCaps),"GetReadSlotCaps"}};
+    if(cfg.shim)for(const auto& u:shim)if(!u.fn){
+        why_=std::string("WheelFfb.dll has no ")+u.name+" (0.11.0 or newer is needed with Input = Shim)";phase_=Phase::Released;return false;}
     if(const int v=api_.GetWheelFfbVersion();v<MinVersion){
         why_="WheelFfb.dll "+std::to_string(v)+" is older than "+std::to_string(MinVersion);phase_=Phase::Released;return false;}
     phase_=Phase::Waiting;
@@ -92,13 +101,20 @@ bool Delivery::same_device(const std::string& dev)const{
 }
 
 // Stops what the library holds: PanicStop for an opened device, then FreeDirectInput (effects stopped, the exit
-// guards' window subclass removed, the hold watchdog joined) whenever the library was given a selection.
+// guards' window subclass removed, the hold watchdog joined) whenever the library was given a selection. With an
+// Owner the input stops reading through the library before FreeDirectInput and takes the wheel back after it; a
+// failed open hands it back only once the library has freed it, so two owners never hold the wheel at once.
 void Delivery::quiesce(){
     if(opened_)api_.PanicStop();
+    if(owner_&&held_)owner_->begin_release();
     if(native_)api_.FreeDirectInput();
-    native_=opened_=false;
+    if(owner_&&held_)owner_->end_release();
+    if(owner_&&promoting_)owner_->end_open(false);
+    native_=opened_=promoting_=held_=shared_=false;
     silent_=true;
 }
+
+void Delivery::set_owner(Owner* o){if(phase_==Phase::Waiting||phase_==Phase::Off)owner_=o;}
 
 void Delivery::release(const std::string& why){
     quiesce();
@@ -115,6 +131,7 @@ void Delivery::open_device(const Sample& s){
     const int n=api_.EnumerateDevices();
     for(int i=0;i<n&&!listed;++i){GUID g{};listed=api_.GetDeviceGuid(i,&g)&&IsEqualGUID(g,guid_);}
     if(!listed){release("the steering device "+cfg_.steer_dev+" is not one of the force-feedback devices");return;}
+    if(owner_){owner_->begin_open();promoting_=true;}   // the input's own handle of the wheel closes first
     // The ABI takes the window as an int; a window handle is 32 bits wide by design, also in 64-bit Windows.
     if(!api_.InitDirectInput(static_cast<int>(reinterpret_cast<std::intptr_t>(s.hwnd)))){
         release("the steering device refused the open (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
@@ -126,6 +143,7 @@ void Delivery::open_device(const Sample& s){
         release("the wheel refused the starting zero (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
     ++counts_.zeroes;
     silent_=true;need_zero_=unacked_=false;last_value_=0;last_send_ms_=s.ms;
+    if(owner_){owner_->end_open(true);promoting_=false;held_=true;shared_=false;e0_=s.steer_epoch;opened_ms_=s.ms;}
     phase_=Phase::Open;why_.clear();
 }
 
@@ -155,12 +173,22 @@ void Delivery::frame(const Sample& s,std::int32_t command){
     if(phase_==Phase::Waiting){
         if(!s.race||!s.front)return;
         if(!same_device(s.steer_dev)){why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";return;}
+        if(cfg_.shim&&!owner_){why_="waiting: the shim input has no owner hand-over for the wheel";return;}
+        if(owner_&&!s.steer_live){why_="waiting: the steering input is not live";return;}
         open_device(s);
         if(phase_!=Phase::Open)return;
     }
     // One device epoch: the opened instance must stay the input layer's steering device.
     if(!same_device(s.steer_dev)){release("the steering device changed or was lost");return;}
-    const bool drive=s.race&&s.front;
+    bool drive=s.race&&s.front;
+    if(owner_){
+        // The force follows the steering read through the force handle: a new epoch after the open, then that one only.
+        if(!shared_){
+            if(s.steer_live&&s.steer_epoch!=e0_){shared_=true;e1_=s.steer_epoch;}
+            else if(s.ms-opened_ms_>=SilenceMs){release("the steering input did not resume through the force device within 2 s");return;}
+        }else if(s.steer_epoch!=e1_){release("the steering device's input epoch changed");return;}
+        drive=drive&&shared_&&s.steer_live;
+    }
     // A held force older than the hold (since the last accepted command, whatever the sampling did): the library's
     // watchdog may have stopped the wheel, so it restarts through an accepted zero (romi 29717).
     const bool expired=last_value_!=0&&s.ms-last_send_ms_>std::uint64_t(HoldMs);

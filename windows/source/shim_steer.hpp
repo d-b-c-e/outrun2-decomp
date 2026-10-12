@@ -6,16 +6,26 @@
 #include <vector>
 namespace outrun::desktop {
 // `steer`: the binding as the profile parser read it (null: steer is not bound). The parser writes every GUID in one
-// lowercase form and Core keeps one device per instance, so the instance is matched exactly.
-inline ShimSteer shim_steer(const dbce::controls::Binding* steer,const std::vector<dbce::shim::DeviceReport>& reports){
+// lowercase form and Core keeps one device per instance, so the instance is matched exactly. `frame`: Core's latest
+// frame (null: none yet), for `live`.
+inline ShimSteer shim_steer(const dbce::controls::Binding* steer,const std::vector<dbce::shim::DeviceReport>& reports,
+                            const dbce::shim::Frame* frame=nullptr){
     ShimSteer s;
     if(!steer){s.status="steer is not bound";return s;}
     s.dev=steer->dev;s.prod=steer->prod;
-    for(const auto& d:reports){
+    for(std::size_t i=0;i<reports.size();++i){
+        const auto& d=reports[i];
         if(d.identity.dev!=steer->dev)continue;
         // Core keeps the instance's first binding's product; a steer binding that disagrees with it is not applied.
         if(d.identity.prod!=steer->prod){s.status="the shim reads this instance as product "+d.identity.prod+", not the binding's";return s;}
         s.opened=d.opened;s.epoch=d.epoch;s.status=d.status;
+        if(frame&&d.opened){
+            const auto& a=frame->action[std::size_t(dbce::shim::action_index("steer"))];
+            if(a.status==dbce::shim::Status::Live&&!a.injected&&a.sample>=0&&std::size_t(a.sample)<frame->samples.size()){
+                const auto& x=frame->samples[std::size_t(a.sample)];
+                s.live=x.device==i&&x.epoch==d.epoch&&x.valid&&!x.stale;   // the frame's sample index is the report's
+            }
+        }
         return s;
     }
     s.status="the shim reads no device for this instance";

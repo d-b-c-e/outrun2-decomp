@@ -49,4 +49,11 @@ __declspec(dllexport) int __cdecl GetLastHResult(){append(L"GetLastHResult");ret
 __declspec(dllexport) void __cdecl ZeroForces(){append(L"ZeroForces");}
 __declspec(dllexport) void __cdecl PanicStop(){append(L"PanicStop");}
 __declspec(dllexport) void __cdecl FreeDirectInput(){append(L"FreeDirectInput");}
+// The read slots the shim's WheelFfb bridge uses (native 0.11.0): present, logged, never succeeding here.
+__declspec(dllexport) int __cdecl EnumerateAllDevices(){append(L"EnumerateAllDevices");return 0;}
+__declspec(dllexport) int __cdecl GetAnyDeviceGuid(int,void*){append(L"GetAnyDeviceGuid");return 0;}
+__declspec(dllexport) int __cdecl OpenReadDevice(int){append(L"OpenReadDevice");return -1;}
+__declspec(dllexport) int __cdecl ReadDeviceStateWithPov(int,int*,int,unsigned char*,int,int*,int){append(L"ReadDeviceStateWithPov");return 0;}
+__declspec(dllexport) void __cdecl CloseReadDevices(){append(L"CloseReadDevices");}
+__declspec(dllexport) int __cdecl GetReadSlotCaps(int,void*){append(L"GetReadSlotCaps");return 0;}
 }

@@ -254,11 +254,10 @@ void test_output_config(){
     }
     c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = wheel\r\n"),true,nullptr,notes);
     check(c.latched&&outrun::desktop::ffbdev::load_refusal(c)=="a latched (test) process","a latched process refuses the load");
-    // The shim backend holds the wheel's handle (INPUT-SHIM.md section 6): no load until its force lease exists.
+    // The shim backend (INPUT-SHIM.md section 6): the load is allowed and the shim hands the wheel over (ffbdev::Owner).
     for(const char* b:{"Shim","shim"}){
         c=outrun::desktop::ffb_output_config(load(controls+"[Input]\r\nBackend = "+b+"\r\n[FFB]\r\nOutput = wheel\r\n"),false,nullptr,notes);
-        check(c.output&&c.shim&&c.steer_dev==wheel&&outrun::desktop::ffbdev::load_refusal(c)==outrun::desktop::ffbdev::ShimRefusal,
-              "[Input] Backend = Shim (any case) refuses the load");
+        check(c.output&&c.shim&&c.steer_dev==wheel&&outrun::desktop::ffbdev::load_refusal(c).empty(),"[Input] Backend = Shim (any case): shim mode, the load allowed");
     }
     c=outrun::desktop::ffb_output_config(load(controls+"[Input]\r\nBackend = Native\r\n[FFB]\r\nOutput = wheel\r\n"),false,nullptr,notes);
     check(!c.shim&&outrun::desktop::ffbdev::load_refusal(c).empty(),"Backend = Native: the wheel output as before");

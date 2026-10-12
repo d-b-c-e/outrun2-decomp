@@ -217,6 +217,16 @@ Wheelkit needs this marker plus the executable identity before it offers to writ
 - **Bridge provider**, an alternative implementation for consumers that already own the wheel through WheelFfb.
   WheelFfb stays the owner, and the provider reads through it by instance identity. A consumer that adopts the shim
   never opens a second exclusive path.
+  - Built for OutRun (2026-10-12, `shim/wheelffb_bridge`, toolkit native 0.11.0 `GetReadSlotCaps`). The force wheel
+    has one owner at a time. Before the force output opens, and after it releases, the DirectInput provider reads it
+    on its own non-exclusive handle, like any device. While WheelFfb holds it as its force device, the provider reads
+    it through WheelFfb's read slot on the exclusive handle. The identity, objects and ranges come from that handle
+    (`GetReadSlotCaps`), and Core checks them like any open.
+  - The hand-over runs on the game thread inside the delivery's open and release (`ffbdev::Owner`). The ending
+    phase's handle is closed and marked stale first, so Core's next read is Gone and the epoch ends. Wheel opens are
+    refused until the next phase; Core then reopens the wheel as a new epoch.
+  - WheelFfb is called only in the shared phase, under the bridge's lock or on the game thread. After the release
+    returns, no call into it is in flight, so the library may be unloaded.
 
 Proven reader behavior is reused behind this boundary (R1 Q4). Copying WheelFfb's reader code would not share its
 handle, so the design never claims that it does.
@@ -591,10 +601,16 @@ R1-F7, Q9.
 
 R1-F4.
 
-- Force uses the force lease (section 6). OutRun has none yet. Until it exists, ordinary play on the shim backend
-  has no wheel force: the FFB load gate refuses (`ffbdev::ShimRefusal`, WheelFfb.dll never loaded) and says so in the
-  F6 panel. `shim_input_steer()` (source/shim_steer.hpp) is the identity the lease will gate on: the steer binding's
-  instance and product from the same profile bytes Core parses, joined to Core's device report (open, epoch).
+- Force goes through the bridge provider (section 6) on the shim backend; OutRun has no force lease of its own.
+  - `shim_input_steer()` (source/shim_steer.hpp) is the identity the delivery gates on (romi 31452/31707). It joins
+    the steer binding's instance and product (from the same profile bytes Core parses) to Core's device report (open,
+    epoch), and `live` requires this tick's steer action to come from a valid, fresh, not injected sample of that
+    device in that epoch.
+  - The delivery opens only with live steering in an epoch E0. It sends zeros only until the steer is live in a new
+    epoch E1, read through the force handle; if that has not happened within 2 s, it releases.
+  - It releases on any later epoch change, and sends a zero whenever the steering is not live.
+  - A WheelFfb older than 0.11.0 refuses the output with Input = Shim. Without the bridge's hand-over (for example,
+    the shim host did not start), the delivery never opens.
 - A latched process creates no force path (STD-034 item 4). The environment mute `DBCE_FFB_MUTE` is the second
   interlock (STD-035 item 8). Both must cover the stock game's producers and those of other mods in the process, not
   only the shim's own.

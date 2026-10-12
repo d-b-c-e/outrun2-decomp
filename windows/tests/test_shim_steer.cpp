@@ -30,6 +30,7 @@ struct Rig {
     fk::Provider p;
     std::unique_ptr<Core> core;
     Profile parsed;
+    const Frame* frame{};
     std::size_t w=0,s=0;
     explicit Rig(const std::string& text,CoreConfig cfg={}){
         fk::Device d;d.listed={W,WP,"Wheel"};d.caps=fk::wheel_caps();w=p.add(d);
@@ -38,24 +39,28 @@ struct Rig {
         core=std::make_unique<Core>(p,cfg);
         core->set_profile(parsed);
     }
-    void step(){core->service_devices();p.advance(10000);(void)core->tick();}
-    ShimSteer steer()const{return outrun::desktop::shim_steer(dbce::controls::find(parsed.section,"steer"),core->device_reports());}
+    void step(){core->service_devices();p.advance(10000);frame=&core->tick();}
+    ShimSteer steer()const{return outrun::desktop::shim_steer(dbce::controls::find(parsed.section,"steer"),core->device_reports(),frame);}
     fk::Device& dev(std::size_t i){return p.at(i);}
 };
 
 void test_live_and_epochs(){
     Rig r(profile({steer(W,WP),"confirm = button 0 dev="+W+" prod="+WP}));
     auto x=r.steer();
-    check(x.dev==W&&x.prod==WP&&!x.opened&&x.epoch==0,"before the first open: the binding's identity, not open, epoch 0");
+    check(x.dev==W&&x.prod==WP&&!x.opened&&!x.live&&x.epoch==0,"before the first open: the binding's identity, not open, epoch 0");
     r.step();
     x=r.steer();
-    check(x.dev==W&&x.prod==WP&&x.opened&&x.epoch==1&&x.status=="live","opened by Core: open, epoch 1, live: "+x.status);
+    check(x.dev==W&&x.prod==WP&&x.opened&&x.live&&x.epoch==1&&x.status=="live","opened by Core: open, live, epoch 1: "+x.status);
     r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
     x=r.steer();
-    check(!x.opened&&x.epoch==1&&x.status!="live","the device lost: not open, the same epoch: "+x.status);
+    check(!x.opened&&!x.live&&x.epoch==1&&x.status!="live","the device lost: not open, not live, the same epoch: "+x.status);
     r.step();
     x=r.steer();
-    check(x.opened&&x.epoch==2,"reopened: a new epoch (the FFB device epoch ends with the old one)");
+    check(x.opened&&x.live&&x.epoch==2,"reopened: live in a new epoch (the FFB device epoch ends with the old one)");
+    // An open device whose read is pending is not live steering (romi 31707: opened + epoch alone is not enough).
+    r.dev(r.w).script.push_back({Call::Pending,Call::NotCalled});r.step();
+    x=r.steer();
+    check(!x.live,"a pending read: not live, whatever the report says: "+x.status);
 }
 
 void test_identity_rules(){
@@ -86,6 +91,16 @@ void test_identity_rules(){
      check(!x.opened&&x.epoch==0&&x.status=="device-missing","an instance not listed: not open: "+x.status);}
 }
 
+// Open but not usable: the steer axis's range is not qualified on the opened handle.
+void test_open_not_live(){
+    Rig r(profile({steer(W,WP)}));r.dev(r.w).caps.range_ok[0]=false;r.step();
+    const auto x=r.steer();
+    check(x.opened&&x.epoch==1&&!x.live,"an unqualified steer range: open, not live: "+x.status);
+    // Live on another action of the same device does not make the steer live.
+    Rig q(profile({steer(W,WP),"confirm = button 0 dev="+W+" prod="+WP}));q.dev(q.w).caps.range_ok[0]=false;q.step();
+    check(q.steer().opened&&!q.steer().live,"the same device's other action live: the steer still not live");
+}
+
 void test_no_identity(){
     {Rig r(profile({"confirm = button 0 dev="+W+" prod="+WP}));r.step();
      const auto x=r.steer();
@@ -103,7 +118,7 @@ void test_no_identity(){
 }
 
 int main(){
-    try{test_live_and_epochs();test_identity_rules();test_no_identity();}
+    try{test_live_and_epochs();test_identity_rules();test_open_not_live();test_no_identity();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim steer identity: "<<checks<<" checks passed\n";
     return 0;

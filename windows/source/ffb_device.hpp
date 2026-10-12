@@ -3,10 +3,9 @@
 // wheel toolkit's WheelFfb.dll (vendor/wheelffb), loaded at run time from the game folder. Off unless [FFB] Output =
 // wheel. The gates, in order; the first that fails keeps the wheel silent:
 //   load    Output = wheel; not DBCE_FFB_MUTE=1 (STD-035 item 8: the library stays unloaded); not a latched (test)
-//           process; not the shim input backend (it holds the wheel's handle, and a second open of a force device is
-//           never made: INPUT-SHIM.md section 6; its force lease is not built yet); [Controls] steer names a device
-//           instance (dev=); the DLL is 0.9.0 or newer and has every export used here. No library state is created
-//           before the open.
+//           process; [Controls] steer names a device instance (dev=); the DLL is 0.9.0 or newer and has every export
+//           used here (with the shim input backend also the read slots and GetReadSlotCaps, native 0.11.0, which the
+//           shim's WheelFfb bridge reads the wheel through). No library state is created before the open.
 //   open    in the race and in front (an exclusive handle is not acquired behind another window, and the game never
 //           takes the focus), with the input layer reading that same instance as the steering device; the instance is
 //           one of the library's force-feedback devices; strict selection opens exactly it (never a name or an
@@ -22,6 +21,14 @@
 //   release and shutdown: PanicStop (when opened), then FreeDirectInput whenever the library was given a device
 //           selection: it stops the effects, removes the exit guards' window subclass and joins the watchdog, so the
 //           module may be unloaded afterwards (and only then).
+//   owner   with the shim input backend the wheel's handles have one owner at a time (INPUT-SHIM.md section 6): an
+//           Owner (the shim's WheelFfb bridge) closes the input's own handle before the library opens the wheel and
+//           reads it through the library while it holds it, and the release hands it back after FreeDirectInput.
+//           Then the steering input itself gates the force (romi 31707): the open needs the input's steer action
+//           live (a valid, fresh sample of that device) in an epoch E0; after it only zeros go out until the steer is
+//           live again in a new epoch E1 (the read through the force handle), within 2 s or a release; a later epoch
+//           change releases; steering that is not live sends a zero. Without an Owner (the native input layer) none of
+//           this applies and the input keeps its own non-exclusive handle as before.
 // Pure decisions over WheelFfbApi's function pointers: tests/test_ffb_delivery.cpp drives them with a fake library.
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -42,13 +49,11 @@ struct Config {
     bool output{};             // [FFB] Output = wheel
     bool muted{};              // DBCE_FFB_MUTE=1
     bool latched{};            // a test process
-    bool shim{};               // [Input] Backend = Shim: the shared input shim reads (and owns) the wheel
+    bool shim{};               // [Input] Backend = Shim: the shim owns the wheel's handles; it hands them over (Owner)
     std::string steer_dev;     // [Controls] steer dev= ("{...}"); empty when steer names no device
 };
 // Why the library may not be loaded ("" when it may).
 std::string load_refusal(const Config&);
-inline constexpr const char* ShimRefusal="the shared input shim reads the steering wheel ([Input] Backend = Shim), and wheel "
-    "force needs the shim's force lease (INPUT-SHIM.md section 6), which is not built yet; the wheel is never opened twice";
 // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", any case; nothing else.
 bool parse_guid(const std::string&,GUID&);
 enum class Phase { Off, Waiting, Open, Released, Stopped };
@@ -60,11 +65,24 @@ struct Sample {
     void* hwnd{};
     std::string steer_dev;     // the input layer's connected steering device ("" none)
     std::uint64_t ms{};        // a monotonic clock
+    bool steer_live{};         // with an Owner: the steer action is applied from a valid, fresh sample of that device
+    std::uint32_t steer_epoch{};   // with an Owner: that device's input epoch
+};
+// The input's owner of the wheel's handles when it is not the library's own reader (see "owner" above). Game thread.
+class Owner {
+public:
+    virtual ~Owner()=default;
+    virtual void begin_open()=0;          // the input's own handle of the wheel closed; the wheel is not read until end_open
+    virtual void end_open(bool held)=0;   // held: the library holds the wheel and the input reads it through the library
+    virtual void begin_release()=0;       // before FreeDirectInput: the input stops reading through the library
+    virtual void end_release()=0;         // after it: the input reads the wheel on its own handle again
 };
 class Delivery {
 public:
     // Once per process, after the load: the exports and the version; no device and no library state. False: why().
     bool start(const WheelFfbApi&,const Config&);
+    // With the shim input backend, before the open (Waiting only): the wheel's owner. Config::shim never opens without.
+    void set_owner(Owner*);
     // Once per input sample; `command` (DirectInput units, already x FFBGlobalStrength) is used in the race only.
     void frame(const Sample&,std::int32_t command);
     // PanicStop when opened, FreeDirectInput when the library holds any state; the library is not called again.
@@ -95,5 +113,11 @@ private:
     std::int32_t last_value_{};
     std::uint64_t last_send_ms_{};   // the last accepted command or zero
     Counts counts_{};
+    Owner* owner_{};
+    bool promoting_{};         // begin_open was called and end_open not yet
+    bool held_{};              // end_open(true): the owner reads the wheel through the library
+    bool shared_{};            // the steer is live in the epoch read through the force handle (e1_)
+    std::uint32_t e0_{},e1_{};
+    std::uint64_t opened_ms_{};
 };
 }

@@ -33,7 +33,8 @@ struct Live {
     bool output{};              // F4: the delivery started (WheelFfb.dll loaded, gates set)
     std::string off;            // why there is no wheel output (the log line)
     bool stopped{};             // Stop FFB / F8 ended it this session
-    bool shim{};                // Output = wheel refused because the shim backend reads the wheel (ffbdev::ShimRefusal)
+    bool shim{};                // [Input] Backend = Shim: the shim owns the wheel and hands it over (ffbdev::Owner)
+    bool requested{};           // [FFB] Output = wheel
     WheelFfbApi api{};
     ffbdev::Delivery delivery;
     std::uint32_t race_ticks{},sent{},invalid_rows{};
@@ -66,7 +67,12 @@ void deliver(bool race,std::int32_t intent){
     // An open F6 panel counts as outside the race: the gates zero the wheel this sample (the panel's own filter runs
     // after this one in the same tick, and the open state changes only in the message pump between ticks).
     s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=ffb_front_check()(s.hwnd);
-    s.steer_dev=wheel_input_steer_device();s.ms=GetTickCount64();
+    if(f.shim){
+        // The shim backend: the steer binding's instance, live from a valid, fresh sample in its epoch (romi 31707).
+        const auto st=shim_input_steer();
+        s.steer_dev=st.dev;s.steer_live=st.live;s.steer_epoch=st.epoch;
+    }else s.steer_dev=wheel_input_steer_device();
+    s.ms=GetTickCount64();
     const auto before=f.delivery.phase();
     f.delivery.frame(s,intent);
     if(f.delivery.phase()!=before){
@@ -117,8 +123,9 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
 bool start_output(const Ini& settings,bool latched,std::string& notes){
     const auto cfg=ffb_output_config(settings,latched,std::getenv("DBCE_FFB_MUTE"),notes);
     const auto off=[](const std::string& why){f.off=why;std::printf("ffb: no wheel output: %s\n",why.c_str());return false;};
+    f.shim=cfg.shim;f.requested=cfg.output;
     if(!cfg.output){f.off=ffbdev::load_refusal(cfg);return false;}   // the default: no line of its own
-    if(const auto why=ffbdev::load_refusal(cfg);!why.empty()){f.shim=why==ffbdev::ShimRefusal;return off(why);}
+    if(const auto why=ffbdev::load_refusal(cfg);!why.empty())return off(why);
     wchar_t exe[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,exe,MAX_PATH);
     std::wstring path=n&&n<MAX_PATH?std::wstring(exe,n):std::wstring();
     const auto slash=path.find_last_of(L"\\/");
@@ -215,11 +222,12 @@ std::string ffb_status_text(){
     // The player's words; runtime.log keeps the gates' full reasons.
     if(!f.output){
         if(f.stopped)return "off (stopped)";
-        if(!f.shim)return "off";
-        // The shim backend owns the wheel's handle (INPUT-SHIM.md section 6): its live identity, and no second open.
+        if(!f.shim||!f.requested||f.off.empty())return "off";
+        // The shim backend: why the output did not start, and the steering wheel as the shim reads it.
         const auto s=shim_input_steer();
-        const std::string wheel=s.opened?"open, epoch "+std::to_string(s.epoch):s.status.empty()?std::string("not known"):s.status;
-        return "off: no wheel force with Input = Shim yet (the shim's force lease is not built); steering wheel in the shim: "+wheel;
+        const std::string wheel=s.live?"live, epoch "+std::to_string(s.epoch):s.opened?"open, not live, epoch "+std::to_string(s.epoch):
+                                s.status.empty()?std::string("not known"):s.status;
+        return "off: "+f.off+"; steering wheel in the shim: "+wheel;
     }
     switch(f.delivery.phase()){
     case ffbdev::Phase::Waiting:return "on: waits for the race, the game in front and the steering wheel";
@@ -230,6 +238,9 @@ std::string ffb_status_text(){
 }
 
 bool ffb_output_running(){return f.output;}
+
+const WheelFfbApi* ffb_shim_wheel_api(){return f.output&&f.shim&&f.delivery.phase()==ffbdev::Phase::Waiting?&f.api:nullptr;}
+void ffb_set_shim_owner(ffbdev::Owner* o){if(f.output&&f.shim)f.delivery.set_owner(o);}
 
 void ffb_stop_output(){
     if(!f.output)return;

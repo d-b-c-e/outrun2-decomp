@@ -81,10 +81,7 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    // The shim backend has no wheel force yet (ffbdev::ShimRefusal): a saved Output = wheel does not turn it on there.
-    const bool shim=!shim_input_status_text().empty();
-    dbce::panel::Status("At the next start",!v.output_next?"off":shim?"on, but not with Input = Shim yet":"on",
-                        v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
+    dbce::panel::Status("At the next start",v.output_next?"on":"off",v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
     dbce::panel::Text("Turning the wheel output on is not offered in this panel yet. Stop FFB and F8 turn it off now and at "

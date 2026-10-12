@@ -86,28 +86,41 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel without a steer device: never attached");
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
-    // The shim backend (INPUT-SHIM.md section 6): the shim holds the wheel, so WheelFfb.dll is not even loaded, although
-    // the fake would accept this very wheel; the F6 status names why and the wheel as the shim reads it.
+    // The shim backend (INPUT-SHIM.md section 6): the library loads and its delivery waits, but it never opens the wheel
+    // until the shim hands it over (ffb_set_shim_owner, from the shim's WheelFfb bridge): race ticks with a force, the
+    // steering live and the fake accepting this very wheel reach no device call (no unattended exclusive open).
     {
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
         _putenv_s("DBCE_FFB_MUTE","");_putenv_s("OR2_FFB_TRACE","");
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        outrun::desktop::ffb_front_check()=[](void*){return true;};
+        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
         const int before=attaches();
         const std::string prod="{0006346e-0000-0000-0000-504944564944}";
-        outrun::desktop::g_shim={Wheel,prod,"live",true,2};
+        outrun::desktop::g_shim={Wheel,prod,"live",true,true,2};
         outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
         outrun::desktop::ffb_wrap_input_filter();
-        if(auto f=outrun::xbox_runtime::input_filter()){outrun::platform::NativeInputState in{};f(in,nullptr);}
-        check(attaches()==before&&env(L"FAKE_WHEELFFB_CALLS").empty()&&!GetModuleHandleW(L"WheelFfb.dll"),
-              "Backend = Shim, Output = wheel, the fake accepting: never attached");
-        check(!outrun::desktop::ffb_output_running(),"no wheel output with the shim backend");
-        auto status=outrun::desktop::ffb_status_text();
-        check(status.find("Input = Shim")!=std::string::npos&&status.find("open, epoch 2")!=std::string::npos,"status: the shim reason and its open wheel's epoch");
-        outrun::desktop::g_shim={Wheel,prod,"read-failed",false,2};
-        status=outrun::desktop::ffb_status_text();
-        check(status.find("Input = Shim")!=std::string::npos&&status.find("read-failed")!=std::string::npos,"status: the wheel's shim status when not open");
+        check(attaches()==before+1&&outrun::desktop::ffb_output_running(),"Backend = Shim, Output = wheel: the library loaded, the output started");
+        check(outrun::desktop::ffb_shim_wheel_api()!=nullptr,"the shim's bridge is offered the library while the output waits");
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        auto& car=rt->event_function36.car_select.car_799d18;
+        const auto putf=[&](std::size_t at,float v){std::memcpy(car.data()+at,&v,4);};
+        putf(0x1c4,40.f);putf(0x1d0,0.4f);putf(0x1d4,0.02f);putf(0x264,6.f);putf(0x268,6.f);
+        const auto filter=outrun::xbox_runtime::input_filter();
+        for(int i=0;i<60;++i){outrun::platform::NativeInputState in{};filter(in,rt.get());}
+        check(env(L"FAKE_WHEELFFB_CALLS")==L"GetWheelFfbVersion;GetWheelFfbVersion;","no owner: no device call in 60 race ticks (only the version at the start)");
+        check(outrun::desktop::ffb_status_text().rfind("on: waits",0)==0,"status: on, waiting");
         outrun::desktop::ffb_shutdown();
-        check(attaches()==before&&!GetModuleHandleW(L"WheelFfb.dll"),"still never attached after shutdown");
+        check(!GetModuleHandleW(L"WheelFfb.dll")&&outrun::desktop::ffb_shim_wheel_api()==nullptr,"unloaded at shutdown; no library offered");
+        // Off with the shim backend: the reason, and the steering wheel as the shim reads it.
+        outrun::desktop::ffb_configure(ini("[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        auto status=outrun::desktop::ffb_status_text();
+        check(status.find("steer names no device")!=std::string::npos&&status.find("live, epoch 2")!=std::string::npos,"status: off with the reason and the shim's live wheel");
+        outrun::desktop::g_shim={Wheel,prod,"read-failed",false,false,2};
+        status=outrun::desktop::ffb_status_text();
+        check(status.find("read-failed")!=std::string::npos,"status: the wheel's shim status when not open");
+        outrun::desktop::ffb_shutdown();
         outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nOutput = none\r\n"),false,std::string());
         check(outrun::desktop::ffb_status_text()=="off","Output = none: the plain off, no shim reason");
         outrun::desktop::ffb_shutdown();

@@ -8,6 +8,7 @@
 #include <dinput.h>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <deque>
 #include <string>
 #include <vector>
@@ -94,6 +95,36 @@ Delivery opened(){
     return d;
 }
 void finish(Delivery& d){d.shutdown();invariant(d);CHECK(!F.di&&!F.worker&&!F.subclass&&F.wheel==0);}
+
+// The shim backend's hand-over (ffbdev::Owner): its calls go into the same log, so every order is checked against the
+// library's. The read-slot exports are present (Delivery::start requires them with Config::shim) and never called.
+struct FakeOwner final:Owner {
+    void begin_open()override{note("Owner begin_open");}
+    void end_open(bool held)override{note(std::string("Owner end_open ")+(held?"1":"0"));}
+    void begin_release()override{note("Owner begin_release");}
+    void end_release()override{note("Owner end_release");}
+};
+int __cdecl NotCalled0(){note("read slot export called");return 0;}
+int __cdecl NotCalledGuid(int,void*){note("read slot export called");return 0;}
+int __cdecl NotCalledOpen(int){note("read slot export called");return -1;}
+int __cdecl NotCalledRead(int,int*,int,unsigned char*,int,int*,int){note("read slot export called");return 0;}
+void __cdecl NotCalledClose(){note("read slot export called");}
+int __cdecl NotCalledCaps(int,ReadSlotCapsV1*){note("read slot export called");return 0;}
+WheelFfbApi shim_api(){
+    WheelFfbApi a=api();
+    a.EnumerateAllDevices=NotCalled0;a.GetAnyDeviceGuid=NotCalledGuid;a.OpenReadDevice=NotCalledOpen;
+    a.ReadDeviceStateWithPov=NotCalledRead;a.CloseReadDevices=NotCalledClose;a.GetReadSlotCaps=NotCalledCaps;
+    return a;
+}
+Config shim_on(){Config c=on();c.shim=true;return c;}
+Sample live(std::uint64_t ms,std::uint32_t epoch,bool is_live=true){Sample s=race(ms);s.steer_live=is_live;s.steer_epoch=epoch;return s;}
+// Opened with the owner at 0 ms in epoch 1 (the input's own handle), then the steer live in epoch 2 (through the library).
+Delivery owned(FakeOwner& o){
+    reset();Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+    step(d,live(0,1),0);CHECK(d.phase()==Phase::Open);
+    step(d,live(5,2),0);CHECK(d.phase()==Phase::Open);
+    F.log.clear();return d;
+}
 }
 int main(){
     // GUID text: braces, dashes, hex; nothing else.
@@ -233,6 +264,84 @@ int main(){
      d.shutdown();invariant(d);CHECK((F.log==Lines{"PanicStop","FreeDirectInput"})&&d.phase()==Phase::Stopped);
      F.log.clear();d.shutdown();step(d,race(20),2500);CHECK(F.log.empty());
      CHECK(!d.start(api(),on()));}                                                // and no restart
+
+    // With the shim backend: the read-slot exports (0.11.0) are required at the start; without the owner nothing opens.
+    {reset();Delivery d;CHECK(!d.start(api(),shim_on())&&d.phase()==Phase::Released&&d.why().find("EnumerateAllDevices")!=std::string::npos);
+     CHECK(F.log.empty());
+     reset();WheelFfbApi a=shim_api();a.GetReadSlotCaps=nullptr;Delivery e;
+     CHECK(!e.start(a,shim_on())&&e.why().find("GetReadSlotCaps")!=std::string::npos&&e.why().find("0.11.0")!=std::string::npos);
+     reset();Delivery n;CHECK(n.start(shim_api(),shim_on()));const auto base=F.log.size();
+     for(std::uint64_t ms=0;ms<3000;ms+=10)step(n,live(ms,1),4000);
+     CHECK(n.phase()==Phase::Waiting&&!device_calls(since(base))&&n.why().find("no owner")!=std::string::npos);
+     finish(n);}
+
+    // The owner's hand-over around the open: its handle closed before InitDirectInput, handed back after the accepted
+    // zero; the open waits for live steering; then zeros only until the steer is live in a new epoch.
+    {reset();FakeOwner o;Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);const auto base=F.log.size();
+     step(d,live(0,1,false),3000);step(d,race(1),3000);                          // not live (and a sample without liveness)
+     CHECK(d.phase()==Phase::Waiting&&since(base).empty()&&d.why().find("not live")!=std::string::npos);
+     step(d,live(2,1),3000);
+     Lines want=OpenSequence;
+     want.insert(std::find(want.begin(),want.end(),std::string("InitDirectInput 4660")),"Owner begin_open");
+     want.push_back("Owner end_open 1");
+     CHECK(since(base)==want&&d.phase()==Phase::Open&&F.wheel==0);               // the open's tick sends no force
+     const auto opened=F.log.size();
+     for(std::uint64_t ms=10;ms<500;ms+=10)step(d,live(ms,1),3000);              // still the old epoch: nothing
+     step(d,live(500,2,false),3000);                                             // the new epoch, not live yet: nothing
+     CHECK(since(opened).empty()&&F.wheel==0&&d.silent());
+     step(d,live(510,2),3000);
+     CHECK((since(opened)==Lines{"SetDeviceForcesXY 0 0","SetDeviceForcesXY 3000 0"})&&F.wheel==3000);   // an accepted zero, then the force
+     for(const auto& s:F.log)CHECK(s!="read slot export called");
+     finish(d);}
+
+    // Steering not live in the shared epoch: an accepted zero, no release; live again: the force resumes.
+    {FakeOwner o;Delivery d=owned(o);
+     step(d,live(10,2),2500);CHECK(F.wheel==2500);
+     F.log.clear();step(d,live(20,2,false),2500);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0"})&&d.phase()==Phase::Open&&F.wheel==0);
+     step(d,live(30,2,false),2500);CHECK(F.log.size()==1);                      // held zero: no refresh
+     step(d,live(40,2),2500);CHECK(F.log.back()=="SetDeviceForcesXY 2500 0"&&F.wheel==2500);
+     finish(d);}
+
+    // A later epoch change releases: PanicStop, the owner stops reading through the library, FreeDirectInput, the owner
+    // takes the wheel back. The same order at shutdown.
+    {FakeOwner o;Delivery d=owned(o);
+     step(d,live(10,2),2500);F.log.clear();
+     step(d,live(20,3),2500);
+     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"PanicStop","Owner begin_release","FreeDirectInput","Owner end_release"}));
+     F.log.clear();step(d,live(30,3),2500);finish(d);CHECK(F.log.empty());}
+    {FakeOwner o;Delivery d=owned(o);
+     step(d,live(10,2),2500);F.log.clear();
+     d.shutdown();invariant(d);
+     CHECK(d.phase()==Phase::Stopped&&(F.log==Lines{"PanicStop","Owner begin_release","FreeDirectInput","Owner end_release"}));}
+
+    // No new epoch within 2 s of the open: released (the owner never got the wheel back through the library).
+    {reset();FakeOwner o;Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     step(d,live(0,1),0);CHECK(d.phase()==Phase::Open);F.log.clear();
+     for(std::uint64_t ms=10;ms<2000;ms+=10)step(d,live(ms,1),3000);
+     CHECK(d.phase()==Phase::Open&&F.log.empty());
+     step(d,live(2000,1),3000);
+     CHECK(d.phase()==Phase::Released&&d.why().find("did not resume")!=std::string::npos);
+     CHECK((F.log==Lines{"PanicStop","Owner begin_release","FreeDirectInput","Owner end_release"}));}
+
+    // A failed open with the owner: the library frees the wheel before the owner takes it back.
+    {reset();F.init=0;FakeOwner o;Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     const auto base=F.log.size();step(d,live(0,1),3000);
+     const auto got=since(base);
+     const auto at=[&](const char* s){return std::find(got.begin(),got.end(),std::string(s))-got.begin();};
+     CHECK(d.phase()==Phase::Released&&at("Owner begin_open")<at("InitDirectInput 4660")&&at("InitDirectInput 4660")<at("FreeDirectInput")&&
+           at("FreeDirectInput")<at("Owner end_open 0")&&at("Owner end_open 0")==std::ptrdiff_t(got.size())-1);
+     for(const auto& s:got)CHECK(s!="PanicStop"&&s!="Owner begin_release");}
+    {reset();F.forces={0};F.hr=long(DIERR_INPUTLOST);FakeOwner o;Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     const auto base=F.log.size();step(d,live(0,1),3000);                          // the starting zero refused
+     const auto got=since(base);
+     CHECK(d.phase()==Phase::Released&&got.back()=="Owner end_open 0"&&got[got.size()-2]=="FreeDirectInput");}
+
+    // set_owner only before the open; native (no owner) never sees an owner call.
+    {FakeOwner o,late;Delivery d=owned(o);d.set_owner(&late);
+     step(d,live(10,3),2500);CHECK(d.phase()==Phase::Released);}                 // the first owner's epoch rule still applies
+    {Delivery d=opened();step(d,race(10),2500);step(d,race(20),2500);finish(d);
+     for(const auto& s:F.log)CHECK(s.rfind("Owner",0)!=0);}
 
     std::printf("ffb delivery: %u checks\n",checks);
     return 0;

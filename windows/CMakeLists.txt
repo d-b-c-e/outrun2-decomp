@@ -5,7 +5,7 @@
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
-    source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp
+    source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
@@ -189,3 +189,12 @@ target_compile_options(test_dinput_provider PRIVATE /W4)
 target_compile_definitions(test_dinput_provider PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_dinput_provider PRIVATE dinput8 dxguid)
 add_test(NAME dinput_provider COMMAND test_dinput_provider)
+# The WheelFfb bridge provider (shim/wheelffb_bridge): the hand-over of the force wheel between the provider's own
+# handle and WheelFfb's read slot, through the real Core and DInputProvider over fake COM and a fake read-slot API.
+add_executable(test_wheelffb_bridge tests/test_wheelffb_bridge.cpp shim/wheelffb_bridge.cpp shim/dinput_provider.cpp shim/parse.cpp shim/core.cpp)
+target_include_directories(test_wheelffb_bridge PRIVATE shim tests vendor/controls vendor/wheelffb)
+target_compile_features(test_wheelffb_bridge PRIVATE cxx_std_17)
+target_compile_options(test_wheelffb_bridge PRIVATE /W4)
+target_compile_definitions(test_wheelffb_bridge PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_wheelffb_bridge PRIVATE dinput8 dxguid)
+add_test(NAME wheelffb_bridge COMMAND test_wheelffb_bridge)

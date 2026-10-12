@@ -780,6 +780,24 @@
   "reason": "the DirectInput provider's device open (CreateDevice; no file)"
  },
  {
+  "file": "windows/shim/wheelffb_bridge.hpp",
+  "line": "OpenResult open(const DeviceInfo& listed) override;",
+  "class": "not-a-file",
+  "reason": "the WheelFfb bridge provider's device open (no file)"
+ },
+ {
+  "file": "windows/shim/wheelffb_bridge.cpp",
+  "line": "if(listed.dev!=instance_)return inner_->open(listed);",
+  "class": "not-a-file",
+  "reason": "every other device: the DirectInput provider's device open"
+ },
+ {
+  "file": "windows/shim/wheelffb_bridge.cpp",
+  "line": "auto r=inner_->open(listed);",
+  "class": "not-a-file",
+  "reason": "the wheel in the Inner phase: the DirectInput provider's device open"
+ },
+ {
   "file": "windows/shim/shim.hpp",
   "line": "virtual OpenResult open(const DeviceInfo& listed)=0; // `opened` is the identity read back from the new handle",
   "class": "not-a-file",

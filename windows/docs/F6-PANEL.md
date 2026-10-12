@@ -71,11 +71,11 @@ Force output stays Off by default, and the panel probes no hardware.
 - **Latched (test) processes**: no saves (the fence: the game folder is read-only there); the panel opens through the
   dev channel only. A write-audit entry (latched-skip) for the save.
 - **Hot reconfigure** of FFB: quiesce first (above). Of the triples: "next start" (zero's design).
-- **Shim backend**: the shim holds the wheel's handle, so there is no wheel force with `[Input] Backend = Shim` until
-  its force lease exists (INPUT-SHIM.md section 6; romi 31452: no second open). The load gate refuses
-  (`ffbdev::ShimRefusal`: WheelFfb.dll is never loaded), the FFB page says so with the steering wheel as the shim
-  reads it (`shim_input_steer`: the steer binding's instance and product joined to Core's live report, open and
-  epoch), and "At the next start" does not claim "on". The Native backend is unchanged.
+- **Shim backend**: with `[Input] Backend = Shim` the wheel output goes through the shim's WheelFfb bridge
+  (INPUT-SHIM.md section 6, one owner at a time): the delivery opens only after the shim hands the wheel over, and
+  forces only while the steering is live through the force handle. When the output is off with Input = Shim, the FFB
+  page gives the reason and the steering wheel as the shim reads it (`shim_input_steer`: live / open / its status,
+  epoch). The Native backend is unchanged.
 - **Cameras**: Surround and Separate monitors are one planar wide view today; the page says so and never implies
   three angled views (romi 31510).
 - **STD-019**: drawn on the centre screen, as the toolkit already does on a span.

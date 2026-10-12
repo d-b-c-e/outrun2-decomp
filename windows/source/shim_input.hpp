@@ -40,8 +40,10 @@ std::string shim_input_status_text();
 // the [Controls] steer binding's device instance and product, from the profile bytes Core parses (no second mapping
 // store), joined to Core's live report of that instance. `opened` only when that report is open and its product (Core
 // checks it against the listing and the opened handle) is the binding's; `epoch` is the report's (a reopen is a new
-// epoch, 0 before the first open). `dev` is empty when steer is not bound or this backend is not in use; `status` is
-// Core's device status, or why there is none. Game thread (the input sample's thread).
-struct ShimSteer { std::string dev,prod,status; bool opened{}; std::uint32_t epoch{}; };
+// epoch, 0 before the first open). `live`: this tick's steer action is applied from a valid, fresh, not injected sample
+// of that device in that epoch (an open handle can still be pending, failed, stale or range-unqualified; romi 31707).
+// `dev` is empty when steer is not bound or this backend is not in use; `status` is Core's device status, or why there
+// is none. Game thread (the input sample's thread).
+struct ShimSteer { std::string dev,prod,status; bool opened{},live{}; std::uint32_t epoch{}; };
 ShimSteer shim_input_steer();
 }

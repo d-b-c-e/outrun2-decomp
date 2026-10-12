@@ -51,6 +51,17 @@
  * on the consumer's device owner thread. Open FFB before its shared read slot;
  * close/reopen readers when promoting an input-only device to FFB ownership.
  *
+ * Native 0.11.0 GetReadSlotCaps reads back what a read slot's handle has, from that very handle (for the force-feedback
+ * wheel's slot, the shared exclusive handle), so a consumer reading through a slot (the input shim's WheelFfb bridge)
+ * checks it exactly as it checks a handle of its own: instance and product GUIDs (GetDeviceInfo); the interface path
+ * (DIPROP_GUIDANDPATH as UTF-8, NUL-terminated, empty when unavailable, not valid UTF-16 or longer than the field);
+ * each DIJOYSTATE2 axis (X Y Z Rx Ry Rz Slider1 Slider2) by offset (GetObjectInfo) and, for a present axis, its
+ * DIPROP_RANGE read back by offset (rangeOk only when max > min); buttons 0..127 and POVs 0..3 by offset. caps->cbSize
+ * must be sizeof(ReadSlotCapsV1), else nothing is touched; otherwise the struct is cleared first (cbSize kept) and
+ * version is 1 on success. Returns 1 only for an open slot whose GetDeviceInfo succeeded; a wheel slot whose
+ * force-feedback handle was released or now belongs to another device returns 0, the same rule as its reads. Nothing
+ * is acquired or set. Optional for older DLLs (find it by name).
+ *
  * Test injection (STD-033 section 6), development only. EnableTestInjection(1) latches an irreversible no-force
  * mode for the process, and only before any force path was ever used (InitDirectInput, Aquire, an effect, an
  * external session; attempted counts). Then every force export refuses before touching a device, an effect or a
@@ -77,10 +88,12 @@
 #include <windows.h>
 #include <string.h>
 #include "external_ffb.h"
+#include "read_slot_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 
 /* X(return type, name, parameter list) */
 #define WHEELFFB_API_LIST(X) \
@@ -142,7 +155,8 @@ extern "C" {
     X(int, EnableTestInjection, (int flags)) \
     X(int, SubmitTestInjection, (const char* line, char* why, int whySize)) \
     X(int, GetTestInjectionStatus, (char* buf, int size)) \
-    X(int, LastReadInjected, (int slot))
+    X(int, LastReadInjected, (int slot)) \
+    X(int, GetReadSlotCaps, (int slot, ReadSlotCapsV1* caps))
 
 #define WHEELFFB_TYPEDEF(ret, name, args) typedef ret (__cdecl *WheelFfb_##name##_t) args;
 WHEELFFB_API_LIST(WHEELFFB_TYPEDEF)

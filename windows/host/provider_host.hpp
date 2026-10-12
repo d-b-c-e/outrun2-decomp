@@ -8,6 +8,7 @@
 #include "host_lifecycle.hpp"
 #include "control_pump.hpp"
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -20,6 +21,7 @@ namespace dbce::shim::hosting {
 // provider; members are destroyed in reverse order, the core first.
 struct WorkerState {
     std::shared_ptr<dbce::shim::DInputProvider> provider;
+    std::shared_ptr<dbce::shim::Provider> front;   // optional, over `provider` (the WheelFfb bridge); the core reads it
     std::shared_ptr<dbce::shim::Core> core;
     std::atomic<bool> stop{false};
     std::mutex m; std::condition_variable cv; bool done = false;
@@ -65,11 +67,14 @@ template<class RecorderType> class ProviderHost {
     bool stopped_ = false; Report cache_;
 public:
     // `input` is one reference to the DirectInput object (real or fake); the provider takes it over.
+    // `front` (optional) wraps the DirectInput provider in another Provider the core reads through (shim/wheelffb_bridge);
+    // it lives in the worker's shared state, so a worker that outlives the host keeps it alive too (D1).
     // RecorderType must be lazy: no worker or write begins before the first push. Construction may still throw before
     // this host can stop it. The fake recorder, the real P21 recorder and NoCapture all satisfy this contract.
     ProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched,
         std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {}, HWND window = nullptr,
-        std::int64_t freshness_us = 100'000)
+        std::int64_t freshness_us = 100'000,
+        std::function<std::shared_ptr<dbce::shim::Provider>(const std::shared_ptr<dbce::shim::DInputProvider>&)> front = {})
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
           recorder_(std::move(recorder)),
           w_(std::make_shared<WorkerState>()),latched_(latched) {
@@ -77,7 +82,8 @@ public:
         w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, window);
         dbce::shim::CoreConfig cfg; cfg.latched = latched; cfg.capability = capability;
         cfg.fresh_us = freshness_us;   // ordinary 100 ms bound; fixture wrapper explicitly supplies its own value
-        w_->core = std::make_shared<dbce::shim::Core>(*w_->provider, cfg);
+        if (front) { w_->front = front(w_->provider); if (!w_->front) throw std::invalid_argument("front provider refused"); }
+        w_->core = std::make_shared<dbce::shim::Core>(w_->front ? *w_->front : static_cast<dbce::shim::Provider&>(*w_->provider), cfg);
         w_->core->set_profile(dbce::shim::read_profile(profile));
         report_ = CreateFileW((folder_ + L"\\host-shutdown.json").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         auto s = w_;
