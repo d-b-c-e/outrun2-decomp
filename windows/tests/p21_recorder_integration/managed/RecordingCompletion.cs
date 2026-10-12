@@ -68,11 +68,14 @@ static partial class Program {
         var artifact=TextHash(manifest.ToString());Check(Str(r,"artifactSha256")==artifact,"completion artifact digest");return artifact;
     }
 
-    static void RecordingCommand(bool seal,string dir,string request,string exe,ulong pid,ulong creation,string receipt){
+    static void RecordingCommand(bool seal,string dir,string request,string exe,ulong pid,ulong creation,string receipt,bool export=false){
         // Receipt is not a capture member. Refuse an output inside the sealed directory before writing any seal.
         var root=Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
         var output=Path.GetFullPath(receipt);
         Check(!output.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&!File.Exists(output),"new receipt outside capture required");
+        // An output directory alias must not put the export back inside its sealed input.
+        if(export)for(var p=Path.GetDirectoryName(output);p!=null;p=Path.GetDirectoryName(p))
+            Check((File.GetAttributes(p)&FileAttributes.ReparsePoint)==0,"export output reparse path");
         if(seal)Check(!File.Exists(Path.Combine(dir,RecordingSeal)),"new recording seal only");
         var held=FreezeMembers(dir,RecordingRequired.Concat(seal?Array.Empty<string>():new[]{RecordingSeal}));
         try{
@@ -80,6 +83,10 @@ static partial class Program {
             var rows=ValidateQueued(dir);
             var artifact=ValidateRecordingReport(dir,request,exe,pid,creation);
             if(seal){ArtifactSeal.CompleteNamed(dir,RecordingSeal,RecordingRequired);VerifyRecordingSeal(dir);}
+            if(export){
+                WriteExport(rows,output);
+                Console.WriteLine($"PASS recording export: {rows.Length} rows; process exit not asserted; {checks} checks");return;
+            }
             var result=new {schema="outrun.recording-verified@1",requestId=request,processId=pid,processCreationFileTime=creation,
                 exeSha256=exe,artifactSha256=artifact,sealSha256=ArtifactSeal.Hash(Path.Combine(dir,RecordingSeal)),
                 recordingSaved=true,rows=rows.Length,scope="recording saved; process exit not asserted"};

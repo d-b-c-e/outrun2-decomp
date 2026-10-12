@@ -56,8 +56,11 @@ rows[0]['metadata']['game'] = 'outrun2006-decomp-desktop'
 rows[0]['metadata']['properties'].update(runNonce=request, captureNonce='3'*32, context='synthetic protocol test, not runtime evidence')
 final = ['final.'+n for n in 'steering accelerator brake shiftUp shiftDown menuLeft menuRight menuUp menuDown menuConfirm menuCancel start featureMask deviceHeld frontAxis0 frontAxis1 frontAxis2 frontAxis3 connected pcInputLayer pcRecordUsed pcOverlay pcOverlayYield pcButtons pcSteer pcAccel pcBrake'.split()]
 final += ['keyboard.'+n for n in 'enter esc up down left right any drives'.split()]
-for row in rows[1:-1]:
+for i, row in enumerate(rows[1:-1]):
     row['sample']['channels'].update({n:0 for n in final})
+    # Additive inputs must survive export without changing the required @2 schema.
+    row['sample']['channels'].update({'final.pcDrive':i%2, 'final.pcAxis01':0.125,
+        'final.pcAxis03':-0.3141592653589793, 'final.pcAxis17':float(i), 'final.pcAxis18':1e-12})
 names = rows[1]['sample']['channels'].keys()
 bound = 192 + sum(len(json.dumps(n))+34 for n in names)
 (base/'budget.tsv').write_text(f'{len(names)}\t{bound}\t16432\n', encoding='utf-8')
@@ -89,6 +92,43 @@ command(ok, 'wrong-request', expected=1, mode='--read-recording', overrides=['4'
 command(ok, 'wrong-process', expected=1, mode='--read-recording', overrides=[request, exe, str(pid+1), str(creation)])
 command(ok, 'wrong-executable', expected=1, mode='--read-recording', overrides=[request, '5'*64, str(pid), str(creation)])
 
+def export(d, name, expected=0, overrides=None, output=None):
+    args=[request, exe, str(pid), str(creation)] if overrides is None else overrides
+    output=a.result/(name+'.txt') if output is None else output
+    p=subprocess.run(['dotnet',str(a.dll),'--export-recording',str(d),*args,str(output)],
+                     capture_output=True,text=True,timeout=30)
+    (a.result/(name+'.log')).write_text(p.stdout+p.stderr,encoding='utf-8')
+    assert (p.returncode==0)==(expected==0),(name,p.stdout,p.stderr)
+    checks.append(dict(name=name,refused=p.returncode!=0))
+    return output
+
+before={p.name:sha(p) for p in ok.iterdir()}
+exported=export(ok,'alive-export')
+assert not (ok/'complete.tsv').exists() and not (ok/'host-shutdown.json').exists() and not (ok/'exit.json').exists()
+lines=iter(exported.read_text(encoding='utf-8-sig').splitlines())
+for row in rows[1:-1]:
+    channels=row['sample']['channels']
+    assert next(lines)==f'ROW {len(channels)}'
+    for key in sorted(channels):
+        k,v=next(lines).split(' ')
+        assert k==key and float(v)==float(channels[key]),(k,v,channels[key])
+assert next(lines,None) is None
+assert before=={p.name:sha(p) for p in ok.iterdir()}
+export(ok,'export-wrong-request',1,['4'*32,exe,str(pid),str(creation)])
+export(ok,'export-wrong-exe',1,[request,'5'*64,str(pid),str(creation)])
+export(ok,'export-wrong-pid',1,[request,exe,str(pid+1),str(creation)])
+export(ok,'export-wrong-creation',1,[request,exe,str(pid),str(creation+1)])
+for n in ['export-wrong-request','export-wrong-exe','export-wrong-pid','export-wrong-creation']:
+    assert not (a.result/(n+'.txt')).exists()
+export(ok,'export-no-overwrite',1,output=exported)
+assert before=={p.name:sha(p) for p in ok.iterdir()}
+inside=ok/'export.txt'
+export(ok,'export-inside-capture',1,output=inside)
+assert not inside.exists()
+unsealed=copy('unsealed-export')
+export(unsealed,'export-missing-seal',1)
+assert not (a.result/'export-missing-seal.txt').exists()
+
 changes = {
     'not-joined': lambda r: r.update(joined=False),
     'not-complete': lambda r: r.update(outcome='TimedOut'),
@@ -116,6 +156,8 @@ tampered = a.result/'tampered'
 shutil.copytree(ok,tampered)
 (tampered/'profile.ini').write_text('changed', encoding='utf-8')
 command(tampered,'tampered',expected=1,mode='--read-recording')
+export(tampered,'export-tampered',1)
+assert not (a.result/'export-tampered.txt').exists()
 for name, channel in [('missing-final-channel','final.steering'),('missing-keyboard-channel','keyboard.drives')]:
     d=copy(name)
     modified=[json.loads(s) for s in (d/'source.jsonl').read_text().splitlines()]
@@ -127,6 +169,8 @@ for name, channel in [('missing-final-channel','final.steering'),('missing-keybo
     # A byte-correct digest cannot make an invalid recording valid through the process-level API.
     sealed = sorted(members+['recorder-complete.json'])
     (d/'recording-complete.tsv').write_text('dbce-playback-seal-v1\n'+''.join(f'{n}\t{(d/n).stat().st_size}\t{sha(d/n)}\n' for n in sealed),encoding='utf-8',newline='\n')
+    export(d,name+'-export',1)
+    assert not (a.result/(name+'-export.txt')).exists()
     write_json(d/'host-shutdown.json',dict(state='resolved',nonce=request,recorderJoined=True,recorderOutcome=2,
         unresolved=[],pid=pid,creationTime=creation))
     write_json(d/'exit.json',dict(pid=pid,creationTime=creation,forced=False,exitCode=0))
@@ -149,5 +193,7 @@ for name, forced, different in [('normal-exit',False,False),('forced-exit',True,
     (a.result/(name+'.log')).write_text(p.stdout+p.stderr,encoding='utf-8')
     assert (p.returncode==0)==(not forced and not different),(name,p.stdout,p.stderr)
     checks.append(dict(name=name,refused=p.returncode!=0))
+    if name=='normal-exit':
+        assert (a.result/(name+'.txt')).read_bytes()==exported.read_bytes(), 'ordinary and P21 export formats differ'
 write_json(a.result/'results.json',dict(passed=True,scope='synthetic protocol only; no runtime or gameplay claim',checks=checks))
 print(f'PASS {len(checks)} recording completion scenarios')
