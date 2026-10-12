@@ -149,6 +149,15 @@ target_link_libraries(test_ordinary_recording PRIVATE bcrypt)
 # --cross-volume: the request in %TEMP% and its folders in the build tree, on another volume here (C: and E:; the 12:56
 # pilot's failure). The test fails when the two are on one volume.
 add_test(NAME ordinary_recording COMMAND test_ordinary_recording --cross-volume ${CMAKE_CURRENT_BINARY_DIR}/cross-volume)
+# The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
+# synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
+add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp
+    source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(session_game_fixture PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(session_game_fixture PRIVATE cxx_std_17)
+target_compile_options(session_game_fixture PRIVATE /W4 /WX)
+target_compile_definitions(session_game_fixture PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(session_game_fixture PRIVATE bcrypt)
 
 # The shared input shim as a DLL for managed game adapters (shim_dll/dbce_shim.h, experimental ABI 1; Astra 16982/17050):
 # the reviewed Core, DInputProvider and ProviderHost, unchanged, behind a C ABI.

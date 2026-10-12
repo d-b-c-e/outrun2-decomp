@@ -67,8 +67,53 @@ At the exit the process waits up to 65 s for the saver. Wheelkit seals while the
 `test_ordinary_recording --finalizer <P21Finalizer.exe>` runs that whole wire offline: a native capture, the managed seal
 against the live test process, and the native receipt check.
 
+## Runtime evidence
+
+The muted pilot r2 on 2026-10-12 used c4dc62f; evidence is in the hub at
+`artifacts/outrun-recording-pilot-20261012`. It ran on a disposable copy of the game:
+- the request was admitted across volumes;
+- the request-bound stop, then a managed seal while the game was still running (2489 rows);
+- the badge showed REC, then complete-verifying, then saved;
+- a normal exit, a read-back afterwards, and a byte-exact restore of the copy.
+
+The rows came at 59.1 Hz on average, with a median of 16.66 ms; the only long gaps were in the menus and the race load.
+The saving state was seen only in status.json, not in a frame. The run's raw FAIL was a wrong runner check (it
+expected the `Output = wheel` mute line); a separate amended evaluation re-checked the same evidence and passed.
+
+## The companion (`tools/session/OutRun-Session.ps1`)
+
+Wheelkit runs this companion, never the game directly (sana 34164/34207). It mirrors DRIVE's full-session bridge.
+- **Install record.** The owner package installs the companion beside the exe. The install record
+  (`outrun.owner-install@1`) owns it through `session.companionSha256`, along with the capabilities
+  (`session.capabilitiesSha256`, `dbce.session-capabilities@1`, record enabled) and the managed finalizer
+  (`session.finalizerDirectory`, plus a `finalizer` map of file names to SHA-256). A record is selected by this whole
+  payload, and exactly one must match.
+- **`-Record`.** Preflight, then the native request (expires in 120 s), then the launch. The launched process's pid and
+  creation FILETIME are pinned, and status.json counts only when it names that process.
+  - After 60 s without admission, the request's exact bytes are moved aside.
+  - At complete: `--seal-recording`, the receipt checked, `--read-recording`, then `<recording>\recording.json`.
+  - Then it waits for the owner's close with no timeout, and writes `result.json` (`outrun.full-session-result@1`).
+  - It never sends input and never closes the game.
+- **`-Stop`.** Writes `<result>\stop.request` only for the live process this session launched, and only while it
+  records.
+- **Exit codes.** 0 pass; 1 refused or failed; 2 saved but not a clean close. An abnormal exit is never a pass, and
+  never removes a saved recording.
+- **The descriptor** (`outrun.recording-package@1`, sana 34447/34458), beside `capture\` and never in it. Its fields are
+  gameId `outrun-2006-decomp`, requestId, recordedUtc, inputOrigin, recordingSealSha256, rows, durationUs (from the
+  footer's elapsedSeconds), stoppedBy, gameBuildSha256, and `playback: false`. It is display context only: the native
+  seal and report stay the identity and the integrity.
+- **Device-free fixtures.** `tests/session_companion/test_companion.ps1` runs with `session_game_fixture.exe` (the same
+  intake and recorder, synthetic rows) and the real finalizer. The cases are:
+  - an owner session with a Stop;
+  - an abnormal end after saved;
+  - a request that is never taken;
+  - the limit;
+  - a foreign status.json;
+  - refusals: the native backend, record disabled, a tampered finalizer, ambiguous records, a stray request, an
+    existing result folder.
+
 ## Not in this slice
 
 - Playback: this build refuses a playback request and exits.
 - Menu, car and stage checkpoints.
-- Any runtime or rig evidence: no game has run this code yet.
+- The companion in the owner package (install.ps1 and the record's `session` block), and a live companion run.
