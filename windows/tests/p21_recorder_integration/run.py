@@ -71,7 +71,7 @@ if args.mutations:
     }
     for name, (old, new, reason) in managed.items():
         src = result / 'mutations' / name; src.mkdir(parents=True)
-        for f in ['P21Finalizer.csproj', 'Program.cs']: shutil.copyfile(here / 'managed' / f, src / f)
+        for f in ['P21Finalizer.csproj', 'Program.cs', 'RecordingCompletion.cs']: shutil.copyfile(here / 'managed' / f, src / f)
         s = (src / 'Program.cs').read_text()
         if s.count(old) != 1: raise RuntimeError('Mutation anchor changed: ' + name)
         (src / 'Program.cs').write_text(s.replace(old, new))

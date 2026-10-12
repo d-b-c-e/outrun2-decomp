@@ -11,7 +11,7 @@ using System.Text.Json;
 using Dbce.Wheel.Playback;
 using Dbce.Wheel.Recording;
 
-static class Program {
+static partial class Program {
     static readonly string[] Queued={"bundle.meta","profile.ini","worker.tsv","source.jsonl","budget.tsv"};
     static readonly string[] Required=Queued.Concat(new[]{"host-shutdown.json","exit.json"}).ToArray();
     const string Contract="dbce.shim.queued-frames-spike@2\n", InputContract="shim-frame-audit-2-pending-unadopted";
@@ -29,16 +29,19 @@ static class Program {
         var id=rest.Substring(5,rest.Length-6);
         return id.Length is >0 and <=64&&id.All(ch=>ch is >='a' and <='z' or >='0' and <='9' or '.' or '-')&&!id.Contains('\n')?id:"";
     }
-    static bool Desktop(string dir)=>File.ReadAllText(Path.Combine(dir,"bundle.meta"))==DesktopContract||GenericGame(dir)!=null;
-    static string[] RequiredFor(string dir)=>Desktop(dir)?Required.Concat(new[]{"devices.json"}).ToArray():Required;
+    static bool Desktop(string dir)=>File.ReadAllText(Path.Combine(dir,"bundle.meta"))==DesktopContract||RecordingV2(dir)||GenericGame(dir)!=null;
+    static string[] RequiredFor(string dir)=>RecordingV2(dir)?Required.Concat(new[]{"devices.json",RecordingReport,RecordingSeal}).ToArray():Desktop(dir)?Required.Concat(new[]{"devices.json"}).ToArray():Required;
     static int checks;
     static void Check(bool ok,string why){++checks;if(!ok)throw new InvalidDataException(why);}
     static ulong U(string s){Check(ulong.TryParse(s,NumberStyles.None,CultureInfo.InvariantCulture,out var n),"unsigned decimal");return n;}
     static uint Limb(double n){Check(double.IsFinite(n)&&n>=0&&n<=uint.MaxValue&&n==Math.Floor(n),"uint32 limb");return (uint)n;}
     static ulong Wide(IDictionary<string,double> c,string k)=>Limb(c[k+".lo"])|((ulong)Limb(c[k+".hi"])<<32);
     static List<FileStream> Freeze(string dir,bool sealedBundle){
+        return FreezeMembers(dir,RequiredFor(dir).Concat(sealedBundle?new[]{"complete.tsv"}:Array.Empty<string>()));
+    }
+    static List<FileStream> FreezeMembers(string dir,IEnumerable<string> members){
         var held=new List<FileStream>();var desktop=Desktop(dir);try{
-            foreach(var name in RequiredFor(dir).Concat(sealedBundle?new[]{"complete.tsv"}:Array.Empty<string>())){
+            foreach(var name in members){
                 var path=Path.GetFullPath(Path.Combine(dir,name));
                 for(var p=path;p!=null;p=Path.GetDirectoryName(p))Check((File.GetAttributes(p)&FileAttributes.ReparsePoint)==0,"reparse path");
                 var f=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);held.Add(f);
@@ -115,6 +118,13 @@ static class Program {
         Check(Num(h,"pid")!=0&&Num(h,"creationTime")!=0&&Num(e,"pid")!=0&&Num(e,"creationTime")!=0,"nonzero process identity in both reports");
         Check(Num(e,"pid")==Num(h,"pid")&&Num(e,"creationTime")==Num(h,"creationTime"),"the supervisor observed the same process the host reported from");
         Check(!Bool(e,"forced")&&Num(e,"exitCode")==0,"normal exit observed, not forced");
+        if(RecordingV2(dir)){
+            using var completion=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,RecordingReport)));
+            var r=completion.RootElement;
+            Check(Num(r,"processId")==Num(h,"pid")&&Num(r,"processCreationFileTime")==Num(h,"creationTime"),"recording and exit identify the same process");
+            VerifyRecordingSeal(dir);
+            ValidateRecordingReport(dir,nonce,Str(r,"exeSha256"),Num(h,"pid"),Num(h,"creationTime"));
+        }
     }
     static void Finalize(string dir){Check(!File.Exists(Path.Combine(dir,"complete.tsv")),"new seal only");var held=Freeze(dir,false);
         try{ValidateQueued(dir);ValidateHostAndExit(dir);ArtifactSeal.Complete(dir,RequiredFor(dir));}finally{foreach(var f in held)f.Dispose();}}
@@ -129,6 +139,9 @@ static class Program {
     static bool Refused(Action action,string because){string why;try{action();return false;}catch(InvalidDataException e){why=e.Message;}catch(IOException e){why=e.Message;}
         Console.WriteLine("   refused ("+because+"): "+why);return why.Contains(because,StringComparison.Ordinal);}
     static int Main(string[] args){try{
+        if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording")){
+            RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6]);return 0;
+        }
         // Reuse the exact reviewed validator for a capture from the combined
         // real-provider/recorder fixture. The export is outside the sealed bundle.
         // --read-export (Astra 16889): an already sealed capture, verified again (seal inventory, hashes, host and exit,
