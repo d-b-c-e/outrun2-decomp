@@ -368,7 +368,8 @@ def main():
     if consumed:
         receipt["consumed"] = dict(playbackComplete=False, playbackEnd=None, compare=None, reference=str(reference),
             label="consumed playback: the saved recording's final.* words put back at 453BB0 from the first input tick (no presses, "
-                  "no live input); an input/startup proof, not route fidelity (pose and heading not compared)")
+                  "no live input); its scope is the comparison's (compare.pose.scope): input and startup, and the player car's "
+                  "pose when the recording carries it")
     elif tape:
         receipt["r3"] = dict(playbackComplete=False, playbackEnd=None, compare=None, firstRoute=r1.get("route"),
             label="menus: injected presses as above; race: the first run's recorded normalized Frame actions, played at the adapter "
