@@ -120,6 +120,71 @@ Status 2026-10-12: design only.
 - **Unattended checks**: source angles and rendered seams can be checked unattended. Physical comfort waits for the
   owner.
 
+## Step 4 mechanism (proposal for review, 2026-10-12): one game render, three viewports
+
+Step 2 is checked at the rig (2026-10-12, hub `artifacts/outrun-perf-20261011/triples-20261012`):
+- one borderless 7680x1440 window over the three monitors;
+- planar 48:9 at 60 fps, with CPU render_frame +2.3 % and about 11 ms of GPU/vsync slack left;
+- the menus and HUD on the centre monitor.
+
+The rig math is in `windows/source/triple_rig.hpp`, matching the toolkit's values to 1e-9 (`6d53a07`).
+
+**Why not run the scene three times.** `render_frame` runs the game's own frame, 449050, and its display callbacks.
+They are not all pure:
+- the particle draws consume the shared CRT random state (`native_race_effects.cpp:299`);
+- the per-frame counters advance;
+- the race-area hooks keep their own state.
+
+Three runs per frame would need an audit of every display callback, and still cost three times the 4.4 ms CPU (nene's
+budget point).
+
+**Proposal: replicate on the GPU.** The game renders once, from the centre panel's camera. Each back-buffer draw is
+emitted into three viewports by a geometry shader.
+- **The clip position is one value in both shader paths.** The translated vertex programs write it at
+  `d3d11_d3d9.cpp:334` (`o.p`, after the D3D9 pixel-centre fix). The fixed-function path passes through positions
+  the CPU has already transformed to clip space (generated `ffp` `vs_main`: `o.p=v.p`).
+- **Per panel i, a 4x4 correction** `C[i] = P_c^-1 · R(yaw_i) · P_i` (row vectors):
+  - P_c is the centre projection the game used, from the 404310 frustum 95BF40 and near/far;
+  - P_i is the panel's off-axis projection from `panel_bounds` at the same near/far;
+  - R turns the centre's view space to the panel's.
+  - `clip_i = clip_c · C[i]` is exact for any vertex, whatever produced clip_c. C[centre] is the identity.
+- **The geometry shader** takes the pipeline's `Varying` unchanged and emits each primitive three times, each with
+  `p · C[i]`, `SV_ViewportArrayIndex = i` and a scissor per viewport. Three variants (triangles, lines, points); point
+  sprites are already triangles.
+- **Bound only for draws into the back buffer.** The reflection cube, shadows and other render-to-texture passes stay
+  single.
+- **Pretransformed (rhw) draws stay single, in the centre viewport only**: the HUD, menus, and 418CF0's screen-space
+  particles.
+- **The camera**: the game's own camera is the centre panel, at 16:9 with its own vertical FOV +A0.
+  - Matched-FOV rig: `eye_distance_for_vertical_fov(panel height, A0)`, recomputed every frame (A0 changes with the
+    camera mode), so the centre looks exactly as the 16:9 game does today.
+  - The sides then meet it at the seams by construction (toolkit property, tested).
+- **Culling**: the game culls for the centre frustum only, so the side views would be empty at their edges.
+  - For the spike: stage culling and object culling off while three views are on (the existing DisableStageCulling
+    path; `g_pc_view_half_width` wide).
+  - Afterwards: an object is visible if it is in any of the three frusta (the union exceeds 180 degrees, so no single
+    frustum can stand in for it).
+- **What stays the centre's**:
+  - fog depth: vertex fog from the centre's view z, so a slight mismatch at far sides;
+  - the lens flare and glare (415630);
+  - the screen-space particles;
+  - the reflection cube.
+  - All acceptable for a spike, and to be judged at the rig.
+- **Cost**:
+  - CPU about 1x (one game render), plus the culling-off draws;
+  - GPU vertex work 3x plus the geometry-shader pass;
+  - pixel work about the planar span's (three 2560x1440 panels). That measured about 11 ms of slack at 60 fps.
+- **Status**: `three-projections` only from counting, per frame, the draws emitted through the three-view geometry
+  shader. runtime.log also gives per-pass counts.
+- **Feature level**: 11.0 on this device (`b000` in runtime.log); viewport arrays and the geometry shader are core
+  there.
+
+Open points for review:
+- (a) GPU replication versus three scene runs;
+- (b) the spike's culling-off versus doing the union first;
+- (c) whether the clip_fix half-pixel offset should move after the correction (it is in NDC per viewport, and
+  every viewport is the same size).
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
