@@ -307,6 +307,75 @@ t56.
   surfaces exist in the stage data is open).
 - The abrupt change on the beach is the car's sand spray ending, in all three panels at once. It is game content.
 
+### Proposal: rig settings and a physical eye (for review; no code yet, sana 37643)
+
+**Why.**
+- Applied Angled views use a fixture rig whose eye is matched to the game's FOV. At the game's 96.4 degree horizontal
+  FOV, that puts the eye 317 mm from the centre panel.
+- Each side panel then spans 49 to 121 degrees from the heading, so its outer 54 % looks behind the car. The start
+  wedges sit there (hub `triples-20261012`, "Where the start wedges are").
+- A real eye of 660 mm on the same rig would end the side panels at 91 degrees.
+
+**Settings: the portfolio's names, no new ones.**
+- Every rig key below is one Wheelkit's `RigProfile` already writes (`GeometryValue`), with the defaults and ranges of
+  Wheelkit's `ScreenSetup` and DRIVE's `[Triple]` table.
+
+| `[Triple]` key | Default | Range | Meaning |
+|---|---|---|---|
+| `PanelWidthMm` | 708.4 | 100..3000 | visible width of one panel (32-inch 16:9) |
+| `PanelHeightMm` | 398.5 | 100..2000 | visible height |
+| `EyeDistanceMm` | 660 | 200..3000 | eye to the centre panel, along its normal |
+| `SideAngle` | 70 | 0..89 | how far each side panel turns toward the driver |
+| `BezelMm` | 8 | 0..100 | gap between active areas at each seam |
+| `MatchGameFov` | `true` | true / false | DRIVE's name. True: today's behaviour (the eye matched to the game's FOV; EyeDistanceMm unused). False: the physical eye. |
+
+- **Defaults keep today's picture exactly.** The geometry defaults equal the fixture, and `MatchGameFov = true` is the
+  current mode.
+- Nothing changes for an INI without the keys.
+- The owner's supplied values (32 in, 660 mm, 70 degrees, 8 mm) are these defaults. The owner's 1500R curve is
+  approximated by the flat chord, as in Wheelkit.
+- Read once at start, only for applied Angled views. A value out of range or not a number is refused with a log line,
+  and that key's default applies, as for the other keys.
+- Planar and 16:9 never read these keys.
+
+**What `MatchGameFov = false` does.**
+- The race camera's vertical FOV becomes the rig's: 2 atan(PanelHeightMm / 2 / EyeDistanceMm), 33.6 degrees at the
+  defaults.
+- triple_views then matches the eye to that projection, which is now the physical eye. The corrections keep one code
+  path.
+- The centre view narrows from 96.4 to 56.4 degrees horizontal (less of the road at once, as a real window), and each
+  side panel spans 28 to 91 degrees.
+- This changes what the centre shows, so it is never a default; the owner judges it.
+- **Open question for review:** the game varies the camera FOV (+AC, mode and speed). Should the physical mode
+  - (a) scale the game's FOV tangent by rig / resting value, keeping its dynamics, or
+  - (b) hold the rig FOV fixed?
+
+  (a) is proposed, because it keeps the game's speed feel.
+- The screen tests (4F02D0 and its focal +B4) follow the camera, so culling stays consistent.
+
+**F6 (STD-022 order; no new UI kind).** On the Cameras page, below Projection, only when Three projected views is
+chosen:
+- `Field of view`: Choice "Match the game / From my rig". It saves `MatchGameFov`, and help text names the
+  consequence ("From my rig: the centre shows a real window's view; the side screens end near 90 degrees").
+- `Rig` (Status, read-only): "32-inch 16:9, eye 660 mm, sides 70 degrees, gap 8 mm (Wheelkit or OutRunDesktop.ini)".
+  The geometry is edited in Wheelkit's screen setup, as DRIVE does; F6 has no measurement fields.
+- "Now" adds the eye: "three projected views, eye matched to the game (317 mm)" or "eye 660 mm (your rig)".
+- The pending-change note covers `MatchGameFov` as it does Views.
+
+**Wheelkit (sana; a seed and schema change, no new adapter).**
+- OutRun's catalog entry has `settingsFile = null` and `settings = null` today. It would gain `OutRunDesktop.ini`
+  with `[Triple] Screens`, `Views`, `MatchGameFov` and the five geometry keys.
+- `RigProfile` then writes the geometry from the screen setup through the existing `GeometryValue`. It never writes
+  `Views` or `MatchGameFov` (the owner's choices; STD-032 point 4 lists only shared keys).
+- STD-032 point 4: these are exactly the keys F6 reads. F6 shows the geometry read-only.
+
+**Tests and evidence (before any rig run).**
+- Pure parse and validation of the six keys in `triple_screens.hpp`, unit-tested: defaults, ranges, refusals,
+  MatchGameFov parsing.
+- triple_views with a rig-FOV projection equals the physical rig's per-panel projections to 1e-9.
+- At the rig only after review, muted, in the perf copy: one Angled run with `MatchGameFov = false`, a window clip,
+  and the side panels' outer edges checked near 91 degrees.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
