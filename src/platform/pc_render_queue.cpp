@@ -167,7 +167,7 @@ void walk_404d10(PcRenderContext& c,const PcModelBank& bank,const PmtObject& obj
             d.matrix_dirty=1;pushed=true;
         }
         CourseProbe centre{};std::int32_t lod=0;
-        if(node_visible(c,node,centre,lod)&&node.mesh[lod]>=0){
+        if((node_visible(c,node,centre,lod)||render_disable_culling())&&node.mesh[lod]>=0){
             std::memcpy(&d.depth,&centre.z,4);
             d.mesh=obj.meshes+u32(node.mesh[lod])*8u;
             d.node=node_at;
@@ -209,6 +209,7 @@ void render_queues_reset_405160(PcRenderQueue& o,PcRenderQueue& a){
     o.capacity=0x100;o.matrix_capacity=0x100;o.entries.resize(0x100);o.matrices.resize(0x100);
     a.capacity=0x600;a.matrix_capacity=0x600;a.entries.resize(0x600);a.matrices.resize(0x600);
 }
+bool& render_disable_culling(){static bool off=false;return off;}
 bool render_node_visible_404b00(PcRenderContext& c,Bytes node,CourseProbe& v,std::int32_t& lod_out){
     return node_visible(c,pmt<PmtNode>(node,0),v,lod_out);
 }

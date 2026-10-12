@@ -118,6 +118,9 @@ float ghost_spline_454fc0(const PcRaceMemory&,std::uint32_t spline,std::uint32_t
 // car tables mapped by ghost_map_car_tables.
 void ghost_map_car_tables(PcRaceMemory&);
 void other_car_draw_4ae0f0(PcRaceContext&,std::uint32_t car);
+// Tweaks DisableVehicleLODs (the host's [Graphics] key; off by default): 4AE0F0 draws LOD 0 instead of the car's
+// +328 LOD, as the Tweaks patch at 4AE4E9 ("eax = car.LodNumber" -> 0) does.
+bool& other_car_lods_disabled();
 void ghost_car_display_4ae5f0(PcRaceContext&,std::uint32_t car);
 void ghost_car_shadow_4adac0(PcRaceContext&,std::uint32_t car);
 // 465F40(i): car byte of playback record i ('NHOT' at +0), else -1 (AL).

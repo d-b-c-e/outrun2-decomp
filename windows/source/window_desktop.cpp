@@ -7,6 +7,8 @@
 #include "d3d11_display.hpp"
 #include "d3d11_d3d9.hpp"
 #include "platform/pc_car_reflection.hpp"
+#include "platform/pc_render_queue.hpp"
+#include "platform/race_ghosts.hpp"
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
@@ -170,6 +172,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const bool on=settings.flag("Graphics","TransparencySupersampling",false);
         if(on)std::printf("settings: transparency supersampling (alpha-to-coverage under MSAA)\n");
         outrun::xbox_runtime::set_transparency_supersampling(on);}
+    // [Graphics] DisableVehicleLODs / DisableStageCulling, the Tweaks keys: other cars always at their full model; every
+    // stage node drawn whether in view or not (no pop-in, more draws). Off when absent.
+    {   const bool lods=settings.flag("Graphics","DisableVehicleLODs",false),cull=settings.flag("Graphics","DisableStageCulling",false);
+        if(lods)std::printf("settings: vehicle LODs disabled (other cars at full detail)\n");
+        if(cull)std::printf("settings: stage culling disabled (every node drawn)\n");
+        outrun::platform::other_car_lods_disabled()=lods;outrun::platform::render_disable_culling()=cull;}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){

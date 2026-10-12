@@ -74,6 +74,9 @@ inline void render_queue_mode_4052b0(PcRenderContext& c){c.immediate_8999b0=0;}
 // PC 40A580: rotation about the unit axis by (sin, cos), current = R * current.
 void render_rotate_axis_40a580(driving::PcMatrixStack&,const driving::CourseProbe& axis,float sn,float cs);
 // PC 404B00: visibility and LOD of one node under the current matrix.
+// Tweaks DisableStageCulling (the host's [Graphics] key; off by default): 404D10 queues every node whose LOD mesh exists,
+// visible or not, as the Tweaks patch of the JE at 40501F does (a culled node keeps LOD 0, so nothing pops in).
+bool& render_disable_culling();
 bool render_node_visible_404b00(PcRenderContext&,driving::Bytes node,driving::CourseProbe& view_centre,
     std::int32_t& lod);
 }
