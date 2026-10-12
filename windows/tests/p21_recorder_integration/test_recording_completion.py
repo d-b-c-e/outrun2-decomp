@@ -130,6 +130,9 @@ export(unsealed,'export-missing-seal',1)
 assert not (a.result/'export-missing-seal.txt').exists()
 
 changes = {
+    'record-tape-end': lambda r: r.update(stoppedBy='tape-end', action='record'),
+    'legacy-tape-end': lambda r: r.update(stoppedBy='tape-end'),
+    'unknown-action': lambda r: r.update(action='unknown'),
     'not-joined': lambda r: r.update(joined=False),
     'not-complete': lambda r: r.update(outcome='TimedOut'),
     'dropped': lambda r: r['report'].update(discarded=1),
@@ -150,6 +153,12 @@ for name, edit in changes.items():
     r=json.loads((d/'recorder-complete.json').read_text()); edit(r); write_json(d/'recorder-complete.json',r)
     command(d,name,expected=1)
     assert not (d/'recording-complete.tsv').exists()
+replay=copy('playback-tape-end')
+replay_report=json.loads((replay/'recorder-complete.json').read_text())
+replay_report.update(action='playback',stoppedBy='tape-end')
+write_json(replay/'recorder-complete.json',replay_report)
+command(replay,'playback-tape-end')
+command(replay,'playback-tape-end-read',mode='--read-recording')
 for name, member in [('missing-worker','worker.tsv'), ('missing-report','recorder-complete.json')]:
     d=copy(name); (d/member).unlink(); command(d,name,expected=1)
 tampered = a.result/'tampered'
@@ -195,5 +204,60 @@ for name, forced, different in [('normal-exit',False,False),('forced-exit',True,
     checks.append(dict(name=name,refused=p.returncode!=0))
     if name=='normal-exit':
         assert (a.result/(name+'.txt')).read_bytes()==exported.read_bytes(), 'ordinary and P21 export formats differ'
+# Product comparison holds and verifies both ordinary seals before reading their observations.
+# These small, explicitly synthetic copies exercise the production command, not game behavior.
+def posed_copy(name, is_replay, change=None, report_change=None):
+    d=copy(name)
+    values=[json.loads(s) for s in (d/'source.jsonl').read_text().splitlines()]
+    for i, row in enumerate(values[1:-1]):
+        c=row['sample']['channels']
+        c.update({'gameInput.mode':16,'gameInput.gear':2,'gameInput.speed':40.0,
+            'gameInput.consumedSteer':0,'gameInput.consumedAccel':100,'gameInput.consumedBrake':0,
+            'gameInput.poseValid':1,'gameInput.posX':float(i),'gameInput.posY':0.0,'gameInput.posZ':float(i)*2,
+            'gameInput.vec20X':0,'gameInput.vec20Y':0,'gameInput.vec20Z':1,
+            'gameInput.carModel':1,'gameInput.stageKey':0,'gameInput.courseGate':0,
+            'replay.tapeRow':i if is_replay else -1})
+        c.update({'gameInput.rot%d%d'%(r,k):int(r==k) for r in range(3) for k in range(3)})
+    if change: change(values)
+    names=values[1]['sample']['channels'].keys()
+    (d/'budget.tsv').write_text(f'{len(names)}\t{192+sum(len(json.dumps(n))+34 for n in names)}\t16432\n',encoding='utf-8')
+    refresh_source(d,values)
+    report=completion(d)
+    if is_replay: report.update(action='playback',stoppedBy='tape-end')
+    if report_change: report_change(report)
+    write_json(d/'recorder-complete.json',report)
+    command(d,name+'-seal',overrides=[request,report['exeSha256'],str(pid),str(creation)])
+    return d
+
+def compare(ref, rep, name, expected, artifact=True):
+    output=a.result/(name+'.json')
+    p=subprocess.run(['dotnet',str(a.dll),'--compare-recordings',str(ref),str(rep),str(output)],
+                     capture_output=True,text=True,timeout=30)
+    (a.result/(name+'.log')).write_text(p.stdout+p.stderr,encoding='utf-8')
+    assert p.returncode==expected,(name,p.stdout,p.stderr)
+    assert output.exists()==artifact,name
+    if artifact:
+        value=json.loads(output.read_text())
+        assert value['sealed'] and value['referenceSealSha256']==sha(ref/'recording-complete.tsv')
+        assert value['replaySealSha256']==sha(rep/'recording-complete.tsv')
+        assert value['valid']==(expected!=1)
+        if expected==0: assert value['followed'] and value['pose']['pairedRows']==len(rows)-2
+    checks.append(dict(name=name,exitCode=p.returncode))
+
+posed_ref=posed_copy('posed-reference',False)
+posed_replay=posed_copy('posed-replay',True)
+compare(posed_ref,posed_replay,'posed-comparison',0)
+different=posed_copy('posed-divergence',True,lambda v:v[3]['sample']['channels'].update({'gameInput.posX':99}))
+compare(posed_ref,different,'posed-divergence-comparison',2)
+different_input=posed_copy('posed-input-difference',True,lambda v:v[3]['sample']['channels'].update({'final.steering':99}))
+compare(posed_ref,different_input,'posed-input-difference-comparison',2)
+other_exe=posed_copy('posed-other-exe',True,report_change=lambda r:r.update(exeSha256='6'*64))
+compare(posed_ref,other_exe,'posed-other-exe-comparison',1,False)
+compare(posed_ref,posed_ref,'ordinary-not-replay-comparison',1,False)
+compare(ok,posed_replay,'input-only-not-product-comparison',1)
+tampered_replay=a.result/'posed-tampered'
+shutil.copytree(posed_replay,tampered_replay)
+(tampered_replay/'source.jsonl').write_text('changed',encoding='utf-8')
+compare(posed_ref,tampered_replay,'posed-tampered-comparison',1,False)
 write_json(a.result/'results.json',dict(passed=True,scope='synthetic protocol only; no runtime or gameplay claim',checks=checks))
 print(f'PASS {len(checks)} recording completion scenarios')

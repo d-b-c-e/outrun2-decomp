@@ -146,6 +146,8 @@ static partial class Program {
                 writer.WriteLine(value.Key+" "+value.Value.ToString("R",CultureInfo.InvariantCulture));}
     }
     static int Main(string[] args){try{
+        if(args.Length==4&&(args[0]=="--compare-recordings"||args[0]=="--compare-consumed-sources"))
+            return ComparisonCommand(args[1],args[2],args[3],args[0]=="--compare-recordings");
         if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording"||args[0]=="--export-recording")){
             RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6],args[0]=="--export-recording");return 0;
         }

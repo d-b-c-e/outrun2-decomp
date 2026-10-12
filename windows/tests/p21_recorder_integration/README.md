@@ -83,3 +83,46 @@ It does not show:
 - portable replay.
 
 The capture contract is still the fixture's `dbce.shim.queued-frames-spike@2`.
+
+## Packaged consumed-input comparison
+
+The finalizer also serves the ordinary recording companion. It accepts
+`--compare-recordings <reference-capture> <replay-capture> <new-output.json>`.
+Both captures must have valid `dbce.shim.outrun-capture@2` recording seals and
+completion reports from the same executable. The replay report must name
+`action=playback` and `stoppedBy=tape-end`. Older reports without an action remain
+ordinary recordings; they cannot use the tape-end stop reason.
+
+`ConsumedComparison.cs` ports `shim_first_loop/compare_consumed.py` at `86f4640`:
+complete loss-free streams, each tape row once in order, exact supplied `final.*`
+inputs, and game observations plus active-car motion. Speed tolerance is 0.01,
+position 0.001 in native units, vec20 0.0001 and rotation 0.00001. Discrete values
+are exact. Pose validity must be 0 or 1; pose values compare when both rows have
+the active car. The source and replay must each show that car moving. A neutral
+tail is allowed only after all supplied rows. Input-only references are refused
+by the product command rather than promoted to a gameplay pass.
+
+Output is `outrun.consumed-comparison@1`, including both seal hashes. Exit codes:
+0 = valid and matching supplied inputs and observations, 2 = valid comparison
+with divergent input or observations, 1 = invalid evidence or command failure.
+On early seal/identity failure there is no comparison file. `followed` describes
+observations only: the caller must also require every fed row equal. The tool
+does not establish normal game exit or unchanged owner files; the companion
+checks those before issuing its terminal result.
+
+`--compare-consumed-sources <reference.jsonl> <replay.jsonl> <new-output.json>` is
+read-only analysis for the earlier private proofs. Its output is explicitly
+unsealed, with no seal hashes, and is not accepted as product qualification.
+It may describe legacy input-only captures honestly. Comparison reads at most
+100,000 samples per file and one GiB per source; outputs never overwrite inputs
+or existing files. Strict JSON rejects non-finite literals and duplicate fields.
+
+`test_consumed_comparison.py --dll <finalizer.dll>` cross-checks the production
+managed command against all 41 cases of the reviewed Python corpus. Optional
+repeatable `--pair <reference.jsonl> <replay.jsonl>` also compares existing private
+proofs without modifying them. Valid cases compare result fields as well as exit
+classification; invalid cases require refusal, since strict JSON rejects bare
+NaN earlier than Python's parser. `test_recording_completion.py` additionally
+exercises both recording seals, replay completion, matched motion, input and pose
+divergence, executable mismatch, tampering and input-only refusal through the
+actual product comparison command. These are fixtures, not live gameplay tests.
