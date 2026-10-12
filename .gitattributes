@@ -3,3 +3,5 @@ windows/vendor/session/session_writer.h -text
 windows/vendor/telemetry/forza_packet.h -text
 windows/tests/data/ffb/*.expected -text
 windows/tests/data/ffb/*.csv -text
+windows/vendor/wheelffb/wheelffb.h -text
+windows/vendor/wheelffb/external_ffb.h -text
