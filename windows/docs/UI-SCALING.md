@@ -94,10 +94,9 @@ three views, mode 1's spacing applies to the centre panel's 16:9 only.
 | 4BD32E slipstream; 4BD397 / 4BD414 / 4BD472 don't-lose-GF | `scores_4bd230` +FE; `scores_4bd340` | hand | C2C |
 | 496AC7 ... 496C6A C2C speech bubbles (7) | `mission_manager_control_496a30`, mission_manager.cpp | hand | |
 | 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (16) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | an adjustment would sit at the translated instruction (its esp+0 / +4 argument) |
-| 460A21 / 460D40 / 460FBC set / ctrl_icon_work (GF request bubble) | none by address | **not found** | between F_45e290 and the next translated function; how the decomp runs them is open |
-| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | none by address | **not found** | between F_4819c0 (ends 481A38) and F_481bc0; open |
+| 460A21 set_icon_work (GF request bubble) | `banner_open_460970` +B1, race_traffic_heart_setup.inc | hand | the heart code lives in `race_traffic_*.inc` (a first scan of .cpp files missed it) |
+| 460D40 / 460FBC ctrl_icon_work | `banner_460ad0` +270 / +4EC, race_traffic_heart_meter.inc | hand | the function's PC extent is to be confirmed |
+| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | inside 481A40, the C2C request manager's GOAL results (7F9460 method) | **not ported** | race_end_runtime.cpp runs it only if translated, and it is not (`EndUnported` "neither native nor translated"); nothing to map until that path is ported |
 
-- **Open before step 2:**
-  - how the decomp runs 460A00..461000 and 481A40..481BBF (a native reconstruction under another name, the heart
-    services, or not yet reached);
-  - the translated C2C bubbles: an adjustment in generated code, or a reconstruction first.
+- **Open before step 2:** the translated C2C bubbles (`F_4fc830` ... `F_4fe760`): an adjustment in generated code, or
+  a reconstruction first.
