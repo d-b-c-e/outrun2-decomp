@@ -5,7 +5,8 @@ script into a race, N measured seconds, a graceful close, and the evidence in a 
                          [--etw [--etw-profile cadence.wprp]] [--env OR2_HOST_LIVE=1] [--check-only]
 
 - No OS input and no focus change: keys are posted (PostMessage WM_KEYDOWN / WM_KEYUP, scan code in lParam) to the game's
-  own top-level window, which fills desktop_keys() (window_desktop.cpp) as typing would. The game is closed with WM_CLOSE.
+  own top-level window, which fills desktop_keys() (window_desktop.cpp) as typing would. The game is closed with WM_CLOSE,
+  and killed (receipt "forced") when it has not exited --close-seconds later (30 by default).
 - No lease of its own: the caller holds the rig lease. This refuses unless %LOCALAPPDATA%\\dbce\\test-slot.txt is fresh
   (under 2 hours, as Stage-RigLease.ps1) and names --lease-owner.
 - Unlatched: it refuses while %LOCALAPPDATA%\\dbce\\outrun2006-decomp\\inject.on exists (that would latch the process).
@@ -135,6 +136,8 @@ def main():
     a.add_argument("--env", action="append", default=[], help="K=V for the game process")
     a.add_argument("--windowed", action="store_true", help="pass --windowed (1280x720) instead of the borderless window")
     a.add_argument("--startup-seconds", type=float, default=90.0, help="bound for the window to appear")
+    a.add_argument("--close-seconds", type=float, default=30.0,
+                   help="bound for the exit after WM_CLOSE before the game is killed (a recording session saves at exit: up to 65 s)")
     a.add_argument("--check-only", action="store_true")
     o = a.parse_args()
     game = o.game.resolve(); out = o.result.resolve(); problems = []
@@ -150,6 +153,7 @@ def main():
     if empty_savegame and (not (game / "SaveGame").is_dir() or any((game / "SaveGame").iterdir())):
         problems.append("the key script needs an empty SaveGame folder in the test copy")
     if not (0 < o.seconds <= 1800): problems.append("--seconds out of range")
+    if not (0 < o.close_seconds <= 300): problems.append("--close-seconds out of range")
     if o.etw_profile and (not o.etw or o.etw_profile.suffix.lower() != ".wprp" or not o.etw_profile.is_file()):
         problems.append("--etw-profile needs --etw and an existing .wprp file")
     # Telemetry off unless asked (unattended runs: SimHub can turn the Forza stream into forces or motion); --env wins.
@@ -163,7 +167,7 @@ def main():
     lp = lease_problem(o.lease_owner)
     if lp: problems.append(lp)
     plan = dict(game=str(game), exeSha256=sha(exe) if exe.exists() else None, keys=str(o.keys), keysSha256=sha(o.keys) if o.keys.exists() else None,
-                steps=len(steps), measureFrom=measure_from, seconds=o.seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
+                steps=len(steps), measureFrom=measure_from, seconds=o.seconds, closeSeconds=o.close_seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
                 etwProfile=str(o.etw_profile.resolve()) if o.etw_profile else None,
                 etwProfileSha256=sha(o.etw_profile) if o.etw_profile and o.etw_profile.is_file() else None)
     if o.check_only or problems:
@@ -205,7 +209,7 @@ def main():
     finally:
         if proc and proc.poll() is None:
             for h in windows_of(proc.pid): user32.PostMessageW(h, WM_CLOSE, 0, 0)
-            try: proc.wait(timeout=30)
+            try: proc.wait(timeout=o.close_seconds)
             except subprocess.TimeoutExpired: receipt["forced"] = True; proc.kill(); proc.wait(timeout=15)
         receipt["exitCode"] = proc.returncode if proc else None
         if etw_on:   # merged only now, with the game closed
