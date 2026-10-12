@@ -3,6 +3,7 @@
 // stop; the six-member admission and recorder-complete.json; every refusal is failed, never complete; the receipt
 // reader; the start's intake of a request file.
 #include "ordinary_recording.hpp"
+#include "consumed_replay.hpp"
 #include "sha256.hpp"
 #include <windows.h>
 #include <cstdio>
@@ -40,7 +41,8 @@ std::vector<dbce::shim::DeviceReport> devices(){
     return {d};
 }
 Snapshot row(std::uint64_t seq,std::int64_t us){
-    Snapshot s;s.frame.seq=seq;s.frame.tick_us=us;s.frame.action[0].value=0.25f;s.frame.action[0].status=dbce::shim::Status::Live;
+    Snapshot s;s.frame.seq=seq;s.frame.tick_us=us;s.frame.boundary_us=us;   // as a Core frame: boundary >= tick
+    s.frame.action[0].value=0.25f;s.frame.action[0].status=dbce::shim::Status::Live;
     s.signals.frame_seq=seq;s.signals.mode=16;s.signals.in_gameplay=true;
     s.view.mode=16;s.view.car=true;s.view.gear=3;s.view.speed=50.f;
     s.has_consumed=true;s.consumed.steering=-10;s.consumed.accelerator=200;s.consumed.connected=true;
@@ -105,9 +107,26 @@ void finalizer_end_to_end(const fs::path& finalizer){
     const int read=run(args(L"--read-recording",a.request.result/"recording-reread.json"),read_log);
     std::printf("ordinary recording: finalizer --read-recording exit %d: %s",read,slurp(read_log).c_str());
     check(read==0,"end to end: the sealed capture reads back");
+    // The managed --export-recording (sana aefe991), when this finalizer has it: the native consumed tape reads its rows.
+    const auto exported=a.request.result/"export.tsv";
+    const auto export_log=a.request.result/"export.log";
+    const int code=run(args(L"--export-recording",exported),export_log);
+    std::printf("ordinary recording: finalizer --export-recording exit %d: %s",code,slurp(export_log).c_str());
+    if(code==0){
+        ConsumedTape tape(exported);
+        check(tape.size()==180&&tape.row(0).seq==5000&&tape.row(179).seq==5179,"end to end: the export's 180 rows load as a consumed tape");
+        check(tape.row(7).replayed.input.steering==-10&&tape.row(7).replayed.input.accelerator==200&&tape.row(7).replayed.input.connected,
+              "end to end: the exported consumed input decodes");
+    }else std::printf("ordinary recording: this finalizer has no --export-recording (an older build): the export check is not run\n");
 }
 
+int run_all(int argc,char** argv);
 int main(int argc,char** argv){
+    std::setvbuf(stdout,nullptr,_IONBF,0);
+    try{return run_all(argc,argv);}
+    catch(const std::exception& e){std::fprintf(stderr,"ordinary recording: FAIL: an exception after %d checks: %s\n",checks,e.what());return 1;}
+}
+int run_all(int argc,char** argv){
     fs::path finalizer,cross;
     for(int i=1;i+1<argc;++i){
         if(std::string(argv[i])=="--finalizer")finalizer=fs::u8path(argv[i+1]);
