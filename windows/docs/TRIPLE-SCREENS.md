@@ -351,8 +351,14 @@ t56.
   - KEEP_BEHIND does not fill them, so the near-plane test is not sufficient (not proof of absent geometry).
   - No magenta after the start in that sample. That separates the wedges from the flicker in this sample only; an
     intermittent uncovered-pixel defect elsewhere is not ruled out (sana 39719).
-- **Next diagnostic: `OR2_TRIPLE_WHOLE_STAGE=1`** (three views only, a normal process, costly). 44DE10 draws each
-  stage object whole: 405360 with no node list walks every node, and stage culling is off with three views.
+- **Next diagnostic: `OR2_TRIPLE_WHOLE_STAGE=1`** (three views only, a normal process, costly). The stage display
+  44DE10 (from 9db43e7) and the course environment model 44CD30 (from b2f9a4d) draw each of their objects whole: 405360
+  with no node list walks every node, and stage culling is off with three views.
+  - 44CD30's node lists are the car's section only. The draw-distance union (44DE10) never reaches them, so its objects
+    can still pop at section changes in the side views; a candidate for later.
+  - Interpretation (sana 39824): render_queue_dropped is read in both arms. With drops, no negative conclusion. With no
+    drops and a wedge still uncovered, bypassing the section-node selection was insufficient; that does not mean no
+    drawable asset exists anywhere. Diagnostic only, never a default workaround; no performance claim.
   - Filled wedges: the surround exists in the stage objects, and the section lists do not select it at the grid.
     That is fixable with the normal framing.
   - Still uncovered: it is not in the stage objects drawn by 44DE10. Other submissions remain (the course environment
