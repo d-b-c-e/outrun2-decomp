@@ -89,10 +89,11 @@ NativeWindow& native_window(){
         RECT r=m.rcMonitor;
         // Separate monitors (STD-015): the window over three equal side-by-side monitors, in physical pixels (the process
         // is per-monitor DPI aware; the left monitor's x is negative). No display mode or layout is ever changed.
+        bool separate_span=false;   // Separate monitors found its three-monitor span
         if(triple==td::TripleScreens::separate){
             std::vector<td::ScreenRect> monitors;EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&monitors));
             td::ScreenRect span{};
-            if(td::triple_span_from_monitors(monitors,span)){r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";}
+            if(td::triple_span_from_monitors(monitors,span)){r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";separate_span=true;}
             else span_note=std::string("refused: ")+td::triple_span_refusal(monitors)+" ("+std::to_string(monitors.size())+
                            " found); the primary monitor";
         }
@@ -105,7 +106,8 @@ NativeWindow& native_window(){
         triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
         // [Triple] Views = Angled (or OR2_TRIPLE_VIEWS=1) turns a planar span into three projected views (TRIPLE-SCREENS.md
         // step 4, experimental): stage culling off while it is on.
-        const char* refused=triple_angled_requested?td::triple_projection_refusal(triple_latched,true,outrun::platform::g_pc_wide_aspect):nullptr;
+        const char* refused=triple_angled_requested?td::triple_projection_refusal(triple_latched,true,triple,separate_span,
+                                                                                   outrun::platform::g_pc_wide_aspect):nullptr;
         triple_status.requested=triple_angled_requested?td::TripleProjection::angled:td::TripleProjection::planar;
         triple_status.applied=triple_angled_requested&&!refused?td::TripleProjection::angled:td::TripleProjection::planar;
         triple_status.projection_note=refused?refused:"";
@@ -143,7 +145,7 @@ NativeWindow& native_window(){
         w.width=1280;w.height=720;
         triple_status={triple,{},"a 1280x720 window (not borderless)",0.f};
         if(triple_angled_requested){triple_status.requested=outrun::desktop::TripleProjection::angled;
-            triple_status.projection_note=outrun::desktop::triple_projection_refusal(triple_latched,false,0.f);
+            triple_status.projection_note=outrun::desktop::triple_projection_refusal(triple_latched,false,triple,false,0.f);
             std::printf("triple screens: Angled views not applied: %s\n",triple_status.projection_note.c_str());}
     }
     SetForegroundWindow(static_cast<HWND>(w.hwnd));

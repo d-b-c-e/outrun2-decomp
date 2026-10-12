@@ -65,11 +65,15 @@ inline std::optional<TripleProjection> parse_triple_projection(std::string_view 
     return std::nullopt;
 }
 // What applies when Angled is asked for, and why not otherwise (nullptr: it applies). A latched or test process reads no
-// [Triple] keys at all; Angled needs the borderless window and a span wider than 16:9.
-inline const char* triple_projection_refusal(bool latched,bool borderless,float aspect){
-    if(latched)return "not in a test process";
+// [Triple] keys at all. Angled needs the borderless window and a span the selector admitted: Surround over a window wider
+// than 16:9, or Separate monitors whose three-monitor span was found (sana 35719: a failed Separate span falls back to
+// the primary monitor, which may itself be wider than 16:9, and must not get three panels).
+inline const char* triple_projection_refusal(bool latched,bool borderless,TripleScreens mode,bool separate_span,float aspect){
+    if(latched)return "not applied in a test session";
     if(!borderless)return "needs the borderless window";
-    if(!(aspect>0.f))return "needs Surround or Separate monitors over a window wider than 16:9";
+    if(mode==TripleScreens::off)return "needs Surround or Separate monitors";
+    if(mode==TripleScreens::separate&&!separate_span)return "Separate monitors found no three-monitor span";
+    if(!(aspect>0.f))return "needs a window wider than 16:9";
     return nullptr;
 }
 // What the window and the views are, for runtime.log and the F6 Cameras page (filled once the window opens).
