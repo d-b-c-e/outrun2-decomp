@@ -39,11 +39,14 @@ void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
   s.RestartStrip();}
 }
 )HLSL";
-std::string triple_gs_source(){   // the FFP vertex stage (the CPU path's draws) has its own copy: they must agree
+// The generated sources each declare their own Varying: the FFP one (vertex and pixel stage of the CPU path's draws) and
+// the ps11 / ps14 pixel programs must agree with the vertex programs' (nene 33931), else a loud error.
+std::string triple_gs_source(){
     const auto varying=[](const std::string& s){const auto at=s.find("struct Varying{"),end=at==std::string::npos?at:s.find("};",at);
         return end==std::string::npos?std::string{}:s.substr(at,end+2-at);};
-    const auto native=varying(hlsl::native_vs),ffp=varying(hlsl::ffp);
-    if(native.empty()||native!=ffp)throw std::runtime_error("three views: the generated vertex stages disagree on their Varying");
+    const auto native=varying(hlsl::native_vs);
+    if(native.empty()||native!=varying(hlsl::ffp)||native!=varying(hlsl::ps11)||native!=varying(hlsl::ps14))
+        throw std::runtime_error("three views: the generated shader stages disagree on their Varying");
     return native+TripleGsMain;
 }
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
