@@ -137,6 +137,30 @@ Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe ar
 - **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
   and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
   the visual check (step 4).
+## Step 2c: the remaining C2C sites, mapped (documentation only; not built)
+
+From objdump of OR2006C2C.exe around each site; "R" is right by the spacing, unrounded for floats and rounded for
+ints.
+- **Scores, hand-reconstructed** (`race_hud_navi.cpp`), put_scroll R through `put_shift()` as in 2b:
+  - "test your slipstream": 4BD32E, the one 42D280 call in `scores_4bd230`;
+  - "don't lose your girlfriend": 4BD397 / 4BD414 / 4BD472, the three 42D280 calls in `scores_4bd340`.
+- **Mission-manager speech bubbles, hand-reconstructed** (`mission_manager.cpp`, `mission_manager_control_496a30`):
+  - the seven sites (496AC7, 496B14, 496B39, 496B94, 496BE1, 496C10, 496C6A) each move the float on top of the stack,
+    which is the bubble's x of 170.0 (0x432A0000);
+  - four are 465860's x (the decomp's `configure(..., 170.0f, ...)`) and three are 4653C0's x (`motion`: 4653C0(170,
+    -80, 0.2, 0));
+  - the decomp calls `motion` four times (lines 339 / 340 / 344 / 345), against three hooked 4653C0 sites in the EXE,
+    so each call is checked against the EXE's branch layout before code.
+- **The GF request bubble, hand-reconstructed** (`race_traffic_heart_*.inc`):
+  - 460A21 (`banner_open_460970` +B1): a float x in xmm0;
+  - 460D40 / 460FBC (`banner_460ad0` +270 / +4EC): float x in xmm0; at 460FBC Tweaks also writes it back to [esp].
+- **GF speech bubbles, rank emoji, rank text: translated code** (`bulk_tr.cpp` `F_4fc830`, `F_4fc9a0`, `F_4fcd40`,
+  `F_4fd4e0`, `F_4fe760`; 16 sites).
+  - Floats at [esp] or [esp+4] at instruction boundaries.
+  - An edit would sit inside generated code at those addresses, so a small address-keyed hook in the translation, or
+    a reconstruction of these functions first, is the open choice.
+- **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
+  decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the
