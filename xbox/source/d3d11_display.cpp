@@ -57,11 +57,13 @@ Graphics& graphics(){
     g.width=w.width;g.height=w.height;
     std::fprintf(stdout,"Xbox display: Direct3D 11 feature level %x, swap chain %ux%u\n",unsigned(g.device->GetFeatureLevel()),g.width,g.height);
     if(latency){
-        ComPtr<IDXGISwapChain2> chain2;
-        if(SUCCEEDED(g.swap_chain.As(&chain2))&&SUCCEEDED(chain2->SetMaximumFrameLatency(latency))){
-            g_latency_wait=chain2->GetFrameLatencyWaitableObject();
-            std::fprintf(stdout,"Xbox display: frame latency %u (waitable object, waited before the input sample; OR2_FRAME_LATENCY)\n",latency);
-        }else std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=%u not applied (no IDXGISwapChain2); default latency\n",latency);
+        // A chain created with the waitable flag no longer throttles in Present, so its object is always waited on,
+        // even if SetMaximumFrameLatency is refused (the waitable default is then 1).
+        ComPtr<IDXGISwapChain2> chain2;check(g.swap_chain.As(&chain2),"IDXGISwapChain2 (OR2_FRAME_LATENCY)");
+        const bool set=SUCCEEDED(chain2->SetMaximumFrameLatency(latency));
+        g_latency_wait=chain2->GetFrameLatencyWaitableObject();
+        std::fprintf(stdout,"Xbox display: frame latency %u%s (waitable object, waited before the input sample; OR2_FRAME_LATENCY)\n",
+                     set?latency:1u,set?"":" (SetMaximumFrameLatency refused: the waitable default)");
     }
     return g;
 }
