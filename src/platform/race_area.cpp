@@ -1,5 +1,6 @@
 #include "platform/race_area.hpp"
 #include "platform/race_draw_distance.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/pc_address_view.hpp"
 #include "system/perf.hpp"
 #include <algorithm>
@@ -1028,7 +1029,14 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
             p.pop();
         }else p.obj(sign,0,0,0,None,0);
     }
-    if(m.u32(desc)==0xbu&&p.call(0x44ff10u,{}))p.obj(0x630001u,0,0,0,None,0);
+    if(m.u32(desc)==0xbu&&p.call(0x44ff10u,{})){
+        if(g_pc_fix_particle_rendering){   // FixParticleRendering (pc_screen.hpp): Tweaks' fireworks object and node list
+            static const std::uint16_t nodes[]{0,4,5,6,7,0xb,0xc,0xd,0xe,0x12,0x13,0x14,0x15,0x1a,0x1b,0x1f,0x20,0x21,0xffff};
+            constexpr std::uint32_t FireworksNodes=0xb1100000u;      // synthetic PC range (beside the draw-distance lists)
+            if(!m.mapped(FireworksNodes,sizeof nodes))m.map_const(FireworksNodes,reinterpret_cast<const std::uint8_t*>(nodes),sizeof nodes);
+            p.obj(0x1a000au,0,FireworksNodes,0,None,0);
+        }else p.obj(0x630001u,0,0,0,None,0);
+    }
     if(m.u32(desc)==0x1cu){
         if(p.call(0x43f960u,{})){done();return;}
         if(p.call(0x46c500u,{})||(p.byte_call(0x48b310u)&&p.byte_call(0x48b350u))){m.put32(0x636bb8u,2);done();return;}

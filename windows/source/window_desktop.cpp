@@ -205,6 +205,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
                 from?from:"no lods.ini");
         }}
+    // [Bugfixes] FixParticleRendering, the Tweaks key (on unless set false, as there): the half-resolution particle
+    // mapping of 418CF0 and the Metropolis fireworks object (pc_screen.hpp).
+    outrun::platform::g_pc_fix_particle_rendering=settings.flag("Bugfixes","FixParticleRendering",true);
+    if(!outrun::platform::g_pc_fix_particle_rendering)std::printf("settings: particle rendering fix off (the PC's own particle mapping)\n");
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
