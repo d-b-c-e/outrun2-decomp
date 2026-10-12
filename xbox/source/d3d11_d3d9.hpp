@@ -2,7 +2,9 @@
 #include "platform/pc_soft_d3d9.hpp"
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <atomic>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -42,7 +44,20 @@ public:
     void finish_scene();
     std::uint32_t fxaa_passes{},msaa_resolves{};
     std::uint64_t native_draws()const{return native_stats_.draws;}   // draws taken by the GPU vertex path
+    // Background compiles (test hooks): block until nothing is queued or compiling; the draws a fallback served
+    // meanwhile (the CPU vertex path for a vertex program, the generic interpreter for a pixel program).
+    void wait_for_compiles();
+    std::uint64_t vertex_fallback_draws()const{auto it=native_stats_.refused.find(CompilingWhy);return it==native_stats_.refused.end()?0:it->second;}
+    std::uint64_t pixel_fallback_draws()const{return shader_stats_.generic_draws;}
+    bool background_compiles()const{return compiler_!=nullptr;}
 private:
+    // A program missing from the disk cache compiles on one worker thread, so no frame waits for D3DCompile. The
+    // worker only compiles its own copy of the HLSL and writes the disk cache; the game thread creates every D3D11
+    // object from the finished code. A job is final once done is set; error is empty on success.
+    struct CompileJob { std::string path,source,entry,target;std::vector<std::uint8_t> code;std::string error;double ms{};std::atomic<bool> done{}; };
+    class ShaderCompiler;
+    std::unique_ptr<ShaderCompiler> compiler_;   // null with OR2_D3D11_SYNC_COMPILE: every compile in its draw, as before
+    static constexpr const char* CompilingWhy="vertex program compiling";
     struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
     void flush();void pixel_pipeline();void bind_target();void apply_state();void bind_textures();
@@ -51,7 +66,9 @@ private:
     // its vertex and index buffers, updated over the byte range locked since the last draw. Anything else, and
     // every draw with OR2_D3D11_CPU_VERTEX set, keeps the CPU path (PcSoftD3D9Device::draw_indexed_primitive).
     struct GpuBuffer { ComPtr<ID3D11Buffer> buffer;std::size_t bytes{},dirty_lo{~std::size_t(0)},dirty_hi{}; };
-    struct NativeProgram { ComPtr<ID3D11VertexShader> shader;std::vector<std::uint8_t> code; };
+    // pending: compiling in the background (its draws keep the CPU path); a failed program keeps a null shader.
+    struct NativeProgram { ComPtr<ID3D11VertexShader> shader;std::vector<std::uint8_t> code;std::shared_ptr<CompileJob> pending;std::size_t index{}; };
+    void finish_native(NativeProgram&);
     bool draw_native(std::uint32_t type,std::int32_t base,std::uint32_t start,std::uint32_t count);
     ID3D11Buffer* gpu_buffer(std::uint32_t handle);
     NativeProgram* native_program(const std::string& key,const platform::PcShaderProgram& program,unsigned provided,unsigned colours,unsigned bytes4);
@@ -62,7 +79,7 @@ private:
     std::set<std::string> native_refused_layouts_;
     ComPtr<ID3D11Buffer> vs_constants_;std::vector<float> vs_shadow_;      // C[256] and the pixel-centre fix (VS b0)
     bool native_enabled_{true};
-    struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};
+    struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{},background{}; double ms{};
              std::map<std::string,std::uint64_t> refused; } native_stats_;
     Texture* texture(std::uint32_t);
     ID3D11RenderTargetView* colour_view();
@@ -96,7 +113,13 @@ private:
     std::vector<std::uint8_t> uniform_shadow_[3];
     unsigned frame_draws_{},frame_vertices_{};
     std::map<std::uint32_t,ComPtr<ID3D11PixelShader>> shader_programs_;
-    struct {unsigned compiled{},loaded{};double ms{},max_ms{};} shader_stats_;   // pixel programs: compiled vs from the disk cache
+    // Pixel programs compiling in the background, by D3D9 handle; meanwhile their draws use the generic interpreter
+    // of their kind (hlsl::ps11 / ps14 unspecialized: pixel_pipeline always fills program[] and info in cbuffer 1).
+    std::map<std::uint32_t,std::shared_ptr<CompileJob>> pixel_pending_;
+    ComPtr<ID3D11PixelShader> generic_ps_[3];   // [1] ps.1.1, [2] ps.1.4; null in synchronous mode and until ready
+    std::shared_ptr<CompileJob> generic_pending_[3];
+    ID3D11PixelShader* generic_pixel(unsigned kind);
+    struct {unsigned compiled{},loaded{},failed{},background{};double ms{},max_ms{};std::uint64_t generic_draws{};} shader_stats_;   // pixel programs
     std::map<std::string,ComPtr<ID3D11RasterizerState>> rasterizer_states_;
     std::map<std::string,ComPtr<ID3D11DepthStencilState>> depth_states_;
     std::map<std::string,ComPtr<ID3D11BlendState>> blend_states_;

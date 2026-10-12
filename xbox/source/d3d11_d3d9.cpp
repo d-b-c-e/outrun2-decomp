@@ -6,8 +6,12 @@
 #include "runtime/game_host.hpp"
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <vector>
 #include <cfloat>
 #include <cstdio>
@@ -71,6 +75,78 @@ void write_shader_cache(const std::string& path,const void* data,std::size_t siz
     if(e)std::remove(temp.c_str());
 }
 }
+// The background compiler: one worker at below-normal priority (a cold race start must not take the game thread's
+// core), jobs deduplicated by cache path while queued or running, at most MaxJobs of them (beyond that the caller
+// compiles in its draw, as without the worker). The worker touches no D3D11 object: D3DCompile on its own copy of
+// the source, then the disk cache (write_shader_cache: temp file, then rename, so a reader never sees half a file).
+// Destruction drops what is still queued and waits for the compile in progress, then joins.
+class D3D11D3D9Device::ShaderCompiler {
+public:
+    static constexpr std::size_t MaxJobs=1024;
+    ShaderCompiler():worker_([this]{run();}){}
+    ~ShaderCompiler(){{std::lock_guard<std::mutex> l(m_);stop_=true;queue_.clear();}work_.notify_all();worker_.join();}
+    std::shared_ptr<CompileJob> request(const std::string& path,const std::string& source,const char* entry,const char* target){
+        std::lock_guard<std::mutex> l(m_);
+        if(auto it=inflight_.find(path);it!=inflight_.end())return it->second;
+        if(inflight_.size()>=MaxJobs)return nullptr;
+        auto job=std::make_shared<CompileJob>();job->path=path;job->source=source;job->entry=entry;job->target=target;
+        inflight_.emplace(path,job);queue_.push_back(job);work_.notify_one();
+        return job;
+    }
+    void wait_idle(){std::unique_lock<std::mutex> l(m_);idle_.wait(l,[this]{return inflight_.empty();});}
+private:
+    void run(){
+        SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_BELOW_NORMAL);
+        for(;;){
+            std::shared_ptr<CompileJob> job;
+            {std::unique_lock<std::mutex> l(m_);work_.wait(l,[this]{return stop_||!queue_.empty();});
+             if(stop_)return;job=std::move(queue_.front());queue_.pop_front();}
+            const auto started=std::chrono::steady_clock::now();
+            try{
+                const auto code=compile(job->source,job->entry.c_str(),job->target.c_str());
+                const auto* b=static_cast<const std::uint8_t*>(code->GetBufferPointer());job->code.assign(b,b+code->GetBufferSize());
+                write_shader_cache(job->path,job->code.data(),job->code.size());
+            }catch(const std::exception& e){job->error=e.what();if(job->error.empty())job->error="compile failed";}
+            job->ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+            job->done.store(true,std::memory_order_release);
+            {std::lock_guard<std::mutex> l(m_);inflight_.erase(job->path);}
+            idle_.notify_all();
+        }
+    }
+    std::mutex m_;std::condition_variable work_,idle_;bool stop_{};
+    std::deque<std::shared_ptr<CompileJob>> queue_;
+    std::map<std::string,std::shared_ptr<CompileJob>> inflight_;   // queued or compiling, by cache path
+    std::thread worker_;   // last: it starts once every member it uses exists
+};
+void D3D11D3D9Device::wait_for_compiles(){if(compiler_)compiler_->wait_idle();}
+// The generic interpreter of a pixel program kind: the generated source as it is, except that the program's slots
+// run through one loop instead of one unrolled call site each. Every call site inlines the whole run() dispatcher, which
+// took D3DCompile 7-20 s for ps.1.1 (measured on WARP); the loop makes the same calls in the same order. The specialized
+// programs keep the unrolled form, where the constant ids fold each call to one case.
+static std::string generic_pixel_source(const char* generated){
+    std::string s=generated;
+    const auto at=s.find("if(program[0].x>=0)run(program[0].x);");
+    if(at==std::string::npos)throw std::runtime_error("generic interpreter: the program dispatch was not found");
+    auto end=s.find('\n',at);if(end==std::string::npos)end=s.size();
+    if(end>at&&s[end-1]=='\r')--end;
+    unsigned slots=0;std::string expect;
+    for(;slots<16;++slots){const std::string e="program["+std::to_string(slots/4)+"]."+"xyzw"[slots%4];
+        const std::string call="if("+e+">=0)run("+e+");";if(s.compare(at+expect.size(),call.size(),call)!=0)break;expect+=call;}
+    if(!slots||at+expect.size()!=end)throw std::runtime_error("generic interpreter: unexpected program dispatch");
+    s.replace(at,expect.size(),"[loop] for(int slot=0;slot<"+std::to_string(slots)+";++slot){const int id=program[slot>>2][slot&3];if(id>=0)run(id);}");
+    return s;
+}
+// The generic interpreter of a kind, once ready: from the disk cache at device creation, else when its background
+// compile is done (the shader is created here, on the game thread). Null until then.
+ID3D11PixelShader* D3D11D3D9Device::generic_pixel(unsigned kind){
+    if(!generic_ps_[kind]&&generic_pending_[kind]&&generic_pending_[kind]->done.load(std::memory_order_acquire)){
+        const auto job=std::move(generic_pending_[kind]);
+        if(job->error.empty()&&SUCCEEDED(device_->CreatePixelShader(job->code.data(),job->code.size(),nullptr,&generic_ps_[kind])))
+            std::printf("shader: generic pixel interpreter ps.1.%s compiled in the background in %.0f ms\n",kind==1?"1":"4",job->ms);
+        else{generic_ps_[kind].Reset();std::printf("shader: no generic pixel interpreter ps.1.%s: %.300s\n",kind==1?"1":"4",job->error.c_str());}
+    }
+    return generic_ps_[kind].Get();
+}
 D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* context,unsigned w,unsigned h)
     :PcSoftD3D9Device(w,h),device_(device),context_(context){
     const auto vs=compile(hlsl::ffp,"vs_main","vs_4_1");
@@ -91,6 +167,22 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
         check(device_->CreateBuffer(&d,nullptr,&vs_constants_),"CreateBuffer(vertex constants)");}
     native_enabled_=std::getenv("OR2_D3D11_CPU_VERTEX")==nullptr;
     std::printf("D3D11 vertex path: %s\n",native_enabled_?"GPU (CPU for draws it cannot take)":"CPU (OR2_D3D11_CPU_VERTEX)");
+    // Background compiles unless OR2_D3D11_SYNC_COMPILE is set. The generic pixel interpreters load from the disk
+    // cache or are the compiler's first jobs; until one is ready, pixel programs of its kind compile in the draw.
+    if(!std::getenv("OR2_D3D11_SYNC_COMPILE")){
+        compiler_=std::make_unique<ShaderCompiler>();
+        for(unsigned k:{1u,2u}){
+            try{
+                const std::string source=generic_pixel_source(k==1?hlsl::ps11:hlsl::ps14),path=shader_cache_path(source,"ps_4_1");
+                const auto code=read_shader_cache(path);
+                if(!code.empty()&&SUCCEEDED(device_->CreatePixelShader(code.data(),code.size(),nullptr,&generic_ps_[k])))
+                    std::printf("shader: generic pixel interpreter ps.1.%s loaded\n",k==1?"1":"4");
+                else{generic_ps_[k].Reset();generic_pending_[k]=compiler_->request(path,source,"ps_main","ps_4_1");}
+            }catch(const std::exception& e){std::printf("shader: no generic pixel interpreter ps.1.%s: %.300s\n",k==1?"1":"4",e.what());}
+        }
+    }
+    std::printf("shader compiles: %s\n",compiler_?"background (until a program is ready its draws use the CPU vertex path or the generic pixel interpreter)":
+                                                 "in the draw (OR2_D3D11_SYNC_COMPILE)");
     allocate_back(w,h);
     {   const auto fvs=compile(hlsl::fxaa,"vs_main","vs_4_1"),fps=compile(hlsl::fxaa,"ps_main","ps_4_1");
         check(device_->CreateVertexShader(fvs->GetBufferPointer(),fvs->GetBufferSize(),nullptr,&fxaa_vertex_),"CreateVertexShader(FXAA)");
@@ -113,14 +205,16 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
+    compiler_.reset();   // joined first: what is queued is dropped, the compile in progress finishes
     if(query_live_){context_->End(queries_[query_index_].Get());query_pending_[query_index_]=true;}
     collect_queries(false);   // what the GPU has finished; the rest of the diagnostic count is not waited for
-    std::printf("shader programs: %u compiled, %u from the cache, %.0f ms in total, slowest %.0f ms\n",
-                shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
+    std::printf("shader programs: %u compiled (%u in the background), %u from the cache, %u failed, %.0f ms in total, slowest %.0f ms; %llu draws by the generic interpreter meanwhile\n",
+                shader_stats_.compiled,shader_stats_.background,shader_stats_.loaded,shader_stats_.failed,shader_stats_.ms,shader_stats_.max_ms,
+                (unsigned long long)shader_stats_.generic_draws);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
-    std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
-                (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
+    std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled (%u in the background), %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
+                (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.background,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
     for(const auto& r:native_stats_.refused)std::printf("  CPU vertex path: %s (%llu draws)\n",r.first.c_str(),(unsigned long long)r.second);
 }
@@ -259,7 +353,7 @@ void D3D11D3D9Device::bind_target(){
 }
 void D3D11D3D9Device::release(std::uint32_t handle){
     PcSoftD3D9Device::release(handle);if(object(handle))return;
-    textures_.erase(handle);depth_views_.erase(handle);shader_programs_.erase(handle);gpu_buffers_.erase(handle);index_ranges_.erase(handle);
+    textures_.erase(handle);depth_views_.erase(handle);shader_programs_.erase(handle);pixel_pending_.erase(handle);gpu_buffers_.erase(handle);index_ranges_.erase(handle);
     for(auto it=colour_views_.begin();it!=colour_views_.end();)it=std::uint32_t(it->first>>32)==handle?colour_views_.erase(it):std::next(it);
 }
 void D3D11D3D9Device::unlock_rect(std::uint32_t handle){
@@ -317,7 +411,9 @@ ID3D11Buffer* D3D11D3D9Device::gpu_buffer(std::uint32_t h){
 }
 D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::string& key,const platform::PcShaderProgram& program,
                                                               unsigned provided,unsigned colours,unsigned bytes4){
-    if(auto it=native_programs_.find(key);it!=native_programs_.end())return &it->second;
+    if(auto it=native_programs_.find(key);it!=native_programs_.end()){
+        if(it->second.pending&&it->second.pending->done.load(std::memory_order_acquire))finish_native(it->second);
+        return &it->second;}
     // The program: its declared input registers (D3DCOLOR as RGBA, UBYTE4 as 0..255, the others (0,0,0,1)) and
     // its blob list as literal run() calls, then the D3D9 pixel-centre fix as in raster() (x + w/vw, y - w/vh).
     std::string source=hlsl::native_vs;source+="struct NativeIn{";
@@ -336,6 +432,14 @@ D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::strin
     NativeProgram p;const std::string path=shader_cache_path(source,"vs_4_1");
     p.code=read_shader_cache(path);
     const bool loaded=!p.code.empty()&&SUCCEEDED(device_->CreateVertexShader(p.code.data(),p.code.size(),nullptr,&p.shader));
+    if(!loaded&&compiler_){
+        p.code.clear();p.shader.Reset();
+        if((p.pending=compiler_->request(path,source,"vs_main","vs_4_1"))){
+            p.index=native_programs_.size()+1;
+            std::printf("shader: vertex program %zu (%zu blobs) compiling in the background; its draws keep the CPU path meanwhile\n",p.index,program.blobs.size());
+            return &(native_programs_[key]=std::move(p));
+        }
+    }
     if(!loaded){
         // A program that does not compile stays on the CPU path (a null shader), logged once, never a frame failure.
         try{
@@ -351,7 +455,21 @@ D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::strin
     const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     ++(loaded?native_stats_.loaded:p.shader?native_stats_.compiled:native_stats_.failed);native_stats_.ms+=ms;
     std::printf("shader: vertex program %zu (%zu blobs) %s in %.0f ms\n",native_programs_.size()+1,program.blobs.size(),loaded?"loaded":"compiled",ms);
+    p.index=native_programs_.size()+1;
     return &(native_programs_[key]=std::move(p));
+}
+// A background vertex program is done: its shader is created here, on the game thread. One that failed keeps a null
+// shader (the CPU path), so it is never queued again.
+void D3D11D3D9Device::finish_native(NativeProgram& p){
+    const auto job=std::move(p.pending);
+    if(job->error.empty()&&SUCCEEDED(device_->CreateVertexShader(job->code.data(),job->code.size(),nullptr,&p.shader))){
+        p.code=job->code;++native_stats_.compiled;++native_stats_.background;
+        std::printf("shader: vertex program %zu compiled in the background in %.0f ms\n",p.index,job->ms);
+    }else{
+        p.shader.Reset();p.code.clear();++native_stats_.failed;
+        std::printf("shader: vertex program %zu stays on the CPU path: %.400s\n",p.index,job->error.empty()?"CreateVertexShader failed":job->error.c_str());
+    }
+    native_stats_.ms+=job->ms;
 }
 bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint32_t start,std::uint32_t count){
     if(!native_enabled_)return false;
@@ -394,7 +512,7 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
         elements[n++]={"V",r,formats[e.type],e.stream,e.offset,D3D11_INPUT_PER_VERTEX_DATA,0};}
     key+="|"+std::to_string(provided)+"|"+std::to_string(colours)+"|"+std::to_string(bytes4);
     auto* program=native_program(key,vs->program,provided,colours,bytes4);
-    if(!program->shader)return refuse("vertex program did not compile");
+    if(!program->shader)return refuse(program->pending?CompilingWhy:"vertex program did not compile");
     std::string layout_key=key;for(UINT k=0;k<n;++k)layout_key+=";"+std::to_string(elements[k].SemanticIndex)+":"+std::to_string(elements[k].Format)+":"+
         std::to_string(elements[k].InputSlot)+":"+std::to_string(elements[k].AlignedByteOffset);
     auto& layout=native_layouts_[layout_key];   // a refused layout stays null: its draws keep the CPU path
@@ -500,6 +618,22 @@ void D3D11D3D9Device::bind_textures(){
 }
 ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::PcShaderProgram* program){
     auto found=shader_programs_.find(pixel_shader);if(found!=shader_programs_.end())return found->second.Get();
+    if(auto it=pixel_pending_.find(pixel_shader);it!=pixel_pending_.end()){
+        if(!it->second->done.load(std::memory_order_acquire)){++shader_stats_.generic_draws;return generic_ps_[kind].Get();}
+        const auto job=std::move(it->second);pixel_pending_.erase(it);
+        ComPtr<ID3D11PixelShader> shader;
+        if(job->error.empty()&&SUCCEEDED(device_->CreatePixelShader(job->code.data(),job->code.size(),nullptr,&shader))){
+            ++shader_stats_.compiled;++shader_stats_.background;
+            std::printf("shader: program %zu compiled in the background in %.0f ms\n",shader_programs_.size()+1,job->ms);
+        }else{
+            // A program that does not compile keeps the generic interpreter of its kind: the same instructions, read
+            // from cbuffer 1 instead of folded in. It is never queued again.
+            shader=generic_ps_[kind];++shader_stats_.failed;
+            std::printf("shader: program %zu keeps the generic interpreter: %.400s\n",shader_programs_.size()+1,job->error.empty()?"CreatePixelShader failed":job->error.c_str());
+        }
+        shader_stats_.ms+=job->ms;shader_stats_.max_ms=std::max(shader_stats_.max_ms,job->ms);
+        return (shader_programs_[pixel_shader]=shader).Get();
+    }
     // Specialize the recovered instruction sequence, leaving material,
     // constants and textures dynamic (as the PS5 GL device does).
     if(program->blobs.size()>16)throw std::runtime_error("PS program exceeds 16 blobs");
@@ -520,6 +654,13 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
     const std::string path=shader_cache_path(source,"ps_4_1");
     const auto cached=read_shader_cache(path);
     const bool loaded=!cached.empty()&&SUCCEEDED(device_->CreatePixelShader(cached.data(),cached.size(),nullptr,&shader));
+    if(!loaded&&compiler_&&generic_pixel(kind)){
+        if(auto job=compiler_->request(path,source,"ps_main","ps_4_1")){
+            std::printf("shader: program %zu compiling in the background; the generic interpreter draws meanwhile\n",shader_programs_.size()+pixel_pending_.size()+1);
+            pixel_pending_[pixel_shader]=std::move(job);++shader_stats_.generic_draws;
+            return generic_ps_[kind].Get();
+        }
+    }
     if(!loaded){
         const auto code=compile(source,"ps_main","ps_4_1");
         check(device_->CreatePixelShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader),"CreatePixelShader");
