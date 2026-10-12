@@ -129,16 +129,20 @@ def replay_due(now, phase_at, replay_timeout, playback_end):
 
 
 def replace_file(path, data):
-    """Atomic publish of inject files: a sibling temp, then ReplaceFileW (works while the shim holds the old handle
-    with FILE_SHARE_DELETE; MoveFileEx(REPLACE_EXISTING) is refused then, Astra 15795). New file: a plain rename."""
+    """Atomic publish of inject files: a sibling temp, then a rename over the target (MoveFileExW REPLACE_EXISTING, as
+    DRIVE's StageShimSession publishes), retried briefly on a sharing conflict.
+
+    Not ReplaceFileW: first live R1 (2026-10-11 22:26, r1-01) showed it briefly holding inject.txt in a way the control
+    worker's snapshot open (FILE_SHARE_READ | FILE_SHARE_DELETE, no FILE_SHARE_WRITE: control_snapshot.hpp) refuses with
+    Win32 32. The worker then failed for the rest of the run after batch 1. A rename never opens the target for writing,
+    and the worker's own handle allows it (FILE_SHARE_DELETE); test_publish.py holds such a handle across a publish."""
     path = pathlib.Path(path); tmp = path.with_name(path.name + ".tmp-" + "".join(random.choices(string.ascii_lowercase, k=8)))
     tmp.write_bytes(data)
-    if path.exists():
-        for _ in range(20):
-            if kernel32.ReplaceFileW(str(path), str(tmp), None, 0, None, None): return
-            time.sleep(0.05)
-        tmp.unlink(missing_ok=True); raise OSError("ReplaceFileW failed: %d" % ctypes.get_last_error())
-    os.rename(tmp, path)
+    last = None
+    for _ in range(40):
+        try: os.replace(tmp, path); return
+        except PermissionError as e: last = e; time.sleep(0.025)   # a reader mid-open: retry, never touch its handle
+    tmp.unlink(missing_ok=True); raise OSError("publish of %s failed: %r" % (path.name, last))
 
 
 def windows_of(pid):
