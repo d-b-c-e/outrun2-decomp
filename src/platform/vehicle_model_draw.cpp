@@ -33,7 +33,8 @@ void roof_angle(Bytes car){
 std::array<float,3> matrix_angles_449640(Bytes m){return driving::pc_matrix_angles_449640(m);}
 // CalcPeraShadow's alpha argument at the three bare-RET sites (469EB4 in 469600, 46AC76 in 46A560, 46B766 in 46AE70;
 // REA/Ghidra listings): 1 with +4 bit 0x800000; with +2C8 > 0, max((0.5 - +2DC) * 2, 2^-23) in single precision
-// (subss / mulss / comiss against 6281F0); otherwise 1.
+// (subss / mulss / comiss against 6281F0); otherwise 1. A NaN +2DC stays NaN, as the PC's unordered comiss takes the
+// jc and keeps it. The car is the shared [799D18] work at all three sites here, which is Tweaks' pl_car() (nene 29993).
 float base_shadow_alpha(Bytes car){
     if(car.u32(4)&0x800000u)return 1.f;
     if(!(car.f32(0x2c8)>0.f))return 1.f;

@@ -17,7 +17,8 @@ inline bool g_pc_screen_edge_cull_fix=true;
 // - Metropolis fireworks: 44DE10 draws object 0x630001 with no node list (node 0: road barriers instead); Tweaks draws
 //   0x1A000A with the node list of DrawDistanceBehind = 2 in its place (race_area.cpp).
 inline bool g_pc_fix_particle_rendering=true;
-// [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow).
+// [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
+// any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'
 // RestoreCarBaseShadow puts it back: the flat shadow object drawn with DrawObjectAlpha (4056D0) under the car's
 // own matrix (+B0) raised 0.05, its alpha the call's argument times this factor (C2C Xbox halved it, too faint on
