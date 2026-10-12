@@ -218,14 +218,31 @@ int main(){
                 const bool single=c.mode==2||(c.gpu_single&&i==0);
                 for(unsigned panel=0;panel<3;++panel)compare_third(image,panel,refs[k][i],c.mode==1&&panel==0?16:0,single&&panel!=1,c.what);}
         }
+        // A remembered projection must not outlive a change of the current one (sana 35076). The affine test sees only
+        // the depth row, so constants built with A also factor through B (same near and far, another FOV). Counts only:
+        // these perspective constants place the quad off screen. 1) current A, constants A: matched with A, which is
+        // remembered; 2) current X (another depth row), constants still A: matched through the remembered A; 3) current
+        // B, constants B: matched with the current B, not the remembered A.
+        {   const float pa[16]{1,0,0,0, 0,1,0,0, 0,0,-2,-1, 0,0,-1,0},pb[16]{2,0,0,0, 0,2,0,0, 0,0,-2,-1, 0,0,-1,0},
+                        px[16]{1,0,0,0, 0,1,0,0, 0,0,-3,-1, 0,0,-2,0},identity[16]{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            auto& d=tgpu;g_triple_mode=0;
+            const auto constants=[&](const float* k){for(unsigned i=0;i<4;++i){const float c[4]{k[i],k[4+i],k[8+i],k[12+i]};d.set_vertex_shader_constant_f(64+i,c,1);}};
+            const auto frame=[&](const float* current,const float* k){d.set_transform(0x100,identity);d.set_transform(2,identity);d.set_transform(3,current);
+                constants(k);d.begin_frame();d.clear(7,0xff000000,1,0);check(d.draw_indexed_primitive(4,1,0,4,2,2)==0,"remembered-projection draw succeeds");d.end_frame();};
+            const auto recent0=d.triple_draws_recent,draws0=d.triple_draws;
+            frame(pa,pa);check(d.triple_draws==draws0+1&&d.triple_draws_recent==recent0,"current A: matched with the current projection");
+            frame(px,pa);check(d.triple_draws==draws0+2&&d.triple_draws_recent==recent0+1,"current X, constants A: matched through the remembered A");
+            frame(pb,pb);check(d.triple_draws==draws0+3&&d.triple_draws_recent==recent0+1,"current B: the current projection wins over the remembered A");
+            frame(pb,pb);check(d.triple_draws==draws0+4&&d.triple_draws_recent==recent0+1,"current B again: still the current one");
+            for(unsigned row=0;row<4;++row){float c[4]{};c[row]=1;d.set_vertex_shader_constant_f(64+row,c,1);}
+        }
         g_pc_triple_corrections=nullptr;
         check(tgpu.native_draws()>=n,"the three-view GPU device drew through the GPU vertex path");
-        check(tgpu.triple_draws==5&&tcpu.triple_draws==6,"draws replicated: 5 on the GPU path, 6 on the CPU path");
-        check(tgpu.triple_draws_affine==2&&tcpu.triple_draws_affine==0,"two GPU draws replicated through an affine match");
-        check(tgpu.triple_draws_recent==1&&tcpu.triple_draws_recent==0,"one GPU draw replicated with a recent projection");
+        check(tgpu.triple_draws==9&&tcpu.triple_draws==6,"draws replicated: 9 on the GPU path (5 + 4 remembered-projection frames), 6 on the CPU path");
+        check(tgpu.triple_draws_recent==2&&tcpu.triple_draws_recent==0,"two GPU draws replicated with a recent projection");
         check(tgpu.triple_single_refused==1&&tcpu.triple_single_refused==1,"refused corrections keep the draw single");
         check(tgpu.triple_single_unmatched==1&&tcpu.triple_single_unmatched==0,"a program without the projection keeps the draw single");
-        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==5&&tcpu.triple_frames==6,"three-view counts");
+        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==9&&tcpu.triple_frames==6,"three-view counts");
         std::printf("three views: GPU path %llu replicated, CPU path %llu replicated\n",(unsigned long long)tgpu.triple_draws,(unsigned long long)tcpu.triple_draws);
     }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());

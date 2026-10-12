@@ -620,12 +620,17 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine,const std::
     const auto& proj=projection?*projection:transform_proj;   // a recent projection the program's constants hold, else the current
     if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
         triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
-        float c[52]{};triple_ok_=corrections(proj.data(),c);
-        if(triple_ok_){c[48]=fx;c[49]=fy;
-            if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+        TripleCorrections* e=nullptr;
+        for(auto& k:triple_corrections_)if(k.used&&k.fix[0]==fx&&k.fix[1]==fy&&std::memcmp(k.p.data(),proj.data(),64)==0){e=&k;break;}
+        if(!e){e=&triple_corrections_[triple_corrections_next_];triple_corrections_next_=(triple_corrections_next_+1u)%unsigned(triple_corrections_.size());
+            *e=TripleCorrections{};e->p=proj;e->fix[0]=fx;e->fix[1]=fy;e->used=true;e->ok=corrections(proj.data(),e->c);
+            if(e->ok){e->c[48]=fx;e->c[49]=fy;}}
+        triple_ok_=e->ok;
+        if(triple_ok_){
+            if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof e->c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
-            std::memcpy(m.pData,c,sizeof c);context_->Unmap(triple_cb_.Get(),0);}
+            std::memcpy(m.pData,e->c,sizeof e->c);context_->Unmap(triple_cb_.Get(),0);}
     }
     const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
     const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
@@ -701,7 +706,17 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
     const int registers=int(vs_constants.size());
     // A recent projection that is the current one adds nothing; its slot is skipped.
     const auto distinct=[&](int slot){return std::memcmp(triple_recent_[std::size_t(slot)].p.data(),transform_proj.data(),64)!=0;};
-    bool ok=p.base>=0&&(!p.affine?exact(p.base):p.projection<0?affine(p.base):affine_with(p.base,p.projection));
+    // The current projection first, then a remembered one (sana 35076): the affine test sees only a projection's depth
+    // row, so projections sharing near and far (another FOV) all pass it, and a remembered match must not outlive a
+    // change of the current projection.
+    bool ok=false;
+    if(p.base>=0){
+        const bool was_affine=p.affine;const int was_projection=p.projection;
+        if(exact(p.base)){p.affine=false;p.projection=-1;ok=true;}
+        else if(affine(p.base)){p.affine=true;p.projection=-1;ok=true;}
+        else if(p.projection>=0&&affine_with(p.base,p.projection))ok=true;
+        if(ok&&(p.affine!=was_affine||p.projection!=was_projection))++p.changes;
+    }
     if(!ok&&(p.base>=0||p.failed_constants!=triple_constants_generation_||p.failed_xf!=triple_xf_generation_)){
         const int was=p.base,was_projection=p.projection;const bool was_affine=p.affine;p.base=-1;p.projection=-1;
         for(int base=0;base+4<=registers&&p.base<0;++base)if(exact(base)){p.base=base;p.affine=false;}
@@ -714,7 +729,8 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
         if(ok&&p.projection>=0&&!triple_recent_logged_){triple_recent_logged_=true;   // once: the evidence for the cause
             std::string now,then;const auto& r=triple_recent_[std::size_t(p.projection)].p;
             for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,"%g ",double(transform_proj[k]));now+=t;std::snprintf(t,sizeof t,"%g ",double(r[k]));then+=t;}
-            std::printf("triple views: vertex program %.80s holds a recent projection, not the current one; current: %s; recent: %s\n",
+            std::printf("triple views: vertex program %.80s is compatible with a recent projection, not the current one (same depth row "
+                        "at least); current: %s; recent: %s\n",
                         key.c_str(),now.c_str(),then.c_str());}
     }
     if(ok&&p.projection>=0&&projection)*projection=&triple_recent_[std::size_t(p.projection)].p;
@@ -724,7 +740,7 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
     if(p.logged_n<4&&std::find(p.logged,p.logged+p.logged_n,outcome)==p.logged+p.logged_n){p.logged[p.logged_n++]=outcome;
         if(p.base<0)std::printf("triple views: vertex program %.120s: no matrix of the current projection in its constants (single on the centre)\n",key.c_str());
         else std::printf("triple views: vertex program %.120s: %s at c%d\n",key.c_str(),!p.affine?"world x view x projection":
-                         p.projection<0?"an affine matrix x the projection":"an affine matrix x a recent projection",p.base);}
+                         p.projection<0?"an affine matrix x the projection":"compatible with an affine matrix x a recent projection",p.base);}
     return !ok?0:!p.affine?1:p.projection<0?2:3;
 }
 void D3D11D3D9Device::flush(){

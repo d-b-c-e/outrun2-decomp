@@ -67,6 +67,10 @@ private:
     // triangle into three viewports with the panel's clip correction; corrections cached per projection.
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
+    // Corrections already computed, by projection and pixel-centre fix (six, replaced in turn): draws that alternate
+    // between the current and a remembered projection reuse them instead of computing again (nene 35084).
+    struct TripleCorrections { std::array<float,16> p{};float fix[2]{};bool used{},ok{};float c[52]{}; };
+    std::array<TripleCorrections,6> triple_corrections_{};unsigned triple_corrections_next_{};
     // Per vertex program: the constant register of its position matrix (-1: none found) and whether that matrix is the
     // current world x view x projection or only some affine matrix x the current projection; the outcomes already
     // logged (each distinct one once, at most four, encoded base*2+affine or -1), how often the outcome changed, and the
@@ -80,7 +84,8 @@ private:
     std::array<double,4> triple_pinv_col3_{};bool triple_pinv_ok_{};
     // The last four distinct projections a back-buffer draw replicated with, and their inverse's column 3: a program's
     // constants may hold one of them while SetTransform already holds another pass's (the second rig picture's side sky
-    // went black in some frames). Slots are replaced oldest first and keep their index until then.
+    // went black in some frames). Slots are replaced oldest first and keep their index until then. A match against one
+    // is compatibility, not proof: the affine test sees only the depth row, so the current projection is preferred.
     struct TripleProjection { std::array<float,16> p{};std::array<double,4> pinv_col3{};bool valid{}; };
     std::array<TripleProjection,4> triple_recent_{};unsigned triple_recent_next_{};bool triple_recent_logged_{};
     std::uint64_t triple_xf_generation_{},triple_constants_generation_{};   // a transform change; a vertex constants upload
