@@ -205,7 +205,10 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
-    compiler_.reset();   // joined first: what is queued is dropped, the compile in progress finishes
+    // Joined first: what is queued is dropped, the compile in progress finishes (logged, so a slow exit has a cause).
+    if(compiler_){const auto started=std::chrono::steady_clock::now();compiler_.reset();
+        const double waited=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+        std::printf("shader compiles: waited %.0f ms at shutdown for a compile in progress\n",waited);}
     if(query_live_){context_->End(queries_[query_index_].Get());query_pending_[query_index_]=true;}
     collect_queries(false);   // what the GPU has finished; the rest of the diagnostic count is not waited for
     std::printf("shader programs: %u compiled (%u in the background), %u from the cache, %u failed, %.0f ms in total, slowest %.0f ms; %llu draws by the generic interpreter meanwhile\n",
