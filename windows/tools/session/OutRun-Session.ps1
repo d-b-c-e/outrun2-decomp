@@ -39,7 +39,8 @@ param(
     [string]$Exe = 'OutRunDesktop.exe',          # test seam: the device-free fixture (tests/session_companion)
     [int]$AdmissionSeconds = 60,
     [int]$PollMilliseconds = 250,
-    [int]$CloseSeconds = 90                      # Playback: the child's normal exit after WM_CLOSE (it saves its capture)
+    [int]$CloseSeconds = 90,                     # Playback: the child's normal exit after WM_CLOSE (it saves its capture)
+    [ValidateSet('', 'launch')][string]$TestFault = ''   # test seam (tests/session_companion): 'launch' fails the launch after the request
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
@@ -248,7 +249,7 @@ if ($Playback) {
     $state = [ordered]@{ admitted = $false; finalState = $null; stoppedBy = $null; sealed = $false; compared = $false; comparisonCode = $null
                          comparisonSha256 = $null; cancelled = $false; closed = $false; exitCode = $null; ownerStateUnchanged = $false; why = @() }
     $proc = $null; $processId = 0; $creation = 0; $startedUtc = [DateTime]::UtcNow.ToString('o'); $requestText = $null
-    $recordingRequestId = $null; $ownerBefore = $null
+    $recordingRequestId = $null; $ownerBefore = $null; $ownResult = $false
     function Write-PlaybackResult {
         $complete = $state.compared -and $state.comparisonCode -in 0, 2
         $passed = $state.comparisonCode -eq 0 -and $state.closed -and $state.exitCode -eq 0 -and $state.ownerStateUnchanged -and -not $state.cancelled
@@ -295,7 +296,7 @@ if ($Playback) {
         # The owner's files now (never written by a playback; checked unchanged at the end), and the admitted tape.
         $ownerBefore = Get-OwnerFingerprint $GameDir
         foreach ($p in (Split-Path $Result)) { New-Item -ItemType Directory -Force -Path $p | Out-Null }
-        New-Item -ItemType Directory -Path $Result | Out-Null
+        New-Item -ItemType Directory -Path $Result | Out-Null; $ownResult = $true   # only now is the folder this invocation's
         Write-New "$Result\owner-before.json" ($ownerBefore | ConvertTo-Json)
         $tape = "$Result\tape.txt"
         $out = & $finalizer --export-playback "$Recording\capture" $recordingRequestId $exeSha "$($proof.processId)" "$($proof.processCreationFileTime)" $tape 2>&1
@@ -310,6 +311,7 @@ if ($Playback) {
         Write-New $requestFile $requestText
         $psi = [System.Diagnostics.ProcessStartInfo]::new($exePath); $psi.WorkingDirectory = $GameDir; $psi.UseShellExecute = $false
         $psi.Environment['DBCE_FFB_MUTE'] = '1'
+        if ($TestFault -eq 'launch') { Fail 'the launch failed (test fault)' }
         $proc = [System.Diagnostics.Process]::Start($psi)
         $processId = [uint64]$proc.Id; $creation = Get-Creation $proc.Handle   # the handle is held: this pid cannot be another process
         if ($null -eq $creation) { Fail 'the launched process has no creation time' }
@@ -357,19 +359,24 @@ if ($Playback) {
             if ([DateTime]::UtcNow -gt $bound) { $state.why += "the playback did not finish within $([int]([double]$rows / 30 + 60)) s"; break }
             Start-Sleep -Milliseconds $PollMilliseconds
         }
-        # The exact child, closed normally (it saves nothing of the owner's); never killed. A child that stays keeps the result pending.
-        if (-not $proc.HasExited) {
-            $posted = [OutRunSession.Native]::CloseWindowsOf([uint32]$processId)
-            if (-not $proc.WaitForExit($CloseSeconds * 1000)) { $state.why += "the game did not close within $CloseSeconds s of WM_CLOSE ($posted window(s)); it is left running" }
-        }
-        if ($proc.HasExited) { $state.closed = $true; $state.exitCode = $proc.ExitCode; if ($state.exitCode -ne 0) { $state.why += "the game exited with code $($state.exitCode)" } }
         if ($state.admitted -and -not $done -and -not $state.cancelled -and $state.finalState -notin 'complete', 'saved') { $state.why += "the playback ended $($state.finalState)" }
     } catch {
         $state.why += "companion: $($_.Exception.Message)"
-        if (-not $proc) { Write-Output "refused: $($_.Exception.Message)"; if (Test-Path -LiteralPath $Result) { [void](Write-PlaybackResult) }; exit 1 }
-        if (-not $proc.HasExited) { Write-Output "error while the game runs: $($_.Exception.Message); the game is left running" }
-        else { $state.closed = $true; $state.exitCode = $proc.ExitCode }
+        if ($proc) { Write-Output "error while the game runs: $($_.Exception.Message); the game is closed normally" }
     }
+    # Common cleanup, after a normal end and after an error alike (sana 38426). This invocation's own request is never left
+    # to be taken by a later launch (only its exact bytes are moved aside).
+    if ($requestText -and (Test-Path -LiteralPath $requestFile) -and [System.IO.File]::ReadAllText($requestFile) -ceq $requestText) {
+        Move-Item -LiteralPath $requestFile "$Result\session-request.not-taken.txt"; $state.why += 'the request was set aside unread' }
+    # No child: a refusal. It writes a result only into the folder this invocation made (sana 38347): an existing one is
+    # left as it was.
+    if (-not $proc) { Write-Output "refused: $((@($state.why)[-1]) -replace '^companion: ', '')"; if ($ownResult) { [void](Write-PlaybackResult) }; exit 1 }
+    # The exact child, closed normally (it saves nothing of the owner's); never killed. One that stays keeps the result pending.
+    if (-not $proc.HasExited) {
+        $posted = [OutRunSession.Native]::CloseWindowsOf([uint32]$processId)
+        if (-not $proc.WaitForExit($CloseSeconds * 1000)) { $state.why += "the game did not close within $CloseSeconds s of WM_CLOSE ($posted window(s)); it is left running" }
+    }
+    if ($proc.HasExited) { $state.closed = $true; $state.exitCode = $proc.ExitCode; if ($state.exitCode -ne 0) { $state.why += "the game exited with code $($state.exitCode)" } }
     # The owner's files: unchanged, or the difference reported (never copied over).
     if ($null -ne $ownerBefore -and $state.closed) {
         try {
@@ -391,9 +398,11 @@ if ($Playback) {
 $state = [ordered]@{ admitted = $false; sealed = $false; saved = $false; descriptor = $false; readBack = $false; finalState = $null; stoppedBy = $null
                      rows = $null; exitCode = $null; closed = $false; why = @() }
 $proc = $null; $processId = 0; $creation = 0; $startedUtc = [DateTime]::UtcNow.ToString('o'); $requestText = $null
-$startupSeal = $null; $startupWhy = $null
+$startupSeal = $null; $startupWhy = $null; $ownResult = $false
 function Write-Result {
-    $passed = $state.saved -and $state.readBack -and $state.closed -and $state.exitCode -eq 0
+    # A pass needs the descriptor too (sana 38466): without recording.json Wheelkit cannot list the capture, which stays
+    # saved (a valid raw capture) but is not a passed session.
+    $passed = $state.saved -and $state.readBack -and $state.descriptor -and $state.closed -and $state.exitCode -eq 0
     $r = [ordered]@{ schema = $Schema.result; requestId = $RequestId; action = 'record'; recording = $Recording; result = $Result
                      processId = $processId; processCreationFileTime = $creation; startedUtc = $startedUtc; completedUtc = [DateTime]::UtcNow.ToString('o')
                      admitted = $state.admitted; sealed = $state.sealed; saved = $state.saved; descriptor = $state.descriptor; readBack = $state.readBack
@@ -436,7 +445,7 @@ try {
     }
 
     # The request and the launch.
-    New-Item -ItemType Directory -Path $Result | Out-Null
+    New-Item -ItemType Directory -Path $Result | Out-Null; $ownResult = $true   # only now is the folder this invocation's
     $expires = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 120
     $requestText = "$($Schema.request)`r`nrequestId=$RequestId`r`naction=record`r`nexpiresUnix=$expires`r`nresult=$Result`r`nrecording=$Recording`r`n"
     Write-New $requestFile $requestText
@@ -525,7 +534,8 @@ try {
     if ($state.admitted -and $state.finalState -notin 'complete', 'saved') { $state.why += "the recording ended $($state.finalState)" }
 } catch {
     $state.why += "companion: $($_.Exception.Message)"
-    if (-not $proc) { Write-Output "refused: $($_.Exception.Message)"; if (Test-Path -LiteralPath $Result) { [void](Write-Result) }; exit 1 }
+    # A refusal writes a result only into the folder this invocation made (sana 38347): an existing one is left as it was.
+    if (-not $proc) { Write-Output "refused: $($_.Exception.Message)"; if ($ownResult) { [void](Write-Result) }; exit 1 }
     if (-not $proc.HasExited) { Write-Output "error while the game runs: $($_.Exception.Message); the game is left running" }
     else { $state.closed = $true; $state.exitCode = $proc.ExitCode }
 }

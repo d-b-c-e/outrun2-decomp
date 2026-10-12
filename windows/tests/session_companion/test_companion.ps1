@@ -122,6 +122,18 @@ $common = @('-Exe', 'session_game_fixture.exe', '-PollMilliseconds', '100')
     Check ((Test-Path "$($s.rec)\recording.json") -and (Test-Path "$($s.rec)\capture\recording-complete.tsv")) 'abnormal: the saved recording and its descriptor stay'
 }
 
+# 2b. sana 38466: saved and read back, a normal exit, but the descriptor cannot be written: saved, not passed (exit 2).
+& {
+    $g = New-Game 'no-descriptor'; $id = New-Id; $s = Session 'no-descriptor' $id
+    $c = Start-Companion "$Out\no-descriptor\record.log" (@('-Record', '-GameDir', $g, '-Recording', $s.rec, '-Result', $s.res, '-RequestId', $id) + $common)
+    Check (Wait-Until { (Read-Json "$($s.res)\status.json").state -eq 'recording' } 30) 'no-descriptor: recording'
+    New-Item -ItemType Directory "$($s.rec)\recording.json" | Out-Null   # the descriptor's write fails
+    [System.IO.File]::WriteAllText("$g\fixture-close.txt", '0')   # the game saves at its exit and closes normally
+    $r = Finish-Companion $c 90
+    $j = Read-Json "$($s.res)\result.json"
+    Check ($r.code -eq 2 -and $j.saved -and $j.readBack -and -not $j.descriptor -and $j.closed -and $j.exitCode -eq 0 -and -not $j.passed) "no-descriptor: saved and read back, closed normally, no descriptor: not passed (exit $($r.code))"
+}
+
 # 3. A game that never takes the request: refused after the admission bound, the request set aside, the game left running.
 & {
     $g = New-Game 'not-taken' -Options "ignore-request`r`n"; $id = New-Id; $s = Session 'not-taken' $id
@@ -177,10 +189,11 @@ foreach ($t in @(
         @{ case = 'result-exists'; game = @{}; want = 'exists'; resultExists = $true })) {
     $p = $t.game; $g = New-Game $t.case @p; $id = New-Id; $s = Session $t.case $id
     if ($t.stray) { [System.IO.File]::WriteAllText("$fence\session-request.txt", 'someone else') }
-    if ($t.resultExists) { New-Item -ItemType Directory $s.res -Force | Out-Null }
+    if ($t.resultExists) { New-Item -ItemType Directory $s.res -Force | Out-Null; [System.IO.File]::WriteAllText("$($s.res)\result.json", 'an earlier session') }
     $r = Run-Companion "$Out\$($t.case)\record.log" (@('-Record', '-GameDir', $g, '-Recording', $s.rec, '-Result', $s.res, '-RequestId', $id) + $common) 60
     Check ($r.code -eq 1 -and $r.text -match [regex]::Escape($t.want)) "$($t.case): refused ($($r.text.Trim()))"
     Check (-not (Get-CimInstance Win32_Process -Filter "Name='session_game_fixture.exe'" | Where-Object { $_.ExecutablePath -like "$g\*" })) "$($t.case): nothing launched"
+    if ($t.resultExists) { Check ([System.IO.File]::ReadAllText("$($s.res)\result.json") -ceq 'an earlier session' -and @(Get-ChildItem $s.res).Count -eq 1) 'result-exists: the existing result folder is left as it was (sana 38347)' }
     if ($t.stray) { Check ([System.IO.File]::ReadAllText("$fence\session-request.txt") -ceq 'someone else') 'stray-request: the other request is untouched'; Remove-Item "$fence\session-request.txt" }
     else { Check (Fence-Clean) "$($t.case): no request written" }
 }
@@ -246,6 +259,18 @@ function Play([string]$case, [string]$g, $pkg, [string]$options = '', [string[]]
     $r = Finish-Companion $p.c 120; $j = Read-Json "$($p.res)\result.json"
     Check ($stop.code -eq 0 -and $r.code -eq 1 -and $j.cancelled -and -not $j.passed -and $j.state -eq 'failed' -and $j.closed -and $j.exitCode -eq 0 -and $j.ownerStateUnchanged) "cancel: closed normally, failed, owner files unchanged (stop $($stop.code), exit $($r.code))"
 
+    # 10b. sana 38426: an error after admission closes the child normally and still checks the owner's files; a launch
+    #      failure leaves no request to be taken.
+    $p = Play 'playback' $g $pkg "tick-ms=60`r`n" -NoWait
+    Check (Wait-Until { Test-Path "$($p.res)\companion.json" } 30) 'after-admission error: launched'
+    New-Item -ItemType Directory "$($p.res)\seal.log" | Out-Null   # the companion's log write at the seal fails
+    $r = Finish-Companion $p.c 120; $j = Read-Json "$($p.res)\result.json"
+    Check ($r.code -eq 1 -and -not $j.passed -and $j.state -eq 'failed' -and $j.closed -and $j.exitCode -eq 0 -and $j.ownerStateUnchanged -and
+           ($j.why -join ' ') -match 'companion:') "after-admission error: the child closed normally, owner files checked, failed (exit $($r.code))"
+    Check (-not (Get-CimInstance Win32_Process -Filter "Name='session_game_fixture.exe'" | Where-Object { $_.ExecutablePath -like "$g\*" })) 'after-admission error: no fixture left running'
+    $p = Play 'playback' $g $pkg '' @('-TestFault', 'launch')
+    Check ($p.r.code -eq 1 -and (Fence-Clean) -and (Test-Path "$($p.res)\session-request.not-taken.txt") -and $p.j.state -eq 'failed' -and -not $p.j.passed) "launch failure: refused, the request set aside, none left to take (exit $($p.r.code))"
+
     # 11. Refusals before anything is written or launched.
     $bad = Play 'playback' $g ([pscustomobject]@{ s = $pkg.s; d = [pscustomobject]@{ recordingSealSha256 = ('0' * 64); startupSealSha256 = $pkg.d.startupSealSha256 } })
     Check ($bad.r.code -eq 1 -and $bad.r.text -match 'not the one prepared' -and -not (Test-Path $bad.res)) "refused: another recording seal ($($bad.r.text.Trim()))"
@@ -253,6 +278,16 @@ function Play([string]$case, [string]$g, $pkg, [string]$options = '', [string[]]
     Check ($still.d.playback -eq $false -and $still.d.playbackWhy -match 'not admitted for playback') "a car that never moved: analysis only, with the reason ($($still.d.playbackWhy))"
     $bad = Play 'playback' $g ([pscustomobject]@{ s = $still.s; d = [pscustomobject]@{ recordingSealSha256 = $still.d.recordingSealSha256; startupSealSha256 = ('1' * 64) } })
     Check ($bad.r.code -eq 1 -and $bad.r.text -match 'not a playable package') "refused: an analysis-only recording ($($bad.r.text.Trim()))"
+    # An existing result folder is never written into (sana 38347), whether the refusal is the folder itself or an
+    # earlier invalid input.
+    foreach ($bad in @(@{ name = 'existing result'; seal = $pkg.d.recordingSealSha256; want = 'exists' }, @{ name = 'invalid seal input'; seal = 'not-hex'; want = '64 lower-case hex' })) {
+        $id = New-Id; $res = "$Out\playback\sessions\playbacks\$id"; New-Item -ItemType Directory $res -Force | Out-Null
+        [System.IO.File]::WriteAllText("$res\result.json", 'an earlier session')
+        $r = Run-Companion "$Out\playback\refused-$id.log" (@('-Playback', '-GameDir', $g, '-Recording', $pkg.s.rec, '-Result', $res, '-RequestId', $id,
+            '-RecordingSealSha256', $bad.seal, '-StartupSealSha256', $pkg.d.startupSealSha256) + $common)
+        Check ($r.code -eq 1 -and $r.text -match [regex]::Escape($bad.want) -and [System.IO.File]::ReadAllText("$res\result.json") -ceq 'an earlier session' -and
+               @(Get-ChildItem $res).Count -eq 1) "refused ($($bad.name)): the existing result folder byte-identical ($($r.text.Trim()))"
+    }
     $g2 = New-Game 'playback-disabled' -playbackEnabled $false; $pkg2 = Record-Package 'playback-disabled' $g2
     $bad = Play 'playback-disabled' $g2 $pkg2
     Check ($bad.r.code -eq 1 -and $bad.r.text -match 'playback is not an enabled capability') "refused: playback not enabled ($($bad.r.text.Trim()))"
