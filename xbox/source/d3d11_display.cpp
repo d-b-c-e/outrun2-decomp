@@ -16,6 +16,7 @@ namespace {
 // many frames queued at most, waited at the top of the frame before the input sample (wait_for_frame_latency).
 // Unset: the default chain, as before (up to 3 frames queued, Present blocks).
 HANDLE g_latency_wait=nullptr;   // owned by the process, like the swap chain (graphics(), never torn down): closed at exit
+std::uint64_t g_latency_waits=0,g_latency_timeouts=0;   // frames waited; waits that hit the 1 s cap (an occluded window)
 unsigned frame_latency_request(){
     const char* v=std::getenv("OR2_FRAME_LATENCY");if(!v)return 0u;
     const unsigned n=unsigned(std::strtoul(v,nullptr,10));return n>=1u&&n<=3u?n:0u;
@@ -197,12 +198,19 @@ void sample_cadence(IDXGISwapChain1* swap_chain){
 }
 }
 // The top of a frame with OR2_FRAME_LATENCY: wait until the swap chain takes another frame, so the input sampled
-// next is as recent as the queue allows. Timed as the frame profile's acquire bucket (the vsync wait moves here from
-// Present). No effect without the variable.
+// next is as recent as the queue allows. Called first in map_input, so the wheel paths (DirectInput in the input
+// filter) and the keyboard are sampled after it; the pad snapshot (game_host read_pad) is taken before map_input,
+// so a gamepad is not (nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
+// Present). Not alertable, so an APC cannot end it early. No effect without the variable.
 void wait_for_frame_latency(){
     if(!g_latency_wait)return;
     ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
-    WaitForSingleObjectEx(g_latency_wait,1000,TRUE);
+    ++g_latency_waits;
+    if(WaitForSingleObjectEx(g_latency_wait,1000,FALSE)==WAIT_TIMEOUT)++g_latency_timeouts;
+}
+void report_frame_latency(){
+    if(g_latency_wait)std::fprintf(stdout,"frame latency waits: %llu frames, %llu timed out (1 s cap)\n",
+        (unsigned long long)g_latency_waits,(unsigned long long)g_latency_timeouts);
 }
 unsigned output_refresh(){
     if(!g_refresh){
@@ -229,6 +237,7 @@ bool D3D11Display::present(std::string& error){
     return true;
 }
 D3D11Display::~D3D11Display(){
+    report_frame_latency();
     if(g_cadence.samples)std::fprintf(stdout,"display cadence: %llu presents over %llu refreshes at present interval %u; %llu late (a gap above the interval), largest gap %u refreshes; %llu disjoint\n",
         (unsigned long long)g_cadence.presents,(unsigned long long)g_cadence.refreshes,g_interval,(unsigned long long)g_cadence.late,g_cadence.max_gap,(unsigned long long)g_cadence.disjoint);
     else std::fprintf(stdout,"display cadence: no frame statistics from the swap chain\n");
