@@ -63,6 +63,19 @@ private:
     std::map<std::string,ComPtr<ID3D11InputLayout>> native_layouts_;
     std::set<std::string> native_refused_layouts_;
     ComPtr<ID3D11Buffer> vs_constants_;std::vector<float> vs_shadow_;      // C[256] and the pixel-centre fix (VS b0)
+    // The three-view spike (pc_screen.hpp g_pc_triple_corrections): a geometry shader that emits each back-buffer
+    // triangle into three viewports with the panel's clip correction; corrections cached per projection.
+    ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
+    std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
+    std::map<const void*,int> triple_wvp_base_;   // vertex program -> the constant register of its world-view-projection (-1: none)
+    unsigned triple_frame_draws_{};
+    bool triple_bind(bool rhw,bool standard);void triple_unbind();bool triple_native_standard(const void* program);
+public:
+    // Three-view counts (runtime.log at exit): draws into three viewports; draws kept single on the centre panel because
+    // pretransformed (rhw: HUD, menus, screen-space particles), custom projection, or not drawn into the back buffer;
+    // frames with at least one three-viewport draw.
+    std::uint64_t triple_draws{},triple_single_rhw{},triple_single_custom{},triple_single_target{},triple_frames{};
+private:
     bool native_enabled_{true};
     struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};
              std::map<std::string,std::uint64_t> refused; } native_stats_;

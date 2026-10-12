@@ -20,6 +20,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "triple_rig.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "test_fence.hpp"
@@ -36,6 +37,16 @@ namespace {
 bool closed=false,borderless=true;
 outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
 outrun::desktop::TripleStatus triple_status;                                    // triple_screens_status()
+// The three-view spike's corrections (pc_screen.hpp g_pc_triple_corrections): the toolkit's fixture rig (32-inch 16:9,
+// eye 660 mm, sides 70 degrees, 8 mm gap; the owner's rig is 1500R curved, approximated flat) matched to the game's
+// own projection each time it changes (triple_rig.hpp triple_views).
+bool triple_fixture_corrections(const float* projection,float* out){
+    outrun::desktop::Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
+    outrun::desktop::TripleViews v{};
+    if(!outrun::desktop::triple_views(p,outrun::desktop::fixture_rig(8.),v))return false;
+    for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+    return true;
+}
 BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
     MONITORINFO i{};i.cbSize=sizeof i;
     if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
@@ -88,7 +99,15 @@ NativeWindow& native_window(){
         // The planar span (step 2): wider than 16:9 and not Off gives one wide frustum over the whole window.
         outrun::platform::g_pc_wide_aspect=td::planar_aspect(triple,w.width,w.height);
         triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
-        if(outrun::platform::g_pc_wide_aspect>0.f)
+        // Development: OR2_TRIPLE_VIEWS=1 (cleared in test processes like every OR2_ switch) turns a planar span into the
+        // three-view spike (TRIPLE-SCREENS.md step 4): projected views, stage culling off while it is on.
+        if(const char* v=std::getenv("OR2_TRIPLE_VIEWS");v&&std::string(v)=="1"&&outrun::platform::g_pc_wide_aspect>0.f){
+            outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;outrun::platform::render_disable_culling()=true;
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE VIEWS (spike, OR2_TRIPLE_VIEWS): the toolkit fixture rig "
+                        "(32 in 16:9, eye matched to the game's FOV, sides 70 deg, gap 8 mm), one game render replicated into three "
+                        "viewports; stage culling off; objects behind the eye still culled; the HUD, menus and screen-space particles "
+                        "on the centre only\n",td::triple_screens_name(triple),w.width,w.height,r.left,r.top,span_note.c_str());
+        }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
                         "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
                         r.left,r.top,span_note.c_str(),double(outrun::platform::g_pc_wide_aspect));

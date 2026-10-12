@@ -4,6 +4,7 @@
 #include <cmath>
 #include <d3dcompiler.h>
 #include "runtime/game_host.hpp"
+#include "platform/pc_screen.hpp"
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -20,6 +21,28 @@ namespace {
 constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
+// The three-view geometry shader (TRIPLE-SCREENS.md step 4): each triangle three times, panel i in viewport i with its
+// clip correction C[i], applied before the D3D9 pixel-centre fix (undone, then re-applied: every viewport is the same
+// size). The Varying is the pipeline's own (generated pc_hlsl_shaders.hpp); windows/source/triple_rig.hpp triple_apply
+// is the same arithmetic, unit-tested.
+constexpr const char* TripleGs=R"HLSL(
+struct Varying{float4 p:SV_Position;float4 d0:COLOR0;float4 d1:COLOR1;
+ float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;
+ float4 t4:TEXCOORD4;float4 t5:TEXCOORD5;float4 t6:TEXCOORD6;float4 t7:TEXCOORD7;float fog:TEXCOORD8;};
+struct Panel{float4 p:SV_Position;float4 d0:COLOR0;float4 d1:COLOR1;
+ float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;
+ float4 t4:TEXCOORD4;float4 t5:TEXCOORD5;float4 t6:TEXCOORD6;float4 t7:TEXCOORD7;float fog:TEXCOORD8;uint vp:SV_ViewportArrayIndex;};
+cbuffer Triple:register(b0){row_major float4x4 C[3];float4 fix;};
+[maxvertexcount(9)]
+void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
+ [unroll] for(uint i=0;i<3;++i){
+  [unroll] for(uint k=0;k<3;++k){
+   float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*q.w;q.y-=fix.y*q.w;
+   Panel o;o.p=q;o.d0=v[k].d0;o.d1=v[k].d1;o.t0=v[k].t0;o.t1=v[k].t1;o.t2=v[k].t2;o.t3=v[k].t3;
+   o.t4=v[k].t4;o.t5=v[k].t5;o.t6=v[k].t6;o.t7=v[k].t7;o.fog=v[k].fog;o.vp=i;s.Append(o);}
+  s.RestartStrip();}
+}
+)HLSL";
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
     ComPtr<ID3DBlob> code,errors;
     const HRESULT hr=D3DCompile(source.data(),source.size(),"pc_shader",nullptr,nullptr,entry,target,CompileFlags,0,&code,&errors);
@@ -121,6 +144,10 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
+    if(platform::g_pc_triple_corrections)
+        std::printf("triple views: %llu draws into three viewports over %llu frames; single on the centre: %llu pretransformed, %llu custom "
+                    "projection, %llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
+                    (unsigned long long)triple_single_rhw,(unsigned long long)triple_single_custom,(unsigned long long)triple_single_target);
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
@@ -172,6 +199,7 @@ void D3D11D3D9Device::finish_scene(){
         check(device_->CreateTexture2D(&t,nullptr,&fxaa_copy_tex_),"CreateTexture2D(FXAA)");
         check(device_->CreateShaderResourceView(fxaa_copy_tex_.Get(),nullptr,&fxaa_copy_srv_),"CreateShaderResourceView(FXAA)");
     }
+    triple_unbind();
     ID3D11ShaderResourceView* none[12]{};context_->PSSetShaderResources(0,12,none);
     context_->CopyResource(fxaa_copy_tex_.Get(),back_colour_tex_.Get());
     ID3D11RenderTargetView* rtv=back_rtv_.Get();context_->OMSetRenderTargets(1,&rtv,nullptr);
@@ -188,6 +216,7 @@ void D3D11D3D9Device::begin_frame(){
     scene_finished_=false;msaa_live_=msaa_>1&&!count_only;
     if(msaa_live_)ensure_msaa();
     bound_=Bound{};
+    if(platform::g_pc_triple_corrections){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
     if(!count_only){
         // A slot three frames old that the GPU has not answered yet: its sample (diagnostics only) is dropped and the
         // query reissued, never waited for; OR2_XBOX_DRAW_STATS waits, for its per-frame log.
@@ -203,6 +232,7 @@ void D3D11D3D9Device::collect_queries(bool wait_all){
     }
 }
 void D3D11D3D9Device::end_frame(){
+    triple_unbind();if(triple_frame_draws_){++triple_frames;triple_frame_draws_=0;}
     if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
@@ -423,6 +453,7 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     if(bound_.topology!=topology){context_->IASetPrimitiveTopology(topology);bound_.topology=topology;}
     if(!bound_.vs_constants){ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);bound_.vs_constants=true;}
     if(bound_.vs!=program->shader.Get()){context_->VSSetShader(program->shader.Get(),nullptr,0);bound_.vs=program->shader.Get();}
+    if(platform::g_pc_triple_corrections)triple_bind(false,colour_target_==BackBuffer&&triple_native_standard(program));
     context_->DrawIndexed(UINT(total),start,base);
     ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
     return true;
@@ -546,6 +577,63 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
     std::printf("shader: program %zu %s in %.0f ms\n",shader_programs_.size()+1,loaded?"loaded":"compiled",ms);
     return (shader_programs_[pixel_shader]=shader).Get();
 }
+// The three-view spike: just before a draw (after pixel_pipeline's single viewport). A back-buffer draw that is not
+// pretransformed and whose projection is a standard perspective goes to three viewports (the back buffer's thirds)
+// through the geometry shader; any other back-buffer draw stays single on the centre third, where the game's 16:9
+// camera put it. Nothing changes without g_pc_triple_corrections.
+bool D3D11D3D9Device::triple_bind(bool rhw,bool standard){
+    const auto corrections=platform::g_pc_triple_corrections;
+    if(!corrections)return false;
+    if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
+    if(rhw){++triple_single_rhw;triple_unbind();return false;}   // apply_state's ui_rect already keeps it in the centre
+    const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
+    if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),transform_proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+        triple_proj_=transform_proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
+        float c[52]{};triple_ok_=corrections(transform_proj.data(),c);
+        if(triple_ok_){c[48]=fx;c[49]=fy;
+            if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+                b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
+            D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
+            std::memcpy(m.pData,c,sizeof c);context_->Unmap(triple_cb_.Get(),0);}
+    }
+    const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
+    const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
+        float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
+    const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
+        LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
+    bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
+    if(!standard||!triple_ok_){   // a custom projection: the centre third only
+        ++triple_single_custom;triple_unbind();
+        const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+        return false;
+    }
+    if(!triple_gs_){const auto code=compile(TripleGs,"gs_main","gs_4_1");
+        check(device_->CreateGeometryShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&triple_gs_),"CreateGeometryShader(three views)");}
+    if(!triple_gs_bound_){context_->GSSetShader(triple_gs_.Get(),nullptr,0);ID3D11Buffer* b=triple_cb_.Get();context_->GSSetConstantBuffers(0,1,&b);
+        triple_gs_bound_=true;}
+    const D3D11_VIEWPORT v[3]{viewport(0),viewport(1),viewport(2)};const D3D11_RECT r[3]{scissor(v[0]),scissor(v[1]),scissor(v[2])};
+    context_->RSSetViewports(3,v);context_->RSSetScissorRects(3,r);
+    if(!triple_logged_){triple_logged_=true;
+        std::printf("triple views: back buffer %ux%u, viewports x %.0f / %.0f / %.0f, width %.0f each, height %.0f\n",back_w_,back_h_,
+                    double(v[0].TopLeftX),double(v[1].TopLeftX),double(v[2].TopLeftX),double(v[0].Width),double(v[0].Height));}
+    ++triple_draws;++triple_frame_draws_;
+    return true;
+}
+void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}}
+// A vertex program's clip position is the standard one when its constants hold the current world x view x projection
+// (as m4x4 reads it: four registers, the matrix transposed). The register is found once per program, then checked.
+bool D3D11D3D9Device::triple_native_standard(const void* program){
+    const auto wvp=transform_wvp();
+    const auto at=[&](int base){
+        double scale=0.;for(const float v:wvp)scale=std::max(scale,double(std::fabs(v)));if(!(scale>0.))return false;
+        for(int i=0;i<4;++i)for(int j=0;j<4;++j)if(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))>1e-4*scale)return false;
+        return true;};
+    auto it=triple_wvp_base_.find(program);
+    if(it!=triple_wvp_base_.end()&&it->second>=0&&at(it->second))return true;
+    for(int base=0;base+4<=int(vs_constants.size());++base)if(at(base)){triple_wvp_base_[program]=base;return true;}
+    if(it==triple_wvp_base_.end())triple_wvp_base_[program]=-1;
+    return false;
+}
 void D3D11D3D9Device::flush(){
     if(batch_.empty()||count_only)return;
     pixel_pipeline();
@@ -560,6 +648,7 @@ void D3D11D3D9Device::flush(){
     if(bound_.layout!=layout_.Get()){context_->IASetInputLayout(layout_.Get());bound_.layout=layout_.Get();}
     if(bound_.topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST){context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);bound_.topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;}
     if(bound_.vs!=vertex_.Get()){context_->VSSetShader(vertex_.Get(),nullptr,0);bound_.vs=vertex_.Get();}
+    triple_bind(batch_rhw_,true);   // the CPU's clip positions: world x view x projection, the standard form
     context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.

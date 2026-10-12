@@ -11,6 +11,14 @@ inline float g_pc_view_half_width=320.0f;
 // wide frustum: not three views), the PC frame fills the window, and its 2D keeps the centred 4:3. Set once by the
 // desktop window; 0 on every other platform.
 inline float g_pc_wide_aspect=0.0f;
+// The three-view spike (TRIPLE-SCREENS.md step 4; development only: OR2_TRIPLE_VIEWS=1 with a planar span window). Given
+// the projection a back-buffer draw uses (D3D row-vector layout, 16 floats), writes the clip corrections of the left,
+// centre and right panels (3 x 16 floats, row-major, row vectors; applied before the D3D9 pixel-centre fix) and returns
+// true; false for a projection that is not a centred perspective (the draw then stays single, on the centre panel).
+// Null: one view. While set, the game's camera is the centre panel's (16:9) and the PC device replicates its
+// back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
+using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
+inline PcTripleCorrections g_pc_triple_corrections=nullptr;
 // [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
 // (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
 // objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).

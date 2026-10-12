@@ -128,7 +128,7 @@ void D3D11Display::clear(){
     const D3D11_VIEWPORT vp{float(fit.x),float(fit.y),float(fit.width),float(fit.height),0,1};c->RSSetViewports(1,&vp);
     c->RSSetState(raster_.Get());c->OMSetDepthStencilState(no_depth_.Get(),0);c->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);
     c->IASetInputLayout(layout_.Get());c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    c->VSSetShader(vertex_.Get(),nullptr,0);c->PSSetShader(pixel_.Get(),nullptr,0);
+    c->VSSetShader(vertex_.Get(),nullptr,0);c->GSSetShader(nullptr,nullptr,0);c->PSSetShader(pixel_.Get(),nullptr,0);
     ID3D11SamplerState* s=sampler_.Get();c->PSSetSamplers(0,1,&s);
     const UINT stride=sizeof(QuadVertex),offset=0;ID3D11Buffer* vb=vbo_.Get();c->IASetVertexBuffers(0,1,&vb,&stride,&offset);
 }

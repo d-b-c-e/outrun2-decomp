@@ -139,6 +139,61 @@ int main(){
         bad=fixture_rig();bad.eye_distance_mm=0.;CHECK(rig_check(bad)==RigError::eye_distance);
         CHECK(panel_bounds(p[1],{0.,0.,-1000.},b)==RigError::eye_behind);
     }
+    // The three-view clip corrections (triple_views): for game projections at several near planes and FOVs, every
+    // panel's clip position computed through the centre's (clip_c C[i]) equals the direct one (v R_i P_i), for points
+    // off the panel plane, at the near plane, beside and behind the eye (w <= 0 for the centre); the centre's C is the
+    // identity; through the D3D9 pixel-centre fix too (triple_apply undoes and re-applies it); a projection that is not a
+    // centred perspective is refused (romi 30680, nene 30684).
+    {
+        const auto near_rel=[](const std::array<double,4>& a,const std::array<double,4>& b){
+            double scale=1e-30,err=0.;for(int k=0;k<4;++k){scale=std::max(scale,std::fabs(b[std::size_t(k)]));err=std::max(err,std::fabs(a[std::size_t(k)]-b[std::size_t(k)]));}
+            return err<=1e-9*scale;};
+        const auto row=[](const std::array<double,4>& v,const Mat4& m){std::array<double,4> r{};
+            for(int j=0;j<4;++j)r[std::size_t(j)]=v[0]*m[j]+v[1]*m[4+j]+v[2]*m[8+j]+v[3]*m[12+j];return r;};
+        const auto fix=[](std::array<double,4> p,double fx,double fy){p[0]+=fx*p[3];p[1]-=fy*p[3];return p;};
+        for(const double nz:{0.05,0.25,1.0})for(const double fov:{0.6,1.0,1.4}){
+            const double t=nz*std::tan(fov/2.),r=t*16./9.;
+            const Mat4 p_c=perspective_off_center_rh(-r,r,-t,t,nz,4000.);
+            TripleViews v{};CHECK(triple_views(p_c,fixture_rig(8.),v));
+            CHECK(v.correction[1]==mat_identity());
+            const std::array<std::array<double,4>,7> points{{{300.,20.,-800.,1.},{-0.01,0.02,-nz,1.},{-1000.,-5.,-100.,1.},
+                {900.,40.,-30.,1.},{-20.,3.,5.,1.},{0.,0.,1.,1.},{50.,-60.,-3900.,1.}}};
+            for(int i=0;i<3;++i)for(const auto& pt:points){
+                const auto direct=row(row(pt,v.rotation[i]),v.projection[i]);
+                const auto clip_c=row(pt,p_c);
+                CHECK(near_rel(row(clip_c,v.correction[i]),direct));
+                const double fx=1./640.,fy=1./480.;
+                CHECK(near_rel(triple_apply(v.correction[i],fx,fy,fix(clip_c,fx,fy)),fix(direct,fx,fy)));
+            }
+            // The side panels' forward directions are the rig's +-70 degrees from the centre's.
+            const std::array<double,4> ahead_right{std::sin(70.*3.14159265358979323846/180.),0.,-std::cos(70.*3.14159265358979323846/180.),0.};
+            const auto in_right=row(ahead_right,v.rotation[2]);
+            CHECK(std::fabs(in_right[0])<1e-12&&std::fabs(in_right[1])<1e-12&&std::fabs(in_right[2]+1.)<1e-12);
+        }
+        // Gap 0: a point on the centre's right edge (NDC x = +1) is on the right panel's left edge (NDC x = -1), at
+        // any height and depth: the seam is continuous.
+        {   const double nz=1.,t=std::tan(0.5),r=t*16./9.;const Mat4 p_c=perspective_off_center_rh(-r,r,-t,t,nz,4000.);
+            TripleViews v{};CHECK(triple_views(p_c,fixture_rig(0.),v));
+            for(const double depth:{2.,50.,700.})for(const double hy:{-0.9,0.,0.7}){
+                const std::array<double,4> pt{r*depth,hy*t*depth,-depth,1.};
+                const auto cc=row(pt,p_c);CHECK(std::fabs(cc[0]/cc[3]-1.)<1e-9);
+                const auto rc=row(cc,v.correction[2]);CHECK(std::fabs(rc[0]/rc[3]+1.)<1e-9&&std::fabs(rc[1]/rc[3]-cc[1]/cc[3])<1e-9);
+                const auto lc=row(std::array<double,4>{-pt[0],pt[1],pt[2],1.},p_c);const auto lv=row(lc,v.correction[0]);
+                CHECK(std::fabs(lv[0]/lv[3]-1.)<1e-9);
+            }
+        }
+        // Refused: identity, orthographic, an off-axis centre, a degenerate rig.
+        TripleViews v{};
+        CHECK(!triple_views(mat_identity(),fixture_rig(),v));
+        Mat4 ortho=mat_identity();ortho[0]=2./640.;ortho[5]=2./480.;ortho[10]=-1./1000.;CHECK(!triple_views(ortho,fixture_rig(),v));
+        CHECK(!triple_views(perspective_off_center_rh(-0.5,0.9,-0.4,0.4,1.,4000.),fixture_rig(),v));
+        TripleRig flat=fixture_rig();flat.right_angle_deg=95.;
+        CHECK(!triple_views(perspective_off_center_rh(-0.7,0.7,-0.4,0.4,1.,4000.),flat,v));
+        // The frustum read back from a projection is the one built.
+        Frustum fr{};CHECK(perspective_frustum(perspective_off_center_rh(-0.3,0.5,-0.2,0.4,0.25,3000.),fr));
+        CHECK(std::fabs(fr.l+0.3)<1e-12&&std::fabs(fr.r-0.5)<1e-12&&std::fabs(fr.b+0.2)<1e-12&&std::fabs(fr.t-0.4)<1e-12&&
+              std::fabs(fr.n-0.25)<1e-12&&std::fabs(fr.f-3000.)<1e-6);
+    }
     std::printf("triple screens: %u checks\n",checks);
     return 0;
 }
