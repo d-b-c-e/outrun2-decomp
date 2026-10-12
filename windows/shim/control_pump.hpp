@@ -8,7 +8,8 @@
 
 namespace dbce::shim::control {
 // Busy: the open met a sharing or lock conflict (another handle holds the file incompatibly, e.g. a publisher in the
-// middle of replacing it). The pump retries it on later passes, for at most BusyBoundMs in a row (Pump::pass).
+// middle of replacing it). The pump retries it on later passes while it has been Busy for at most BusyBoundMs in a
+// row (exactly BusyBoundMs is still within the bound); more than that fails (Pump::pass).
 enum class ReadState { Missing, Bytes, Busy, Error };
 struct Read { ReadState state{ReadState::Missing}; std::string bytes, reason; };
 struct Journal {
@@ -36,7 +37,8 @@ struct Options { bool latched{},fences_verified{},force_absent{}; std::string ex
 enum class State { New, Polling, Failed, Closed };
 class Pump {
 public:
-    // A Busy inject.txt is retried for at most this long in a row; then the session fails as an I/O failure would.
+    // A Busy inject.txt is retried while it has been Busy for at most this long in a row (exactly this long is still
+    // within); after more than this the session fails, as an I/O failure would.
     static constexpr std::uint64_t BusyBoundMs=2000;
 private:
     Core& core_; Io& io_; const Options options_;
