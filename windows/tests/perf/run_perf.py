@@ -14,7 +14,9 @@ script into a race, N measured seconds, a graceful close, and the evidence in a 
   exit, game_host.cpp / xbox/source/main.cpp), perf.json with the parsed profile and the run's timing, and with --etw a
   wpr CPU+GPU trace whose merge runs only after the game has closed. Keep a no-ETW run as the fps reference.
 
-keys.json: a list of steps, each {"key": <name>, "at": <seconds after the window appears>, "hold": <seconds, default 0.1>}.
+keys.json: a list of steps, each {"key": <name>, "at": <seconds after the window appears>, "hold": <seconds, default 0.1>},
+or an object {"steps": [...], "measure_from": s, "requires_empty_savegame": true}; the last makes the preflight refuse a
+test copy whose SaveGame folder is not empty (it is checked, never cleared).
 Names: enter, esc, up, down, left, right, space, or a one-letter key a-z. "measure_from" (seconds, optional, top level
 when keys.json is an object {"steps": [...], "measure_from": s}) marks where the race is expected to be running; the
 measured window is --seconds from there.
@@ -50,6 +52,7 @@ def key_lparam(scan, extended, up):
 def load_keys(path):
     doc = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     steps, measure_from = (doc.get("steps"), doc.get("measure_from")) if isinstance(doc, dict) else (doc, None)
+    empty_savegame = bool(doc.get("requires_empty_savegame")) if isinstance(doc, dict) else False
     if not isinstance(steps, list) or not steps: raise ValueError("keys.json has no steps")
     out = []
     for s in steps:
@@ -60,7 +63,7 @@ def load_keys(path):
         out.append(dict(key=k, at=at, hold=hold))
     out.sort(key=lambda s: s["at"])
     if measure_from is None: measure_from = max(s["at"] + s["hold"] for s in out)
-    return out, float(measure_from)
+    return out, float(measure_from), empty_savegame
 
 
 def parse_profile(text):
@@ -134,8 +137,11 @@ def main():
     if (game / "dinput8.dll").exists(): problems.append("dinput8.dll beside the exe would load instead of the system DirectInput")
     if INJECT_ON.exists(): problems.append("%s exists: the process would latch" % INJECT_ON)
     if out.exists(): problems.append("result folder exists")
-    try: steps, measure_from = load_keys(o.keys)
-    except (OSError, ValueError, KeyError) as e: problems.append("keys: %s" % e); steps, measure_from = [], 0.0
+    try: steps, measure_from, empty_savegame = load_keys(o.keys)
+    except (OSError, ValueError, KeyError) as e: problems.append("keys: %s" % e); steps, measure_from, empty_savegame = [], 0.0, False
+    # A script that starts from "create new license" needs an empty SaveGame; the harness checks, it never deletes.
+    if empty_savegame and (not (game / "SaveGame").is_dir() or any((game / "SaveGame").iterdir())):
+        problems.append("the key script needs an empty SaveGame folder in the test copy")
     if not (0 < o.seconds <= 1800): problems.append("--seconds out of range")
     env = dict(os.environ)
     for kv in o.env:

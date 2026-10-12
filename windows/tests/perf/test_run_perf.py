@@ -24,15 +24,19 @@ with tempfile.TemporaryDirectory() as t:
     t = pathlib.Path(t)
     k = t / "keys.json"
     k.write_text(json.dumps({"steps": [{"key": "enter", "at": 5}, {"key": "UP", "at": 2, "hold": 0.5}], "measure_from": 20}))
-    steps, mf = run_perf.load_keys(k)
-    check([s["key"] for s in steps] == ["up", "enter"] and mf == 20.0, "steps sorted, names lower-cased, measure_from kept")
+    steps, mf, es = run_perf.load_keys(k)
+    check([s["key"] for s in steps] == ["up", "enter"] and mf == 20.0 and es is False, "steps sorted, names lower-cased, measure_from kept")
     k.write_text(json.dumps([{"key": "enter", "at": 3, "hold": 2}]))
-    steps, mf = run_perf.load_keys(k)
+    steps, mf, es = run_perf.load_keys(k)
     check(mf == 5.0, "measure_from defaults to the last key's release")
     for bad in ([], [{"key": "f13", "at": 1}], [{"key": "enter", "at": -1}], [{"key": "enter", "at": 1, "hold": 0}]):
         k.write_text(json.dumps(bad))
         try: run_perf.load_keys(k); failures.append("bad key script accepted: %r" % (bad,))
         except (ValueError, KeyError): pass
+
+    shipped = pathlib.Path(run_perf.__file__).with_name("keys-c2c-outrun-new-license.json")
+    steps, mf, es = run_perf.load_keys(shipped)
+    check(len(steps) == 13 and mf == 40.0 and es is True and steps[0]["key"] == "enter" and steps[-1]["at"] == 28.5, "the shipped C2C key script")
 
 # The V0 run 6 profile shape (artifacts/outrun-v0-20261011/v0-run6-OutRunXbox.log).
 log = "\n".join([

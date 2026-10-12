@@ -1,0 +1,72 @@
+{
+ "description": "zero 24236: from an empty SaveGame (create new license) to an OUTRUN2 race, DINO 246 GTS, automatic, SPLASH WAVE; the race loads in about 6 s, then the start countdown.",
+ "requires_empty_savegame": true,
+ "measure_from": 40,
+ "steps": [
+  {
+   "key": "enter",
+   "at": 6.0,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 9.0,
+   "hold": 0.1
+  },
+  {
+   "key": "down",
+   "at": 11.0,
+   "hold": 0.1
+  },
+  {
+   "key": "down",
+   "at": 11.5,
+   "hold": 0.1
+  },
+  {
+   "key": "down",
+   "at": 12.0,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 12.8,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 15.5,
+   "hold": 0.1
+  },
+  {
+   "key": "right",
+   "at": 18.0,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 18.8,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 21.5,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 24.0,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 26.0,
+   "hold": 0.1
+  },
+  {
+   "key": "enter",
+   "at": 28.5,
+   "hold": 0.1
+  }
+ ]
+}
