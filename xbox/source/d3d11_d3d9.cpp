@@ -435,6 +435,16 @@ void D3D11D3D9Device::uniform(unsigned slot,const void* data,std::size_t bytes){
     std::memcpy(m.pData,data,bytes);context_->Unmap(ubo_[slot].Get(),0);
     shadow.assign(static_cast<const std::uint8_t*>(data),static_cast<const std::uint8_t*>(data)+bytes);
 }
+// [Graphics] AnisotropicFiltering (the Tweaks key; 0 or 1 = the game's own filtering, 0 the default; 2..16 = that
+// anisotropy level): the samplers the
+// game filters linearly when minifying take anisotropic filtering at that level; point-filtered ones are left alone.
+namespace { unsigned g_anisotropy=0;bool g_transparency_supersampling=false; }
+void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;}
+// [Graphics] TransparencySupersampling (the Tweaks key; off by default): alpha-to-coverage for the alpha-tested,
+// unblended draws of the multisampled scene (barriers, foliage, cloth at the track edge). The game's alpha test still
+// discards below its reference, so nothing below it appears; above it, the texel's alpha becomes partial MSAA
+// coverage, which smooths the cut edge. Needs MSAA (options.ini antialiasing=msaa2/4); without it, no effect.
+void set_transparency_supersampling(bool on){g_transparency_supersampling=on;}
 void D3D11D3D9Device::apply_state(){
     // The logical PC target stretched to the back buffer's pixels; with the UI
     // rectangle, pretransformed (2D) draws keep a centred 4:3 area.
@@ -466,15 +476,12 @@ void D3D11D3D9Device::apply_state(){
     t.BlendEnable=render[RS_ALPHABLENDENABLE]!=0;t.SrcBlend=blend_factor(render[RS_SRCBLEND]);t.DestBlend=blend_factor(render[RS_DESTBLEND]);t.BlendOp=blend_op(render[RS_BLENDOP]);
     t.SrcBlendAlpha=alpha_factor(render[separate?RS_SRCBLENDALPHA:RS_SRCBLEND]);t.DestBlendAlpha=alpha_factor(render[separate?RS_DESTBLENDALPHA:RS_DESTBLEND]);
     t.BlendOpAlpha=blend_op(render[separate?RS_BLENDOPALPHA:RS_BLENDOP]);t.RenderTargetWriteMask=UINT8(render[RS_COLORWRITEENABLE]&15);
+    b.AlphaToCoverageEnable=g_transparency_supersampling&&back&&msaa_live_&&render[RS_ALPHATESTENABLE]!=0&&!t.BlendEnable?TRUE:FALSE;
     if(!last_blend_state_||std::memcmp(&b,&last_blend_,sizeof b)!=0){
         auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState");
         last_blend_=b;last_blend_state_=bs.Get();}
     if(bound_.blend!=last_blend_state_){context_->OMSetBlendState(last_blend_state_,nullptr,0xffffffffu);bound_.blend=last_blend_state_;}
 }
-// [Graphics] AnisotropicFiltering (the Tweaks key, 1..16; 0 = the game's own filtering, the default): the samplers the
-// game filters linearly when minifying take anisotropic filtering at that level; point-filtered ones are left alone.
-namespace { unsigned g_anisotropy=0; }
-void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;}
 void D3D11D3D9Device::bind_textures(){
     ID3D11ShaderResourceView* views[12];ID3D11SamplerState* samplers[6];
     for(unsigned s=0;s<6;++s){auto* o=object(textures[s]);auto* t=texture(textures[s]);

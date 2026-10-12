@@ -146,7 +146,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
         if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
-    // [Graphics] AnisotropicFiltering, the Tweaks key: 0 (absent) keeps the game's own filtering, 2..16 the anisotropy
+    // [Graphics] AnisotropicFiltering, the Tweaks key: 0 (absent) or 1 keeps the game's own filtering, 2..16 the anisotropy
     // level of its linearly filtered textures. An integer 0..16; anything else is logged and 0 applies.
     {   const auto text=settings.text("Graphics","AnisotropicFiltering");unsigned level=0u;bool ok=text.empty();
         if(!text.empty()&&text.size()<=2u&&std::all_of(text.begin(),text.end(),[](char c){return c>='0'&&c<='9';})){
@@ -164,6 +164,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }
         if(edge!=128u)std::printf("settings: car reflection %ux%u\n",edge,edge);
         outrun::platform::car_reflection_edge()=edge;}
+    // [Graphics] TransparencySupersampling, the Tweaks key: alpha-to-coverage for alpha-tested edges under MSAA. Off when
+    // absent.
+    {   const bool on=settings.flag("Graphics","TransparencySupersampling",false);
+        if(on)std::printf("settings: transparency supersampling (alpha-to-coverage under MSAA)\n");
+        outrun::xbox_runtime::set_transparency_supersampling(on);}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
