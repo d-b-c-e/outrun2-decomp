@@ -52,15 +52,19 @@ Validation completed before the performance-build hold:
   QueryPerformanceCounter directly. Mono Stopwatch had a different origin;
   its stale samples were correctly rejected by Core freshness before correcting
   the fixture. Production snapshot timestamps come from native QPC.
+- After the performance hold released, the full default P21 provider-host
+  harness passed at source commit `d46096c40fa3806bdde6223212af07b541163b5f`:
+  129 supervised host checks, 84 DInputProvider checks, clean teardown lexer
+  and compiler audits, and their mutation controls. Receipt:
+  `E:/Source/research/.worktrees/art-shim-bridge-evidence/p21-20261011/receipt.json`.
+  Optional extra `--mutations` host-defect cases were not run.
 
 The built x64 source candidate SHA-256 is
 `C4D76DA58E62867F938FC1388AC72632C480C3ECD6A83BB03279841E11E89E10`.
 It is build evidence only, not a release pin or a deployed artifact. No native
 device, game, force, runtime capture or saved-profile activation was attempted.
 
-Before integration: cross-review provider/host lifetime and original-clock
-assumptions, run the existing provider-host/P21 fake fault suites after the rig
-performance lease, assign reviewed native candidate provenance, then complete
+Before integration: assign reviewed native candidate provenance, then complete
 Art identity-based Rewired isolation and explicit startup/profile Apply.
 Existing Art menu/shifter/shortcut consumers stay legacy; only five driving
 axes have a shared-frame sink. The first rig work must be serialized, backed up,
