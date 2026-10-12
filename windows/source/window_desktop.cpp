@@ -271,13 +271,18 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
             return int(v);};
         dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
-        if(dd.active()){
-            outrun::platform::render_queues_extended()=true;
-            const char* from=nullptr;std::size_t excluded=0;
+        // The three-view spike may set sections behind later (native_window): its exclusions are read here too.
+        const char* views=std::getenv("OR2_TRIPLE_VIEWS");const bool spike=views&&std::string(views)=="1";
+        const char* from=nullptr;std::size_t excluded=0;
+        if(dd.active()||spike)
             for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
                 std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
                 const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
                 excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
+        if(spike&&!dd.active())std::printf("settings: three-view spike: %zu excluded nodes for its sections behind (%s)\n",excluded,
+            from?from:"no lods.ini");
+        if(dd.active()){
+            outrun::platform::render_queues_extended()=true;
             std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
                 from?from:"no lods.ini");
         }}
