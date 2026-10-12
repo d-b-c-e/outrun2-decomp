@@ -244,6 +244,15 @@ The `three-projections` status needs counted passes plus a WGC check of the seam
   against the sky. The culling union is still open.
 - One program flipping between outcomes flooded runtime.log (max frame 109 ms); `67d9cbd` logs each outcome once.
 
+**Side sky flicker (F10 and F11, 13:46-13:51):**
+- Captures every 2 s showed the side sky black in most frames. C5 and C6's frames had happened to land on good ones.
+- The recent-projection fallback (`a4e64aa`, `45c43e4`) matched nothing.
+- F11's dump identified the cause. The sky program's constants are the camera's P x the view rotation (no translation),
+  but their depth row is 1.1e-4 off the camera's (near term -0.099991 against -0.100002). That sits just outside the
+  affine test's 1e-4 tolerance, and drifts in and out frame by frame.
+- That column of M meets only P's depth row, so it bears only on clip z. Clip x, y and w, and so the side placement, are
+  exact for any M. The tolerance is now 1e-3 relative.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,

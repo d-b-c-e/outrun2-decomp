@@ -234,15 +234,22 @@ int main(){
             frame(px,pa);check(d.triple_draws==draws0+2&&d.triple_draws_recent==recent0+1,"current X, constants A: matched through the remembered A");
             frame(pb,pb);check(d.triple_draws==draws0+3&&d.triple_draws_recent==recent0+1,"current B: the current projection wins over the remembered A");
             frame(pb,pb);check(d.triple_draws==draws0+4&&d.triple_draws_recent==recent0+1,"current B again: still the current one");
+            // The race sky's constants carry a depth row 1.1e-4 off the camera's (F11 dump): a depth row 2e-4 off still
+            // matches the current projection (clip x, y and w do not depend on it); one 1% off stays single.
+            const float pa_near[16]{1,0,0,0, 0,1,0,0, 0,0,-2,-1, 0,0,-0.9998f,0},pa_far[16]{1,0,0,0, 0,1,0,0, 0,0,-2,-1, 0,0,-0.99f,0};
+            const auto unmatched0=d.triple_single_unmatched;
+            frame(pa,pa_near);check(d.triple_draws==draws0+5&&d.triple_draws_recent==recent0+1&&d.triple_single_unmatched==unmatched0,
+                                    "a depth row 2e-4 off: matched with the current projection");
+            frame(pa,pa_far);check(d.triple_draws==draws0+5&&d.triple_single_unmatched==unmatched0+1,"a depth row 1% off: single on the centre");
             for(unsigned row=0;row<4;++row){float c[4]{};c[row]=1;d.set_vertex_shader_constant_f(64+row,c,1);}
         }
         g_pc_triple_corrections=nullptr;
         check(tgpu.native_draws()>=n,"the three-view GPU device drew through the GPU vertex path");
-        check(tgpu.triple_draws==9&&tcpu.triple_draws==6,"draws replicated: 9 on the GPU path (5 + 4 remembered-projection frames), 6 on the CPU path");
+        check(tgpu.triple_draws==10&&tcpu.triple_draws==6,"draws replicated: 10 on the GPU path (5 + 5 counts-only frames), 6 on the CPU path");
         check(tgpu.triple_draws_recent==2&&tcpu.triple_draws_recent==0,"two GPU draws replicated with a recent projection");
         check(tgpu.triple_single_refused==1&&tcpu.triple_single_refused==1,"refused corrections keep the draw single");
-        check(tgpu.triple_single_unmatched==1&&tcpu.triple_single_unmatched==0,"a program without the projection keeps the draw single");
-        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==9&&tcpu.triple_frames==6,"three-view counts");
+        check(tgpu.triple_single_unmatched==2&&tcpu.triple_single_unmatched==0,"programs without the projection keep the draw single");
+        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==10&&tcpu.triple_frames==6,"three-view counts");
         std::printf("three views: GPU path %llu replicated, CPU path %llu replicated\n",(unsigned long long)tgpu.triple_draws,(unsigned long long)tcpu.triple_draws);
     }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());

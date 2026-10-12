@@ -692,14 +692,17 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
             if(!(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))<=tolerance))return false;
         return true;};
     // (K x P^-1)[r][3] = sum_k K[r][k] Pinv[k][3], with K[r][k] in register base+k, component r; slot -1 is the current
-    // projection, 0..3 a recent one.
+    // projection, 0..3 a recent one. That column of M meets only P's depth row, so it bears only on clip z: clip x, y and
+    // w are exact for any M (TRIPLE-SCREENS.md). Its tolerance is 1e-3 relative: the race sky's constants (F11 dump,
+    // 2026-10-12) are the camera's P x the view rotation with a depth row 1.1e-4 off the camera's (its near term
+    // -0.099991 against -0.100002), which 1e-4 refused in most frames and the side sky flickered black.
     const auto affine_with=[&](int base,int slot){
         if(slot<0?!triple_pinv_ok_:!triple_recent_[std::size_t(slot)].valid)return false;
         const auto& q=slot<0?triple_pinv_col3_:triple_recent_[std::size_t(slot)].pinv_col3;
         for(int r=0;r<4;++r){double s=0.,size=0.;
             for(int k=0;k<4;++k){const double t=double(vs_constants[std::size_t(base+k)][std::size_t(r)])*q[std::size_t(k)];s+=t;size+=std::fabs(t);}
             // Finite first: inf <= inf would pass the tolerance (sana 34429); a finite size bounds s.
-            if(!std::isfinite(size)||!(std::fabs(s-(r==3?1.:0.))<=1e-4*std::max(1.,size)))return false;}
+            if(!std::isfinite(size)||!(std::fabs(s-(r==3?1.:0.))<=1e-3*std::max(1.,size)))return false;}
         return true;};
     const auto affine=[&](int base){return affine_with(base,-1);};
     auto& p=triple_programs_[program];
