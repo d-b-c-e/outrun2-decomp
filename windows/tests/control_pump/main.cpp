@@ -15,12 +15,13 @@ std::string batch(int n,const std::string& command=""){
 struct Io final:c::Io {
     c::Read session{c::ReadState::Bytes,"nonce="+N+"\nexpires=2000\n",{}},input;
     int session_reads{},batch_reads{},appends{},finishes{};bool write_ok=true,throws=false;
-    std::uint64_t now=1000;
+    std::uint64_t now=1000,mono=0;
     std::vector<c::Journal> journal;
     std::function<void()> on_session,on_batch,on_append;
     c::Read read_session()override{++session_reads;if(on_session)on_session();return session;}
     c::Read read_batch()override{++batch_reads;if(on_batch)on_batch();if(throws)throw std::runtime_error("read fault");return input;}
     std::uint64_t unix_seconds()override{return now;}
+    std::uint64_t monotonic_ms()override{return mono;}
     bool append(const c::Journal& j)override{++appends;if(on_append)on_append();if(write_ok)journal.push_back(j);return write_ok;}
     bool finish()override{++finishes;return true;}
 };
@@ -70,6 +71,37 @@ void failures(){
         check(r.pump.reason()==reason&&r.value()==0,"failure cannot recover silently");
     }
 }
+void busy(){
+    const c::Read busy{c::ReadState::Busy,{},"snapshot open busy (Win32 32)"};
+    // Transient: a sharing conflict for a while, then the next batch reads and is offered.
+    {Rig r;r.start();r.io.input=busy;
+     for(int i=0;i<5;++i){r.io.mono+=100;r.pump.pass();}
+     check(r.pump.state()==c::State::Polling&&r.tick().run==Run::Running,"a Busy read within the bound does not fail the session");
+     check(r.pump.busy_passes()==5&&r.pump.batches_offered()==1,"Busy passes offer nothing");
+     r.io.input={c::ReadState::Bytes,batch(2),{}};r.io.mono+=100;r.pump.pass();
+     check(r.pump.batches_offered()==2&&r.tick().run==Run::Running&&r.value()==1,"the next batch after a transient Busy is offered and applies");}
+    // Prolonged: Busy past the bound fails the session neutral, as an I/O failure.
+    {Rig r;r.start();r.io.input=busy;
+     r.pump.pass();r.io.mono+=c::Pump::BusyBoundMs;r.pump.pass();
+     check(r.pump.state()==c::State::Polling,"exactly the bound is still within it");
+     r.io.mono+=1;r.pump.pass();
+     check(r.pump.state()==c::State::Failed&&r.pump.reason().find("busy for more than")!=std::string::npos,"Busy past the bound fails, with the reason");
+     check(r.tick().run==Run::Failed&&r.value()==0,"the failed session is neutral");}
+    // A held batch expires on its original deadline while Busy: Busy never renews it.
+    {Rig r;r.start();check(r.value()==1,"the batch holds its button");r.io.input=busy;
+     r.io.mono+=10;r.pump.pass();r.tick(60000);   // past the batch's ms=50 hold
+     check(r.value()==0,"the held batch expired neutral on its own deadline during Busy");
+     check(r.pump.state()==c::State::Polling,"and the session is still polling within the bound");}
+    // The bound restarts only after a successful snapshot or a missing file.
+    for(int mode=0;mode<2;++mode){Rig r;r.start();r.io.input=busy;
+     r.pump.pass();r.io.mono+=1500;r.pump.pass();
+     r.io.input=mode==0?c::Read{c::ReadState::Missing,{},{}}:c::Read{c::ReadState::Bytes,batch(1),{}};r.io.mono+=10;r.pump.pass();
+     r.io.input=busy;r.pump.pass();r.io.mono+=1500;r.pump.pass();
+     check(r.pump.state()==c::State::Polling,mode==0?"a missing file restarts the Busy bound":"a successful snapshot restarts the Busy bound");}
+    // An Error stays fatal at once, even right after Busy passes (size, reparse and read errors are never retried).
+    {Rig r;r.start();r.io.input=busy;r.pump.pass();r.io.input={c::ReadState::Error,{},"snapshot grew during read"};r.pump.pass();
+     check(r.pump.state()==c::State::Failed&&r.tick().run==Run::Failed,"an Error after Busy still fails at once");}
+}
 void shutdown(){
     {Rig r;r.core.close_control();r.pump.pass();check(r.io.session_reads==0&&r.io.batch_reads==0,"preclosed gate never touches files");
      check(r.core.offer_batch(batch(1)).verdict==BatchVerdict::Refused,"Core independently refuses after close");
@@ -107,4 +139,4 @@ void final_evidence(){
     check(strict_utf8(bounded_diagnostic("bad\xff")),"invalid diagnostic replaced by valid text");
 }
 }
-int main(){try{basics();failures();shutdown();final_evidence();std::cout<<"PASS "<<checks<<" control-pump checks\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{basics();failures();busy();shutdown();final_evidence();std::cout<<"PASS "<<checks<<" control-pump checks\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

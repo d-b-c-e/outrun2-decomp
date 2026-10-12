@@ -32,7 +32,9 @@ void files(const fs::path& root){
     HANDLE writer=CreateFileW((root/L"old").c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
     check(writer!=INVALID_HANDLE_VALUE,"competing writer fixture open");
     auto denied=c::read_snapshot((root/L"old").wstring(),512);CloseHandle(writer);
-    check(denied.state==c::ReadState::Error&&denied.bytes.empty(),"existing writer refuses snapshot");
+    check(denied.state==c::ReadState::Busy&&denied.bytes.empty()&&denied.reason.find("Win32 32")!=std::string::npos,
+          "existing writer refuses snapshot as Busy (a sharing conflict), with no bytes");
+    check(c::read_snapshot((root/L"old").wstring(),512).bytes=="new bytes","once the writer closes, the snapshot reads");
     {c::SnapshotFile held((root/L"old").wstring(),512);
      writer=CreateFileW((root/L"old").c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,0,nullptr);
      check(writer==INVALID_HANDLE_VALUE,"snapshot refuses new in-place writer");

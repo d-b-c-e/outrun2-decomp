@@ -25,6 +25,9 @@ public:
         if(file_==INVALID_HANDLE_VALUE){
             const DWORD e=GetLastError();
             if(e==ERROR_FILE_NOT_FOUND||e==ERROR_PATH_NOT_FOUND)result_={ReadState::Missing,{},{}};
+            // Another handle holds the file incompatibly (a writer, or a publisher mid-replace). Nothing is read, and
+            // the pump decides whether to wait (Busy, bounded) or fail.
+            else if(e==ERROR_SHARING_VIOLATION||e==ERROR_LOCK_VIOLATION)result_={ReadState::Busy,{},"snapshot open busy (Win32 "+std::to_string(e)+")"};
             else error("snapshot open refused",e);
             return;
         }
