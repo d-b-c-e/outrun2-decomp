@@ -51,6 +51,10 @@ inline bool g_pc_use_hidef_characters=true;
 // GH00 7 (race_robots.hpp race_robot_hidef_passenger). Ending: race_ending.hpp ending_jp_motion_set /
 // ending_heroine_resource and race_autoscene.cpp 4B5A80 (the 4B5AE6 force of 0xE to 0xF skipped).
 inline bool g_pc_restore_jp_clarissa=false;
+// [Misc] DisableCountdownTimer (the Tweaks key, off by default there and here; Tweaks clears the PC's
+// Sumo_CountdownTimerEnable, .data 637911): the race clock does not count down. The byte's only two readers (450B03 /
+// 450B4B) are race_manager.cpp's time_decrement_637911 tests; race_manager_runtime.cpp sets it from this.
+inline bool g_pc_disable_countdown_timer=false;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'

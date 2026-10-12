@@ -1,5 +1,6 @@
 #include "system/exe_image.hpp"
 #include <cstring>
+#include "platform/pc_screen.hpp"
 #include "platform/race_variant_owners.hpp"
 #include "platform/race_ghosts_runtime.hpp"
 #include "platform/race_manager_runtime.hpp"
@@ -71,7 +72,7 @@ struct Binding final : RaceManagerServices {
         w.variant_780258=std::int32_t(c.game_mode.game_variant);
         w.mode_78026c=std::int32_t(c.mode_state.current);
         w.difficulty_7c24c0=std::int32_t(le32(c.event_function36.frontend_profiles.active.data()+0xe0)); // 7C23E0 license +E0
-        w.time_decrement_637911=1;                                        // .data 637911, no writer in .text
+        w.time_decrement_637911=g_pc_disable_countdown_timer?0:1;         // .data 637911 (no writer in .text; Tweaks' DisableCountdownTimer clears it)
         w.ranking_80fb14=c.race.car_world.gate_80fb14;
         auto& rt=c.game_mode.course_runtime;
         w.network_7f95a8=rt.force_mode_7f95a8;

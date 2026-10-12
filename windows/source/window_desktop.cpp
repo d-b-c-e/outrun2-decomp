@@ -337,6 +337,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // mode and the arcade ending (pc_screen.hpp).
     outrun::platform::g_pc_restore_jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
     if(outrun::platform::g_pc_restore_jp_clarissa)std::printf("settings: Clarissa's Japanese model restored (O2SP arcade and ending)\n");
+    // [Misc] DisableCountdownTimer, the Tweaks key (off unless set true, as there): the race clock stands still (pc_screen.hpp).
+    outrun::platform::g_pc_disable_countdown_timer=settings.flag("Misc","DisableCountdownTimer",false);
+    if(outrun::platform::g_pc_disable_countdown_timer)std::printf("settings: countdown timer disabled (the race clock stands still)\n");
     // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md step 1; 2, keep centred, by default here until
     // Tweaks' 1 is built): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp).
     {   std::string note;
