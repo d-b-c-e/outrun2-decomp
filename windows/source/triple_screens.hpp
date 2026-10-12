@@ -2,9 +2,12 @@
 // [Triple] Screens (STD-022: Off / Surround / Separate monitors) and the pure rules behind it, tested offline
 // (windows/tests/test_triple_screens.cpp); window_desktop.cpp feeds them the INI text and EnumDisplayMonitors.
 // Design and review: windows/docs/TRIPLE-SCREENS.md.
+#include "triple_rig.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -90,6 +93,50 @@ inline int triple_union_env(const char* text,int fallback,int max){
 }
 inline TripleUnion triple_default_union(int increase,int behind,const char* env_ahead,const char* env_behind){
     return {increase>0?increase:triple_union_env(env_ahead,64,1024),behind>0?behind:triple_union_env(env_behind,64,256)};
+}
+// The [Triple] rig keys for applied Angled views (TRIPLE-SCREENS.md "Rig settings and the physical eye"; sana 37757):
+// the portfolio's names and ranges (Wheelkit RigProfile.GeometryValue / ScreenSetup, DRIVE's [Triple]). The defaults
+// are the toolkit's fixture rig with its 8 mm gap, exactly (fixture_rig), and MatchGameFov = true: the views as before.
+struct TripleRigSettings {
+    double panel_width_mm{fixture_rig(8.).panel_width_mm},panel_height_mm{fixture_rig(8.).panel_height_mm};
+    double eye_distance_mm{660.},side_angle_deg{70.},bezel_mm{8.};
+    bool match_game_fov{true};
+};
+// Reads them through text(key) (the INI's [Triple] value, "" when absent). A value that is not a finite number in its
+// range (SideAngle: 0 to below 90), or a MatchGameFov other than true / false (any case, blanks around ignored), is
+// refused: one note each in `notes`, and that key's default applies.
+template<class Text> TripleRigSettings parse_triple_rig(Text text,std::vector<std::string>& notes){
+    TripleRigSettings s;
+    const auto trimmed=[](std::string t){
+        while(!t.empty()&&std::isspace(static_cast<unsigned char>(t.back())))t.pop_back();
+        std::size_t a=0;while(a<t.size()&&std::isspace(static_cast<unsigned char>(t[a])))++a;
+        return t.substr(a);};
+    struct Key { const char* name; double TripleRigSettings::*field; double min,max; bool below_max; };
+    static constexpr Key keys[]{{"PanelWidthMm",&TripleRigSettings::panel_width_mm,100.,3000.,false},
+        {"PanelHeightMm",&TripleRigSettings::panel_height_mm,100.,2000.,false},{"EyeDistanceMm",&TripleRigSettings::eye_distance_mm,200.,3000.,false},
+        {"SideAngle",&TripleRigSettings::side_angle_deg,0.,90.,true},{"BezelMm",&TripleRigSettings::bezel_mm,0.,100.,false}};
+    for(const Key& k:keys){
+        const std::string t=trimmed(std::string(text(k.name)));if(t.empty())continue;
+        char* end=nullptr;const double v=std::strtod(t.c_str(),&end);
+        if(end!=t.c_str()&&*end=='\0'&&std::isfinite(v)&&v>=k.min&&(k.below_max?v<k.max:v<=k.max)){s.*k.field=v;continue;}
+        char note[160];std::snprintf(note,sizeof note,"%s = %.32s refused (%g to %s%g); %g applies",k.name,t.c_str(),k.min,
+                                     k.below_max?"below ":"",k.max,s.*k.field);
+        notes.push_back(note);
+    }
+    std::string m=trimmed(std::string(text("MatchGameFov")));
+    for(char& ch:m)ch=char(std::tolower(static_cast<unsigned char>(ch)));
+    if(m=="false")s.match_game_fov=false;
+    else if(!m.empty()&&m!="true")notes.push_back("MatchGameFov = "+m.substr(0,32)+" refused (true or false); true applies");
+    return s;
+}
+inline TripleRig triple_rig_from(const TripleRigSettings& s){
+    return {s.panel_width_mm,s.panel_height_mm,s.eye_distance_mm,s.side_angle_deg,s.side_angle_deg,0.,s.bezel_mm};
+}
+// MatchGameFov = false: the race camera's vertical FOV (radians) at which the centre panel's frustum is the physical
+// eye's. It is taken from the panel's width and the render's aspect (the panel's pixels), so triple_views' matched eye is
+// exactly EyeDistanceMm; PanelHeightMm agrees with it when the panel's millimetres have its pixels' aspect.
+inline double triple_physical_fov_y(const TripleRigSettings& s,double render_aspect){
+    return 2.*std::atan(s.panel_width_mm/2./s.eye_distance_mm/render_aspect);
 }
 // What the window and the views are, for runtime.log and the F6 Cameras page (filled once the window opens).
 struct TripleStatus {

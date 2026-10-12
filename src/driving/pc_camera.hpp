@@ -51,6 +51,12 @@ void camera_view_482f20(Bytes camera,PcMatrixStack&,PcCameraDevice&,float blend)
 // 485FE0 control), 484BD0 first writes Tweaks' near plane to +BC, as Tweaks' CalcCameraMatrix hook does.
 struct CameraZnearContext { bool armed{}; std::uint32_t mode_78026c{}; std::int32_t car_model{-1}; };
 CameraZnearContext& camera_znear_context();
+// Three projected views with [Triple] MatchGameFov = false (windows/docs/TRIPLE-SCREENS.md): while fov_y is above 0 (the
+// host sets it around the main camera's 485FE0 control in race and goal modes only), 484BD0 replaces the +A0 / +A4 that
+// 483C10 derived from +AC with this vertical FOV (radians) and its horizontal at the screen aspect. +AC is untouched, so
+// the game's own FOV returns at the next projection outside that window.
+struct CameraFovContext { float fov_y{}; };
+CameraFovContext& camera_fov_context();
 // Tweaks' rule: 1.0 in the chase or bumper view (+34A 2 or 0) with no camera switch running (+364 == 0) in GAME (0x10)
 // or GOAL (0x13); 0.1 during a switch or outside GAME; otherwise (the in-car view in GAME) 0.25, or 0.2 for the
 // 360SP (car model 7, which still shows a gap at 0.25).
