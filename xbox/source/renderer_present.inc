@@ -17,8 +17,11 @@ bool present_frame(RendererImpl& r){
         // binary always executes the pixel shaders and presents every frame.
         r.device->count_only=!rasterize;
         if(r.video_pending){r.video_pending=false;r.device->resize_back_buffer(r.video_width,r.video_height);}
-        const bool span=platform::g_pc_wide_aspect>0.f;   // planar span: the 2D keeps its centred 4:3 too
-        r.device->set_ui_rect(g_widescreen||span);r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
+        const bool span=platform::g_pc_wide_aspect>0.f;
+        // The 2D layer's rectangle (display_fit.hpp ui_scaling_rect): the centred 4:3 on 16:9 and on a planar span, or
+        // with UIScalingMode 0 stretched over the frame, or over the span's centre panel.
+        const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect);
+        r.device->set_ui_rect(ui.on,ui.aspect);r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
         r.device->begin_frame();
         if(!r.start_loading_visible&&r.scene){
             r.device->clear(3u,0xff000000u,1.0f,0u);

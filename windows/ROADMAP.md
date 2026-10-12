@@ -65,7 +65,8 @@ needed in a native build.
 | Telemetry | Enable, SharedMemName | ⬜ | step 5 |
 | FFB | all | ⬜ | step 4 |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
-| | UIScalingMode, UILetterboxing | ⬜ | |
+| | UIScalingMode | 🟡 | step 1 of windows/docs/UI-SCALING.md: 2 (keep centred, the centred 4:3) by default here until Tweaks' 1 is built; 0 stretches the 2D over the 16:9 frame, or over a span's centre panel only; 1 and invalid values log a line and apply 2. Tweaks' 1 (HUD spacing to the edges) is step 2: the scope map is in the note. Unit-tested (test_triple_screens); not yet seen in game |
+| | UILetterboxing | ⬜ | |
 | | AnisotropicFiltering, ReflectionResolution, TransparencySupersampling | ✅ | `[Graphics]`, off by default; anisotropy only on samplers linear in both min and mag (the HUD stays sharp); alpha-to-coverage only under MSAA |
 | | DisableVehicleLODs, DisableStageCulling | ✅ | off by default. With all five options on (2026-10-12 A/B, n = 1 vs 2): GPU draws about 2.1x and 1 to 2.5 % of race frames miss vsync; not attributed per option |
 | | ScreenEdgeCullFix | 🟡 | on by default as in Tweaks: the object test 4F0E40 (cones, course objects, gates) takes the widened widescreen bounds 4F02D0 (cars) already had; identical at 4:3; not yet seen in game |

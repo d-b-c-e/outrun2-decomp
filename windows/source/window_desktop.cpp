@@ -5,6 +5,8 @@
 // folder, like the original one; settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
+#include "display_fit.hpp"
+#include "renderer.hpp"
 #include "d3d11_d3d9.hpp"
 #include "platform/pc_car_reflection.hpp"
 #include "platform/pc_render_queue.hpp"
@@ -335,6 +337,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // mode and the arcade ending (pc_screen.hpp).
     outrun::platform::g_pc_restore_jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
     if(outrun::platform::g_pc_restore_jp_clarissa)std::printf("settings: Clarissa's Japanese model restored (O2SP arcade and ending)\n");
+    // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md step 1; 2, keep centred, by default here until
+    // Tweaks' 1 is built): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp).
+    {   std::string note;
+        outrun::xbox_runtime::g_ui_scaling_mode=outrun::xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note);
+        if(!note.empty())std::printf("settings: [Graphics] %s\n",note.c_str());
+        if(outrun::xbox_runtime::g_ui_scaling_mode==0u)
+            std::printf("settings: UI scaling 0: the 2D stretched over the 16:9 frame (over the centre panel on a span)\n");}
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
