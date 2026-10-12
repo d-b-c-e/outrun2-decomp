@@ -78,7 +78,6 @@ static partial class Program {
         try{
             if(!seal)VerifyRecordingSeal(dir);
             var rows=ValidateQueued(dir);
-            Check(FinalChannels.All(rows[0].Channels.ContainsKey),"complete post-arbitration input channels");
             var artifact=ValidateRecordingReport(dir,request,exe,pid,creation);
             if(seal){ArtifactSeal.CompleteNamed(dir,RecordingSeal,RecordingRequired);VerifyRecordingSeal(dir);}
             var result=new {schema="outrun.recording-verified@1",requestId=request,processId=pid,processCreationFileTime=creation,

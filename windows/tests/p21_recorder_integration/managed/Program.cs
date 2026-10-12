@@ -74,6 +74,7 @@ static partial class Program {
             count.LimitCount==0&&count.ErrorCount==0&&count.AcceptedMarkers==0&&count.WrittenMarkers==0,"inner worker accounting");
         Check(records.All(x=>x.Marker==null),"fixture has no event journal");
         var rows=records.Where(x=>x.Sample!=null).Select(x=>x.Sample).ToArray();Check((ulong)rows.Length==written,"complete rows");
+        if(RecordingV2(dir))Check(FinalChannels.All(rows[0].Channels.ContainsKey),"complete post-arbitration input channels");
         var declared=desktop?U(File.ReadAllText(Path.Combine(dir,"budget.tsv")).TrimEnd('\r','\n').Split('\t')[0]):382UL;
         var names=rows[0].Channels.Keys.OrderBy(x=>x,StringComparer.Ordinal).ToArray();Check((ulong)names.Length==declared,"complete two-device plus adapter schema and inputs");
         for(int i=0;i<rows.Length;++i){var row=rows[i];var c=row.Channels;var seq=Wide(c,"frame");var tick=Wide(c,"tickUs");

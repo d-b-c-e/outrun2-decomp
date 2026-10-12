@@ -124,6 +124,20 @@ for name, channel in [('missing-final-channel','final.steering'),('missing-keybo
     (d/'budget.tsv').write_text(f'{len(names)}\t{192+sum(len(json.dumps(n))+34 for n in names)}\t16432\n',encoding='utf-8')
     refresh_source(d,modified); write_json(d/'recorder-complete.json',completion(d))
     command(d,name,expected=1)
+    # A byte-correct digest cannot make an invalid recording valid through the process-level API.
+    sealed = sorted(members+['recorder-complete.json'])
+    (d/'recording-complete.tsv').write_text('dbce-playback-seal-v1\n'+''.join(f'{n}\t{(d/n).stat().st_size}\t{sha(d/n)}\n' for n in sealed),encoding='utf-8',newline='\n')
+    write_json(d/'host-shutdown.json',dict(state='resolved',nonce=request,recorderJoined=True,recorderOutcome=2,
+        unresolved=[],pid=pid,creationTime=creation))
+    write_json(d/'exit.json',dict(pid=pid,creationTime=creation,forced=False,exitCode=0))
+    process_members = sorted(sealed+['recording-complete.tsv','host-shutdown.json','exit.json'])
+    for mode in ['--seal-export','--read-export']:
+        if mode=='--read-export':
+            (d/'complete.tsv').write_text('dbce-playback-seal-v1\n'+''.join(f'{n}\t{(d/n).stat().st_size}\t{sha(d/n)}\n' for n in process_members),encoding='utf-8',newline='\n')
+        p=subprocess.run(['dotnet',str(a.dll),mode,str(d),str(a.result/(name+mode+'.txt'))],capture_output=True,text=True,timeout=30)
+        (a.result/(name+mode+'.log')).write_text(p.stdout+p.stderr,encoding='utf-8')
+        assert p.returncode!=0 and 'complete post-arbitration input channels' in p.stderr,(name,mode,p.stdout,p.stderr)
+        checks.append(dict(name=name+mode,refused=True))
 
 # Saving while alive does not bypass the process seal. It still needs the SAME host plus a normal external exit.
 for name, forced, different in [('normal-exit',False,False),('forced-exit',True,False),('other-process',False,True)]:
