@@ -226,7 +226,10 @@ void pace_frames(unsigned fps){
     std::fprintf(stdout,"Xbox display: %u fps on a %u Hz output (present interval %u)\n",fps,output_refresh(),g_interval);
 }
 bool D3D11Display::present(std::string& error){
-    auto& g=graphics();screenshot(g);
+    auto& g=graphics();
+    // The desktop's overlay (the F6 panel), on the whole back buffer before the screenshot: what the player sees.
+    if(const auto overlay=present_overlay())overlay(g.device.Get(),g.context.Get(),g.target.Get(),g.width,g.height);
+    screenshot(g);
     const HRESULT hr=g.swap_chain->Present(g_interval,0);
     if(FAILED(hr)){error="Present failed (HRESULT "+std::to_string(unsigned(hr))+")";return false;}
     // A closed window (WM_CLOSE: the X button, Alt+F4, a test harness) is not a failed frame. It stops the application,

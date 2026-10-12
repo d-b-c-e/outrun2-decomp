@@ -11,6 +11,11 @@ namespace outrun::xbox_runtime {
 // Unset on the Xbox and in the PC test build.
 using InputFilter=void(*)(outrun::platform::NativeInputState&,const outrun::platform::NativeRuntimeContext* runtime);
 InputFilter& input_filter();
+// Desktop builds draw their own overlay (the F6 panel, windows/source/desktop_panel) into the back buffer just before
+// each frame is presented: the D3D11 device, its immediate context and the back buffer's render target view (void*, so
+// this header stays free of graphics headers), and the swap chain's full size. Unset on the Xbox and in the PC test build.
+using PresentOverlay=void(*)(void* device,void* context,void* back_buffer_view,unsigned width,unsigned height);
+PresentOverlay& present_overlay();
 // A latched (test) desktop process: home() is this run folder and the game folder is only read (data, the EXE image
 // cache). Empty in every other process. Set by the desktop entry point before or2_xbox_main.
 std::string& latched_home();

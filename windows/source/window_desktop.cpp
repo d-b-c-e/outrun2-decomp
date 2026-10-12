@@ -7,6 +7,7 @@
 #include "d3d11_display.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
+#include "desktop_panel.hpp"
 #include "d3d11_d3d9.hpp"
 #include "platform/pc_car_reflection.hpp"
 #include "platform/pc_render_queue.hpp"
@@ -298,8 +299,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // OR2_FFB_TRACE in ordinary play); no device output at all.
     outrun::desktop::ffb_configure(settings,plan.latched,plan.latched?fence::utf8(plan.run_root):std::string());
     outrun::desktop::ffb_wrap_input_filter();
+    // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
+    outrun::desktop::desktop_panel_configure(settings,plan.latched,plan.latched?fence::utf8(plan.run_root):std::string());
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
+    outrun::desktop::desktop_panel_shutdown();
     outrun::desktop::telemetry_shutdown();
     outrun::desktop::ffb_shutdown();
     if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files){
