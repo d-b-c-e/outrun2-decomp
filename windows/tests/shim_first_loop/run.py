@@ -40,6 +40,11 @@ MENU_SCRIPT = [(6.0, "confirm"), (9.0, "confirm"), (11.0, "navDown"), (11.5, "na
                (15.5, "confirm"), (18.0, "navRight"), (18.8, "confirm"), (21.5, "confirm"), (24.0, "confirm"), (26.0, "confirm"),
                (28.5, "confirm")]
 MENU_FALLBACK_AFTER = 12.0     # seconds after the script's last step with no race before the confirm/start presses resume
+MENU_MIN_GAP = 0.4             # seconds between any two presses: each is a 200 ms hold, so the game samples a release
+# The race's identity from the run's runtime.log exit summary (romi 24552): the stage the world loads, the retail car
+# and the selected course descriptor. R3 compares a first run's tape only on the same route.
+ROUTE_LINES = {"stage": re.compile(r"world source: .*[\\/]Stage[\\/]([^\\/]+)[\\/]"),
+               "car": re.compile(r"retail driving car=(\d+)"), "course": re.compile(r"course descriptors=\S+ records=\d+ depth=\d+ selected=(\d+)")}
 REPLAY_END = re.compile(r"input shim: replay end at live frame (\d+): (\d+) of (\d+) tape rows played \(([^)]*)\)")
 SIGNAL = re.compile(r"input shim: frame (\d+) run (\w+) mode (\d+)( race)? record steer (-?\d+) accel (\d+) brake (\d+) "
                     r"buttons ([0-9a-f]+) consumed steer (-?\d+) accel (-?\d+) brake (-?\d+)")
@@ -88,10 +93,34 @@ def inject_expiry(start, startup_seconds, budget):
 def next_menu_action(script, since_window, sent, last_press_age, presses):
     """The menu press due now, or None: the next script step once its time has come (one per poll, in order), then,
     MENU_FALLBACK_AFTER seconds past the script's end, the former start/confirm presses 1.5 s apart, 40 presses in all."""
-    if since_window is None or presses >= 40: return None
+    if since_window is None or presses >= 40 or last_press_age < MENU_MIN_GAP: return None
     if sent < len(script): return script[sent][1] if since_window >= script[sent][0] else None
     if since_window < script[-1][0] + MENU_FALLBACK_AFTER or last_press_age <= 1.5: return None
     return "start" if (presses - len(script)) % 3 == 0 else "confirm"
+
+
+def route_identity(log_text):
+    """The last stage, car and course the run's runtime.log names (an empty value: not logged)."""
+    out = {}
+    for key, rx in ROUTE_LINES.items():
+        found = rx.findall(log_text)
+        out[key] = found[-1] if found else None
+    return out
+
+
+def route_of(receipt, log_text):
+    """How this run reached its race: by the menu script alone (no fallback press), and the identity the log names."""
+    presses = receipt.get("presses") or []
+    return dict(scriptedOnly=bool(presses) and all(p.get("scripted") for p in presses),
+                script=[list(step) for step in MENU_SCRIPT], identity=route_identity(log_text))
+
+
+def same_route(first, second):
+    """R3 compares only on the first run's route: both by the script alone, the same script, the same logged identity."""
+    if not (first and second and first.get("scriptedOnly") and second.get("scriptedOnly")): return False
+    if first.get("script") != second.get("script"): return False
+    a, b = first.get("identity") or {}, second.get("identity") or {}
+    return all(a.get(k) is not None and a.get(k) == b.get(k) for k in ROUTE_LINES)
 
 
 def replay_due(now, phase_at, replay_timeout, playback_end):
@@ -168,6 +197,8 @@ def verdict(receipt):
     seal_result = receipt.get("seal")
     if not (isinstance(seal_result, dict) and seal_result.get("exit") == 0): failures.append("capture not sealed: %s" % str(seal_result)[:200])
     r3 = receipt.get("r3")
+    if r3 is not None and not same_route(r3.get("firstRoute"), receipt.get("route")):
+        failures.append("R3 did not race the first run's route: %s vs %s" % (json.dumps(r3.get("firstRoute")), json.dumps(receipt.get("route"))))
     if r3 is not None:   # an R3 replay run: the whole tape played, and the race progressed while it did
         if not r3.get("playbackComplete"): failures.append("replay playback incomplete: %s" % r3.get("playbackEnd"))
         cmp = r3.get("compare")
@@ -239,6 +270,8 @@ def main():
         try:
             r1 = json.loads((first / "receipt.json").read_text())
             if r1.get("result") != "pass": problems.append("--replay-of is not a passing run")
+            r1_route = r1.get("route") or {}
+            if not r1_route.get("scriptedOnly"): problems.append("--replay-of reached its race through fallback presses: its course and car are not established")
             # The same candidate plays its own tape (nene audit): another build may consume the same words differently.
             r1_sha = (r1.get("plan") or {}).get("candidateSha256")
             if not o.candidate.exists() or r1_sha != sha(o.candidate):
@@ -274,7 +307,7 @@ def main():
                    injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
                              "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")
     if tape:
-        receipt["r3"] = dict(playbackComplete=False, playbackEnd=None, compare=None,
+        receipt["r3"] = dict(playbackComplete=False, playbackEnd=None, compare=None, firstRoute=r1.get("route"),
             label="menus: injected presses as above; race: the first run's recorded normalized Frame actions, played at the adapter "
                   "boundary while the live latched session is Running (Astra 16754): not physical input, not a raw-to-Core replay, no route claim")
     nonce = "".join(random.choices(string.ascii_letters + string.digits, k=16))
@@ -387,6 +420,7 @@ def main():
         receipt["maxRecordSteer"] = max([abs(int(m.group(5))) for m in sig], default=0)
         receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
         receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
+        receipt["route"] = route_of(receipt, (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else "")
         failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
         print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",

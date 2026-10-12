@@ -73,8 +73,18 @@ check(not run.valid_race_seconds(json.loads('{"raceSeconds": Infinity}')["raceSe
 script = run.MENU_SCRIPT
 check(run.next_menu_action(script, None, 0, 99, 0) is None, "no press before the game window appears")
 check(run.next_menu_action(script, 5.9, 0, 99, 0) is None and run.next_menu_action(script, 6.0, 0, 99, 0) == "confirm", "the first step at its time")
-check(run.next_menu_action(script, 30.0, 2, 0.1, 2) == "navDown", "a late poll sends the next unsent step, not a later one")
-check(run.next_menu_action(script, 18.0, 7, 0.1, 7) == "navRight", "OUTRUN mode is a navRight")
+check(run.next_menu_action(script, 30.0, 2, 0.4, 2) == "navDown", "a late poll sends the next unsent step, not a later one")
+check(run.next_menu_action(script, 30.0, 3, 0.2, 3) is None, "a late scripted step still waits MENU_MIN_GAP after the last press")
+# Late start: the three navDowns all due at once must still go out MENU_MIN_GAP apart, so each 200 ms hold is released.
+sent_at, sent, last = [], 2, -99.0
+for k in range(60):
+    now = 30.0 + 0.2 * k
+    a_ = run.next_menu_action(script, now, sent, now - last, sent)
+    if a_ == "navDown": sent_at.append(now); sent += 1; last = now
+    elif a_: break
+gaps = [y - x for x, y in zip(sent_at, sent_at[1:])]
+check(len(sent_at) == 3 and all(g >= run.MENU_MIN_GAP - 1e-9 and g - 0.2 >= 0.2 - 1e-9 for g in gaps), "late consecutive navDowns keep a release gap: %r" % gaps)
+check(run.next_menu_action(script, 18.0, 7, 0.5, 7) == "navRight", "OUTRUN mode is a navRight")
 check([a for _, a in script].count("navDown") == 3 and script[-1] == (28.5, "confirm"), "zero's mapped path: three downs, music confirm last")
 done = len(script)
 check(run.next_menu_action(script, script[-1][0] + run.MENU_FALLBACK_AFTER - 0.1, done, 99, done) is None, "no fallback press before its delay")
@@ -83,6 +93,21 @@ check(run.next_menu_action(script, 60, done, 1.0, done + 1) is None, "fallback p
 check(run.next_menu_action(script, 60, done, 2.0, done + 1) == "confirm", "then confirm, as before")
 check(run.next_menu_action(script, 60, done, 99, 40) is None, "40 presses in all")
 check(all("%s = button" % a in run.PROFILE for a in ("navLeft", "navRight")), "the test profile binds navLeft/navRight")
+# Route identity (romi 24552): R3 compares only on the first run's course and car.
+log = "\n".join(["world source: E:\\Games\\X/Stage/BEAC/*.sz", "retail driving car=0 column=0 params=9880",
+                  "course descriptors=66/77 records=15 depth=4 selected=0 copy=1 matrix=1"])
+ident = run.route_identity(log)
+check(ident == {"stage": "BEAC", "car": "0", "course": "0"}, "identity parsed: %r" % ident)
+check(run.route_identity("nothing")["stage"] is None, "an unlogged identity is None")
+scripted = dict(presses=[dict(action="confirm", scripted=True)] * 3)
+fell_back = dict(presses=[dict(action="confirm", scripted=True), dict(action="start", scripted=False)])
+r_a, r_b = run.route_of(scripted, log), run.route_of(scripted, log)
+check(r_a["scriptedOnly"] and not run.route_of(fell_back, log)["scriptedOnly"] and not run.route_of(dict(presses=[]), log)["scriptedOnly"], "scriptedOnly")
+check(run.same_route(r_a, r_b), "same script and identity: same route")
+check(not run.same_route(r_a, run.route_of(fell_back, log)), "a fallback run is not the same route")
+check(not run.same_route(r_a, run.route_of(scripted, log.replace("car=0", "car=3"))), "another car is not the same route")
+check(not run.same_route(r_a, run.route_of(scripted, "nothing")), "an unlogged identity is not the same route")
+check(not run.same_route(None, r_b), "no first route")
 
 print("run timing: %d failure(s)" % len(failures))
 for f in failures: print("  " + f)
