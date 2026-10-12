@@ -357,6 +357,40 @@ void test_keyboard_ordinary(){
     check(out.pc_input_layer&&!out.pc_overlay,"no wheel axes: the PC layer drives the race");
 }
 
+// An H-pattern lever at rest in a gate is not wheel use (zero 25230): the keyboard can take the race; a gear change
+// (the gate's edge, then the gearbox's pulses toward it) returns the race to the wheel.
+void test_keyboard_hpattern_rest(){
+    Rig r(false,profile({Steer,Throttle,Brake,sb("gear3",2),sb("gear4",3)},"H-pattern"),true);
+    r.sample.connected=false;
+    auto& d=r.dev(r.w);auto& x=r.dev(r.s);
+    d.state.axes[0]=32768;
+    r.view.mode=16;r.view.car=true;r.view.gear=3;
+    Keyboard none;Keyboard key;key.any=true;
+    x.state.buttons[2]=0x80;              // the lever in gate 3, the car already in third: no pulse
+    r.tick(16000,&none);r.tick(16000,&none);
+    auto out=r.tick(16000,&key);
+    check(out.pc_overlay_yield,"a lever resting in gate 3 does not keep the race from the keyboard");
+    out=r.tick(16000,&key);
+    check(out.pc_overlay_yield,"and the keyboard keeps it while the lever rests");
+    x.state.buttons[2]=0;x.state.buttons[3]=0x80;   // into gate 4: a gear change
+    out=r.tick(16000,&key);
+    check(!out.pc_overlay_yield,"a gear change returns the race to the wheel");
+}
+
+// The shim backend without a host (DirectInput or the host refused, romi 25245): shim_input applies an empty frame
+// (every action unbound) with the keyboard, so a padless rig keeps the keyboard in the race and the menus.
+void test_keyboard_without_host(){
+    Adapter a("Sequential");const Frame none{};GameView v;v.mode=16;
+    Keyboard key;key.any=true;
+    NativeInputState out{};a.apply(none,v,out,&key);
+    check(out.pc_input_layer&&!out.pc_overlay,"no host, race: the PC layer runs and its record (the keyboard) drives");
+    v.mode=3;Keyboard enter;enter.any=enter.enter=true;
+    out=NativeInputState{};a.apply(none,v,out,&enter);
+    check(out.pc_input_layer&&out.menu_confirm&&(out.frontend.feature_mask&4u),"no host, menu: Enter confirms");
+    out=NativeInputState{};a.apply(none,v,out,&enter);
+    check(!out.menu_confirm,"no host: one edge per press");
+}
+
 // A latched frame never takes the keyboard, even if the glue passes one: the test path is unchanged.
 void test_keyboard_latched(){
     Rig r(true,profile({Steer,Throttle,wb("confirm",0)}));
@@ -370,7 +404,7 @@ void test_keyboard_latched(){
 
 int main(){
     try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
-        test_keyboard_ordinary();test_keyboard_latched();}
+        test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;

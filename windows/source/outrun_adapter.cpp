@@ -199,10 +199,14 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     // buttons are at rest hands the race to the keyboard, until the wheel turns 3% (983 of 32767) from where it was then,
     // a pedal is pressed or a wheel button is held. A profile with no wheel axes leaves the race to the keyboard.
     if(kb){
-        static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight",
-                                               "gear1","gear2","gear3","gear4","gear5","gear6"};
+        // Held buttons as wheel_input's ButtonActions, without the gears: an H-pattern gate is a button held for as long
+        // as the lever sits in it, so a lever at rest in a gate is not wheel use (zero 25230). A gear change is: a gate's
+        // own edge, or the gearbox's shift pulse, as wheel_input counts its gear_pulses.
+        static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight"};
+        static constexpr const char* Gates[]{"gear1","gear2","gear3","gear4","gear5","gear6"};
         bool wheel_button=false;for(const char* b:Buttons)wheel_button=wheel_button||held(f,b);
-        const bool wheel_pressed=wheel_accel>=3u||wheel_brake>=3u||wheel_button;
+        bool gear_change=pulse!=0u;for(const char* g:Gates)gear_change=gear_change||down(f,g);
+        const bool wheel_pressed=wheel_accel>=3u||wheel_brake>=3u||wheel_button||gear_change;
         if(!keyboard_drives_&&kb->any&&!wheel_pressed){keyboard_drives_=true;keyboard_anchor_=steer_word;}
         else if(keyboard_drives_&&(wheel_pressed||std::abs(steer_word-keyboard_anchor_)>983))keyboard_drives_=false;
         out.pc_overlay=steer||throttle||brake;

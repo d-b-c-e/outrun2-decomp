@@ -171,6 +171,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     if(!o.configured||o.stopped)return;
     if(!o.started){
         o.started=true;
+        o.adapter=std::make_unique<Adapter>(o.transmission);   // before the host: the keyboard fallback needs it (romi 25245)
         IDirectInput8W* input=nullptr;
         if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
             std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);return;}
@@ -178,7 +179,6 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
             o.host=std::make_unique<h::ProviderHost<NoCapture>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
                 std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd));
         }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
-        o.adapter=std::make_unique<Adapter>(o.transmission);
         (void)o.host->tick();
         const auto start=o.host->start_report();
         std::printf("%s\n",start.line.c_str());
@@ -186,19 +186,19 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths\n");
         std::fflush(stdout);
     }
-    if(!o.host)return;
-    const auto& frame=o.host->tick();
     using outrun::desktop::desktop_key;
     Keyboard kb;kb.any=outrun::desktop::desktop_any_key();
     kb.enter=desktop_key(0x1c);kb.esc=desktop_key(0x01);kb.up=desktop_key(0xc8);kb.down=desktop_key(0xd0);kb.left=desktop_key(0xcb);kb.right=desktop_key(0xcd);
-    o.adapter->apply(frame,view(runtime),out,&kb);
+    // No host (DirectInput or the host refused): the keyboard keeps its path anyway. An empty frame (every action
+    // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
+    static const sh::Frame no_shim{};
+    o.adapter->apply(o.host?o.host->tick():no_shim,view(runtime),out,&kb);
 }
 
 void shim_input_shutdown_ordinary(){
     if(!o.host||o.stopped)return;
     o.stopped=true;
-    (void)o.host->tick();                      // the final neutral Core tick before the stop (host order)
-    platform::NativeInputState neutral{};o.adapter->apply_neutral(false,neutral);
+    (void)o.host->tick();                      // a final poll before the stop (host order); Core is still ordinary live here
     const auto report=o.host->stop();
     std::printf("input shim: ordinary host stop %s\n",report.resolved?"resolved":"UNRESOLVED");std::fflush(stdout);
 }
