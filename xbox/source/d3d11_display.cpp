@@ -169,6 +169,8 @@ void sample_cadence(IDXGISwapChain1* swap_chain){
     const UINT presents=s.PresentCount-g_cadence.present;if(!presents)return;
     const UINT refreshes=s.SyncRefreshCount-g_cadence.sync;
     g_cadence.present=s.PresentCount;g_cadence.sync=s.SyncRefreshCount;
+    // The first statistics can come before the counters are valid (a gap of millions of refreshes): not a cadence.
+    if(refreshes>presents*g_interval*600u){++g_cadence.disjoint;return;}
     g_cadence.presents+=presents;g_cadence.refreshes+=refreshes;
     if(refreshes>presents*g_interval)++g_cadence.late;   // at least one of them was shown a refresh or more late
     g_cadence.max_gap=std::max(g_cadence.max_gap,unsigned((refreshes+presents-1)/presents));

@@ -93,9 +93,10 @@ void PcSceneRenderer::step_banks(double budget_ms){
 bool PcSceneRenderer::load_bank(std::uint32_t resource,std::vector<std::uint8_t> pmt,std::string& error){
     if(owned_banks_.count(resource)){error.clear();return true;}
     OR2_PERF_ZONE("bank load");
-    PendingBank p;
+    const auto started=std::chrono::steady_clock::now();
+    PendingBank p;bool was_queued=false;
     for(auto it=pending_banks_.begin();it!=pending_banks_.end();++it)
-        if(it->resource==resource){p=std::move(*it);pending_banks_.erase(it);break;}   // queued: finish it now
+        if(it->resource==resource){p=std::move(*it);pending_banks_.erase(it);was_queued=true;break;}   // queued: finish it now
     if(!p.bank){
         p.resource=resource;p.bank=open_bank(std::move(pmt),error);
         if(!p.bank)return false;
@@ -104,6 +105,9 @@ bool PcSceneRenderer::load_bank(std::uint32_t resource,std::vector<std::uint8_t>
     try{while(!step_bank(p)){}}
     catch(const std::exception& e){error=std::string("PMT loader: ")+e.what();return false;}
     install_bank(resource,std::move(p.bank));
+    // A bank finished inside a frame: which one, how long, and whether it had been queued for the background loader.
+    const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+    if(ms>=2.0)std::printf("bank %u (0x%x) loaded in the frame in %.1f ms (%s)\n",resource,resource,ms,was_queued?"queued, finished now":"not queued");
     error.clear();return true;
 }
 void PcSceneRenderer::install_bank(std::uint32_t resource,std::unique_ptr<Bank> bank){
