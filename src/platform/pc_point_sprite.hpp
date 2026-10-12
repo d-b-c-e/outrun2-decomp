@@ -11,7 +11,10 @@
 //   bottom-right on screen (wined3d matches D3D with GL's GL_UPPER_LEFT point-sprite origin).
 // - Clipping: not drawn when its depth is outside the viewport's MinZ..MaxZ (clip z outside [0, w], w > 0), nor when
 //   the square, its size included, is entirely outside the viewport; a partly visible square is drawn, cut at the
-//   viewport's edges.
+//   viewport's edges. The page (nene 29713 asked for the sentence): "If the point, taking into account the point size,
+//   is completely outside the viewport in X and Y, then the point is not rendered; the remaining points are rendered.
+//   It is possible for the point position to be outside the viewport in X or Y and still be partially visible." (Some
+//   drivers culled by the centre instead; the documented rule is kept.)
 #include <cstdint>
 namespace outrun::platform {
 struct PcPointSpriteParams {
