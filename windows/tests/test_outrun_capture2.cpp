@@ -4,6 +4,7 @@
 #include "outrun_capture.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 using namespace outrun::desktop;
@@ -44,6 +45,25 @@ int main(){
     check(c2.at("gameInput.carModel")==4&&c2.at("gameInput.stageKey")==17&&c2.at("gameInput.courseGate")==9,"the identity");
     {auto off=two;off.pose={};const auto c=channels(off);
      check(c.at("gameInput.poseValid")==0&&c.count("gameInput.posX")&&c.count("gameInput.stageKey"),"outside a race: present, not valid");}
+    // car_pose (sana 35974): read only for the active player car; a stale record with values is never valid.
+    {std::uint8_t car[CarPoseBytes]{};
+     const auto put=[&](std::size_t at,float v){std::memcpy(car+at,&v,4);};
+     const auto put32=[&](std::size_t at,std::uint32_t v){std::memcpy(car+at,&v,4);};
+     put(0x14,12.5f);put(0x18,-3.0f);put(0x1c,-640.25f);put(0x20,0.5f);put(0x24,0.0f);put(0x28,-0.875f);
+     for(std::size_t r=0;r<3;++r)for(std::size_t k=0;k<4;++k)put(0x70+(r*4+k)*4,float(10*r+k)+0.5f);   // the 4th column is not read
+     car[0x11]=7;put32(0x5c,0x13u);put32(0x68,0x2a0u);
+     const auto p=car_pose(16,0x7804b0u,0x02,car);
+     check(p.valid&&p.position[0]==12.5f&&p.position[1]==-3.0f&&p.position[2]==-640.25f&&p.vec20[0]==0.5f&&p.vec20[2]==-0.875f,"the active car: position and the raw +20 vector");
+     check(p.rotation[0]==0.5f&&p.rotation[2]==2.5f&&p.rotation[3]==10.5f&&p.rotation[5]==12.5f&&p.rotation[8]==22.5f,"the 3x3 from the +70 4x4, row-major");
+     check(p.model==7&&p.course_gate==0x13u&&p.stage_key==0x2a0u,"the identity");
+     check(car_pose(18,0x7804b0u,0x0a,car).valid,"mode 18, and a paused (flags 0x08) active car, is valid");
+     check(!car_pose(13,0x7804b0u,0x02,car).valid&&!car_pose(32,0x7804b0u,0x02,car).valid,"loading and the menus: not valid");
+     check(!car_pose(16,0x7804b0u,0x01,car).valid,"event 8 opened, its init not run yet: not valid");
+     check(!car_pose(16,0x7804b0u,0x00,car).valid&&!car_pose(16,0x7804b0u,0x04,car).valid,"event 8 closed or closing: not valid");
+     check(!car_pose(16,0x7804b0u,0x03,car).valid,"open and init pending together: not valid");
+     check(!car_pose(16,0x7d0000u,0x02,car).valid&&!car_pose(16,0,0x02,car).valid,"event 8 holding another work, or none: not valid");
+     const auto z=car_pose(16,0,0x02,car);
+     check(z.position[0]==0&&z.stage_key==0&&z.rotation[8]==0,"an invalid pose carries zeros, not the stale record");}
     check(c2.size()==c1.size()+consumed_channels(two).size(),"the @2 channels are only added");
     for(const auto& v:c1)check(c2.count(v.first)&&c2.at(v.first)==v.second,"every @1 channel unchanged in @2: "+v.first);
     check(frame_channels(c1)==frame_channels(c2),"the Core frame decoder sees the same channels (final.*/keyboard.* excluded)");

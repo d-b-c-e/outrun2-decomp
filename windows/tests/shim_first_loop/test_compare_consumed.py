@@ -85,7 +85,17 @@ def posed(c, i):
     return c
 PREF = [posed(c, i) for i, c in enumerate(REF)]; PREP = [posed(c, min(i, N - 1)) for i, c in enumerate(REP)]
 r = run(PREF, PREP)
-check(r["valid"] and r["followed"] and r["pose"]["compared"] and r["pose"]["racingRows"] == N - 3 and r["pose"]["pathLength"] > 0, "a posed replay: valid, followed, pose compared (%s)" % r["pose"])
+check(r["valid"] and r["followed"] and r["pose"]["compared"] and r["pose"]["reference"]["validRows"] == N - 3 and r["pose"]["reference"]["pathLength"] > 0
+      and r["pose"]["replay"]["validRows"] == N - 3 and r["pose"]["pairedRows"] == N - 3, "a posed replay: valid, followed, pose compared (%s)" % r["pose"])
+# sana 35974: validity on every row; the pose only on rows valid in both; both runs need the active car, moving.
+rep = copy.deepcopy(PREP); rep[5]["gameInput.poseValid"] = 0
+r = run(PREF, rep); check(r["valid"] and not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.poseValid" and r["firstDivergence"]["row"] == 5, "a validity disagreement is a divergence (%s)" % r["firstDivergence"])
+rep = copy.deepcopy(PREP); rep[1]["gameInput.posX"] = 55.0; rep[1]["gameInput.stageKey"] = 3
+check(run(PREF, rep)["followed"], "stale values on a row without the car in either run are not compared")
+rep = [dict(c, **{"gameInput.poseValid": 0}) for c in PREP]; r = run(PREF, rep)
+check(not r["valid"] and not r["followed"] and any("the replay has no row with a valid pose" in p for p in r["problems"]), "a replay without the car is not admitted (%s)" % r["problems"])
+rep = [dict(c, **{"gameInput.posX": 9.0, "gameInput.posY": 9.0, "gameInput.posZ": 9.0}) for c in PREP]; r = run(PREF, rep)
+check(not r["valid"] and any("never moved in the replay" in p for p in r["problems"]), "a replay car that never moved is not admitted (%s)" % r["problems"])
 rep = copy.deepcopy(PREP); rep[6]["gameInput.posX"] += 0.01
 r = run(PREF, rep); check(r["valid"] and not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.posX" and r["firstDivergence"]["row"] == 6, "a position divergence is named (%s)" % r["firstDivergence"])
 rep = copy.deepcopy(PREP); rep[7]["gameInput.rot01"] = 0.001

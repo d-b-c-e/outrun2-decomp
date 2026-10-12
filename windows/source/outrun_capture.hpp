@@ -10,6 +10,7 @@
 #include "capture.hpp"
 #include "outrun_adapter.hpp"
 #include "platform/runtime_input.hpp"
+#include <cstring>
 #include <vector>
 namespace outrun::desktop {
 namespace rec=dbce::shim::recorder;
@@ -23,7 +24,7 @@ struct KeyboardProvenance { bool enter{},esc{},up{},down{},left{},right{},any{},
 constexpr std::int64_t NotReplay=-2;
 // The player car's pose and identity (@2 rows only; sana 35817): the car record 799D18 (a 0x10F0 vehicle object, the
 // 7815A0 car works' layout: race_player_car.cpp 4A4D20 position +14, 487740 rotation +70, 40A270 translation +14),
-// read in the race modes only; zero and not valid elsewhere, as gear and speed. vec20 is the raw +20..28 vector (the
+// read in the race modes while event 8 is the active car (shim_input.cpp car_pose); zero and not valid elsewhere. vec20 is the raw +20..28 vector (the
 // direction 4A4D20 reads, the source of the work velocity at 49FAD0): compared as raw values, not as a heading.
 struct CarPose {
     bool valid{};
@@ -31,6 +32,20 @@ struct CarPose {
     std::array<float,9> rotation{};          // the 3x3 of the +70 matrix, row-major
     std::uint32_t model{},stage_key{},course_gate{};   // +11 (byte), +68 (the key stage_property reads), +5C
 };
+constexpr std::size_t CarPoseBytes=0xa0;   // the car record bytes car_pose reads (the record has 0x10F0)
+// Valid only while it is the active player car (sana 35974): a race mode (16/18), and event 8 holds the car work 7804B0
+// with its init run (flags & 3 == 2: open, not pending; event_control_43fab0), the test 42D710 makes before 49F4D0.
+inline CarPose car_pose(std::uint32_t mode,std::uint32_t event8_work,std::uint8_t event8_flags,const std::uint8_t* car){
+    CarPose p{};
+    if(!car||(mode!=16u&&mode!=18u)||event8_work!=0x7804b0u||(event8_flags&3u)!=2u)return p;
+    const auto f=[&](std::size_t at){float v;std::memcpy(&v,car+at,4);return v;};
+    const auto u=[&](std::size_t at){std::uint32_t v;std::memcpy(&v,car+at,4);return v;};
+    for(std::size_t i=0;i<3;++i){p.position[i]=f(0x14+i*4);p.vec20[i]=f(0x20+i*4);}
+    for(std::size_t r=0;r<3;++r)for(std::size_t c=0;c<3;++c)p.rotation[r*3+c]=f(0x70+(r*4+c)*4);
+    p.model=car[0x11];p.stage_key=u(0x68);p.course_gate=u(0x5c);
+    p.valid=true;
+    return p;
+}
 // consumed / keyboard: an ordinary recording's @2 fields, written when has_consumed (every row of an @2 capture).
 struct Snapshot {
     dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay;
