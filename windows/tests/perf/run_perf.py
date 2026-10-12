@@ -219,7 +219,7 @@ def main():
             late = [r["posted"] - r["at"] for r in recs]
             receipt["observed"] = dict(events=len(events), echoed=sum(1 for r in recs if r["echo"] is not None), error=err,
                                        maxLateSeconds=round(max(late), 3) if late else None)
-            if err: receipt["errors"].append("observed delivery: %s" % err)
+            if err: receipt["errors"].append("observed delivery: %s" % err); end = time.time()   # closed now, not at the fixed end (sana 36766)
         while time.time() < end and proc.poll() is None:
             now = time.time() - t0
             while pending and pending[0][0] <= now:

@@ -117,6 +117,27 @@ g = Game(); g.exited = 1.6; recs, err = ok.deliver(ok.events_of(MENU), g.post, g
 check(err is not None and "exited" in err and not g.posted and not any(p[0] >= 1.6 and not p[2] for p in g.posts),
       "the game's exit stops delivery, nothing pressed after it, keys released: %s %s" % (err, g.posts[-2:]))
 
+# sana 36766: a failed post or echo read never escapes with keys held; an interrupt releases them and propagates.
+class PostFails(Game):
+    def post(self, key, up):
+        if len(self.posts) == 1 and not up: self.posts.append((round(self.t, 3), key, "refused")); raise OSError(1400, "PostMessage failed")
+        super().post(key, up)
+g = PostFails(); recs, err = run(RACE, g)
+check(err is not None and "OSError" in err and not g.posted and g.posts[-1][1:] == ("up", True), "a failed post: a failure, the held key released (%s, %s)" % (err, g.posts))
+class ReadFails(Reader):
+    def poll(self):
+        if self.g.posts: raise PermissionError(32, "sharing violation")
+        return super().poll()
+g = Game(); recs, err = ok.deliver(ok.events_of(RACE), g.post, g.now, g.sleep, ReadFails(g))
+check(err is not None and "PermissionError" in err and not g.posted, "a failed echo read: a failure, held keys released (%s)" % err)
+class Interrupted(Game):
+    def sleep(self, dt):
+        super().sleep(dt)
+        if self.t > 2.5: raise KeyboardInterrupt
+g = Interrupted()
+try: run(RACE, g); check(False, "an interrupt propagates")
+except KeyboardInterrupt: check(not g.posted and any(p[1] == "left" and p[2] for p in g.posts), "an interrupt releases every held key first: %s" % g.posts[-3:])
+
 # Keys without an echo are refused up front; equal times release before press.
 try: ok.events_of([dict(key="space", at=1.0, hold=0.1)]); check(False, "a key without an echo is refused")
 except ok.EchoError: pass

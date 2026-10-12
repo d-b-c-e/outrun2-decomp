@@ -14,6 +14,8 @@ Rules:
 - No echo within `timeout`: FAIL. Every key still held is released, and nothing more is posted (no retry).
 - Any other echo line is a failure too (a key or edge nobody posted: the drive would not be the script's), as is a
   malformed line.
+- A failed post or echo read (OSError) is a delivery failure too; any way out of delivery but completion (also an
+  interrupt, which still propagates) releases every held key first.
 The capture and its seal stay the evidence; the echo is diagnostic only.
 """
 
@@ -60,7 +62,7 @@ def deliver(events, post, now, sleep, echo, timeout=3.0, gap=0.25, slack=0.05, a
     """Posts every event and waits for its echo. Returns (records, error). records: one per posted event with its
     scripted, posted and echo times (seconds on `now`'s clock) and the echo row; error: None, or why delivery stopped
     (every held key released by then)."""
-    records, held, shift, last_echo, last_row = [], set(), 0.0, None, -1
+    records, held, shift, last_echo, last_row, completed = [], set(), 0.0, None, -1, False
 
     def release_all():
         for key in sorted(held):
@@ -93,7 +95,11 @@ def deliver(events, post, now, sleep, echo, timeout=3.0, gap=0.25, slack=0.05, a
                 sleep(poll_every)
             last_echo, last_row = rec["echo"], rec["row"]
             shift = max(shift, rec["echo"] - at - slack)
+        completed = True
         return records, None
     except EchoError as e:
-        release_all()
         return records, str(e)
+    except OSError as e:   # a failed post or echo read (sana 36766): a delivery failure, never an escape with keys held
+        return records, "%s: %s" % (type(e).__name__, e)
+    finally:   # any way out but completion (an error, an interrupt): every held key released first
+        if not completed: release_all()
