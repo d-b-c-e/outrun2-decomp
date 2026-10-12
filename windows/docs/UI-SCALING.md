@@ -83,7 +83,7 @@ So mode 1 needs a wider 2D mapping at the same scale:
    - a current scope (off / detect / left / right) that the reconstructed HUD sets and clears;
    - `SpraniDraw` gains a `spacing` field, filled when `sprani_draw_428a10` records the draw;
    - `pc_sprani_render_429460` passes the record's value to `layer_429350`. After `matrix_429220`, as Tweaks' 4293F3,
-     that shifts the layer matrix's m[12] by ±ext: detect moves x < 213 left and x ≥ 426 right; left / right force
+     that shifts the layer matrix's m[12] by ± Tweaks' HUD amount (see below): detect moves x < 213 left and x ≥ 426 right; left / right force
      the direction.
 3. NaviPub_Disp's scope, with its own disables, placed by the calls in 4BEB00..4BEE40 of the EXE:
    - on (detect) from 4BEB31: score, clocks, time attack, OutRun, Heart Attack, LAN and mission bodies, then speed,
@@ -108,6 +108,16 @@ So mode 1 needs a wider 2D mapping at the same scale:
      - one beyond the extension stays clipped.
 
 Under triples the HUD stays on the centre panel (ext from the centre panel's 16:9), as STD-007.
+
+**Correction (after 2b): the HUD moves by Tweaks' amount, not by the margin.**
+- Tweaks' AddSpriteSpacing adds margin_px / screen_scale.x to a 640-space x, and its mode-1 sprite path draws that x
+  at screen_scale.y (the draw_sprite_custom_matrix_mid and D3DXMatrixTransformation2D hooks).
+- On screen that is margin x scaleY / scaleX: in these units 320 (1 - 4 / (3A)), i.e. 80 at 16:9 (three quarters of
+  the 106.7 margin) and 137.1 at 21:9.
+- `ui_scaling_rect` returns it as `.hud`, and pc_screen.hpp `g_pc_ui_spacing` carries it for layer_429350 and the
+  put_scroll fixes.
+- The device extension stays the full margin (`.spacing`), so nothing moved is clipped.
+- 2a and 2b as first committed moved by the margin; fixed before integration.
 
 ## Step 2b (sana 40119; built; review pending)
 
@@ -137,11 +147,11 @@ Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe ar
 - **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
   and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
   the visual check (step 4).
-## Step 2c: the remaining C2C sites, mapped (documentation only; not built)
+## Step 2c: the remaining C2C sites (the hand-reconstructed ones built; the translated ones and 481A40 not)
 
 From objdump of OR2006C2C.exe around each site; "R" is right by the spacing, unrounded for floats and rounded for
 ints.
-- **Scores, hand-reconstructed** (`race_hud_navi.cpp`), put_scroll R through `put_shift()` as in 2b:
+- **Scores, hand-reconstructed** (`race_hud_navi.cpp`), put_scroll R through `put_shift()` as in 2b (**built**):
   - "test your slipstream": 4BD32E, the one 42D280 call in `scores_4bd230`;
   - "don't lose your girlfriend": 4BD397 / 4BD414 / 4BD472, the three 42D280 calls in `scores_4bd340`.
 - **Mission-manager speech bubbles, hand-reconstructed** (`mission_manager.cpp`, `mission_manager_control_496a30`):
@@ -149,11 +159,14 @@ ints.
     which is the bubble's x of 170.0 (0x432A0000);
   - four are 465860's x (the decomp's `configure(..., 170.0f, ...)`) and three are 4653C0's x (`motion`: 4653C0(170,
     -80, 0.2, 0));
-  - the decomp calls `motion` four times (lines 339 / 340 / 344 / 345), against three hooked 4653C0 sites in the EXE,
-    so each call is checked against the EXE's branch layout before code.
+  - the decomp calls `motion` four times (lines 339 / 340 / 344 / 345), against three hooked 4653C0 sites in the EXE:
+    the second element's two calls share the tail at 496C54 .. 496C6A, so all four are hooked.
+  - **Built:** the four `configure(..., 170.0f + HUD shift, ...)` and `motion`'s 4653C0 x (floats, unrounded).
 - **The GF request bubble, hand-reconstructed** (`race_traffic_heart_*.inc`):
   - 460A21 (`banner_open_460970` +B1): a float x in xmm0;
   - 460D40 / 460FBC (`banner_460ad0` +270 / +4EC): float x in xmm0; at 460FBC Tweaks also writes it back to [esp].
+  - **Built:** x 176 ([5B02A4]) plus the HUD shift in the open (460A21) and reopen (460FBC) stores, and in their
+    translations (Tweaks writes the moved xmm0 over the pushed 176). The bobbing centre 7F8BBC also moves (460D40).
 - **GF speech bubbles, rank emoji, rank text: translated code** (`bulk_tr.cpp` `F_4fc830`, `F_4fc9a0`, `F_4fcd40`,
   `F_4fd4e0`, `F_4fe760`; 16 sites).
   - Floats at [esp] or [esp+4] at instruction boundaries.

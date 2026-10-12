@@ -1,4 +1,5 @@
 #include "platform/mission_manager.hpp"
+#include "platform/pc_screen.hpp"
 #include <cmath>
 #include <cstring>
 namespace outrun::platform {
@@ -169,8 +170,11 @@ struct Race {
     bool configure(Element& e,std::uint32_t token,std::uint32_t a1,std::uint32_t a2,std::uint32_t a3,std::uint32_t a4,
                    float x,float y,float sx,float sy,float sz){
         return call(e,0x465860,{token,a1,a2,a3,a4,fb(x),fb(y),fb(sx),fb(sy),fb(sz),0})&&call(e,0x465970);}
+    // UIScalingMode 1 (step 2c): Tweaks' C2CSpeechBubble fixes (496AC7 ... 496C6A) move the bubbles' x of 170 right by
+    // its HUD shift in all four 465860 configures at countdown 0x168 / 0xB4 and in this 4653C0 (pc_screen.hpp
+    // g_pc_ui_spacing; 0 outside mode 1). motion is only called there.
     bool motion(Element& e){                                         // 465310(1,1,0.2,0), 4653C0(170,-80,0.2,0)
-        return call(e,0x465310,{fb(1.0f),fb(1.0f),fb(0.2f),0})&&call(e,0x4653c0,{fb(170.0f),fb(-80.0f),fb(0.2f),0});}
+        return call(e,0x465310,{fb(1.0f),fb(1.0f),fb(0.2f),0})&&call(e,0x4653c0,{fb(170.0f+g_pc_ui_spacing),fb(-80.0f),fb(0.2f),0});}
     Bytes racer(std::uint32_t index){return Bytes(r.racers->racers_80fb00.data()+std::size_t(index)*0xa0u,0xa0u);}
     // 477350: racer [64E194] or null.
     bool rival(Bytes& out,bool& present){
@@ -336,13 +340,13 @@ bool mission_manager_control_496a30(MissionManagerState& m,MissionManagerService
     if(m.countdown_836390!=0u){
         const auto cd=m.countdown_836390;
         if(cd==0x168u){
-            if(!q.configure(m.ui_836590,0x2b0020,~0u,~0u,9,3,170.0f,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836590))return false;
-            if(!q.configure(m.ui_836450,0x2b003e,~0u,~0u,0xa,3,170.0f,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836450))return false;
+            if(!q.configure(m.ui_836590,0x2b0020,~0u,~0u,9,3,170.0f+g_pc_ui_spacing,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836590))return false;
+            if(!q.configure(m.ui_836450,0x2b003e,~0u,~0u,0xa,3,170.0f+g_pc_ui_spacing,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836450))return false;
         }else if(cd==0xb4u){
             const auto t=q.type();if(t>7u)return q.fail(0x496b5e);
             navi_voice_request_45bd30(*r.voice,r.voice_services,Voice5c1d44[t],0xb4,0xf);
-            if(!q.call(m.ui_836590,0x465250)||!q.configure(m.ui_836590,0x2b0020,~0u,~0u,9,5,170.0f,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836590))return false;
-            if(!q.call(m.ui_836450,0x465250)||!q.configure(m.ui_836450,Tag67e6bc[t],~0u,~0u,0xa,3,170.0f,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836450))return false;
+            if(!q.call(m.ui_836590,0x465250)||!q.configure(m.ui_836590,0x2b0020,~0u,~0u,9,5,170.0f+g_pc_ui_spacing,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836590))return false;
+            if(!q.call(m.ui_836450,0x465250)||!q.configure(m.ui_836450,Tag67e6bc[t],~0u,~0u,0xa,3,170.0f+g_pc_ui_spacing,20.0f,1.0f,4.0f,1.0f)||!q.motion(m.ui_836450))return false;
         }
         std::int32_t e=std::int32_t(m.countdown_836390)-1;bool reset=false;
         if(e<=0){m.countdown_836390=0;reset=true;}else{--e;m.countdown_836390=std::uint32_t(e);reset=e==0;}

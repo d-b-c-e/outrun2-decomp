@@ -234,10 +234,14 @@
         p32(0x7f8b54u,spr_create(frm,2,0));p32(0x7f8b58u,spr_create(tok,3,2));
         p32(0x7f8b68u,0xffffffffu);call(0x428940u,{u32(0x7f8b54u),0xffffffffu});
         p32(0x7f8b48u,mode);p32(0x7f8b4cu,mode);
-        pf(0x7f8b6cu,K(0x5b02a4u));pf(0x7f8bbcu,K(0x5b02a4u));
+        // UIScalingMode 1 (step 2c), Tweaks 460A21 (set_icon_work): the bubble's x, 176 ([5B02A4]), moves right by the
+        // HUD shift in both stores and in the translation below (Tweaks writes its moved xmm0 over the pushed 176);
+        // pc_screen.hpp g_pc_ui_spacing, 0 outside mode 1, so 176 exactly then.
+        const float bx=sadd(K(0x5b02a4u),g_pc_ui_spacing);
+        pf(0x7f8b6cu,bx);pf(0x7f8bbcu,bx);
         p32(0x7f8b50u,0);p32(0x7f8b60u,text);p16(0x7f8b5cu,std::uint16_t(open));p16(0x7f8b5eu,std::uint16_t(close));
         p32(0x7f8b64u,frame);p16(0x7f8bb4u,0);pf(0x7f8b70u,K(0x5b02a0u));pf(0x7f8bc0u,K(0x5b029cu));
-        translation_4393a6(M0,from_bits(0x43300000u),from_bits(0x429c0000u),0.0f);
+        translation_4393a6(M0,bx,from_bits(0x429c0000u),0.0f);
         scaling_4393ca(T1,0.0f,0.0f,1.0f);
         mul_439394(M0,T1,M0);
         spr_matrix(u32(0x7f8b54u),M0);spr_matrix(u32(0x7f8b58u),M0);

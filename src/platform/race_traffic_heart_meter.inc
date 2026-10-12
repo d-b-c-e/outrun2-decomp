@@ -286,8 +286,11 @@
                 banner_close_45bec0();p32(0x7f8b60u,keep);
                 p32(0x7f8b54u,spr_create(frame,2,0));p32(0x7f8b58u,spr_create(text,3,2));
                 call(0x428940u,{u32(0x7f8b54u),u32(0x7f8b68u)});
-                pf(0x7f8b6cu,K(0x5b02a4u));p32(0x7f8b50u,0);p32(0x7f8b4cu,1);pf(0x7f8b70u,K(0x5b02a0u));
-                translation_4393a6(M0,from_bits(0x43300000u),from_bits(0x429c0000u),0.0f);
+                // UIScalingMode 1 (step 2c), Tweaks 460FBC (ctrl_icon_work, reopened): x 176 plus the HUD shift, in the
+                // store and the translation, as at 460A21.
+                const float bx=sadd(K(0x5b02a4u),g_pc_ui_spacing);
+                pf(0x7f8b6cu,bx);p32(0x7f8b50u,0);p32(0x7f8b4cu,1);pf(0x7f8b70u,K(0x5b02a0u));
+                translation_4393a6(M0,bx,from_bits(0x429c0000u),0.0f);
                 scaling_4393ca(T1,0.0f,0.0f,1.0f);
                 mul_439394(M0,T1,M0);
                 spr_matrix(u32(0x7f8b54u),M0);spr_matrix(u32(0x7f8b58u),M0);
@@ -307,7 +310,8 @@
         translation_4393a6(T1,f32(0x7f8b6cu),f32(0x7f8b70u),0.0f);
         mul_439394(M0,M0,T1);
         spr_matrix(u32(0x7f8b58u),M0);
-        pf(0x7f8bbcu,sadd(f32(0x7f8b6cu),K(0x5b02a4u)));pf(0x7f8bc0u,ssub(K(0x5b029cu),f32(0x7f8b70u)));
+        // UIScalingMode 1 (step 2c), Tweaks 460D40 (ctrl_icon_work): the bobbing centre's x plus the HUD shift.
+        pf(0x7f8bbcu,sadd(sadd(f32(0x7f8b6cu),K(0x5b02a4u)),g_pc_ui_spacing));pf(0x7f8bc0u,ssub(K(0x5b029cu),f32(0x7f8b70u)));
         spr_matrix(u32(0x7f8b54u),M0);
         p16(0x7f8bb8u,u16(0x7f8bb8u)+u16(0x7f8bbau));
         p16(0x7f8bb4u,u16(0x7f8bb4u)-1u);

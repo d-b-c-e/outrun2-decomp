@@ -545,13 +545,13 @@ bool scores_4bd340(N& n){
     auto& m=n.m;
     const auto r=n.rival_47da80();const bool first=r&&m.u8(r+0x74)==0;
     auto buf=format_int("%04d",(m.i32(0x836388)+5)/6);
-    n.draw(0x42d280,{0x2c019e,0x1e1,0x36,0,F4,0xffffffffu});
+    n.draw(0x42d280,{0x2c019e,std::uint32_t(0x1e1+put_shift()),0x36,0,F4,0xffffffffu});
     if(!digits(n,first?0xd:1,0x227,0x49,buf))return false;
     if(r){
         buf=format_int("%04d",(m.i32(r+0x98)+5)/6);
-        n.draw(0x42d280,{0x2c019e,0x1e1,0x54,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c019e,std::uint32_t(0x1e1+put_shift()),0x54,0,F4,0xffffffffu});
         if(!digits(n,first?1:0xd,0x227,0x67,buf))return false;
-        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1f5,m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1f5+std::uint32_t(put_shift()),m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
     }
     return true;
 }
@@ -564,7 +564,7 @@ bool scores_4bd230(N& n,std::uint32_t car){
     if(!digits(n,live?1:0xd,0x1e1,0x49,buf))return false;
     if(const auto r=n.rival_47da80()){
         if(!digits(n,1,0x1e1,0x67,score7(m.i32(r+0x98))))return false;
-        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1e1,m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1e1+std::uint32_t(put_shift()),m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
     }
     return true;
 }

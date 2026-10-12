@@ -57,6 +57,11 @@ int main(){
         CHECK(mspan.on&&std::fabs(mspan.spacing-320./3.)<1e-4);                                     // the centre panel's 16:9, not the span's
         CHECK(std::fabs(640.+2.*mspan.spacing-480.*double(48.f/9.f)/3.)<1e-3);                     // 4:3 + both spacings = the centre panel
         CHECK(!ui_scaling_rect(1,false,0.f,4./3.).on&&ui_scaling_rect(1,false,0.f,4./3.).spacing==0.);
+        // Tweaks' own HUD shift (margin_px / screen_scale.x, drawn at screen_scale.y): 320 (1 - 4 / (3A)); three quarters
+        // of the margin at 16:9 (80 against 106.7), 137.1 at 21:9; the centre panel's on a span; 0 outside mode 1.
+        CHECK(std::fabs(m169.hud-80.)<1e-9&&std::fabs(m219.hud-960./7.)<1e-9&&std::fabs(mspan.hud-80.)<1e-4);
+        CHECK(std::fabs(m169.hud-0.75*m169.spacing)<1e-9);
+        CHECK(ui_scaling_rect(2,true,0.f).hud==0.&&ui_scaling_rect(0,true,48.f/9.f).hud==0.&&ui_scaling_rect(1,false,0.f,4./3.).hud==0.);
         // The footage-layer rule (pc_sprite_2d.hpp, Tweaks' drawFootage): detect moves the left third left and the right
         // third right; left / right force; off or no spacing moves nothing.
         using outrun::platform::UiSpacing;using outrun::platform::ui_spacing_shift;
