@@ -160,8 +160,24 @@ internal static class ConsumedComparison
         return new Motion { ValidRows = active.Length, PathLength = Math.Round(distance, 3),
             Range = Enumerable.Range(0, 3).Select(i => new[] { Math.Round(positions.Min(p => p[i].Value), 3), Math.Round(positions.Max(p => p[i].Value), 3) }).ToArray() };
     }
-    static double Tolerance(string name) => name == "gameInput.speed" ? .01 : name.StartsWith("gameInput.pos", StringComparison.Ordinal) ? 1e-3 :
+    static double Tolerance(string name) => name == "gameInput.speed" ? .01 : name is "gameInput.posX" or "gameInput.posY" or "gameInput.posZ" ? 1e-3 :
         name.StartsWith("gameInput.vec20", StringComparison.Ordinal) ? 1e-4 : name.StartsWith("gameInput.rot", StringComparison.Ordinal) ? 1e-5 : 0;
+    internal static Motion RequirePlaybackSource(string path)
+    {
+        var problems = new List<string>(); var rows = Read(path, problems, "reference");
+        if (rows.Count == 0) problems.Add("the reference has no rows");
+        var required = Game.Concat(Pose).Concat(new[] { Valid, "final.pcDrive" }).ToArray();
+        for (int i = 0; i < rows.Count; ++i)
+        {
+            if (required.Any(k => Number(rows[i], k) == null))
+            { problems.Add($"reference row {i}: playback needs finite game, input and pose channels"); break; }
+            if (rows[i][Valid] is not (0 or 1))
+            { problems.Add($"reference row {i}: poseValid is not 0 or 1"); break; }
+        }
+        var motion = Measure(rows, problems, "reference");
+        if (problems.Count > 0) throw new InvalidDataException("Recording cannot be played: " + string.Join("; ", problems.Take(4)));
+        return motion;
+    }
     internal static Result Compare(string referencePath, string replayPath)
     {
         var result = new Result(); var problems = result.Problems;
