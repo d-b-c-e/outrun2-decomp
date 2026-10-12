@@ -16,7 +16,7 @@ Run it only when a live launch is coordinated (Astra, owner). It uses the existi
 It never touches the owner's game folder; it runs from a dedicated test copy.
 
 ```
-py -3 -B run.py --candidate <OutRunDesktop.exe> --prepare-from E:\Games\SaveBackups\Outrun   # once: builds E:\Games\OutRunShimTest
+py -3 -B run.py --candidate <OutRunDesktop.exe> --prepare-from <a game folder with OR2006C2C.exe> --game <new test folder>   # once per candidate
 py -3 -B run.py --candidate <OutRunDesktop.exe> --finalizer <P21Finalizer.dll> --replay-tool <capture_replay.exe>     --result <fresh dir> --check-only                                                       # preflight, no launch
 py -3 -B run.py ... --result <fresh dir>                                                     # R1: the first loop, captured
 py -3 -B run.py ... --result <fresh dir> --replay-of <passing R1 result>                     # R3: the cold replay run
@@ -39,6 +39,13 @@ Capture and replay (Astra 16553/16754):
   tape for that run only). `compare_replay.py` reports intended and consumed agreement and race progression against the
   first run; the verdict requires the whole tape played and the race progressing. Adapter/action replay: not physical
   input, not a raw-to-Core replay, no route claim.
+- R3 plays only a tape recorded by the same candidate: the first run's `plan.candidateSha256` must equal this run's.
+  Its wall-clock bound comes from the first run's own race, not an assumed frame rate. R1 records `raceSeconds`, from
+  race entry to the end batch, and R3 ends at the later of `2 x raceSeconds + 30` and the former `tape rows / 30 + 15`.
+  A test run's shader cache (`home()/shadercache`, the run folder) is always cold, so both runs compile their
+  programs at the menus and at race entry.
+- `--prepare-from` refuses an existing test folder. For a new candidate, prepare a new folder; the preflight refuses a
+  test copy whose `OutRunDesktop.exe` is not the candidate. The owner's save backups are never a source.
 
 First-loop limits:
 - no observer mapping;

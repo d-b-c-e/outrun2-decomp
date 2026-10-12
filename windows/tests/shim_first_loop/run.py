@@ -176,15 +176,26 @@ def main():
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
     if not o.replay_tool or not o.replay_tool.exists(): problems.append("no --replay-tool capture_replay.exe to replay the capture")
-    tape = None; tape_rows = 0; tape_source = None
+    tape = None; tape_rows = 0; tape_source = None; replay_timeout = None
     if o.replay_of:   # R3: only a passing first run whose sealed capture verifies again is played
         first = o.replay_of.resolve(); tape_source = first / "run" / "capture"; tape = out / "tape.tsv"
         try:
-            if json.loads((first / "receipt.json").read_text()).get("result") != "pass": problems.append("--replay-of is not a passing run")
+            r1 = json.loads((first / "receipt.json").read_text())
+            if r1.get("result") != "pass": problems.append("--replay-of is not a passing run")
+            # The same candidate plays its own tape (nene audit): another build may consume the same words differently.
+            r1_sha = (r1.get("plan") or {}).get("candidateSha256")
+            if not o.candidate.exists() or r1_sha != sha(o.candidate):
+                problems.append("--replay-of was recorded by another candidate (%s, this run %s)" % (str(r1_sha)[:16], sha(o.candidate)[:16] if o.candidate.exists() else None))
+            # Wall-clock bound from the first run's own race (nene audit): a test run's shader cache is always cold, so a
+            # fixed frame rate is not assumed. The former floor, tape rows at 30 per second plus 15 s, stays the minimum.
+            race_seconds = r1.get("raceSeconds")
+            if not isinstance(race_seconds, (int, float)) or race_seconds <= 0: problems.append("--replay-of has no race duration (raceSeconds)")
+            else: replay_timeout = race_seconds
             if not o.finalizer or not o.finalizer.exists(): raise ValueError("no finalizer to verify it")
             with tempfile.TemporaryDirectory() as t:   # the preflight writes nothing it keeps
                 read_export(o.finalizer, tape_source, pathlib.Path(t) / "tape.tsv"); tape_rows = len(compare_replay.tape(str(pathlib.Path(t) / "tape.tsv")))
             if not tape_rows: problems.append("--replay-of has no race rows with the run Running")
+            if replay_timeout is not None: replay_timeout = max(tape_rows / 30 + 15, 2 * replay_timeout + 30)
         except (OSError, ValueError, SystemExit) as e: problems.append("--replay-of unusable: %s" % e)
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
@@ -194,6 +205,7 @@ def main():
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
+                replayTimeoutSeconds=replay_timeout,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
@@ -227,7 +239,7 @@ def main():
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
             publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
-        phase = "menus"; phase_at = 0
+        phase = "menus"; phase_at = 0; race_at = None
         while time.time() < deadline and proc.poll() is None:
             time.sleep(0.2)
             if log.exists():
@@ -240,6 +252,7 @@ def main():
                         receipt["r3"]["playbackEnd"] = l.strip()
                         receipt["r3"]["playbackComplete"] = e.group(2) == e.group(3) and int(e.group(3)) == tape_rows and e.group(4) == "tape complete"
             if phase == "menus":
+                if race: race_at = time.time()
                 if race and tape: phase, phase_at = "replay", time.time(); continue   # the shim plays the tape from the race entry
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
                 if time.time() - last_press > 1.5 and len(receipt["presses"]) < 40:
@@ -249,9 +262,11 @@ def main():
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:
                 phase = "end"; batch(["end"]); break
-            elif phase == "replay" and (receipt["r3"]["playbackEnd"] or time.time() - phase_at > tape_rows / 30 + 15):
+            elif phase == "replay" and (receipt["r3"]["playbackEnd"] or time.time() - phase_at > replay_timeout):
                 phase = "end"; batch(["end"]); break
         receipt["phase"] = phase; receipt["race"] = race
+        # Wall-clock seconds from race entry to the end batch: an R3 of this run derives its timeout from it.
+        receipt["raceSeconds"] = round(time.time() - race_at, 3) if race_at is not None and phase == "end" else None
         time.sleep(1.0)
         if proc.poll() is None:
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)   # WM_CLOSE: the game's own close path
