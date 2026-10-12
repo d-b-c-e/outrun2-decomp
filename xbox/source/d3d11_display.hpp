@@ -13,6 +13,7 @@ using Microsoft::WRL::ComPtr;
 unsigned output_refresh();
 void pace_frames(unsigned fps);
 void wait_for_frame_latency();   // OR2_FRAME_LATENCY: the top of a frame, before the input sample (no-op otherwise)
+void report_frame_latency();     // its wait and timeout counts, at exit (no-op without the variable)
 // The composed frame on the window's swap chain: the same interface as the
 // PS5 GL display (ps5/source/gl_display.hpp). The D3D11 device and the swap
 // chain belong to the process (one window); every display shares them, so
