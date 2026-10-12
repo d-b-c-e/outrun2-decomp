@@ -108,10 +108,27 @@ def present_to_scanout(header, rows, mine, key, start, end):
                     break
     lat = [shown[i] - t for t, i in found.items() if start <= t <= end and i in shown and shown[i] >= t]
     inwin = sum(1 for c in calls if start <= c[0] <= end)
-    if not lat: return dict(measured=False, why="no Present call tied to a shown present id", calls=inwin, tiedCalls=len(found), idEvents=dict(used))
+    # A few chance ties (an id event of another context inside a call) are not a measurement: at least half the calls.
+    if len(lat) < max(1, inwin // 2): return dict(measured=False, why="%d of %d calls tied to a shown present id (needs half)" % (len(lat), inwin), calls=inwin, tiedCalls=len(found), idEvents=dict(used))
     ms = [x / 1000 for x in lat]
     return dict(measured=True, calls=inwin, matched=len(lat), idEvents=dict(used), medianMs=round(statistics.median(ms), 2),
                 p95Ms=round(percentile(ms, 0.95), 2), maxMs=round(max(ms), 2), minMs=round(min(ms), 2))
+
+
+def whole_run(header, rows, key, first, usual):
+    mp = "Microsoft-Windows-DxgKrnl/VSyncDPCMultiPlane/win:Info"
+    if key[0] != mp or not usual: return dict(measured=False)
+    s_col, a_col = column(header, mp, "VidPnSourceId"), column(header, mp, "PresentIdOrPhysicalAddress[PlaneCount]")
+    vs = [(int(v[1]), v[a_col].strip("[]").split(":")[0].strip()) for v in rows[mp] if "source " + v[s_col] == key[1] and int(v[1]) >= first]
+    holds, run, since = [], 1, vs[0][0] if vs else 0
+    for x, y in zip(vs, vs[1:]):
+        if y[1] == x[1]: run += 1
+        else: holds.append((run, since)); run, since = 1, y[0]
+    holds = holds[1:]
+    long_ = [(h, t) for h, t in holds if h > usual]
+    return dict(measured=True, frames=len(holds), held=histogram(min(h, 12) for h, _ in holds), longerThanUsual=len(long_),
+                vblanksLost=sum(h - usual for h, _ in long_),
+                longest=[dict(vblanks=h, atSeconds=round((t - first) / 1e6, 2)) for h, t in sorted(long_, reverse=True)[:12]])
 
 
 def frame_statistics_latency(header, rows, mine, presents, period_us, start, end):
@@ -216,6 +233,10 @@ def main():
         else: holds.append((run, since)); run, since = 1, b[0]
     report["scanout"]["longestHolds"] = [dict(vblanks=h, atSeconds=round((t - start) / 1e6, 3)) for h, t in sorted(holds[1:], reverse=True)[:8]]
 
+    # The whole run on the game's display, from its first Present (menus, car select, the race start included): the
+    # frames held longer than usual, with their time since the first Present, to compare startup freezes (cold caches).
+    report["wholeRun"] = whole_run(header, rows, key, presents[0], mode)
+
     # Present to scan-out: each Present call of the game, tied to its present id by an id event logged on the same thread
     # inside that call, against the first vblank whose plane 0 shows that id on the game's display. Measured only when
     # ids tie; otherwise reported as not measured (order matching is ambiguous by whole frames with a queue).
@@ -250,6 +271,9 @@ def main():
     print("present calls: %d, intervals in vblanks %s, max %.2f ms, >20 ms %d, >33 ms %d" % (p["count"], p["intervalVblanks"], p["maxIntervalMs"] or 0, p["over20ms"], p["over33ms"]))
     f = report["frameStatistics"]
     print("frame statistics (the game's own calls): %d samples, %d presents over %d refreshes, %d samples late" % (f["samples"], f["presents"], f["refreshes"], f["samplesLate"]))
+    w = report["wholeRun"]
+    if w.get("measured"): print("whole run from the first Present: %d frames, %d held longer than usual (%d vblanks lost); longest %s" %
+                               (w["frames"], w["longerThanUsual"], w["vblanksLost"], ", ".join("%d@%.1fs" % (x["vblanks"], x["atSeconds"]) for x in w["longest"][:8])))
     q = report["presentToScanout"]
     if q.get("measured"): print("present to scan-out (%s): %d of %d calls: median %.2f ms, p95 %.2f, max %.2f, min %.2f; queued %s, QPC fit error %s us" %
                                (q.get("method", "present id"), q["matched"], q["calls"], q["medianMs"], q["p95Ms"], q["maxMs"], q["minMs"],
