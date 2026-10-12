@@ -285,6 +285,11 @@ void wheel_input_configure(const Ini& ini){
 }
 
 void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
+    // The keyboard reaches the race only through the PC layer (406FA0), which native_runtime runs only while
+    // pc_input_layer is set. The pad mapping sets it only for a connected gamepad (src/input/dual_sense.cpp returns
+    // first without one), so on a rig without a pad a held accelerate key did nothing (perf run 1, nene 24264). The
+    // desktop always has a keyboard. With no pad, pc_pad stays default: axes 0 (a centred stick) and the POV released.
+    out.pc_input_layer=true;
     if(!g.configured)return;
     if(!g.started)start();
     const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
