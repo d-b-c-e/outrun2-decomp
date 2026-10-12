@@ -1159,27 +1159,9 @@
  },
  {
   "file": "windows/source/ordinary_recording.cpp",
-  "line": "HANDLE f=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
-  "class": "not-a-file",
-  "reason": "session::take: GENERIC_READ, OPEN_EXISTING: the bounded read of the session request; writes nothing"
- },
- {
-  "file": "windows/source/ordinary_recording.cpp",
-  "line": "if(!MoveFileExW(file.c_str(),aside.c_str(),MOVEFILE_WRITE_THROUGH))DeleteFileW(file.c_str()); // never read twice",
-  "class": "latched-skip",
-  "reason": "the refused request set aside (.refused-<pid>), never read twice; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
- },
- {
-  "file": "windows/source/ordinary_recording.cpp",
   "line": "(void)write_session_status(r.request,\"failed\",why,\"\",\"\");",
   "class": "latched-skip",
   "reason": "a refused request's status.json in its result folder; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
- },
- {
-  "file": "windows/source/ordinary_recording.cpp",
-  "line": "if(!MoveFileExW(file.c_str(),(r.request.result/L\"session-request.txt\").c_str(),MOVEFILE_WRITE_THROUGH)){",
-  "class": "latched-skip",
-  "reason": "the request consumed into its result folder (never over one there); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
  },
  {
   "file": "windows/source/ordinary_recording.hpp",
@@ -1204,5 +1186,47 @@
   "line": "if(!ok){DeleteFileW(tmp.c_str());return false;}",
   "class": "definition",
   "reason": "replace_file_atomically's body: the temp file removed after a failed write"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!MoveFileExW(file.c_str(),claimed.c_str(),MOVEFILE_WRITE_THROUGH)){",
+  "class": "latched-skip",
+  "reason": "the request claimed by a rename beside itself (.taken-<pid>), so no later launch can take it; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(HANDLE f=CreateFileW(claimed.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);f!=INVALID_HANDLE_VALUE){",
+  "class": "not-a-file",
+  "reason": "session::take: GENERIC_READ, OPEN_EXISTING: the bounded read of the claimed request; writes nothing"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH))(void)DeleteFileW(claimed.c_str());",
+  "class": "latched-skip",
+  "reason": "a refused request kept beside the claim as .refused-<pid> (never taken again); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE c=CreateFileW(consumed.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "latched-skip",
+  "reason": "the exclusive copy of the request into its own result folder (CREATE_NEW: never over an earlier one, any volume); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "const bool wrote=WriteFile(c,bytes.data(),DWORD(bytes.size()),&written,nullptr)&&written==bytes.size()&&FlushFileBuffers(c);",
+  "class": "latched-skip",
+  "reason": "the request copy's bytes, into the file just created; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!wrote){(void)DeleteFileW(consumed.c_str());return refused(\"the request copy could not be written\"+win32(write_error));}",
+  "class": "latched-skip",
+  "reason": "the partial copy removed after a failed write; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "(void)DeleteFileW(claimed.c_str()); // consumed; a claim that cannot be deleted stays inert (only the exact name is taken)",
+  "class": "latched-skip",
+  "reason": "the claim removed once the copy is in place; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
  }
 ]

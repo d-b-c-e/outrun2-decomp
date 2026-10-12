@@ -108,8 +108,11 @@ void finalizer_end_to_end(const fs::path& finalizer){
 }
 
 int main(int argc,char** argv){
-    fs::path finalizer;
-    for(int i=1;i+1<argc;++i)if(std::string(argv[i])=="--finalizer")finalizer=fs::u8path(argv[i+1]);
+    fs::path finalizer,cross;
+    for(int i=1;i+1<argc;++i){
+        if(std::string(argv[i])=="--finalizer")finalizer=fs::u8path(argv[i+1]);
+        if(std::string(argv[i])=="--cross-volume")cross=fs::u8path(argv[i+1]);
+    }
     fs::create_directories(Root);
     if(!finalizer.empty()){finalizer_end_to_end(finalizer);std::printf("ordinary recording: end to end with %s\n",session::utf8(finalizer).c_str());}
     // Unarmed: nothing at all, as NoCapture was.
@@ -261,11 +264,13 @@ int main(int argc,char** argv){
                "\nresult="+session::utf8(dir/("result-"+id))+"\nrecording="+session::utf8(dir/("recording-"+id))+"\n"+extra;
      };
      check(session::take(file,game,true,now).kind==session::Intake::Kind::None,"no request: ordinary play");
+     const auto claims=[&](const fs::path& d){int n=0;for(const auto& e:fs::directory_iterator(d))if(session::utf8(e.path().filename()).rfind("session-request.txt.taken-",0)==0)++n;return n;};
      const std::string id1(32,'1');spit(file,request("record",id1));
      auto t=session::take(file,game,true,now);
      check(t.kind==session::Intake::Kind::Record&&t.request.request_id==id1&&t.exe_sha256.size()==64,"a record request admitted: "+t.why);
-     check(!fs::exists(file)&&fs::exists(dir/("result-"+id1)/"session-request.txt")&&fs::is_directory(dir/("recording-"+id1))&&
-           !fs::exists(dir/("recording-"+id1)/"capture"),"consumed into its result folder; the recording folder made, no capture yet");
+     check(!fs::exists(file)&&slurp(dir/("result-"+id1)/"session-request.txt")==request("record",id1)&&fs::is_directory(dir/("recording-"+id1))&&
+           !fs::exists(dir/("recording-"+id1)/"capture"),"consumed: its exact bytes in its result folder; the recording folder made, no capture yet");
+     check(claims(dir)==0,"the claim is removed once the copy is in place");
      const std::string id2(32,'2');spit(file,request("record",id2));
      t=session::take(file,game,false,now);
      check(t.kind==session::Intake::Kind::Refused&&has(t.why,"Backend = Shim"),"the native backend refuses a record request: "+t.why);
@@ -284,10 +289,43 @@ int main(int argc,char** argv){
      t=session::take(file,game,true,now);
      check(t.kind==session::Intake::Kind::Refused&&has(t.why,"already holds a capture"),"a recording folder with a capture: refused: "+t.why);
      const std::string id6(32,'6');fs::create_directories(dir/("result-"+id6));spit(dir/("result-"+id6)/"session-request.txt","earlier");
+     spit(dir/("result-"+id6)/"status.json","another session's status");
      spit(file,request("record",id6));
      t=session::take(file,game,true,now);
-     check(t.kind==session::Intake::Kind::Refused&&slurp(dir/("result-"+id6)/"session-request.txt")=="earlier"&&!fs::exists(file),
-           "an earlier request in the result folder is never replaced: "+t.why);}
+     check(t.kind==session::Intake::Kind::Refused&&has(t.why,"another session")&&slurp(dir/("result-"+id6)/"session-request.txt")=="earlier"&&!fs::exists(file),
+           "an earlier request in the result folder is never replaced: "+t.why);
+     check(slurp(dir/("result-"+id6)/"status.json")=="another session's status","and that session's status.json is never written over");
+     check(claims(dir)==0,"a refused claim is kept as .refused, never left under the claim name");}
+
+    // The request on one volume (%TEMP%) and its result and recording folders on another (the 12:56 pilot: C: to E:).
+    if(!cross.empty()){
+        wchar_t a[MAX_PATH]{},b[MAX_PATH]{};
+        fs::create_directories(cross);
+        check(GetVolumePathNameW(Root.c_str(),a,MAX_PATH)&&GetVolumePathNameW(cross.c_str(),b,MAX_PATH),"the two volumes resolved");
+        const bool other=_wcsicmp(a,b)!=0;
+        std::printf("ordinary recording: cross-volume: request on %ls, folders on %ls%s\n",a,b,other?"":" (THE SAME VOLUME: not a cross-volume check)");
+        check(other,"--cross-volume names a folder on another volume than %TEMP%");
+        const auto dir=Root/"cross";fs::create_directories(dir);fs::create_directories(dir/"game");
+        const auto here=cross/("ordinary-recording-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64()));
+        fs::create_directories(here);
+        const auto file=dir/"session-request.txt";const auto now=std::uint64_t(std::time(nullptr));
+        const std::string id(32,'c');
+        const auto text=std::string(session::RequestSchema)+"\r\nrequestId="+id+"\r\naction=record\r\nexpiresUnix="+std::to_string(now+300)+
+            "\r\nresult="+session::utf8(here/"result")+"\r\nrecording="+session::utf8(here/"recording")+"\r\n";
+        spit(file,text);
+        const auto t=session::take(file,dir/"game",true,now);
+        check(t.kind==session::Intake::Kind::Record,"cross-volume: a record request admitted: "+t.why);
+        check(slurp(here/"result"/"session-request.txt")==text&&!fs::exists(file),"cross-volume: its exact bytes in the result folder, none left to take");
+        int left=0;for(const auto& e:fs::directory_iterator(dir))if(session::utf8(e.path().filename()).rfind("session-request.txt",0)==0)++left;
+        check(left==0,"cross-volume: no claim or copy left beside the request");
+        // The whole recording on the other volume too: one real capture, complete.
+        OrdinaryRecorder::Arm a2;a2.request=t.request;a2.profile=Profile;a2.exe_sha256=t.exe_sha256;a2.adapter_version="cross-volume";
+        OrdinaryRecorder r(a2);r.set_devices(devices());
+        for(std::uint64_t i=0;i<30;++i)r.push(row(i+1,std::int64_t(i)*16667));
+        r.stop("f11");
+        check(saved_within(r)&&r.state()==OrdinaryRecorder::State::Complete,"cross-volume: the capture completes: "+r.why());
+        std::error_code e2;fs::remove_all(here,e2);   // this test's own folder on the other volume only
+    }
 
     std::error_code ec;fs::remove_all(Root,ec);   // the test's own folder only
     std::printf("ordinary recording: %d checks passed\n",checks);

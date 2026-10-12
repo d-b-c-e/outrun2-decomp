@@ -452,43 +452,66 @@ std::wstring running_exe(){
 Intake take(const std::filesystem::path& file,const std::filesystem::path& game_folder,bool shim_backend,std::uint64_t now_unix){
     Intake r;
     if(file.empty())return r;
-    HANDLE f=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if(f==INVALID_HANDLE_VALUE){
+    const auto pid=std::to_wstring(GetCurrentProcessId());
+    const auto win32=[](DWORD e){return " (Win32 "+std::to_string(e)+")";};
+    // Claimed first, by a rename in its own folder (one step on one volume): the request's name is gone at once, so no
+    // later launch can take it, whatever happens to its copy below (sana 34298; the 12:56 pilot's result folder was on
+    // another volume, where a move is a copy and a delete that can fail apart). Only the exact name is ever taken.
+    const std::wstring claimed=file.wstring()+L".taken-"+pid;
+    if(!MoveFileExW(file.c_str(),claimed.c_str(),MOVEFILE_WRITE_THROUGH)){
         const DWORD e=GetLastError();
         if(e==ERROR_FILE_NOT_FOUND||e==ERROR_PATH_NOT_FOUND)return r;   // no request: ordinary play
-        r.kind=Intake::Kind::Exit;r.why="the session request cannot be read (error "+std::to_string(e)+")";
+        r.kind=Intake::Kind::Exit;r.why="the session request cannot be claimed"+win32(e);
         return r;
     }
-    std::string bytes(4097,'\0');DWORD n=0;
-    const bool read=ReadFile(f,bytes.data(),DWORD(bytes.size()),&n,nullptr)!=0;
-    CloseHandle(f);
-    bytes.resize(read?n:0);
-    const auto parsed=read?parse(bytes,now_unix,game_folder):Parsed{false,{},"the session request cannot be read",Action::Playback};
-    const auto set_aside=[&]{
-        const auto aside=file.wstring()+L".refused-"+std::to_wstring(GetCurrentProcessId());
-        if(!MoveFileExW(file.c_str(),aside.c_str(),MOVEFILE_WRITE_THROUGH))DeleteFileW(file.c_str());   // never read twice
+    std::string bytes;bool read=false;DWORD read_error=0;
+    if(HANDLE f=CreateFileW(claimed.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);f!=INVALID_HANDLE_VALUE){
+        bytes.assign(4097,'\0');DWORD n=0;
+        read=ReadFile(f,bytes.data(),DWORD(bytes.size()),&n,nullptr)!=0;
+        if(!read)read_error=GetLastError();
+        CloseHandle(f);
+        bytes.resize(read?n:0);
+    }else read_error=GetLastError();
+    // A refused request is kept beside the claim as .refused-<pid>: never taken again, never deleted unread.
+    const auto aside=[&]{
+        const std::wstring refused=file.wstring()+L".refused-"+pid;
+        if(!MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH))(void)DeleteFileW(claimed.c_str());
     };
+    const auto parsed=read?parse(bytes,now_unix,game_folder):Parsed{false,{},"the session request cannot be read"+win32(read_error),Action::Playback};
     if(!parsed.ok){
-        set_aside();
+        aside();
         r.kind=parsed.refused_as==Action::Record?Intake::Kind::Refused:Intake::Kind::Exit;r.why=parsed.why;
         return r;   // the folders it named were not admitted: no status is written there
     }
     r.request=parsed.request;
     const bool record=parsed.request.action==Action::Record;
+    // Before the copy is in its result folder: refused with no status.json (the folder may be another session's).
+    const auto refused=[&](const std::string& why){aside();r.kind=record?Intake::Kind::Refused:Intake::Kind::Exit;r.why=why;return r;};
+    // After: refused with status.json "failed" in its own result folder.
     const auto refuse=[&](const std::string& why){
         r.kind=record?Intake::Kind::Refused:Intake::Kind::Exit;r.why=why;
         (void)write_session_status(r.request,"failed",why,"","");
         return r;
     };
-    // Consumed: into its own result folder (the one place status.json goes), never over an earlier one.
-    if(!folder(r.request.result)){set_aside();r.kind=record?Intake::Kind::Refused:Intake::Kind::Exit;r.why="the result folder cannot be made";return r;}
-    if(!MoveFileExW(file.c_str(),(r.request.result/L"session-request.txt").c_str(),MOVEFILE_WRITE_THROUGH)){
-        set_aside();
-        return refuse("the request cannot be moved into its result folder (one there already?)");
+    if(!folder(r.request.result))return refused("the result folder cannot be made"+win32(GetLastError()));
+    // The exclusive copy of the bytes read into the result folder: never over an earlier request (that folder is
+    // another session's, and its status is never written over).
+    const auto consumed=r.request.result/L"session-request.txt";
+    HANDLE c=CreateFileW(consumed.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(c==INVALID_HANDLE_VALUE){
+        const DWORD e=GetLastError();
+        if(e==ERROR_FILE_EXISTS||e==ERROR_ALREADY_EXISTS)return refused("the result folder already holds a request (another session's)");
+        return refused("the request cannot be copied into its result folder"+win32(e));
     }
+    DWORD written=0;
+    const bool wrote=WriteFile(c,bytes.data(),DWORD(bytes.size()),&written,nullptr)&&written==bytes.size()&&FlushFileBuffers(c);
+    const DWORD write_error=wrote?0:GetLastError();
+    CloseHandle(c);
+    if(!wrote){(void)DeleteFileW(consumed.c_str());return refused("the request copy could not be written"+win32(write_error));}
+    (void)DeleteFileW(claimed.c_str());   // consumed; a claim that cannot be deleted stays inert (only the exact name is taken)
     if(!record)return refuse("this build plays no recording back");
     if(!shim_backend)return refuse("Play with Recording needs [Input] Backend = Shim");
-    if(!folder(r.request.recording))return refuse("the recording folder cannot be made");
+    if(!folder(r.request.recording))return refuse("the recording folder cannot be made"+win32(GetLastError()));
     if(GetFileAttributesW((r.request.recording/L"capture").c_str())!=INVALID_FILE_ATTRIBUTES)return refuse("the recording folder already holds a capture");
     const auto exe=running_exe();
     if(exe.empty())return refuse("the running exe's path is unknown");

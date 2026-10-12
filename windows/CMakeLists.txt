@@ -146,7 +146,9 @@ target_compile_features(test_ordinary_recording PRIVATE cxx_std_17)
 target_compile_options(test_ordinary_recording PRIVATE /W4 /WX)
 target_compile_definitions(test_ordinary_recording PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_ordinary_recording PRIVATE bcrypt)
-add_test(NAME ordinary_recording COMMAND test_ordinary_recording)
+# --cross-volume: the request in %TEMP% and its folders in the build tree, on another volume here (C: and E:; the 12:56
+# pilot's failure). The test fails when the two are on one volume.
+add_test(NAME ordinary_recording COMMAND test_ordinary_recording --cross-volume ${CMAKE_CURRENT_BINARY_DIR}/cross-volume)
 
 # The shared input shim as a DLL for managed game adapters (shim_dll/dbce_shim.h, experimental ABI 1; Astra 16982/17050):
 # the reviewed Core, DInputProvider and ProviderHost, unchanged, behind a C ABI.

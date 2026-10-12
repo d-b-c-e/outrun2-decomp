@@ -41,8 +41,9 @@ std::filesystem::path request_path();
 // A path's UTF-8 bytes as a std::string, alike in C++17 and C++20 (where u8string() is a std::u8string).
 inline std::string utf8(const std::filesystem::path& p){const auto s=p.u8string();return std::string(s.begin(),s.end());}
 // The start's intake (an unlatched process, before the game starts; ordinary_recording.cpp): the request at `file`,
-// consumed either way: moved into its result folder as session-request.txt once it parses, else renamed beside itself
-// (.refused-<pid>). None: no request, ordinary play. Record: armed (the result and recording folders made, the
+// claimed first by a rename beside itself (.taken-<pid>: no later launch can take it), then copied exclusively into its
+// result folder as session-request.txt once it parses (any volume; never over an earlier one), else kept beside itself
+// as .refused-<pid>. None: no request, ordinary play. Record: armed (the result and recording folders made, the
 // capture folder not there yet; `exe_sha256` the running exe's). Refused: a record request refused, ordinary play without a capture
 // (status.json "failed" when its result folder is known). Exit: a playback request (this build plays nothing back) or
 // an unreadable one: never ordinary play, the process ends before the game.
