@@ -47,7 +47,10 @@ const char* native_sprite2d_xst_path(std::uint32_t bank);
 // (scene_owner_49ba80.cpp: 0x2B always, the car's meter, the mode's rank / fight / extra banks), which the port only
 // read as resources: each bank was loaded at its first draw instead, a whole bank inside a race frame (0x2B, the
 // final-stretch sprite of NAVI_PUB 4BEB00, 15-20 ms in perf P2-P4). Each request is taken once per START as it is
-// made; a bank that does not load keeps its first-draw load and its bank_status. Counted in the status line.
+// made. One attempt per bank, as before, only earlier: a bank that fails here is not tried again at its first draw
+// (ensure_bank never retries a bank with a status, so a first-draw failure was never retried either); its bank_status
+// says why. Mode 8 follows retail_asset_lookup's order: a VehicleResourceIds id is a car model there, not a bank.
+// Counted in the status line (start_warmed / start_warm_failed / start_warm_already).
 void native_sprite2d_warm_start_banks(NativeRuntimeContext&,PcD3D9Device& device);
 // Event 398 SPRANI: init 427E30 (the pool allocations are cleared,
 // race_hud.hpp sprani_init_427e30, whenever the event is set up) and, in
