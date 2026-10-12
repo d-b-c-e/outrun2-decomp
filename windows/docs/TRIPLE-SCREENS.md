@@ -380,6 +380,16 @@ t56.
     model 44CD30, course objects), as does absent content.
   - Runtime.log now reports `render queue: N node draws dropped (queue full)`. The 404D10 walk drops nodes when a
     queue is full, which would also look like missing geometry, so a run with drops is read with that in mind.
+- **Next diagnostic: `OR2_TRIPLE_NODE_DUMP=<n>`** (`4909f8b`; three views only, log only, default off; source for
+  review, no run yet).
+  - On the n-th stage display (44DE10), every object that 405360 walks before the next one is first walked whole
+    without queuing. Each node is logged with node_visible's view-space centre and radius, its flags, LOD meshes and
+    verdict. The corrections callback logs P and C[0..2].
+  - Offline: exact ray-sphere tests, in view space, of each wedge pixel's panel ray, from P and C.
+  - Interpretation (sana 41444):
+    - No overlap excludes only these logged bounds, and only if the bounds and transforms are conservative.
+    - It does not establish absent loaded geometry, and it does not exclude other submission paths.
+    - Overlapping nodes are candidates, not evidence that triangles cover those pixels.
 
 ### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
 
@@ -396,8 +406,11 @@ t56.
     is a palm trunk passing the camera. Its blinks are a camera shake on sand, in all three panels. At the same course
     point the sky is drawn in every frame.
 - **Reading:** the scans detect the pre-fix dropout, and the owner build shows none on this route.
+  - sana cross-checked the sequences and records the scoped sky-dropout comparison as **PASS** (41846). Owner
+    visual acceptance is pending.
   - Not established: the exe the owner actually watched, rare events, and oblique-angle texture shimmer.
-  - Open until the owner looks at the current build.
+  - The broader flicker and shimmer item stays open, separate from the start geometry, until the owner looks at
+    the current build.
 - **Pedestrians past the lateral line:** in Q2 they stay drawn to about 84 % across the right panel. No pop-out behind
   the eye was seen in this sample.
 
