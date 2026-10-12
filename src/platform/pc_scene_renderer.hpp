@@ -196,8 +196,11 @@ private:
     driving::PcCameraScreen screen_{};
     std::vector<std::uint8_t> camera_live_fe8_,camera_live_bb0_,camera_live_750_;
     void apply_camera(const driving::PcCameraDevice&,driving::Bytes camera);
-    // FixZBufferPrecision around 40BE70: the main camera's projection with near plane 0.05 (begin) or its own +BC.
+    // FixZBufferPrecision around the 40BE70 sun flare: the main camera's projection with near plane 0.05 (begin), then
+    // the projection that was in effect before it (end).
     void scene_effect_projection(bool begin);
+    bool effect_saved_{};std::array<float,16> effect_projection_{};
+    std::array<float,6> effect_frustum_{};std::array<std::array<float,4>,4> effect_planes_{};
     // Port enhancement (enhancements/frame_rate.hpp): the 485FE0 view redone
     // between ticks from the camera before (`before`) and after this tick.
     void note_camera_replay(driving::Bytes camera,const std::vector<std::uint8_t>& before);

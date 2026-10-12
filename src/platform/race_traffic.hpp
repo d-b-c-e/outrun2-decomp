@@ -18,6 +18,10 @@
 #include <cstdint>
 #include <vector>
 namespace outrun::platform {
+// 4F0E40's screen x bounds: the PC's 5DA2D4 / 6281C8 (k_low / k_high, -320 / 320), or with ScreenEdgeCullFix the port's
+// widescreen half width, as 4F02D0 always uses. An object is culled when x + r < low or x - r > high.
+struct ObjectScreenBounds { float low{},high{}; };
+ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float half_width,bool fix);
 // Scratch stack for the module's locals passed by address (the PC passes
 // stack addresses to its services); mapped by the caller with the state.
 constexpr std::uint32_t TrafficStackBase=0x7ffc0000u,TrafficStackSize=0x4000u;

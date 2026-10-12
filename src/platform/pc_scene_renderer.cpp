@@ -166,15 +166,25 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
 }
 bool& fix_znear(){static bool on=false;return on;}
-// Tweaks re-runs all of CalcCameraMatrix here; only 404310's outputs depend on the near plane (the projection, slot 1,
-// and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so only the projection
-// is rebuilt: with 0.05 for the passes, then from the camera's own +BC (what the control applied) after them.
+// Tweaks re-runs all of CalcCameraMatrix around Clr_SceneEffect; only 404310's outputs depend on the near plane (the
+// projection, slot 1, and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so
+// only the projection is rebuilt with 0.05; afterwards the projection in effect before (95D8A0) is put back as it was.
 void PcSceneRenderer::scene_effect_projection(bool begin){
+    if(!begin){
+        if(!effect_saved_)return;
+        effect_saved_=false;
+        render_set_matrix_410f90(*flush_,effect_projection_,1);
+        device_.set_transform(3,effect_projection_.data());
+        view_.frustum_95bf40=effect_frustum_;view_.planes_95bf58=effect_planes_;
+        return;
+    }
     Bytes vehicle(nullptr,0),camera(nullptr,0);
     if(!vehicle_camera||!vehicle_camera(vehicle,camera)||camera.size()<0x3b4u)return;
+    std::memcpy(effect_projection_.data(),globals_.transform().slot[1],64);
+    effect_frustum_=view_.frustum_95bf40;effect_planes_=view_.planes_95bf58;effect_saved_=true;
     driving::PcCameraDevice d;
     driving::pc_matrix_push(matrices_);
-    driving::camera_perspective_404310(matrices_,camera.f32(0xa0),camera.f32(0xb8),begin?0.05f:camera.f32(0xbc),camera.f32(0xc0),
+    driving::camera_perspective_404310(matrices_,camera.f32(0xa0),camera.f32(0xb8),0.05f,camera.f32(0xc0),
         camera.f32(0xc4),camera.f32(0xc8),d);
     driving::camera_device_store(matrices_,d,1);
     driving::pc_matrix_pop(matrices_);

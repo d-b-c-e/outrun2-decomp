@@ -15,6 +15,10 @@
 #include <functional>
 #include <stdexcept>
 namespace outrun::platform {
+ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float half_width,bool fix){
+    if(fix&&half_width!=320.0f)return {-half_width,half_width};
+    return {k_low,k_high};
+}
 namespace {
 using driving::X87;
 std::uint32_t bits(float f){std::uint32_t u;std::memcpy(&u,&f,4);return u;}

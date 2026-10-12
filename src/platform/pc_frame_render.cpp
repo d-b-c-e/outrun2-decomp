@@ -120,10 +120,13 @@ void frame_render_449050(PcFlushContext& c,PcFrameState& s,const PcFrameInputs& 
         case 2:event_shadow_display_4400c0(sv.events,sv.scene,sv.display);break;
         default:event_display_43fb40(sv.events,1u<<layer,0,0x199,sv.sun_light,sv.scene,sv.display);break;
         }
-        const bool effect=sv.scene_effect_projection&&(sv.events.slots[387].flags&3u)&&(layer==2u||(layer>4u&&layer<=8u));
-        if(effect)sv.scene_effect_projection(true);
-        course_post_40be70(c,in,sv.events.slots[387].flags,sv.leaf,layer);
-        if(effect)sv.scene_effect_projection(false);
+        {   // FixZBufferPrecision: around the one 40BE70 pass that draws, the sun flare 40CBC0 (layer 8, course flag 2);
+            // the others end states (422F20 even restores the projection its 422820 saved).
+            struct Effect{const std::function<void(bool)>* f{};~Effect(){if(f)(*f)(false);}} effect;
+            if(sv.scene_effect_projection&&(sv.events.slots[387].flags&3u)&&layer==8u&&(in.course_flags&2u)){
+                sv.scene_effect_projection(true);effect.f=&sv.scene_effect_projection;}
+            course_post_40be70(c,in,sv.events.slots[387].flags,sv.leaf,layer);
+        }
         if(layer==6u&&in.glare_95af09){sv.leaf(0x414e50,0);sv.leaf(0x414f00,0);}
         if(s.layers[layer].callback)sv.leaf(s.layers[layer].callback,0);
     }

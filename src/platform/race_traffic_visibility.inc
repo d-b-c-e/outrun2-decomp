@@ -107,8 +107,8 @@
         p32(0x84d8e0u,u32(0x84d8e0u)+1u);
         push_load(cam+0x140);
         // x bounds 5DA2D4 / 6281C8 (-320 / 320), or the port's widescreen view as in 4F02D0.
-        const bool wide=g_pc_screen_edge_cull_fix&&g_pc_view_half_width!=320.0f;
-        const float low=wide?-g_pc_view_half_width:K(0x5da2d4u),high=wide?g_pc_view_half_width:K(0x6281c8u);
+        const auto bounds=object_screen_bounds_4f0e40(K(0x5da2d4u),K(0x6281c8u),g_pc_view_half_width,g_pc_screen_edge_cull_fix);
+        const float low=bounds.low,high=bounds.high;
         auto check=[&](std::uint32_t id){
             if((u8(0x79fb48u+id)&3u)!=2u)return;
             const std::uint32_t w=u32(0x799b38u+id*0x3cu);
