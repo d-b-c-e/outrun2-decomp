@@ -356,6 +356,21 @@ t56.
   with no node list walks every node, and stage culling is off with three views.
   - 44CD30's node lists are the car's section only. The draw-distance union (44DE10) never reaches them, so its objects
     can still pop at section changes in the side views; a candidate for later.
+  - **Result, runs W0 / W1** (hub `triples-20261012`): 0 drops in both. The whole-stage path took effect (3,677 against
+    2,034 replicated draws a frame), and the wedges are pixel-identical (427 / 200 magenta at the grid). So bypassing
+    44DE10's and 44CD30's section-node selection is insufficient to cover them.
+  - **Source trace of the other start-area submissions** (no run):
+    - the course objects (44F190 sets, 4F0E40 visibility): placed objects, not ground; their near-plane test was
+      already bypassed in D2;
+    - the sky (5D4DC8), the environment extra (5D4ED0) and the goal: each drawn whole every frame (no node list);
+      none covers the area below the horizon there;
+    - model banks: the runtime keeps them resident (`race_area_runtime.cpp`, no release at area end), so
+      `ensure_bank` skips nothing;
+    - per-node culling: off with three views (`walk_404d10`), and queue drops are now reported (0).
+  - Within that scope, no stage submission path that the decomp reaches covers the start-line surround behind the
+    lateral line. Shipped stage content that simply ends there would explain it, but that is not established.
+  - Options that keep the normal framing are content (new start-area ground) or leaving it, both the owner's choice.
+    The presentation fill is deferred, and narrowing is rejected.
   - Interpretation (sana 39824): render_queue_dropped is read in both arms. With drops, no negative conclusion. With no
     drops and a wedge still uncovered, bypassing the section-node selection was insufficient; that does not mean no
     drawable asset exists anywhere. Diagnostic only, never a default workaround; no performance claim.
