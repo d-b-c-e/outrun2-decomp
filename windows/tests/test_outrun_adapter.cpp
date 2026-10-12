@@ -55,12 +55,12 @@ struct Rig {
         sample.connected=true;
     }
     // One game tick: the pad adapter's native input, then the shim frame applied at the interception point.
-    NativeInputState tick(std::int64_t us=16000){
+    NativeInputState tick(std::int64_t us=16000,const Keyboard* keyboard=nullptr){
         core->service_devices();p.advance(us);
         const auto& f=core->tick();
         frame=&f;
         auto out=pad.update(sample,view.mode);
-        adapter->apply(f,view,out);
+        adapter->apply(f,view,out,keyboard);
         return out;
     }
     void admit(){core->request_admission(Session{Nonce,2000000000ull},1999999000ull,true,true);}
@@ -297,8 +297,80 @@ void test_native_only(){
 }
 }
 
+// Ordinary play on the shim backend (romi 25050): the desktop keyboard keeps its own path, as with the native wheel path
+// (wheel_input.cpp ea34c8b / 45658a0). A padless rig: the pad sample is disconnected, so only the adapter sets the layer.
+void test_keyboard_ordinary(){
+    Rig r(false,profile({Steer,Throttle,Brake,wb("confirm",0),wb("navLeft",7),wb("shiftUp",13)}));
+    r.sample.connected=false;
+    auto& d=r.dev(r.w);
+    d.state.axes[0]=32768;   // the wheel at rest (centre)
+    Keyboard none;Keyboard key;key.any=true;
+    r.view.mode=16;
+    auto out=r.tick(16000,&none);
+    check(out.pc_input_layer&&out.pc_overlay&&!out.pc_overlay_yield,"race, no key: the PC layer runs and the wheel's record drives");
+    out=r.tick(16000,&key);
+    check(out.pc_input_layer&&out.pc_overlay&&out.pc_overlay_yield,"a key with the pedals and buttons at rest hands the race to the keyboard");
+    out=r.tick(16000,&key);
+    check(out.pc_overlay_yield,"the keyboard keeps the race while the wheel stays put");
+    d.state.axes[2]=13107;   // throttle 0.2: a pedal pressed
+    out=r.tick(16000,&key);
+    check(!out.pc_overlay_yield&&out.pc_device.axes_94[0x0d]==51,"a pedal takes the race back for the wheel");
+    d.state.axes[2]=0;r.tick(16000,&none);
+    out=r.tick(16000,&key);
+    check(out.pc_overlay_yield,"a key takes it again once the pedal is at rest");
+    d.state.axes[0]=32768+800;   // about 2.4% of the half range: less than 3%
+    out=r.tick(16000,&none);
+    check(out.pc_overlay_yield,"a small wheel movement leaves the race with the keyboard");
+    d.state.axes[0]=32768+1300;  // about 4%: more than 3% from the anchor
+    out=r.tick(16000,&none);
+    check(!out.pc_overlay_yield,"turning the wheel 3% takes the race back");
+    d.state.axes[0]=32768;r.tick(16000,&none);
+    out=r.tick(16000,&key);check(out.pc_overlay_yield,"keyboard again");
+    d.state.buttons[13]=0x80;out=r.tick(16000,&key);
+    check(!out.pc_overlay_yield,"a held wheel button takes the race back");
+    d.state.buttons[13]=0;r.tick(16000,&none);
+    // In the race the menu keys are the PC layer's own, never menu edges.
+    Keyboard enter;enter.any=enter.enter=true;
+    out=r.tick(16000,&enter);
+    check(!out.menu_confirm&&!(out.frontend.feature_mask&4u),"Enter in the race is not a menu confirm");
+    r.tick(16000,&none);
+    // Menus: the original default menu keys count as confirm, back and navigation, with their own edges.
+    r.view.mode=3;
+    out=r.tick(16000,&enter);
+    check(out.menu_confirm&&(out.frontend.feature_mask&4u)&&(out.pc_device.buttons_04&0x2u),"Enter in a menu: confirm edge, feature 4, held bit 0x2");
+    out=r.tick(16000,&enter);
+    check(!out.menu_confirm&&(out.pc_device.buttons_04&0x2u),"held Enter: the bit stays, no second edge");
+    Keyboard esc;esc.any=esc.esc=true;out=r.tick(16000,&esc);
+    check(out.menu_cancel&&(out.frontend.feature_mask&8u),"Esc: cancel edge, feature 8");
+    Keyboard up;up.any=up.up=true;out=r.tick(16000,&up);check(out.menu_up&&(out.frontend.feature_mask&0x400u),"Up: menu up");
+    Keyboard dn;dn.any=dn.down=true;out=r.tick(16000,&dn);check(out.menu_down&&(out.frontend.feature_mask&0x800u),"Down: menu down");
+    Keyboard lf;lf.any=lf.left=true;out=r.tick(16000,&lf);check(out.menu_left&&(out.frontend.feature_mask&0x1000u)&&(out.pc_device.buttons_04&0x100u),"Left: menu left, D-pad bit");
+    Keyboard rt;rt.any=rt.right=true;out=r.tick(16000,&rt);check(out.menu_right&&(out.frontend.feature_mask&0x2000u)&&(out.pc_device.buttons_04&0x80u),"Right: menu right, D-pad bit");
+    r.tick(16000,&none);
+    // The wheel's own menu actions still work with the keyboard present.
+    d.state.buttons[7]=0x80;out=r.tick(16000,&none);
+    check(out.menu_left&&(out.pc_device.buttons_04&0x100u),"the wheel's navLeft still navigates");
+    d.state.buttons[7]=0;
+    // A profile without wheel axes: no overlay, the race reads the PC layer (the keyboard) with the layer on.
+    Rig b(false,profile({wb("confirm",0)}));b.sample.connected=false;b.view.mode=16;
+    out=b.tick(16000,&key);
+    check(out.pc_input_layer&&!out.pc_overlay,"no wheel axes: the PC layer drives the race");
+}
+
+// A latched frame never takes the keyboard, even if the glue passes one: the test path is unchanged.
+void test_keyboard_latched(){
+    Rig r(true,profile({Steer,Throttle,wb("confirm",0)}));
+    r.view.mode=16;r.admit();
+    Keyboard key;key.any=key.enter=true;
+    auto out=r.tick(16000,&key);
+    check(!out.pc_input_layer&&!out.pc_overlay&&!out.pc_overlay_yield,"latched: the race reads the neutral record, no keyboard overlay");
+    r.view.mode=3;out=r.tick(16000,&key);
+    check(!out.menu_confirm,"latched: no keyboard menu edges");
+}
+
 int main(){
-    try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();}
+    try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
+        test_keyboard_ordinary();test_keyboard_latched();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;

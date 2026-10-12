@@ -2,6 +2,7 @@
 #include "outrun_adapter.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 namespace outrun::desktop {
 namespace {
 int A(const char* id){return shim::action_index(id);}
@@ -101,8 +102,10 @@ int HPattern::step(const bool gates[6],bool race,bool car,std::uint32_t gear,std
 // ---------------------------------------------------------------- the sink
 Adapter::Adapter(std::string transmission,HPattern::Config gearbox):hpattern_(transmission=="H-pattern"),gearbox_(gearbox){}
 
-void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInputState& out){
+void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInputState& out,const Keyboard* keyboard){
     const bool race=g.mode==16u||g.mode==18u;
+    // Ordinary play only: a latched frame (suppress_native) never takes the keyboard.
+    const Keyboard* kb=f.suppress_native?nullptr:keyboard;
     signals_=Signals{};
     signals_.frame_seq=f.seq;signals_.mode=g.mode;signals_.in_gameplay=race;signals_.speed=g.speed;signals_.gear=g.gear;
     signals_.consumed_steer=g.consumed_steer;signals_.consumed_accel=g.consumed_accel;signals_.consumed_brake=g.consumed_brake;
@@ -116,20 +119,34 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     const bool steer=live(f,"steer"),throttle=live(f,"throttle"),brake=live(f,"brake");
     // The record carries the wheel (5A7B50[0]: steer word 0x0E, accelerator 0x0D, brake 0x0C). In a latched process it
     // always does, so the game reads the (neutral) owned values rather than a suppressed pad through the PC layer.
-    if(steer||throttle||brake||f.suppress_native)out.pc_input_layer=false;
+    // Ordinary play with the keyboard: the PC layer stays on for the keyboard (a padless desktop: nothing else sets it,
+    // src/input/dual_sense.cpp returns first without a pad), and the yield below decides which record the race reads.
+    if(kb)out.pc_input_layer=true;
+    else if(steer||throttle||brake||f.suppress_native)out.pc_input_layer=false;
+    std::int32_t steer_word=0;
     if(steer){
-        const auto w=std::int32_t(std::lround(double(value(f,"steer"))*32767.0));
-        d.axes_94[0x0e]=std::int16_t(w);
-        out.steering=std::clamp(w/256,-128,127);
+        steer_word=std::int32_t(std::lround(double(value(f,"steer"))*32767.0));
+        d.axes_94[0x0e]=std::int16_t(steer_word);
+        out.steering=std::clamp(steer_word/256,-128,127);
     }else if(f.suppress_native)d.axes_94[0x0e]=0;
-    auto pedal=[&](bool on,const char* id,std::uint32_t& native,std::size_t word){
+    std::uint32_t wheel_accel=0,wheel_brake=0;
+    auto pedal=[&](bool on,const char* id,std::uint32_t& native,std::size_t word,std::uint32_t& own){
         if(!on)return;
         const auto v=std::uint32_t(std::lround(double(value(f,id))*255.0));
-        native=std::max(native,v);
+        own=v;native=std::max(native,v);
         d.axes_94[word]=std::int16_t(std::max<std::uint32_t>(std::uint16_t(d.axes_94[word]),v));
     };
-    pedal(throttle,"throttle",out.accelerator,0x0d);
-    pedal(brake,"brake",out.brake,0x0c);
+    pedal(throttle,"throttle",out.accelerator,0x0d,wheel_accel);
+    pedal(brake,"brake",out.brake,0x0c,wheel_brake);
+    // Ordinary play: the menu keys, outside the race only (in the race the keyboard is the PC layer's own), merged
+    // with the wheel's actions as wheel_input.cpp merges them: held for the bits, their own edges for the menus.
+    const std::uint32_t KEnter=1u,KEsc=2u,KUp=4u,KDown=8u,KLeft=16u,KRight=32u;
+    std::uint32_t keys=0;
+    if(kb&&!race)keys=(kb->enter?KEnter:0u)|(kb->esc?KEsc:0u)|(kb->up?KUp:0u)|(kb->down?KDown:0u)|(kb->left?KLeft:0u)|(kb->right?KRight:0u);
+    const std::uint32_t key_down=keys&~keys_prev_;
+    keys_prev_=keys;
+    auto held_k=[&](const char* id,std::uint32_t key){return held(f,id)||(keys&key)!=0u;};
+    auto down_k=[&](const char* id,std::uint32_t key){return down(f,id)||(key_down&key)!=0u;};
 
     // H-pattern gates (held, from the core) into shift pulses toward the gate.
     std::uint32_t pulse=0;
@@ -153,29 +170,44 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     if(held(f,"camera"))d.buttons_04|=0x10u;
     d.buttons_04|=pulse;
     if(!race){
-        if(held(f,"confirm"))d.buttons_04|=0x2u;
-        if(held(f,"navRight"))d.buttons_04|=0x80u;
-        if(held(f,"navLeft"))d.buttons_04|=0x100u;
+        if(held_k("confirm",KEnter))d.buttons_04|=0x2u;
+        if(held_k("navRight",KRight))d.buttons_04|=0x80u;
+        if(held_k("navLeft",KLeft))d.buttons_04|=0x100u;
     }
-    // Edges: the core's for actions; the gearbox's own for its pulses.
+    // Edges: the core's for actions; the gearbox's own for its pulses; the menu keys' own.
     out.shift_up|=down(f,"shiftUp")||(pulse_down&0x2u);
     out.shift_down|=down(f,"shiftDown")||(pulse_down&0x8u);
-    out.menu_up|=down(f,"navUp");out.menu_down|=down(f,"navDown");
-    out.menu_left|=down(f,"navLeft");out.menu_right|=down(f,"navRight");
-    out.menu_confirm|=down(f,"confirm")||down(f,"start");out.menu_cancel|=down(f,"back");
+    out.menu_up|=down_k("navUp",KUp);out.menu_down|=down_k("navDown",KDown);
+    out.menu_left|=down_k("navLeft",KLeft);out.menu_right|=down_k("navRight",KRight);
+    out.menu_confirm|=down_k("confirm",KEnter)||down(f,"start");out.menu_cancel|=down_k("back",KEsc);
     out.start|=down(f,"start");
     // Frontend features (48F5F0), as the pad adapter sets them from its button edges.
     auto& m=out.frontend.feature_mask;
     if(down(f,"start"))m|=1u;
-    if(down(f,"confirm"))m|=4u;
-    if(down(f,"back"))m|=8u;
-    if(down(f,"navUp"))m|=0x400u;
-    if(down(f,"navDown"))m|=0x800u;
-    if(down(f,"navLeft"))m|=0x1000u;
-    if(down(f,"navRight"))m|=0x2000u;
+    if(down_k("confirm",KEnter))m|=4u;
+    if(down_k("back",KEsc))m|=8u;
+    if(down_k("navUp",KUp))m|=0x400u;
+    if(down_k("navDown",KDown))m|=0x800u;
+    if(down_k("navLeft",KLeft))m|=0x1000u;
+    if(down_k("navRight",KRight))m|=0x2000u;
     if(!race){if(down(f,"shiftDown"))m|=0x10u;if(down(f,"shiftUp"))m|=0x20u;}
     if(down(f,"camera"))m|=0x40000u;
     if(d.buttons_04||steer||throttle||brake)out.connected=true;
+
+    // Ordinary play: the last device used drives the race (wheel_input.cpp ea34c8b). Without force feedback nothing
+    // centres the wheel, so its resting position is not a test of idleness: a key pressed while the pedals and wheel
+    // buttons are at rest hands the race to the keyboard, until the wheel turns 3% (983 of 32767) from where it was then,
+    // a pedal is pressed or a wheel button is held. A profile with no wheel axes leaves the race to the keyboard.
+    if(kb){
+        static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight",
+                                               "gear1","gear2","gear3","gear4","gear5","gear6"};
+        bool wheel_button=false;for(const char* b:Buttons)wheel_button=wheel_button||held(f,b);
+        const bool wheel_pressed=wheel_accel>=3u||wheel_brake>=3u||wheel_button;
+        if(!keyboard_drives_&&kb->any&&!wheel_pressed){keyboard_drives_=true;keyboard_anchor_=steer_word;}
+        else if(keyboard_drives_&&(wheel_pressed||std::abs(steer_word-keyboard_anchor_)>983))keyboard_drives_=false;
+        out.pc_overlay=steer||throttle||brake;
+        out.pc_overlay_yield=keyboard_drives_;
+    }
 
     signals_.record_steer=d.axes_94[0x0e];
     signals_.record_accel=std::uint16_t(d.axes_94[0x0d]);

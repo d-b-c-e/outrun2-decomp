@@ -1,6 +1,7 @@
 // The input shim in a latched (test) process (shim_input.hpp).
 #include "shim_input.hpp"
 #include "control_journal.hpp"
+#include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "outrun_adapter.hpp"
@@ -33,6 +34,20 @@ struct State {
     Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{};
 };
 State g;
+
+// Ordinary play: no capture. The host's recorder contract (lazy; drain and finish at stop), with nothing to write.
+struct NoCapture {
+    void finish(){}
+    struct Drained{h::RecOutcome outcome;bool joined;};
+    Drained drain(h::Clock::time_point){return {h::RecOutcome::Complete,true};}
+};
+struct Ordinary {
+    std::string profile,transmission,folder;
+    bool configured{},started{},stopped{};
+    std::unique_ptr<h::ProviderHost<NoCapture>> host;
+    std::unique_ptr<Adapter> adapter;
+};
+Ordinary o;
 
 // The journal identity (host/journal_identity.hpp, shared with dbce_shim.dll).
 std::shared_ptr<const c::JournalIdentity> identity(){
@@ -136,6 +151,56 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     g.adapter->apply(*frame,v,out);
     g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
     log_signals(g.adapter->signals(),live.run);
+}
+
+bool shim_backend_selected(const Ini& settings){
+    const auto backend=settings.text("Input","Backend","Native");
+    return _stricmp(backend.c_str(),"Shim")==0;
+}
+
+void shim_input_configure_ordinary(const Ini& settings,const std::string& folder){
+    o.profile="[Controls]\n";
+    for(const auto& line:settings.section_lines("Controls"))o.profile+=line+"\n";
+    const auto parsed=sh::read_profile(o.profile);
+    o.transmission=parsed.ok?parsed.section.transmission:"";
+    o.folder=folder;
+    o.configured=true;
+}
+
+void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
+    if(!o.configured||o.stopped)return;
+    if(!o.started){
+        o.started=true;
+        IDirectInput8W* input=nullptr;
+        if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
+            std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);return;}
+        try{
+            o.host=std::make_unique<h::ProviderHost<NoCapture>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
+                std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd));
+        }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
+        o.adapter=std::make_unique<Adapter>(o.transmission);
+        (void)o.host->tick();
+        const auto start=o.host->start_report();
+        std::printf("%s\n",start.line.c_str());
+        for(const auto& n:start.notes)std::printf("%s\n",n.c_str());
+        std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths\n");
+        std::fflush(stdout);
+    }
+    if(!o.host)return;
+    const auto& frame=o.host->tick();
+    using outrun::desktop::desktop_key;
+    Keyboard kb;kb.any=outrun::desktop::desktop_any_key();
+    kb.enter=desktop_key(0x1c);kb.esc=desktop_key(0x01);kb.up=desktop_key(0xc8);kb.down=desktop_key(0xd0);kb.left=desktop_key(0xcb);kb.right=desktop_key(0xcd);
+    o.adapter->apply(frame,view(runtime),out,&kb);
+}
+
+void shim_input_shutdown_ordinary(){
+    if(!o.host||o.stopped)return;
+    o.stopped=true;
+    (void)o.host->tick();                      // the final neutral Core tick before the stop (host order)
+    platform::NativeInputState neutral{};o.adapter->apply_neutral(false,neutral);
+    const auto report=o.host->stop();
+    std::printf("input shim: ordinary host stop %s\n",report.resolved?"resolved":"UNRESOLVED");std::fflush(stdout);
 }
 
 void shim_input_shutdown(){

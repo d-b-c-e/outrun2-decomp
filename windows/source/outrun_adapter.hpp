@@ -70,11 +70,26 @@ struct Signals {
     HPattern::State gearbox{};
 };
 
+// The desktop keyboard in ordinary play on the shim backend (shim_input ordinary mode): which keys are down this tick.
+// Menu keys are the original defaults (61E678): Enter confirm, Esc back, the arrows navigate.
+struct Keyboard {
+    bool any{};                           // any key down (the race's keyboard is the PC layer's own, 403660 / 61E6B8)
+    bool enter{},esc{},up{},down{},left{},right{};
+};
+
 class Adapter {
 public:
     explicit Adapter(std::string transmission,HPattern::Config gearbox={});
-    // Applies a frame to `out`, which holds the pad adapter's native input for this tick.
-    void apply(const shim::Frame&,const GameView&,platform::NativeInputState& out);
+    // Applies a frame to `out`, which holds the pad adapter's native input for this tick. With `keyboard` (ordinary play
+    // on the shim backend, never a latched process) the desktop keyboard keeps its own path, exactly as with the native
+    // wheel path (wheel_input.cpp, ea34c8b / 45658a0):
+    //   - the PC layer stays on (pc_input_layer), so 406FA0 runs every frame and the race can read the keyboard;
+    //   - the race reads the wheel's record unless the last device used is the keyboard: a key pressed while the pedals
+    //     and wheel buttons are at rest hands the race to the PC layer's record, until the wheel turns 3% from where it
+    //     was then, a pedal is pressed or a wheel button is held (pc_overlay / pc_overlay_yield);
+    //   - outside the race the menu keys count as confirm, back and navigation, merged with the wheel's actions.
+    // Without `keyboard` (a latched process, the fixtures), behaviour is unchanged.
+    void apply(const shim::Frame&,const GameView&,platform::NativeInputState& out,const Keyboard* keyboard=nullptr);
     // The final neutral frame at stop (section 6, shutdown step 1): the owned contribution released, the pad kept
     // unless the process is latched.
     void apply_neutral(bool latched,platform::NativeInputState& out);
@@ -85,6 +100,8 @@ private:
     HPattern gearbox_;
     std::uint32_t last_mode_{};
     std::uint32_t pulse_prev_{};          // shift bits the gearbox held last tick (its own edges)
+    bool keyboard_drives_{};std::int32_t keyboard_anchor_{};   // ordinary play: the race follows the keyboard
+    std::uint32_t keys_prev_{};           // ordinary play: menu keys held last tick (their own edges)
     Signals signals_;
 };
 

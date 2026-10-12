@@ -67,6 +67,16 @@ H-pattern: each gate holds its gear; the build pulses shift up / down, one every
 other frame, until the car's gear (+208) matches, and stops after four pulses
 without a change (top gear, automatic transmission).
 
+**Input backend** (`[Input] Backend`, default `Native`):
+- `Native` is the wheel path described above.
+- `Shim` (in development; not yet the owner's default) reads the `[Controls]` profile through the shared input shim:
+  the same Core, DirectInput provider and `ini-controls-1` profile Wheelkit writes for DRIVE's shim. The native wheel
+  path is then not started, so the profile's devices are read by the shim alone.
+- On either backend the gamepad and the desktop keyboard keep their own native paths: in the race the last device used
+  drives, and Enter, Esc and the arrows work the menus.
+- `runtime.log` gets the shim's start line (`controls: profile ... via shim-ini-controls-1: applied ...`), and the
+  game folder gets `host-shutdown.json` at exit.
+
 Test injection (development only, for Wheelkit's closed-loop tests): see
 `source/test_injection.hpp`. It arms only with a valid
 `%LOCALAPPDATA%\dbce\outrun2006-decomp\inject.on` session and an applied

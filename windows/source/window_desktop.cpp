@@ -135,11 +135,18 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
-        // Ordinary play: the game's own keyboard (the reconstructed PC keyboard device and its key tables).
+        // Ordinary play: the game's own keyboard (the reconstructed PC keyboard device and its key tables), on either backend.
         outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
             const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
-        outrun::desktop::wheel_input_configure(settings);
-        outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
+        if(outrun::desktop::shim_backend_selected(settings)){
+            // [Input] Backend = Shim: the profile's devices through the shared shim (shim_input.hpp). wheel_input is never
+            // configured, so no DirectInput device is opened twice; the pad and the keyboard keep their native paths.
+            outrun::desktop::shim_input_configure_ordinary(settings,folder);
+            outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter_ordinary;
+        }else{
+            outrun::desktop::wheel_input_configure(settings);
+            outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
+        }
     }else{
         // The fenced test process: the input shim (Core, the control worker over inject.txt, the OutRun adapter).
         outrun::desktop::shim_input_configure(plan,settings);
@@ -149,5 +156,6 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
+    else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks
     return result;
 }
