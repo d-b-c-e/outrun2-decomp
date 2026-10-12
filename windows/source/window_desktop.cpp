@@ -103,10 +103,22 @@ NativeWindow& native_window(){
         // three-view spike (TRIPLE-SCREENS.md step 4): projected views, stage culling off while it is on.
         if(const char* v=std::getenv("OR2_TRIPLE_VIEWS");v&&std::string(v)=="1"&&outrun::platform::g_pc_wide_aspect>0.f){
             outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;outrun::platform::render_disable_culling()=true;
+            // The side panels look past 90 degrees, behind the car, where the stage's section lists (the game's own
+            // forward visibility, 44DE10) draw nothing (the second rig picture: the beach ending in a hard line). Unless
+            // [Graphics] DrawDistanceBehind is set, the spike unions the lists of 64 sections behind (OR2_TRIPLE_BEHIND,
+            // 0..256, overrides). Tweaks' caution for that key applies: some models show their back faces from behind.
+            auto& dd=outrun::platform::draw_distance();
+            if(dd.behind==0){
+                int behind=64;
+                if(const char* b=std::getenv("OR2_TRIPLE_BEHIND")){char* end=nullptr;const long n=std::strtol(b,&end,10);
+                    if(end!=b&&!*end&&n>=0&&n<=256)behind=int(n);}
+                dd.behind=behind;if(dd.active())outrun::platform::render_queues_extended()=true;
+            }
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE VIEWS (spike, OR2_TRIPLE_VIEWS): the toolkit fixture rig "
                         "(32 in 16:9, eye matched to the game's FOV, sides 70 deg, gap 8 mm), one game render replicated into three "
-                        "viewports; stage culling off; objects behind the eye still culled; the HUD, menus and screen-space particles "
-                        "on the centre only\n",td::triple_screens_name(triple),w.width,w.height,r.left,r.top,span_note.c_str());
+                        "viewports; stage culling off; %d stage sections behind the car drawn; objects behind the eye still culled; the "
+                        "HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),w.width,w.height,
+                        r.left,r.top,span_note.c_str(),dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
                         "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
