@@ -25,7 +25,9 @@ struct PcPmtResources {
 // replacement exists under the load folder is created from that DDS instead. Names as Tweaks writes them,
 // "{XXH32 of the original DDS file, upper-case hex}_{width}x{height}.dds", tried as <pack>/<index>_<name>, <pack>/<name>,
 // <index>_<name>, <name> (index = the texture's position in its bank). The folder is indexed once at configure time.
-// Off until configured with enabled = true; replacements are loaded with all their mip levels.
+// Off until configured with enabled = true. A replacement is created with the game's own request (levels, filters),
+// only the file differs, as Tweaks does. A file that is unreadable, too large or not a DDS the device reads, or whose
+// creation fails, leaves the stock texture in place (counted as failed).
 void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder);
 struct PmtTextureReplacementStats { std::uint32_t files{},looked{},replaced{},failed{}; };
 const PmtTextureReplacementStats& pmt_texture_replacement_stats();

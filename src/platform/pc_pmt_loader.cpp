@@ -14,16 +14,15 @@ std::uint32_t pmt_xxh32(const std::uint8_t* p,std::size_t len,std::uint32_t seed
     auto rotl=[](std::uint32_t x,int r){return (x<<r)|(x>>(32-r));};
     auto rd=[](const std::uint8_t* q){std::uint32_t v;std::memcpy(&v,q,4);return v;};
     auto round=[&](std::uint32_t a,std::uint32_t in){a+=in*P2;a=rotl(a,13);return a*P1;};
-    const std::uint8_t* end=p+len;std::uint32_t h;
-    if(len>=16){
+    std::size_t left=len;std::uint32_t h;   // the remaining length, so no pointer is formed past the end
+    if(left>=16){
         std::uint32_t v1=seed+P1+P2,v2=seed+P2,v3=seed,v4=seed-P1;
-        const std::uint8_t* limit=end-16;
-        do{v1=round(v1,rd(p));v2=round(v2,rd(p+4));v3=round(v3,rd(p+8));v4=round(v4,rd(p+12));p+=16;}while(p<=limit);
+        do{v1=round(v1,rd(p));v2=round(v2,rd(p+4));v3=round(v3,rd(p+8));v4=round(v4,rd(p+12));p+=16;left-=16;}while(left>=16);
         h=rotl(v1,1)+rotl(v2,7)+rotl(v3,12)+rotl(v4,18);
     }else h=seed+P5;
     h+=std::uint32_t(len);
-    while(p+4<=end){h+=rd(p)*P3;h=rotl(h,17)*P4;p+=4;}
-    while(p<end){h+=std::uint32_t(*p)*P5;h=rotl(h,11)*P1;++p;}
+    for(;left>=4;p+=4,left-=4){h+=rd(p)*P3;h=rotl(h,17)*P4;}
+    for(;left;++p,--left){h+=std::uint32_t(*p)*P5;h=rotl(h,11)*P1;}
     h^=h>>15;h*=P2;h^=h>>13;h*=P3;h^=h>>16;return h;
 }
 namespace {
@@ -34,8 +33,40 @@ struct Replacement {
 };
 Replacement& replacement(){static Replacement r;return r;}
 std::string lower(std::string s){for(auto& ch:s)ch=char(std::tolower(static_cast<unsigned char>(ch)));return s;}
-// The replacement DDS of a bank texture, if the pack has one (Tweaks' search order).
-bool find_replacement(const std::string& pack,std::uint32_t index,const std::uint8_t* data,std::size_t size,std::vector<std::uint8_t>& out){
+// A replacement file read whole, refused above 128 MB (a 4096x4096 A8R8G8B8 chain is 90 MB).
+bool read_replacement(const std::filesystem::path& path,std::vector<std::uint8_t>& out){
+    try{
+        std::error_code e;const auto n=std::filesystem::file_size(path,e);
+        if(e||n<0x80u||n>(std::uintmax_t(128u)<<20))return false;
+        std::ifstream f(path,std::ios::binary);if(!f)return false;
+        out.resize(std::size_t(n));f.read(reinterpret_cast<char*>(out.data()),std::streamsize(n));
+        return f.gcount()==std::streamsize(n);
+    }catch(...){return false;}   // allocation or stream failure: the stock texture
+}
+// A DDS the device's reader (pc_d3dx_texture_from_file) accepts, checked before the device sees it: a file that reader
+// refuses is a device error, and the renderer ends the run on any device error (renderer_present.inc). At least as
+// strict as that reader: DXT1/3/5 or A8R8G8B8, the request's cube kind, 1..16384 texels a side, no more levels than
+// the full chain, every stored level inside the file.
+bool replacement_usable(const std::vector<std::uint8_t>& f,bool cube){
+    if(f.size()<0x80u||std::memcmp(f.data(),"DDS ",4)!=0)return false;
+    auto u=[&](std::size_t o){std::uint32_t v;std::memcpy(&v,f.data()+o,4);return v;};
+    if(u(4)!=124u)return false;                                                 // dwSize
+    const std::uint32_t height=u(12),width=u(16),levels=std::max(1u,u(28));
+    const std::uint32_t pf=u(80),fourcc=u(84),bits=u(88),caps2=u(112);
+    std::uint32_t block=0;                                                      // bytes per 4x4 block, 0 = A8R8G8B8
+    if(pf&4u){if(fourcc==0x31545844u)block=8;else if(fourcc==0x33545844u||fourcc==0x35545844u)block=16;else return false;}
+    else if(!(bits==32u&&u(92)==0xff0000u&&u(96)==0xff00u&&u(100)==0xffu))return false;
+    if(cube!=(caps2!=0u)||width<1u||height<1u||width>16384u||height>16384u)return false;
+    std::uint32_t chain=1;for(std::uint32_t w=width,h=height;w>1||h>1;w=std::max(1u,w/2),h=std::max(1u,h/2))++chain;
+    if(levels>chain)return false;
+    std::uint64_t need=0x80;
+    for(unsigned face=0;face<(cube?6u:1u);++face)
+        for(std::uint32_t l=0,w=width,h=height;l<levels;++l,w=std::max(1u,w/2),h=std::max(1u,h/2))
+            need+=block?std::uint64_t(std::max(1u,(w+3)/4))*std::max(1u,(h+3)/4)*block:std::uint64_t(w)*h*4u;
+    return need<=f.size();
+}
+// The replacement DDS of a bank texture, if the pack has a usable one (Tweaks' search order: the first name present).
+bool find_replacement(const std::string& pack,std::uint32_t index,const std::uint8_t* data,std::size_t size,bool cube,std::vector<std::uint8_t>& out){
     auto& r=replacement();
     if(size<0x80||std::memcmp(data,"DDS ",4)!=0)return false;
     std::uint32_t height,width;std::memcpy(&height,data+12,4);std::memcpy(&width,data+16,4);
@@ -44,9 +75,7 @@ bool find_replacement(const std::string& pack,std::uint32_t index,const std::uin
     ++r.stats.looked;
     for(const std::string& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))}){
         const auto it=r.files.find(key);if(it==r.files.end())continue;
-        std::ifstream f(it->second,std::ios::binary);
-        out.assign(std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>());
-        if(out.size()>=0x80&&std::memcmp(out.data(),"DDS ",4)==0){++r.stats.replaced;return true;}
+        if(read_replacement(it->second,out)&&replacement_usable(out,cube))return true;
         ++r.stats.failed;out.clear();return false;
     }
     return false;
@@ -149,11 +178,14 @@ bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device&
     q.width=q.height=0xffffffffu;q.usage=0;q.format=0;q.pool=1;q.filter=1;q.colour_key=0;
     if(caps2){q.cube=true;q.mip_levels=0xffffffffu;q.mip_filter=1;}
     else{q.cube=false;q.mip_levels=4;q.mip_filter=3;}
-    std::vector<std::uint8_t> swap;
-    if(replacement().enabled&&!r.pack_name.empty()&&find_replacement(r.pack_name,c.texture_95b22c,q.data,q.size,swap)){
-        q.data=swap.data();q.size=std::uint32_t(swap.size());q.mip_levels=0xffffffffu;   // the replacement with all its levels
+    std::uint32_t handle=0;std::vector<std::uint8_t> swap;
+    if(replacement().enabled&&!r.pack_name.empty()&&find_replacement(r.pack_name,c.texture_95b22c,q.data,q.size,q.cube,swap)){
+        auto alt=q;alt.data=swap.data();alt.size=std::uint32_t(swap.size());   // the same request, the pack's file
+        handle=device.create_texture_from_file(alt);
+        if(handle)++replacement().stats.replaced;else ++replacement().stats.failed;   // not created: the stock texture
     }
-    s.put32(slot,device.create_texture_from_file(q));
+    if(!handle)handle=device.create_texture_from_file(q);
+    s.put32(slot,handle);
     c.texture_record_957be0+=0x14;
     ++c.texture_95b22c;
     return c.texture_95b22c>=s.u32(8);

@@ -2,6 +2,7 @@
 // synthetic PMT. The retail-data comparison against the original code is the
 // pmt_loader_probe oracle.
 #include "platform/pc_pmt_loader.hpp"
+#include "platform/pc_dds.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,7 @@ namespace {
 struct Device final:PcD3D9Device{
     std::vector<std::vector<std::uint8_t>> buffers;std::vector<std::uint32_t> kinds;std::vector<std::uint32_t> calls;
     std::vector<PcTextureFileRequest> textures;std::vector<std::vector<std::uint8_t>> texture_bytes;
+    std::uint32_t refuse_size{};   // a texture request of this size fails (returns 0)
     std::uint32_t add(std::uint32_t kind){kinds.push_back(kind);buffers.emplace_back();return std::uint32_t(kinds.size());}
     std::uint32_t create_vertex_buffer(std::uint32_t n,std::uint32_t,std::uint32_t,std::uint32_t)override{
         calls.push_back(26);const auto h=add(26);buffers[h-1].resize(n);return h;}
@@ -27,7 +29,8 @@ struct Device final:PcD3D9Device{
     std::uint32_t create_vertex_shader(const std::uint32_t* t)override{calls.push_back(91);CHECK(t[0]==0xfffe0101u);return add(91);}
     void set_vertex_shader_constant_f(std::uint32_t,const float*,std::uint32_t)override{calls.push_back(94);}
     std::uint32_t create_texture_from_file(const PcTextureFileRequest& q)override{
-        calls.push_back(0x5001);textures.push_back(q);texture_bytes.emplace_back(q.data,q.data+q.size);return add(0x5001);}
+        calls.push_back(0x5001);textures.push_back(q);texture_bytes.emplace_back(q.data,q.data+q.size);
+        return q.size==refuse_size?0u:add(0x5001);}
     void release(std::uint32_t)override{calls.push_back(2);}
     std::uint32_t get_render_state(std::uint32_t)override{return 0;}
     void set_render_state(std::uint32_t,std::uint32_t)override{}
@@ -116,7 +119,7 @@ int main(){
     CHECK(s.u32(0x58)==5);
     CHECK(dev.textures[0].data==video.data()+0x20&&dev.textures[0].size==0x80&&!dev.textures[0].cube&&dev.textures[0].mip_levels==4);
     // Texture replacement (the Tweaks pack layout). XXH32 reference vectors (python-xxhash 3.x), then the synthetic
-    // texture swapped for <pack>/0_<XXH32>_4x8.dds, matched case-insensitively and loaded with all its mip levels.
+    // texture swapped for <pack>/0_<XXH32>_4x8.dds, matched case-insensitively, created with the game's own request.
     const auto bytes=[](const char* text){return reinterpret_cast<const std::uint8_t*>(text);};
     CHECK(pmt_xxh32(bytes(""),0)==0x02cc5d05u&&pmt_xxh32(bytes("abc"),3)==0x32d153ffu);
     CHECK(pmt_xxh32(bytes("Nobody inspects the spammish repetition"),39)==0xe2293b2fu);   // the 16-byte stripe path
@@ -124,24 +127,42 @@ int main(){
     {
         namespace fs=std::filesystem;
         const auto dir=fs::temp_directory_path()/"or2_texture_replacement_test";
-        fs::remove_all(dir);fs::create_directories(dir/"cs_TEST_pmt");
-        PcPmtResources a{};std::vector<std::uint8_t> av;synthetic_pmt(a,av);a.pack_name="cs_TEST_pmt";
+        fs::remove_all(dir);
+        // A 4x4 DXT1 DDS, one level (0x88 bytes); `width` changes the header only.
+        const auto dxt1=[](std::uint32_t width,std::uint32_t fourcc){
+            std::vector<std::uint8_t> f(0x88,0x5a);std::memset(f.data(),0,0x80);std::memcpy(f.data(),"DDS ",4);
+            auto put=[&](std::size_t o,std::uint32_t v){std::memcpy(f.data()+o,&v,4);};
+            put(4,124);put(12,4);put(16,width);put(28,1);put(76,32);put(80,4);put(84,fourcc);return f;};
+        const auto dds=dxt1(4,0x31545844u),truncated=dxt1(64,0x31545844u),dxt2=dxt1(4,0x32545844u);
+        {PcTextureFileRequest q{};q.data=dds.data();q.size=std::uint32_t(dds.size());q.mip_levels=4;q.mip_filter=3;
+         PcDdsTexture tex;std::string error;CHECK(pc_d3dx_texture_from_file(q,tex,error));}   // the device's reader takes it
+        PcPmtResources a{};std::vector<std::uint8_t> av;synthetic_pmt(a,av);
         char name[64];std::snprintf(name,sizeof name,"0_%X_4x8.DDS",pmt_xxh32(av.data()+0x20,0x80));
-        std::vector<std::uint8_t> dds(0x90,0x5a);std::memcpy(dds.data(),"DDS ",4);
-        {std::ofstream f(dir/"cs_TEST_pmt"/name,std::ios::binary);f.write(reinterpret_cast<const char*>(dds.data()),std::streamsize(dds.size()));}
+        const auto write=[&](const char* pack,const std::vector<std::uint8_t>& f){
+            fs::create_directories(dir/pack);std::ofstream o(dir/pack/name,std::ios::binary);
+            o.write(reinterpret_cast<const char*>(f.data()),std::streamsize(f.size()));};
+        write("cs_TEST_pmt",dds);write("cs_SHORT_pmt",truncated);write("cs_DXT2_pmt",dxt2);
+        const auto bank=[&](const char* pack,PcPmtResources& r,std::vector<std::uint8_t>& v){synthetic_pmt(r,v);r.pack_name=pack;};
         // Off: not consulted, even with a matching file.
-        pmt_texture_replacement_configure(false,dir.string());
+        a.pack_name="cs_TEST_pmt";pmt_texture_replacement_configure(false,dir.string());
         {Device d;load_synthetic(a,d);CHECK(d.textures[0].data==av.data()+0x20&&pmt_texture_replacement_stats().looked==0);}
         pmt_texture_replacement_configure(true,dir.string());
-        CHECK(pmt_texture_replacement_stats().files==1);
-        PcPmtResources b{};std::vector<std::uint8_t> bv;synthetic_pmt(b,bv);b.pack_name="cs_TEST_pmt";
-        {Device d;load_synthetic(b,d);
-         CHECK(d.textures[0].size==0x90&&d.textures[0].mip_levels==0xffffffffu&&!d.textures[0].cube&&d.texture_bytes[0]==dds);}
+        CHECK(pmt_texture_replacement_stats().files==3);
+        {PcPmtResources r{};std::vector<std::uint8_t> v;bank("cs_TEST_pmt",r,v);Device d;load_synthetic(r,d);
+         CHECK(d.textures.size()==1&&d.texture_bytes[0]==dds&&d.textures[0].mip_levels==4&&d.textures[0].mip_filter==3);}
         // Another bank: no folder of its own and no loose file, so it keeps its texture.
-        PcPmtResources c{};std::vector<std::uint8_t> cv;synthetic_pmt(c,cv);c.pack_name="cs_OTHER_pmt";
-        {Device d;load_synthetic(c,d);CHECK(d.textures[0].data==cv.data()+0x20&&d.textures[0].mip_levels==4);}
+        {PcPmtResources r{};std::vector<std::uint8_t> v;bank("cs_OTHER_pmt",r,v);Device d;load_synthetic(r,d);
+         CHECK(d.textures.size()==1&&d.textures[0].data==v.data()+0x20);}
+        // A file shorter than its levels, and an unsupported FourCC: never offered to the device; stock kept.
+        for(const char* pack:{"cs_SHORT_pmt","cs_DXT2_pmt"}){
+            PcPmtResources r{};std::vector<std::uint8_t> v;bank(pack,r,v);Device d;load_synthetic(r,d);
+            CHECK(d.textures.size()==1&&d.textures[0].data==v.data()+0x20);}
+        // The device refuses the replacement: the stock texture is created in its place.
+        {PcPmtResources r{};std::vector<std::uint8_t> v;bank("cs_TEST_pmt",r,v);Device d;d.refuse_size=0x88;load_synthetic(r,d);
+         CHECK(d.textures.size()==2&&d.texture_bytes[0]==dds&&d.textures[1].data==v.data()+0x20);
+         CHECK(Bytes(r.system.data(),r.system.size()).u32(0x58)!=0);}
         const auto& st=pmt_texture_replacement_stats();
-        CHECK(st.looked==2&&st.replaced==1&&st.failed==0);
+        CHECK(st.looked==5&&st.replaced==1&&st.failed==3);
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     std::printf("pc pmt loader: %u checks\n",checks);
