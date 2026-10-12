@@ -31,6 +31,10 @@ struct Config {
     const char *devFile = nullptr;
     // STD-023: whether the three views are on, for the frame-rate readout and its log line. Null: not reported.
     bool (*triplesOn)() = nullptr;
+    // The display in the mod's own words for that readout (for example "Surround span, one wide view"); when set, and
+    // not empty, it replaces the triples on/off suffix, so a planar wide view is never called triples. Called on the
+    // present thread. Null: triplesOn as before.
+    const char *(*displayText)() = nullptr;
 };
 
 // Called once by the mod before the overlay starts (not from DllMain).

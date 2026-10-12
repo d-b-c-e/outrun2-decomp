@@ -335,8 +335,9 @@ void EndGroup()
 // ---- frame rate (STD-023) -----------------------------------------------------------------------------------
 static void frameLine(char *out, size_t size, const FrameSummary &s)
 {
-    const char *triples = g_cfg.triplesOn ? (g_cfg.triplesOn() ? "; triples on" : "; triples off") : "";
-    sprintf_s(out, size, "%.0f fps average, 1%% low %.0f fps, worst frame %.1f ms%s", s.avgFps, s.lowFps, s.worstMs, triples);
+    const char *display = g_cfg.displayText ? g_cfg.displayText() : nullptr;
+    const int triples = g_cfg.triplesOn ? (g_cfg.triplesOn() ? 1 : 0) : -1;
+    FormatFrameLine(out, size, s, display, triples);
 }
 void NoteFrame()
 {

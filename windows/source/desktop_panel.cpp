@@ -158,6 +158,15 @@ void stop_ffb(){
     else stop_error=pending_failure;
 }
 bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
+// The frame-rate readout's display suffix (STD-023, romi 31510): the span is one planar view, never "triples on".
+// The present thread only (the readout and its log line).
+const char* display_text(){
+    static char text[96];
+    const auto& st=triple_screens_status();
+    if(st.mode==TripleScreens::off||!(st.aspect>0.f))std::snprintf(text,sizeof text,"one 16:9 view");
+    else std::snprintf(text,sizeof text,"%s span, one wide view %.2f:1",triple_screens_name(st.mode),double(st.aspect));
+    return text;
+}
 void release_backend(){
     if(p.backend){ImGui_ImplDX11_Shutdown();p.backend=false;}
     p.device=nullptr;
@@ -241,6 +250,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     c.log=log_line;
     c.devFile=p.dev.empty()?nullptr:p.dev.c_str();
     c.triplesOn=triples_on;
+    c.displayText=display_text;   // replaces the triples on/off suffix
     dbce::panel::Configure(c);
     xbox_runtime::present_overlay()=overlay;
     p.configured=true;

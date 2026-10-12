@@ -1,7 +1,7 @@
 # Vendored: wheel toolkit native panel and its Dear ImGui
 
 From [d-b-c-e/dbce-wheel-mod-toolkit](https://github.com/d-b-c-e/dbce-wheel-mod-toolkit) `native/` at
-`ee12f00082135d4b7b81ba97ebaab39e185e8c26` (panel files last changed in fdb00b4), byte for byte, in the same layout (the panel
+`bb46a5e` (2026-10-12: panel `Config::displayText`; the other files unchanged since `ee12f00`), byte for byte, in the same layout (the panel
 includes `../third_party/imgui/`). The toolkit code is MIT (`LICENSE` here); Dear ImGui 1.91.6 WIP is MIT
 (`third_party/imgui/LICENSE.txt`, provenance in `third_party/imgui/PROVENANCE.md`). Do not edit; re-vendor from the
 toolkit and update this table together. Only the DX11 backend is copied, and not the toolkit overlay (`dbce_overlay_*`):
@@ -9,9 +9,9 @@ the desktop build draws the panel from its own renderer (docs/F6-PANEL.md).
 
 | File | SHA-256 |
 | --- | --- |
-| `panel/dbce_frame_stats.hpp` | `b2ef1fa2146296b8d70dbe45e58fa6ffd1a202e866f5c650e9d16cf9be12a6f0` |
-| `panel/dbce_panel.cpp` | `90f2904361fee7aceb31350b61969c5e73989df972bdbe34e558f8169c7deca0` |
-| `panel/dbce_panel.h` | `675cb5996da572ee6ba973743927a4e8cac0b52c09542b206de4a81302a6b707` |
+| `panel/dbce_frame_stats.hpp` | `50e5e8e37c6d2b7477a46ca12dedde31d9135be080df689e39503104027d64be` |
+| `panel/dbce_panel.cpp` | `aa309171c4bf2ead669aae9bcb91f01d764c5e7d1d8e26aa6c7eef53072deb1d` |
+| `panel/dbce_panel.h` | `f73948a0ee59b786e67c5e886a98a4dd75bd83964a3e6441163923518c3f176a` |
 | `panel/dbce_panel_input.cpp` | `0616115375a31b1bd21ca89b3b259aff2db9ff5fa00ecad1fc20ee96705ce295` |
 | `panel/dbce_panel_input.h` | `e0ea85167608ad9a1d5ef2af7837fdea9dee10fb6bce98f2542cd97b42809a39` |
 | `third_party/imgui/backends/imgui_impl_dx11.cpp` | `5d76d6a60a6aafa4f41be30e2637e82d76dce65de796ff638604b48c9cf8917b` |

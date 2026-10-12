@@ -2,6 +2,8 @@
 // hook. Pure statistics (tested by test_frame_stats.cpp): a fixed buffer, one sort per window, no allocation per frame.
 #pragma once
 #include <algorithm>
+#include <cstddef>
+#include <cstdio>
 
 namespace dbce { namespace panel {
 
@@ -47,5 +49,17 @@ private:
     double sum_ = 0;
     FrameSummary last_;
 };
+
+// The readout's line: the three numbers, then what the display is. `display` (the mod's own words, for example
+// "Surround span, one wide view") wins over `triples` (-1 not reported, 0 off, 1 on), so a mod whose wide window is
+// one planar view never reports "triples on". Truncated to `size`, never overrun.
+inline void FormatFrameLine(char *out, size_t size, const FrameSummary &s, const char *display, int triples)
+{
+    if (!out || !size) return;
+    char suffix[96] = "";
+    if (display && *display) snprintf(suffix, sizeof suffix, "; %s", display);
+    else if (triples >= 0) snprintf(suffix, sizeof suffix, "%s", triples ? "; triples on" : "; triples off");
+    snprintf(out, size, "%.0f fps average, 1%% low %.0f fps, worst frame %.1f ms%s", s.avgFps, s.lowFps, s.worstMs, suffix);
+}
 
 }} // namespace dbce::panel
