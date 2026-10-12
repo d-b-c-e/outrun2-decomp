@@ -95,6 +95,13 @@ target_include_directories(test_shim_steer PRIVATE source shim tests vendor/cont
 target_compile_features(test_shim_steer PRIVATE cxx_std_17)
 target_compile_options(test_shim_steer PRIVATE /W4)
 add_test(NAME shim_steer COMMAND test_shim_steer)
+# The ordinary session request (source/session_request): the strict parser and what each refusal means.
+add_executable(test_session_request tests/test_session_request.cpp source/session_request.cpp shim/parse.cpp)
+target_include_directories(test_session_request PRIVATE source shim vendor/controls)
+target_compile_features(test_session_request PRIVATE cxx_std_17)
+target_compile_options(test_session_request PRIVATE /W4)
+target_compile_definitions(test_session_request PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+add_test(NAME session_request COMMAND test_session_request)
 
 # The OutRun 2006 shim adapter (source/outrun_adapter), slice 2: the game's pad adapter, the shim core and the adapter
 # on fakes, into the NativeInputState the game consumes.
@@ -121,6 +128,14 @@ target_compile_features(test_outrun_replay PRIVATE cxx_std_17)
 target_compile_options(test_outrun_replay PRIVATE /W4 /WX)
 target_link_libraries(test_outrun_replay PRIVATE bcrypt)
 add_test(NAME outrun_replay COMMAND test_outrun_replay)
+# Capture contract @2 (an ordinary recording): the consumed input and the keyboard channels, @1 rows unchanged.
+add_executable(test_outrun_capture2 tests/test_outrun_capture2.cpp source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp
+    ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_outrun_capture2 PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_outrun_capture2 PRIVATE cxx_std_17)
+target_compile_options(test_outrun_capture2 PRIVATE /W4 /WX)
+target_link_libraries(test_outrun_capture2 PRIVATE bcrypt)
+add_test(NAME outrun_capture2 COMMAND test_outrun_capture2)
 
 # The shared input shim as a DLL for managed game adapters (shim_dll/dbce_shim.h, experimental ABI 1; Astra 16982/17050):
 # the reviewed Core, DInputProvider and ProviderHost, unchanged, behind a C ABI.

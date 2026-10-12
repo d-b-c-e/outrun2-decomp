@@ -23,6 +23,10 @@ struct CaptureSettings {
     dbce::session::Limits limits{512ull*1024*1024,256*1024,300};
     std::size_t slots=510;                     // 510 fixed slots of 8216 bytes stay under 4 MiB
     std::function<void()> before_write;        // test seam (QueuedSink's): empty in the desktop
+    // The contract and the context line: a latched run's @1 by default (byte-compatible with R1b); an ordinary
+    // recording (Play with Recording) passes CaptureContract2 and its own context.
+    std::string contract=CaptureContract;
+    std::string context="OutRunDesktop latched shim run; devices.json carries the device table and caps";
 };
 
 // OutRunDesktop's recorder: the shared frame recorder with OutRun's channels, contract, game id and metadata, so its
@@ -32,8 +36,8 @@ class ShimRecorder {
     static rec::FrameCaptureSettings shared(CaptureSettings c){
         rec::FrameCaptureSettings s;
         s.folder=std::move(c.folder);s.profile=std::move(c.profile);s.run_nonce=std::move(c.run_nonce);s.adapter_version=std::move(c.adapter_version);
-        s.game="outrun2006-decomp-desktop";s.bundle_meta=CaptureContract;
-        s.context="OutRunDesktop latched shim run; devices.json carries the device table and caps";
+        s.game="outrun2006-decomp-desktop";s.bundle_meta=std::move(c.contract);
+        s.context=std::move(c.context);
         s.properties={{"adapterConsumedOffset","previous tick; adapter record fields are this tick"}};
         s.hz=c.hz;s.seconds=c.seconds;s.limits=c.limits;s.slots=c.slots;s.before_write=std::move(c.before_write);
         return s;

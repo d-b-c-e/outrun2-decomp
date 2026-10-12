@@ -3,6 +3,10 @@
 // the Core frame plus the adapter's signals and the GameView it read (the NativeInputState it wrote is kept for
 // replay comparisons, not recorded). Channels are the frame codec's plus "adapter.*" and "gameInput.*"; decoding is
 // strict (finite, in range) and throws.
+// Contract @2 (an ordinary recording, Play with Recording; romi 33134/33165) adds, per tick, the input the game
+// consumed after the PC layer's arbitration at 453BB0 ("final.*": the NativeInputState there, with the record
+// pc_device the race read) and the raw keyboard behind it ("keyboard.*", provenance only). The latched R1/R3 captures
+// stay @1, byte for byte.
 #include "capture.hpp"
 #include "outrun_adapter.hpp"
 #include "platform/runtime_input.hpp"
@@ -10,10 +14,18 @@
 namespace outrun::desktop {
 namespace rec=dbce::shim::recorder;
 constexpr const char* CaptureContract="dbce.shim.outrun-capture@1\n";   // bundle.meta of a desktop capture
+constexpr const char* CaptureContract2="dbce.shim.outrun-capture@2\n";  // bundle.meta of an ordinary recording
+// The raw keyboard behind a tick of an ordinary recording: the six menu keys, any key, and whether the keyboard drives
+// the race (the adapter's keyboard_drives_). Provenance only: what the game consumed is final.*.
+struct KeyboardProvenance { bool enter{},esc{},up{},down{},left{},right{},any{},drives{}; };
 
 // tape_row: in an R3 replay run (outrun_replay.hpp) the tape row the adapter played, or -1; NotReplay elsewhere (no channel).
 constexpr std::int64_t NotReplay=-2;
-struct Snapshot { dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay; };
+// consumed / keyboard: an ordinary recording's @2 fields, written when has_consumed (every row of an @2 capture).
+struct Snapshot {
+    dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay;
+    bool has_consumed{}; platform::NativeInputState consumed{}; KeyboardProvenance keyboard{};
+};
 
 inline rec::Channels signal_channels(const Signals& s){
     rec::Channels c;rec::u64(c,"adapter.frame",s.frame_seq);
@@ -23,12 +35,32 @@ inline rec::Channels signal_channels(const Signals& s){
     c["adapter.recordButtons"]=s.record_buttons;c["adapter.nativeSuppressed"]=s.native_suppressed;c["adapter.gearbox"]=int(s.gearbox);
     return c;
 }
+// @2: what the game consumed this tick and the keyboard behind it.
+inline rec::Channels consumed_channels(const Snapshot& s){
+    rec::Channels c;const auto& f=s.consumed;
+    c["final.steering"]=f.steering;c["final.accelerator"]=f.accelerator;c["final.brake"]=f.brake;
+    c["final.shiftUp"]=f.shift_up;c["final.shiftDown"]=f.shift_down;
+    c["final.menuLeft"]=f.menu_left;c["final.menuRight"]=f.menu_right;c["final.menuUp"]=f.menu_up;c["final.menuDown"]=f.menu_down;
+    c["final.menuConfirm"]=f.menu_confirm;c["final.menuCancel"]=f.menu_cancel;c["final.start"]=f.start;
+    c["final.featureMask"]=f.frontend.feature_mask;c["final.deviceHeld"]=f.frontend.device_held;
+    for(std::size_t i=0;i<f.frontend.axes.size();++i)c["final.frontAxis"+std::to_string(i)]=f.frontend.axes[i];
+    c["final.connected"]=f.connected;
+    c["final.pcInputLayer"]=f.pc_input_layer;c["final.pcRecordUsed"]=f.pc_record_used;
+    c["final.pcOverlay"]=f.pc_overlay;c["final.pcOverlayYield"]=f.pc_overlay_yield;
+    c["final.pcButtons"]=f.pc_device.buttons_04;
+    c["final.pcSteer"]=f.pc_device.axes_94[0x0e];c["final.pcAccel"]=f.pc_device.axes_94[0x0d];c["final.pcBrake"]=f.pc_device.axes_94[0x0c];
+    const auto& k=s.keyboard;
+    c["keyboard.enter"]=k.enter;c["keyboard.esc"]=k.esc;c["keyboard.up"]=k.up;c["keyboard.down"]=k.down;
+    c["keyboard.left"]=k.left;c["keyboard.right"]=k.right;c["keyboard.any"]=k.any;c["keyboard.drives"]=k.drives;
+    return c;
+}
 // OutRun's own channels of a tick (the frame recorder appends them to the Core frame's).
 inline rec::Channels game_channels(const Snapshot& s){
     auto c=signal_channels(s.signals);
     c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
     if(s.tape_row!=NotReplay)c["replay.tapeRow"]=double(s.tape_row);
     c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;
+    if(s.has_consumed){const auto f=consumed_channels(s);c.insert(f.begin(),f.end());}
     return c;
 }
 inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots: rec::encode's fixed sample slots
@@ -37,7 +69,9 @@ inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots
 }
 inline rec::Channels frame_channels(const rec::Channels& all){
     rec::Channels c;
-    for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0&&v.first.rfind("replay.",0)!=0)c.insert(v);
+    // Every OutRun-side prefix of @1 and the versioned @2 additions (romi 33147): only the Core frame codec's remain.
+    for(const auto& v:all)if(v.first.rfind("adapter.",0)!=0&&v.first.rfind("gameInput.",0)!=0&&v.first.rfind("replay.",0)!=0&&
+                             v.first.rfind("final.",0)!=0&&v.first.rfind("keyboard.",0)!=0)c.insert(v);
     return c;
 }
 inline GameView decoded_view(const rec::Channels& c){
@@ -63,6 +97,31 @@ inline Signals decoded_signals(const rec::Channels& c){
     s.native_suppressed=std::uint32_t(rec::number(c,"adapter.nativeSuppressed",0,UINT32_MAX));
     s.gearbox=HPattern::State(rec::number(c,"adapter.gearbox",0,int(HPattern::State::AtTarget)));
     return s;
+}
+// @2: the consumed input and the keyboard back from a row (strict, as the other decoders).
+struct Consumed { platform::NativeInputState input; KeyboardProvenance keyboard; };
+inline Consumed decoded_consumed(const rec::Channels& c){
+    Consumed r;auto& f=r.input;
+    const auto b=[&](const char* k){return rec::number(c,k,0,1)!=0;};
+    f.steering=std::int32_t(rec::number(c,"final.steering",-128,127));
+    f.accelerator=std::uint32_t(rec::number(c,"final.accelerator",0,255));f.brake=std::uint32_t(rec::number(c,"final.brake",0,255));
+    f.shift_up=b("final.shiftUp");f.shift_down=b("final.shiftDown");
+    f.menu_left=b("final.menuLeft");f.menu_right=b("final.menuRight");f.menu_up=b("final.menuUp");f.menu_down=b("final.menuDown");
+    f.menu_confirm=b("final.menuConfirm");f.menu_cancel=b("final.menuCancel");f.start=b("final.start");
+    f.frontend.feature_mask=std::uint32_t(rec::number(c,"final.featureMask",0,UINT32_MAX));
+    f.frontend.device_held=std::uint32_t(rec::number(c,"final.deviceHeld",0,UINT32_MAX));
+    for(std::size_t i=0;i<f.frontend.axes.size();++i)f.frontend.axes[i]=std::int16_t(rec::number(c,("final.frontAxis"+std::to_string(i)).c_str(),INT16_MIN,INT16_MAX));
+    f.connected=b("final.connected");
+    f.pc_input_layer=b("final.pcInputLayer");f.pc_record_used=b("final.pcRecordUsed");
+    f.pc_overlay=b("final.pcOverlay");f.pc_overlay_yield=b("final.pcOverlayYield");
+    f.pc_device.buttons_04=std::uint32_t(rec::number(c,"final.pcButtons",0,UINT32_MAX));
+    f.pc_device.axes_94[0x0e]=std::int16_t(rec::number(c,"final.pcSteer",INT16_MIN,INT16_MAX));
+    f.pc_device.axes_94[0x0d]=std::int16_t(rec::number(c,"final.pcAccel",INT16_MIN,INT16_MAX));
+    f.pc_device.axes_94[0x0c]=std::int16_t(rec::number(c,"final.pcBrake",INT16_MIN,INT16_MAX));
+    auto& k=r.keyboard;
+    k.enter=b("keyboard.enter");k.esc=b("keyboard.esc");k.up=b("keyboard.up");k.down=b("keyboard.down");
+    k.left=b("keyboard.left");k.right=b("keyboard.right");k.any=b("keyboard.any");k.drives=b("keyboard.drives");
+    return r;
 }
 // The adapter signal fields that differ between two ticks (replay comparisons; empty when every field is equal).
 inline std::vector<const char*> signal_differences(const Signals& a,const Signals& b){

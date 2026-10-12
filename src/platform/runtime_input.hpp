@@ -58,6 +58,14 @@ inline bool runtime_input_ready(const NativeRuntimeInput& input){
     return input.sample!=nullptr;
 }
 
+// After the game consumed this tick's input: called at 453BB0 once the PC layer's arbitration (406FA0) chose the
+// record and race_input_update_453bb0 read it, with that consumed input (pc_device the record used). Null by default;
+// the desktop's ordinary recorder sets it (windows/source/shim_input.cpp). runtime_input_sample has this one caller,
+// so each sample is followed by exactly one call.
+struct NativeRuntimeContext;
+using InputConsumedHook=void(*)(const NativeInputState& consumed,const NativeRuntimeContext& context);
+InputConsumedHook& native_input_consumed_hook();
+
 inline void runtime_input_sample(NativeRuntimeInput& input,NativeInputState& state){
     if(!runtime_input_ready(input)){state=NativeInputState{};return;}
     NativeInputState next{};
