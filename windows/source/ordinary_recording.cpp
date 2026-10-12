@@ -2,6 +2,7 @@
 #include "ordinary_recording.hpp"
 #include "control_journal.hpp"
 #include "sha256.hpp"
+#include "startup_state.hpp"
 #include <windows.h>
 #include <bcrypt.h>
 #include <algorithm>
@@ -30,7 +31,8 @@ std::uint64_t creation_time(){
     return (std::uint64_t(c.dwHighDateTime)<<32)|c.dwLowDateTime;
 }
 std::string jstr(const std::string& s){std::string j;if(!dbce::shim::control::journal_detail::json_string(j,s,4096))j="null";return j;}
-// SHA-256 of a file, streamed (a capture can be hundreds of MB).
+}
+// SHA-256 of a file, streamed (a capture can be hundreds of MB); also the startup snapshot's (startup_state.cpp).
 std::string file_sha256(const std::filesystem::path& p,std::uint64_t& bytes){
     bytes=0;
     HANDLE f=CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
@@ -56,6 +58,7 @@ std::string file_sha256(const std::filesystem::path& p,std::uint64_t& bytes){
     BCryptDestroyHash(h);BCryptCloseAlgorithmProvider(alg,0);CloseHandle(f);
     return out;
 }
+namespace {
 // A new file, written and flushed: never over an existing one.
 void write_new_file(const std::filesystem::path& p,const std::string& bytes){
     HANDLE f=CreateFileW(p.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
@@ -147,7 +150,10 @@ std::string OrdinaryRecorder::Shared::admit(const ShimRecorder::Drained& d){
     const auto u=[](std::uint64_t v){return std::to_string(v);};
     const auto b=[](bool v){return std::string(v?"true":"false");};
     const auto g=[](double v){char t[32];std::snprintf(t,sizeof t,"%.17g",v);return std::string(t);};
-    const std::string j="{\n \"schema\":\"outrun.recorder-complete@1\",\n \"requestId\":"+jstr(arm.request.request_id)+
+    // A playback's own capture says so (sana 37229: the managed validator admits stoppedBy "tape-end" only then); a
+    // recording's proof is unchanged (no action: record, as before).
+    const std::string action=arm.request.action==session::Action::Playback?",\n \"action\":\"playback\"":"";
+    const std::string j="{\n \"schema\":\"outrun.recorder-complete@1\",\n \"requestId\":"+jstr(arm.request.request_id)+action+
         ",\n \"contract\":\"dbce.shim.outrun-capture@2\",\n \"outcome\":\"Complete\",\"joined\":true,\n \"stoppedBy\":"+jstr(stopped_by)+
         ",\n \"report\":{\"attempted\":"+u(r.attempted)+",\"accepted\":"+u(r.accepted)+",\"written\":"+u(r.written)+
         ",\"queueFull\":"+u(r.queue_full)+",\"invalid\":"+u(r.invalid)+",\"afterFailure\":"+u(r.after_failure)+
@@ -512,7 +518,36 @@ Intake take(const std::filesystem::path& file,const std::filesystem::path& game_
     CloseHandle(c);
     if(!wrote){(void)DeleteFileW(consumed.c_str());return refused("the request copy could not be written"+win32(write_error));}
     (void)DeleteFileW(claimed.c_str());   // consumed; a claim that cannot be deleted stays inert (only the exact name is taken)
-    if(!record)return refuse("this build plays no recording back");
+    if(!record){
+        // Playback (startup_state.hpp; sana 37135/37176): the recording's own exe, the tape's exact bytes, the verified
+        // startup snapshot, a fresh capture folder for the replay's own capture, then a new private home seeded from the
+        // snapshot (the owner's saves and settings are never written). Any refusal: never ordinary play.
+        const auto exe=running_exe();
+        if(exe.empty())return refuse("the running exe's path is unknown");
+        try{std::uint64_t size=0;r.exe_sha256=file_sha256(exe,size);}catch(const std::exception& e){return refuse(std::string("the running exe cannot be hashed: ")+e.what());}
+        if(r.exe_sha256!=r.request.exe_sha256)return refuse("the running exe is not the recording's (exeSha256)");
+        try{std::uint64_t size=0;if(file_sha256(r.request.tape,size)!=r.request.tape_sha256)return refuse("the tape's bytes are not tapeSha256");}
+        catch(const std::exception& e){return refuse(std::string("the tape cannot be read: ")+e.what());}
+        const auto v=startup::verify(r.request.startup,r.request.startup_seal_sha256,r.request.exe_sha256);
+        if(!v.ok)return refuse("the startup snapshot is refused: "+v.why);
+        // The recorded settings, read once and checked against the seal: the process uses these bytes, not the file again.
+        for(const auto& m:v.snapshot.members){
+            if(m.absent||m.relative!="OutRunDesktop.ini")continue;
+            const auto p=r.request.startup/L"OutRunDesktop.ini";
+            HANDLE f=CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+            if(f==INVALID_HANDLE_VALUE)return refuse("the recorded settings cannot be read"+win32(GetLastError()));
+            std::string s(std::size_t(m.size)+1,'\0');DWORD n=0;const bool ok=ReadFile(f,s.data(),DWORD(s.size()),&n,nullptr)!=0;CloseHandle(f);
+            s.resize(ok?n:0);
+            if(!ok||s.size()!=m.size||dbce::shim::hex(dbce::shim::sha256(s))!=m.sha256)return refuse("the recorded settings changed after the startup check");
+            r.recorded_settings=std::move(s);r.has_recorded_settings=true;
+        }
+        if(!folder(r.request.recording))return refuse("the recording folder cannot be made"+win32(GetLastError()));
+        if(GetFileAttributesW((r.request.recording/L"capture").c_str())!=INVALID_FILE_ATTRIBUTES)return refuse("the recording folder already holds a capture");
+        r.home=r.request.result/L"home";
+        if(const auto why=startup::seed(r.request.startup,v.snapshot,r.home);!why.empty())return refuse("the playback home: "+why);
+        r.kind=Intake::Kind::Playback;
+        return r;
+    }
     if(!shim_backend)return refuse("Play with Recording needs [Input] Backend = Shim");
     if(!folder(r.request.recording))return refuse("the recording folder cannot be made"+win32(GetLastError()));
     if(GetFileAttributesW((r.request.recording/L"capture").c_str())!=INVALID_FILE_ATTRIBUTES)return refuse("the recording folder already holds a capture");

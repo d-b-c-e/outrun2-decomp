@@ -379,7 +379,9 @@ GUARDS = [
     ("windows/source/window_desktop.cpp", "load_desktop_settings(folder,!plan.latched)", None),
     ("windows/source/window_desktop.cpp", "if(!plan.latched){", "outrun::desktop::wheel_input_configure(settings);"),
     # Play with Recording: the request is taken, and the recorder armed, only in an unlatched process.
-    ("windows/source/window_desktop.cpp", "if(!plan.latched){", "const auto intake=session::take(session::request_path(),std::filesystem::u8path(folder),"),
+    ("windows/source/window_desktop.cpp", "if(!plan.latched){", "intake=session::take(session::request_path(),std::filesystem::u8path(folder),"),
+    # Playback (startup_state.hpp): an admitted playback's private home is set before anything writes (the log included).
+    ("windows/source/window_desktop.cpp", "outrun::xbox_runtime::latched_home()=session::utf8(intake.home);", "std::freopen(log.c_str(),\"w\",stdout)"),
     ("windows/source/desktop_settings.cpp", "if(!create_if_missing){", "std::fopen(own.c_str(),\"wb\")"),
 ]
 

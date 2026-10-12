@@ -49,7 +49,8 @@ Parsed parse(const std::string& bytes,std::uint64_t now_unix,const std::filesyst
     while(!lines.empty()&&lines.back().empty())lines.pop_back();
     if(lines.empty()||lines[0]!=RequestSchema)return refuse(std::string("the session request does not start with ")+RequestSchema);
     std::map<std::string,std::string> kv;
-    static const char* const Known[]{"requestId","action","expiresUnix","result","recording","packageSealSha256","tape"};
+    static const char* const Known[]{"requestId","action","expiresUnix","result","recording","packageSealSha256","tape",
+                                     "tapeSha256","exeSha256","startup","startupSealSha256"};
     for(std::size_t i=1;i<lines.size();++i){
         const auto& line=lines[i];
         const auto eq=line.find('=');
@@ -82,17 +83,33 @@ Parsed parse(const std::string& bytes,std::uint64_t now_unix,const std::filesyst
     const auto rec=kv.find("recording");
     if(rec==kv.end())return refuse("the session request names no recording=");
     q.recording=absolute_path(rec->second,why,"recording");if(q.recording.empty())return refuse(why);
-    if(within(q.result,q.recording)||within(q.recording,q.result))return refuse("result= and recording= must be separate folders, neither inside the other");
+    // A recording's package and its run results are separate folders. A playback's own capture is an observation of
+    // that run, at the one fixed place <result>\replay (sana 37516: the comparison pins it; no path from a report).
+    if(q.action==Action::Record){
+        if(within(q.result,q.recording)||within(q.recording,q.result))return refuse("result= and recording= must be separate folders, neither inside the other");
+    }else if(!(within(q.recording,q.result/L"replay")&&within(q.result/L"replay",q.recording)))return refuse("a playback request's recording= must be <result>\\replay");
     if(!game_folder.empty()&&(within(q.result,game_folder)||within(q.recording,game_folder)||within(game_folder,q.result)||within(game_folder,q.recording)))
         return refuse("result= and recording= must be outside the game folder");
-    const auto seal=kv.find("packageSealSha256"),tape=kv.find("tape");
+    static const char* const PlaybackOnly[]{"packageSealSha256","tape","tapeSha256","exeSha256","startup","startupSealSha256"};
     if(q.action==Action::Record){
-        if(seal!=kv.end()||tape!=kv.end())return refuse("a record request names no packageSealSha256= or tape=");
+        for(const char* k:PlaybackOnly)if(kv.count(k))return refuse(std::string("a record request names no ")+k+"=");
     }else{
-        if(seal==kv.end()||!hex(seal->second,64))return refuse("packageSealSha256= is not 64 lowercase hex digits");
-        q.package_seal_sha256=seal->second;
+        // Playback (sana 37135/37176): the managed export of the source recording and its bytes' hash, the source's seal, the
+        // recorded exe (the running one must be it), and the package's sealed startup snapshot.
+        const auto sha=[&](const char* key,std::string& out)->bool{
+            const auto v=kv.find(key);if(v==kv.end()||!hex(v->second,64)){why=std::string(key)+"= is not 64 lowercase hex digits";return false;}
+            out=v->second;return true;};
+        if(!sha("packageSealSha256",q.package_seal_sha256)||!sha("tapeSha256",q.tape_sha256)||!sha("exeSha256",q.exe_sha256)||
+           !sha("startupSealSha256",q.startup_seal_sha256))return refuse(why);
+        const auto tape=kv.find("tape");
         if(tape==kv.end())return refuse("the playback request names no tape=");
         q.tape=absolute_path(tape->second,why,"tape");if(q.tape.empty())return refuse(why);
+        const auto startup=kv.find("startup");
+        if(startup==kv.end())return refuse("the playback request names no startup=");
+        q.startup=absolute_path(startup->second,why,"startup");if(q.startup.empty())return refuse(why);
+        if(within(q.startup,q.result)||within(q.result,q.startup)||within(q.startup,q.recording)||within(q.recording,q.startup))
+            return refuse("startup= must be outside result= and recording=");
+        if(!game_folder.empty()&&(within(q.startup,game_folder)||within(game_folder,q.startup)))return refuse("startup= must be outside the game folder");
     }
     r.ok=true;r.request=q;r.why.clear();
     return r;

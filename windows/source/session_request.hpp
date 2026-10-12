@@ -8,8 +8,12 @@
 //   expiresUnix=<unix seconds, after now and at most 10 min ahead>
 //   result=<absolute folder>          status.json / result.json go here
 //   recording=<absolute folder>       the capture goes in its capture\ child (record)
-//   packageSealSha256=<64 hex>        playback only
-//   tape=<absolute file>              playback only
+//   packageSealSha256=<64 hex>        playback only: the source recording's seal
+//   tape=<absolute file>              playback only: the managed export of the source (P21Finalizer --export-recording)
+//   tapeSha256=<64 hex>               playback only: the tape's bytes (the export has no binding of its own)
+//   exeSha256=<64 hex>                playback only: the recording's exe; the running one must be it
+//   startup=<absolute folder>         playback only: the package's startup snapshot (startup_state.hpp)
+//   startupSealSha256=<64 hex>        playback only: sha256 of startup\complete.tsv
 // Strict: at most 4 KiB, UTF-8, the first line exactly the schema, every other line key=value, each key once, no
 // unknown key. result and recording are separate siblings (neither inside the other) and outside the game folder.
 // What a refusal means (romi 33093): a record request that is refused starts ordinary play with no capture; a
@@ -25,8 +29,8 @@ struct Request {
     Action action{Action::None};
     std::string request_id;
     std::uint64_t expires_unix{};
-    std::filesystem::path result,recording,tape;
-    std::string package_seal_sha256;
+    std::filesystem::path result,recording,tape,startup;
+    std::string package_seal_sha256,tape_sha256,exe_sha256,startup_seal_sha256;
 };
 struct Parsed {
     bool ok{};
@@ -45,12 +49,16 @@ inline std::string utf8(const std::filesystem::path& p){const auto s=p.u8string(
 // result folder as session-request.txt once it parses (any volume; never over an earlier one), else kept beside itself
 // as .refused-<pid>-<n>. None: no request, ordinary play. Record: armed (the result and recording folders made, the
 // capture folder not there yet; `exe_sha256` the running exe's). Refused: a record request refused, ordinary play without a capture
-// (status.json "failed" when its result folder is known). Exit: a playback request (this build plays nothing back) or
-// an unreadable one: never ordinary play, the process ends before the game.
+// (status.json "failed" when its result folder is known). Playback: admitted (the running exe is the recording's, the
+// tape's bytes and the startup snapshot verified, the recording folder made without a capture, `home` = <result>\home
+// made and seeded; `recorded_settings` the snapshot's OutRunDesktop.ini bytes when it had one). Exit: a refused playback
+// request or an unreadable one: never ordinary play, the process ends before the game.
 struct Intake {
-    enum class Kind { None, Record, Refused, Exit } kind{Kind::None};
+    enum class Kind { None, Record, Refused, Exit, Playback } kind{Kind::None};
     Request request;
     std::string exe_sha256,why;
+    std::filesystem::path home;
+    std::string recorded_settings;bool has_recorded_settings{};
 };
 Intake take(const std::filesystem::path& file,const std::filesystem::path& game_folder,bool shim_backend,std::uint64_t now_unix);
 }

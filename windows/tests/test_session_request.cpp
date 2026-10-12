@@ -52,12 +52,39 @@ int main(){
      refused(b,Action::Record,"separate","recording inside result");}
     {auto b=record();const auto at=b.find("result=");b.replace(at,b.find("\r\n",at)-at,"result=e:\\games\\outrundecompsmoke\\results");
      refused(b,Action::Record,"outside the game folder","result inside the game folder (any case)");}
-    refused(record("tape=C:\\t.tape\r\n"),Action::Record,"no packageSealSha256","a record request naming a tape");
-    // Playback: valid shape parses (this build refuses to play it; the caller decides), any defect is a playback refusal.
-    {auto b=record("packageSealSha256="+std::string(64,'a')+"\r\ntape=C:\\Users\\o\\t\\export.tsv\r\n");b.replace(b.find("action=record"),13,"action=playback");
-     const auto r=parse(b,Now,Game);check(r.ok&&r.request.action==Action::Playback&&r.request.package_seal_sha256.size()==64,"a valid playback request parses: "+r.why);}
-    {auto b=record("tape=C:\\Users\\o\\t\\export.tsv\r\n");b.replace(b.find("action=record"),13,"action=playback");
-     refused(b,Action::Playback,"packageSealSha256","a playback request without its seal: never ordinary play");}
+    refused(record("tape=C:\\t.tape\r\n"),Action::Record,"a record request names no tape=","a record request naming a tape");
+    // Playback: valid shape parses (the intake verifies the files; the caller decides), any defect is a playback refusal.
+    const auto playback=[](const std::string& drop="",const std::string& extra=""){
+        std::string keys="packageSealSha256="+std::string(64,'a')+"\r\ntape=C:\\Users\\o\\t\\export.tsv\r\ntapeSha256="+std::string(64,'b')+
+            "\r\nexeSha256="+std::string(64,'c')+"\r\nstartup=C:\\Users\\o\\packages\\p1\\startup\r\nstartupSealSha256="+std::string(64,'d')+"\r\n";
+        if(!drop.empty()){const auto at=keys.find(drop+"=");keys.erase(at,keys.find("\r\n",at)+2-at);}
+        auto b=record(keys+extra);b.replace(b.find("action=record"),13,"action=playback");
+        const auto at=b.find("recording=");   // a playback's own capture: <result>\replay (sana 37516)
+        b.replace(at,b.find("\r\n",at)-at,"recording=C:\\Users\\o\\AppData\\Local\\Wheelkit\\sessions\\outrun\\results\\"+Id+"\\replay");
+        return b;};
+    {auto b=playback();const auto at=b.find("recording=");
+     b.replace(at,b.find("\r\n",at)-at,"recording=C:\\Users\\o\\AppData\\Local\\Wheelkit\\sessions\\outrun\\recordings\\"+Id);
+     refused(b,Action::Playback,"<result>\\replay","a playback capture outside <result>\\replay");}
+    {auto b=playback();const auto at=b.find("recording=");
+     b.replace(at,b.find("\r\n",at)-at,"recording=C:\\Users\\o\\AppData\\Local\\Wheelkit\\sessions\\outrun\\results\\"+Id+"\\replay\\deeper");
+     refused(b,Action::Playback,"<result>\\replay","a playback capture below <result>\\replay");}
+    {auto b=playback();const auto at=b.find("recording=");
+     b.replace(at,b.find("\r\n",at)-at,"recording=C:\\USERS\\o\\AppData\\Local\\Wheelkit\\sessions\\outrun\\results\\"+Id+"\\Replay\\");
+     check(parse(b,Now,Game).ok,"<result>\\replay matched as the file system does (case, a trailing separator)");}
+    {const auto r=parse(playback(),Now,Game);
+     check(r.ok&&r.request.action==Action::Playback&&r.request.package_seal_sha256==std::string(64,'a')&&r.request.tape_sha256==std::string(64,'b')&&
+           r.request.exe_sha256==std::string(64,'c')&&r.request.startup_seal_sha256==std::string(64,'d')&&r.request.startup.filename()=="startup","a valid playback request parses: "+r.why);}
+    for(const char* k:{"packageSealSha256","tape","tapeSha256","exeSha256","startup","startupSealSha256"})
+        refused(playback(k),Action::Playback,k,std::string("a playback request without ")+k+"=: never ordinary play");
+    {auto b=playback();b.replace(b.find("tapeSha256=")+11,64,std::string(64,'B'));refused(b,Action::Playback,"tapeSha256","an uppercase tape hash");}
+    {auto b=playback();b.replace(b.find("startup=")+8,b.find("\r\n",b.find("startup="))-b.find("startup=")-8,"startup");refused(b,Action::Playback,"startup= is not an absolute","a relative startup folder");}
+    {auto b=playback();const auto at=b.find("startup=")+8;b.replace(at,b.find("\r\n",at)-at,"C:\\Users\\o\\AppData\\Local\\Wheelkit\\sessions\\outrun\\results\\"+Id+"\\startup");
+     refused(b,Action::Playback,"outside result=","a startup folder inside the result folder");}
+    {auto b=playback();const auto at=b.find("startup=")+8;b.replace(at,b.find("\r\n",at)-at,"E:\\Games\\OutRunDecompSmoke\\startup");
+     refused(b,Action::Playback,"outside the game folder","a startup folder inside the game folder");}
+    for(const char* k:{"tapeSha256=","exeSha256=","startup=","startupSealSha256="}){
+        const std::string v=std::string(k)==std::string("startup=")?"C:\\s":std::string(64,'e');
+        refused(record(std::string(k)+v+"\r\n"),Action::Record,"a record request names no","a record request naming "+std::string(k));}
     {auto b=record("",std::to_string(Now));b.replace(b.find("action=record"),13,"action=playback");
      refused(b,Action::Playback,"expired","an expired playback request: never ordinary play");}
     check(!request_path().empty()&&request_path().filename()==L"session-request.txt","the request lives beside the fence's files");

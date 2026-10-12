@@ -23,7 +23,7 @@
 namespace outrun::desktop {
 namespace {
 struct Panel {
-    bool configured{},latched{},input{},backend{},was_open{};
+    bool configured{},latched{},input{},backend{},was_open{},playback{};
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
     std::string ini,dev,name;
@@ -204,15 +204,16 @@ void release_backend(){
 // The present overlay: every presented frame. Closed: the frame-rate note and the dev-channel poll only.
 void overlay(void* device,void* context,void* view,unsigned width,unsigned height){
     dbce::panel::NoteFrame();
-    dbce::panel::PollDev();
-    if(!p.input){
+    // Playback: the panel never opens (sana 37135): no dev channel, no F6 hook; only the PLAYBACK badge is drawn.
+    if(!p.playback)dbce::panel::PollDev();
+    if(!p.input&&!p.playback){
         if(const HWND hwnd=static_cast<HWND>(xbox_runtime::native_window().hwnd)){
             p.input=dbce::panel::AttachInput(hwnd);
             log_line(p.input?"F6 input attached to the game window":"F6 input hook FAILED; the dev channel still opens it");
         }
     }
     // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
-    const bool open=dbce::panel::IsOpen();
+    const bool open=!p.playback&&dbce::panel::IsOpen();
     const auto badge=shim_input_recording_badge();
     if((!open&&badge.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
@@ -257,13 +258,13 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 }
 }
 
-void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder){
+void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
     p=Panel{};
-    p.latched=latched;
+    p.latched=latched;p.playback=playback;
     p.ini=settings.path();
     const auto slash=p.ini.find_last_of("\\/");
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
-    if(!folder.empty())p.dev=folder+"\\OutRunDesktop.panel-dev.txt";   // none for a latched run without its folder
+    if(!folder.empty()&&!playback)p.dev=folder+"\\OutRunDesktop.panel-dev.txt";   // none for a latched run without its folder, nor in playback
     p.name="OutRun 2006 desktop (decomp)";
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
@@ -290,12 +291,13 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     dbce::panel::Configure(c);
     xbox_runtime::present_overlay()=overlay;
     p.configured=true;
-    std::printf("panel: F6 settings panel ready (Controls, FFB, Cameras, Telemetry, Help; %s; dev channel %s)\n",
+    if(playback)std::printf("panel: F6 is off in a playback process (the PLAYBACK badge only)\n");
+    else std::printf("panel: F6 settings panel ready (Controls, FFB, Cameras, Telemetry, Help; %s; dev channel %s)\n",
         latched?"a test run: nothing saved":"saves to the settings file",p.dev.empty()?"off":p.dev.c_str());
     std::fflush(stdout);
 }
 
-bool desktop_panel_open(){return p.configured&&dbce::panel::IsOpen();}
+bool desktop_panel_open(){return p.configured&&!p.playback&&dbce::panel::IsOpen();}
 
 void desktop_panel_neutral_input(platform::NativeInputState& out){
     const bool connected=out.connected,layer=out.pc_input_layer;

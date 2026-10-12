@@ -77,6 +77,13 @@ constexpr const char* ImportHeader=
 bool Ini::load(const std::string& path){
     values_.clear();sections_.clear();path_=path;
     std::ifstream f(path);if(!f)return false;
+    std::ostringstream all;all<<f.rdbuf();
+    load_text(all.str(),path);
+    return true;
+}
+void Ini::load_text(const std::string& text,const std::string& path){
+    values_.clear();sections_.clear();path_=path;
+    std::istringstream f(text);
     std::string line,section;
     while(std::getline(f,line)){
         if(!line.empty()&&line.back()=='\r')line.pop_back();
@@ -88,7 +95,6 @@ bool Ini::load(const std::string& path){
         const auto eq=t.find('=');if(eq==std::string::npos)continue;
         values_[section+"/"+lower(trim(t.substr(0,eq)))]=strip_comment(t.substr(eq+1));
     }
-    return true;
 }
 bool Ini::has_section(const std::string& section)const{return sections_.count(lower(section))!=0;}
 std::vector<std::string> Ini::section_lines(const std::string& section)const{

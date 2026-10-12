@@ -40,6 +40,16 @@ std::string shim_input_recording_badge();
 void shim_input_filter_ordinary(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 // The input thread, after the game loop: the final neutral tick and the host stop. Never parks: an ordinary process exits.
 void shim_input_shutdown_ordinary();
+// Playback (an admitted playback request, session::Intake::Kind::Playback; sana 37135/37176): no shim host, no device
+// opened. The consumed-input seam plays the request's tape from the first input tick (consumed_replay.hpp), then holds
+// neutral; the replay's own @2 capture (OrdinaryRecorder, the request's recording\capture, replay.tapeRow on every row)
+// stops itself TapeEndRows rows after the tape's last row ("tape-end"). The [Controls] bytes are the recording's.
+// false: the tape cannot be played (the reason logged, status.json failed); the caller ends the process.
+constexpr std::uint64_t TapeEndRows=60;
+bool shim_input_configure_playback(const session::Intake& intake,const Ini& settings);
+void shim_input_filter_playback(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
+void shim_input_shutdown_playback();
+std::string shim_input_playback_badge();   // the present thread: "PLAYBACK" while the tape plays, then the save's state
 // For the F6 panel's Controls page: the ordinary shim backend's devices (open / not, each one's state); empty when this
 // backend is not the one in use. Game thread (the input sample's thread).
 std::string shim_input_status_text();

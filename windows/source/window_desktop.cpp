@@ -26,7 +26,9 @@
 #include "triple_rig.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
+#include "startup_state.hpp"
 #include "test_fence.hpp"
+#include <sstream>
 #include "desktop_keyboard.hpp"
 #include "platform/pc_input_devices.hpp"
 #include <windows.h>
@@ -215,9 +217,28 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::xbox_runtime::latched_home()=fence::utf8(plan.run_root);
         outrun::xbox_runtime::latched_game_root()=folder;   // application_home refuses any other data root
     }
+    // Play with Recording and playback (session_request.hpp): an ordinary process takes the one-shot session request
+    // first, before anything writes. The owner's settings are only read here (the backend for a record request). An
+    // admitted playback runs in its own home under its result folder, seeded from the recording's startup snapshot (saves
+    // and options), offline and with the game folder only read, as a latched run's home; its log goes to the result
+    // folder; the owner's SaveGame, options.ini and OutRunDesktop.ini are never written (sana 37135/37176).
+    namespace session=outrun::desktop::session;
+    session::Intake intake;
+    if(!plan.latched){
+        outrun::desktop::Ini owner;(void)owner.load(folder+"/OutRunDesktop.ini");   // absent: the Native backend
+        intake=session::take(session::request_path(),std::filesystem::u8path(folder),outrun::desktop::shim_backend_selected(owner),
+                             std::uint64_t(std::time(nullptr)));
+    }
+    const bool playback=intake.kind==session::Intake::Kind::Playback;
+    if(playback){
+        cleared=fence::clear_development_switches();
+        outrun::xbox_runtime::latched_home()=session::utf8(intake.home);
+        outrun::xbox_runtime::latched_game_root()=folder;
+    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // real pixels for the borderless window
     winrt::init_apartment();   // Windows.Gaming.Input
-    const auto log=plan.latched?fence::utf8(fence::log_path(plan,{})):folder+"/runtime.log";   // the fixture tests log_path
+    const auto log=plan.latched?fence::utf8(fence::log_path(plan,{})):   // the fixture tests log_path
+                   playback?session::utf8(intake.request.result/L"runtime.log"):folder+"/runtime.log";
     if(std::freopen(log.c_str(),"w",stdout))std::setvbuf(stdout,nullptr,_IONBF,0);
     if(std::freopen(log.c_str(),"a",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);
     if(plan.latched){
@@ -225,18 +246,32 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
                     "folder %s is only read; %zu OR2_ switch(es) cleared; %zu file(s) seeded (%llu bytes).\n",
                     fence::utf8(plan.run_root).c_str(),folder.c_str(),cleared.size(),plan.seeded.size(),(unsigned long long)plan.seeded_bytes);
     }
+    if(playback){
+        std::printf("PLAYBACK PROCESS: request %s admitted (recording seal %.16s). Saves and options are in %s, seeded from the "
+                    "recording's startup snapshot; the game folder %s is only read; the owner's settings are only read (this rig's "
+                    "[Window] and [Triple]); %zu OR2_ switch(es) cleared; offline.\n",intake.request.request_id.c_str(),
+                    intake.request.package_seal_sha256.c_str(),session::utf8(intake.home).c_str(),folder.c_str(),cleared.size());
+    }
     std::vector<std::string> args;int count=0;
     if(wchar_t** argv=CommandLineToArgvW(GetCommandLineW(),&count)){
         for(int i=0;i<count;++i)args.push_back(outrun::xbox_runtime::utf8(argv[i]));LocalFree(argv);}
-    const auto settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);   // a latched process creates nothing
-    // Play with Recording (session_request.hpp): an ordinary process takes the one-shot session request before the game.
-    // A playback or unreadable request never becomes ordinary play: exit 4 here, before the frontend.
+    // A latched process creates nothing; a playback process reads the recording's settings with this rig's presentation.
+    outrun::desktop::Ini settings;
+    if(playback){
+        std::string owner;
+        if(std::ifstream f(folder+"/OutRunDesktop.ini",std::ios::binary);f){std::ostringstream all;all<<f.rdbuf();owner=all.str();}
+        settings.load_text(outrun::desktop::startup::playback_settings(intake.recorded_settings,owner),
+                           session::utf8(intake.request.startup/L"OutRunDesktop.ini")+" with this rig's [Window] and [Triple]");
+        std::printf("settings: %s%s\n",settings.path().c_str(),intake.has_recorded_settings?"":" (the recording had no settings file: defaults)");
+    }else settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);
+    // The session request's outcome (taken above). A refused playback or an unreadable request never becomes ordinary
+    // play: exit 4 here, before the frontend.
     if(!plan.latched){
-        namespace session=outrun::desktop::session;
-        const auto intake=session::take(session::request_path(),std::filesystem::u8path(folder),
-            outrun::desktop::shim_backend_selected(settings),std::uint64_t(std::time(nullptr)));
         switch(intake.kind){
         case session::Intake::Kind::None:break;
+        case session::Intake::Kind::Playback:
+            std::printf("session: playback request %s admitted (tape %s)\n",intake.request.request_id.c_str(),session::utf8(intake.request.tape).c_str());
+            break;
         case session::Intake::Kind::Record:
             std::printf("session: record request %s admitted\n",intake.request.request_id.c_str());
             outrun::desktop::shim_input_arm_recording(intake.request,intake.exe_sha256);
@@ -375,7 +410,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::platform::pmt_texture_replacement_configure(on,folder+"/"+base+"/load");}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
-    if(!plan.latched){
+    if(playback){
+        // Playback (shim_input.hpp): no device and no keyboard source; the tape drives every tick. A tape that cannot
+        // play never becomes ordinary play.
+        if(!outrun::desktop::shim_input_configure_playback(intake,settings)){std::fflush(stdout);return 4;}
+        outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter_playback;
+    }else if(!plan.latched){
         // Ordinary play: the game's own keyboard (the reconstructed PC keyboard device and its key tables), on either backend.
         outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
             const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
@@ -395,14 +435,18 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     }
     // Forza telemetry and the mod's shared-memory block, one frame per tick after the input filter (telemetry_forza.hpp).
     // Off in a latched process; OR2_TELEMETRY=0 turns it off for unattended runs.
-    outrun::desktop::telemetry_configure(settings,plan.latched);
+    // A playback process is as a latched one here: no telemetry, the software force stream into its home, no device
+    // output, no saves; and its panel never opens (the badge only).
+    const bool test_like=plan.latched||playback;
+    const std::string private_home=plan.latched?fence::utf8(plan.run_root):playback?session::utf8(intake.home):std::string();
+    outrun::desktop::telemetry_configure(settings,test_like);
     outrun::desktop::telemetry_wrap_input_filter();
     // Force feedback F2 (ffb_live.hpp): the software force stream (always in a latched run, into its run folder; with
     // OR2_FFB_TRACE in ordinary play); no device output at all.
-    outrun::desktop::ffb_configure(settings,plan.latched,plan.latched?fence::utf8(plan.run_root):std::string());
+    outrun::desktop::ffb_configure(settings,test_like,private_home);
     outrun::desktop::ffb_wrap_input_filter();
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
-    outrun::desktop::desktop_panel_configure(settings,plan.latched,plan.latched?fence::utf8(plan.run_root):std::string());
+    outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
@@ -432,6 +476,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         std::printf("render queues: %llu draws dropped (queue full)\n",static_cast<unsigned long long>(dropped));
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
+    else if(playback)outrun::desktop::shim_input_shutdown_playback();   // the replay capture's stop and save
     else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks
     return result;
 }

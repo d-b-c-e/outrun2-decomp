@@ -6,7 +6,7 @@
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
-    source/session_request.cpp source/ordinary_recording.cpp
+    source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
@@ -103,6 +103,16 @@ target_compile_features(test_session_request PRIVATE cxx_std_17)
 target_compile_options(test_session_request PRIVATE /W4)
 target_compile_definitions(test_session_request PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 add_test(NAME session_request COMMAND test_session_request)
+# A recording's startup snapshot (startup_state.hpp; sana 37135/37176): the seal, the inventory, the member check,
+# the private home's seed, and the playback settings (the recording's, with the rig's [Window] / [Triple]).
+add_executable(test_startup_state tests/test_startup_state.cpp source/startup_state.cpp source/ordinary_recording.cpp source/session_request.cpp source/desktop_settings.cpp
+    source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_startup_state PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_startup_state PRIVATE cxx_std_17)
+target_compile_options(test_startup_state PRIVATE /W4 /WX)
+target_compile_definitions(test_startup_state PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_startup_state PRIVATE bcrypt)
+add_test(NAME startup_state COMMAND test_startup_state)
 
 # The OutRun 2006 shim adapter (source/outrun_adapter), slice 2: the game's pad adapter, the shim core and the adapter
 # on fakes, into the NativeInputState the game consumes.
@@ -147,7 +157,7 @@ target_compile_definitions(test_key_echo PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 add_test(NAME key_echo COMMAND test_key_echo)
 # Play with Recording: the ordinary recorder over the real frame recorder and writer (one drain, the six-member
 # admission, recorder-complete.json, the receipt reader) and the start's intake of a request file.
-add_executable(test_ordinary_recording tests/test_ordinary_recording.cpp source/ordinary_recording.cpp source/session_request.cpp
+add_executable(test_ordinary_recording tests/test_ordinary_recording.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp
     source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
 target_include_directories(test_ordinary_recording PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_ordinary_recording PRIVATE cxx_std_17)
@@ -169,7 +179,7 @@ target_link_libraries(test_consumed_replay PRIVATE bcrypt)
 add_test(NAME consumed_replay COMMAND test_consumed_replay)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
-add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp
+add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp
     source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
 target_include_directories(session_game_fixture PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(session_game_fixture PRIVATE cxx_std_17)

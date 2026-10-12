@@ -12,6 +12,8 @@ class Ini {
 public:
     // false when the file cannot be read (every value is then its fallback).
     bool load(const std::string& path);
+    // The same parse of text already read (a playback process's merged settings, startup_state.hpp); `path` names it.
+    void load_text(const std::string& text,const std::string& path);
     const std::string& path()const{return path_;}
     bool has_section(const std::string& section)const;
     // The section's lines as written (keys keep their case), for parsers of their own.

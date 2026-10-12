@@ -20,7 +20,8 @@ void desktop_panel_neutral_input(platform::NativeInputState&);
 // The panel's input filter after the current one (call after the backend, telemetry and FFB wrappers).
 void desktop_panel_wrap_input_filter();
 // Once, before the game runs (installs the present overlay). run_folder: the latched run's folder (empty otherwise).
-void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder);
+// playback: a playback process (shim_input.hpp): the panel never opens (no F6 hook, no dev channel); only the badge.
+void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback=false);
 // True while the panel is open (the input filter neutralises the game's input then).
 bool desktop_panel_open();
 // After the game: the ImGui backend and context are released.

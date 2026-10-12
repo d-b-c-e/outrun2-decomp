@@ -296,9 +296,46 @@ int run_all(int argc,char** argv){
      t=session::take(file,game,false,now);
      check(t.kind==session::Intake::Kind::Refused&&has(t.why,"Backend = Shim"),"the native backend refuses a record request: "+t.why);
      check(!fs::exists(file)&&has(slurp(dir/("result-"+id2)/"status.json"),"\"state\":\"failed\""),"consumed, status failed");
-     const std::string id3(32,'3');spit(file,request("playback",id3,("packageSealSha256="+std::string(64,'a')+"\ntape="+session::utf8(dir/"t.tsv")+"\n").c_str()));
-     t=session::take(file,game,true,now);
-     check(t.kind==session::Intake::Kind::Exit&&has(slurp(dir/("result-"+id3)/"status.json"),"\"state\":\"failed\""),"a playback request: exit, status failed");
+     // Playback (sana 37135/37176): the recording's exe, the tape's bytes and the startup snapshot, then a seeded home.
+     {wchar_t me[MAX_PATH];GetModuleFileNameW(nullptr,me,MAX_PATH);std::uint64_t n=0;const auto exe=file_sha256(me,n);
+      const auto sha=[](const std::string& s){return dbce::shim::hex(dbce::shim::sha256(s));};
+      const auto tape=dir/"tape.txt";spit(tape,"ROW 0\nx 1\n");const auto tape_sha=sha("ROW 0\nx 1\n");
+      // A startup snapshot: one save, options.ini, the settings file.
+      const auto startup=dir/"package"/"startup";fs::create_directories(startup/"SaveGame");
+      const std::string save("SAV\0\1",5),options="[o]\na=1\n",ini="[Controls]\nsteer = x\n";
+      spit(startup/"SaveGame"/"license.sav",save);spit(startup/"options.ini",options);spit(startup/"OutRunDesktop.ini",ini);
+      const auto seal_of=[&](const std::string& exe_line){
+          return std::string("outrun.startup-state@1\nrequestId\t")+std::string(32,'9')+"\nexeSha256\t"+exe_line+
+              "\nfile\tSaveGame/license.sav\t5\t"+sha(save)+"\nfile\toptions.ini\t"+std::to_string(options.size())+"\t"+sha(options)+
+              "\nfile\tOutRunDesktop.ini\t"+std::to_string(ini.size())+"\t"+sha(ini)+"\n";};
+      const auto seal=seal_of(exe);spit(startup/"complete.tsv",seal);
+      const auto playback=[&](const std::string& id,const std::string& exe_sha,const std::string& tape_sha_,const std::string& seal_sha){
+          auto text=request("playback",id,("packageSealSha256="+std::string(64,'a')+"\ntape="+session::utf8(tape)+"\ntapeSha256="+tape_sha_+
+              "\nexeSha256="+exe_sha+"\nstartup="+session::utf8(startup)+"\nstartupSealSha256="+seal_sha+"\n").c_str());
+          // A playback's own capture is at <result>\replay (sana 37516).
+          const auto at=text.find("\nrecording=")+11;text.replace(at,text.find('\n',at)-at,session::utf8(dir/("result-"+id)/"replay"));
+          return text;};
+      const std::string id3(32,'3');spit(file,playback(id3,exe,tape_sha,sha(seal)));
+      t=session::take(file,game,true,now);
+      check(t.kind==session::Intake::Kind::Playback&&t.request.request_id==id3&&t.exe_sha256==exe,"a playback request admitted: "+t.why);
+      check(t.home==dir/("result-"+id3)/"home"&&slurp(t.home/"SaveGame"/"license.sav")==save&&slurp(t.home/"options.ini")==options&&
+            !fs::exists(t.home/"OutRunDesktop.ini"),"its home seeded from the snapshot (saves and options; never the settings file)");
+      check(t.has_recorded_settings&&t.recorded_settings==ini,"the recorded settings' bytes carried");
+      check(fs::is_directory(dir/("result-"+id3)/"replay")&&!fs::exists(dir/("result-"+id3)/"replay"/"capture")&&!fs::exists(file),"<result>\\replay made, no capture; consumed");
+      spit(file,playback(std::string(32,'a'),exe,tape_sha,sha(seal)));
+      {const auto r=session::take(file,game,false,now);check(r.kind==session::Intake::Kind::Playback,"playback needs no shim backend (no device is opened): "+r.why);}
+      const auto refused=[&](const std::string& id,const std::string& bytes,const std::string& part,const std::string& what){
+          spit(file,bytes);const auto r=session::take(file,game,true,now);
+          check(r.kind==session::Intake::Kind::Exit&&has(r.why,part)&&has(slurp(dir/("result-"+id)/"status.json"),"\"state\":\"failed\"")&&
+                !fs::exists(dir/("result-"+id)/"home"),what+": exit, status failed, no home (why: "+r.why+")");};
+      refused(std::string(32,'b'),playback(std::string(32,'b'),std::string(64,'e'),tape_sha,sha(seal)),"not the recording's","another exe");
+      refused(std::string(32,'c'),playback(std::string(32,'c'),exe,std::string(64,'e'),sha(seal)),"tapeSha256","another tape");
+      refused(std::string(32,'d'),playback(std::string(32,'d'),exe,tape_sha,std::string(64,'e')),"startup snapshot is refused","another startup seal");
+      spit(startup/"options.ini","[o]\na=2\n");
+      refused(std::string(32,'e'),playback(std::string(32,'e'),exe,tape_sha,sha(seal)),"differs","a snapshot member changed after its seal");
+      spit(startup/"options.ini",options);
+      fs::create_directories(dir/("result-"+std::string(32,'f'))/"replay"/"capture");
+      refused(std::string(32,'f'),playback(std::string(32,'f'),exe,tape_sha,sha(seal)),"already holds a capture","a recording folder with a capture");}
      spit(file,"garbage");
      t=session::take(file,game,true,now);
      check(t.kind==session::Intake::Kind::Exit&&!fs::exists(file)&&

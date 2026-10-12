@@ -18,6 +18,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -251,6 +252,45 @@ void on_consumed(const platform::NativeInputState& in,const platform::NativeRunt
     }
     if(o.rec.at_limit())stop_recording("limit");
 }
+
+// Playback (shim_input.hpp): no shim host and no device; the tape at the seam; the replay's own @2 capture.
+struct Playback {
+    bool configured{},stopped{},end_logged{},missed_logged{};
+    std::unique_ptr<ConsumedReplay> replay;
+    std::unique_ptr<Adapter> adapter;
+    OrdinaryRecorder rec;
+    std::optional<Snapshot> pending;
+    std::uint64_t seq{},ticks{},tail{};
+    std::size_t size{};                        // the tape's rows (fixed once configured)
+    std::atomic<std::uint64_t> played{0};      // the rows the seam has played, for the present thread's badge
+    std::chrono::steady_clock::time_point epoch{std::chrono::steady_clock::now()};
+};
+Playback pb;
+// The seam (platform::native_input_replay_hook): the tape's row for this tick, then neutral.
+void on_replay_playback(platform::NativeInputState& in,bool& pc_drive,const platform::NativeRuntimeContext& context){
+    if(!pb.replay)return;
+    const bool was=pb.replay->ended();
+    pb.replay->apply(in,pc_drive);
+    pb.played.store(pb.replay->played());
+    if(!was&&pb.replay->ended()&&!pb.end_logged){
+        pb.end_logged=true;
+        std::printf("input shim: playback tape end at input tick %llu (mode %u): %zu of %zu rows played; neutral from here\n",
+            (unsigned long long)pb.replay->ticks(),context.mode_state.current,pb.replay->played(),pb.replay->size());std::fflush(stdout);
+    }
+}
+// After the race update (platform::native_input_consumed_hook): the row is completed with what the game consumed.
+void on_consumed_playback(const platform::NativeInputState& in,const platform::NativeRuntimeContext&,bool pc_drive){
+    if(!pb.pending)return;
+    auto& s=*pb.pending;
+    s.consumed=in;s.has_consumed=true;s.pc_drive=pc_drive;s.tape_row=pb.replay?pb.replay->last_row():-1;
+    pb.rec.push(s);
+    pb.pending.reset();
+    // The planned stops happen in the filter before a row is made; not recording here is the recorder's own refusal.
+    if(!pb.rec.recording()){
+        std::printf("input shim: playback capture refused after %llu rows; saving the failure\n",(unsigned long long)pb.rec.pushed());std::fflush(stdout);
+        pb.rec.publish_status();return;}
+    if(pb.rec.at_limit()){pb.rec.stop("limit");pb.rec.publish_status();}
+}
 }
 
 void shim_input_configure(const fence::Plan& plan,const Ini& settings){
@@ -364,7 +404,22 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
 
 void shim_input_arm_recording(const session::Request& request,const std::string& exe_sha256){o.record=request;o.record_exe=exe_sha256;}
 
-std::string shim_input_recording_badge(){return o.rec.badge();}
+std::string shim_input_recording_badge(){
+    if(!pb.configured)return o.rec.badge();
+    // Playback: the tape's progress, then the replay capture's save (the present thread: atomics and the recorder's lock).
+    const auto clock=[](double seconds){char t[16];const int v=int(seconds);std::snprintf(t,sizeof t,"%d:%02d",v/60,v%60);return std::string(t);};
+    switch(pb.rec.state()){
+    case OrdinaryRecorder::State::Recording:{
+        const auto played=pb.played.load();
+        if(played<pb.size)return "PLAYBACK "+clock(double(played)/60.0)+" of "+clock(double(pb.size)/60.0)+"  (the recording drives; input is ignored)";
+        return "PLAYBACK tape ended, finishing";
+    }
+    case OrdinaryRecorder::State::Saving:return "PLAYBACK saving...";
+    case OrdinaryRecorder::State::Complete:return pb.rec.saved()?"PLAYBACK saved":"PLAYBACK complete, verifying";
+    case OrdinaryRecorder::State::Failed:{const auto why=pb.rec.why();return "PLAYBACK failed: "+(why.size()>100?why.substr(0,100)+"...":why);}
+    default:return {};
+    }
+}
 
 void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
     if(!o.configured||o.stopped)return;
@@ -466,6 +521,94 @@ void shim_input_shutdown_ordinary(){
     const auto report=o.host->stop();
     std::printf("input shim: ordinary host stop %s\n",report.resolved?"resolved":"UNRESOLVED");std::fflush(stdout);
     platform::native_input_consumed_hook()=nullptr;
+}
+
+bool shim_input_configure_playback(const session::Intake& intake,const Ini& settings){
+    std::string profile="[Controls]\n";
+    for(const auto& line:settings.section_lines("Controls"))profile+=line+"\n";
+    const auto parsed=sh::read_profile(profile);
+    OrdinaryRecorder::Arm a;
+    a.request=intake.request;a.profile=profile;a.exe_sha256=intake.exe_sha256;a.adapter_version=AdapterVersion;
+    const double budget=a.hz*a.seconds;
+    pb.rec=OrdinaryRecorder(std::move(a));
+    // The tape the start's check hashed (session::take): read, then hashed again, so the rows played are those bytes.
+    std::unique_ptr<ConsumedTape> tape;std::string why;
+    try{tape=std::make_unique<ConsumedTape>(intake.request.tape);}catch(const std::exception& e){why=e.what();}
+    if(tape){
+        try{std::uint64_t n=0;if(file_sha256(intake.request.tape,n)!=intake.request.tape_sha256)why="the tape changed after the start's check";}
+        catch(const std::exception& e){why=e.what();}
+        // The replay's capture holds every played row and the tail, with two seconds to spare under its budget.
+        if(why.empty()&&double(tape->size()+TapeEndRows+120)>budget)why="the tape has more rows than the replay's capture can hold";
+    }
+    if(!why.empty()){
+        pb.rec.fail("the tape cannot be played: "+why);pb.rec.publish_status(true);
+        std::printf("input shim: playback refused: the tape cannot be played: %s\n",why.c_str());std::fflush(stdout);
+        return false;
+    }
+    pb.size=tape->size();
+    pb.replay=std::make_unique<ConsumedReplay>(std::move(tape),std::string());
+    const auto steering=wheel_steering(settings);
+    Steering s;s.sensitivity=steering.sensitivity;s.dead_zone=steering.dead_zone;
+    pb.adapter=std::make_unique<Adapter>(parsed.ok?parsed.section.transmission:"",HPattern::Config{},s);
+    pb.rec.set_devices({});   // no device is opened: the capture's device table is empty
+    platform::native_input_replay_hook()=on_replay_playback;
+    platform::native_input_consumed_hook()=on_consumed_playback;
+    pb.epoch=std::chrono::steady_clock::now();
+    pb.configured=true;
+    pb.rec.publish_status(true);
+    std::printf("input shim: playback: request %s, tape %zu rows (recording seal %.16s), capture %s (contract @2); no input device is opened: "
+        "the tape supplies every tick's input from the first, then neutral; the capture stops %llu rows after the tape's end\n",
+        intake.request.request_id.c_str(),pb.size,intake.request.package_seal_sha256.c_str(),session::utf8(intake.request.recording/L"capture").c_str(),
+        (unsigned long long)TapeEndRows);
+    std::fflush(stdout);
+    return true;
+}
+
+void shim_input_filter_playback(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
+    if(!pb.configured||pb.stopped)return;
+    // The previous tick's row never reached the consumed-input seam: not a row, and the capture cannot complete.
+    if(pb.pending){
+        pb.rec.count_missed_final();pb.pending.reset();
+        if(!pb.missed_logged){pb.missed_logged=true;std::printf("input shim: a playback tick missed the consumed seam\n");std::fflush(stdout);}
+    }
+    // No Core: this tick's frame is made here (consecutive, on a steady clock), with every action unbound.
+    sh::Frame frame;frame.seq=++pb.seq;
+    frame.tick_us=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-pb.epoch).count()+1;
+    frame.boundary_us=frame.tick_us;
+    const auto v=view(runtime);
+    pb.adapter->apply(frame,v,out);   // the seam replaces this tick's input with the tape's
+    ++pb.ticks;
+    // The stop: TapeEndRows neutral rows after the tape's last row.
+    if(pb.rec.recording()&&pb.replay->ended()&&++pb.tail>TapeEndRows){
+        pb.rec.stop("tape-end");
+        std::printf("input shim: playback capture stopped (tape-end) after %llu rows; saving\n",(unsigned long long)pb.rec.pushed());std::fflush(stdout);
+    }
+    if(pb.rec.recording()){
+        Snapshot s{frame,pb.adapter->signals(),out,v,-1};s.pose=car_pose(runtime);
+        pb.pending=std::move(s);
+    }
+    if(pb.ticks%30==0&&pb.rec.state()==OrdinaryRecorder::State::Complete&&!pb.rec.saved()&&pb.rec.observe_receipt()){
+        std::printf("input shim: playback capture saved (the managed receipt names this request, process and artifact)\n");std::fflush(stdout);}
+    pb.rec.publish_status();
+}
+
+void shim_input_shutdown_playback(){
+    if(!pb.configured||pb.stopped)return;
+    pb.stopped=true;
+    if(pb.pending){pb.rec.count_missed_final();pb.pending.reset();}
+    if(pb.rec.recording()){
+        pb.rec.stop("exit");
+        std::printf("input shim: playback capture stopped (exit) after %llu rows; saving\n",(unsigned long long)pb.rec.pushed());std::fflush(stdout);
+    }
+    const bool done=pb.rec.wait_saved(h::Clock::now()+std::chrono::seconds(65));
+    if(done&&pb.rec.state()==OrdinaryRecorder::State::Complete&&!pb.rec.saved())(void)pb.rec.observe_receipt();
+    pb.rec.publish_status();
+    const auto why=pb.rec.why();
+    std::printf("input shim: playback capture %s after %llu rows (%zu of %zu tape rows played)%s%s\n",!done?"still saving at the exit":pb.rec.saved()?"saved":
+        pb.rec.state()==OrdinaryRecorder::State::Complete?"complete (not verified)":"FAILED",(unsigned long long)pb.rec.pushed(),
+        pb.replay?pb.replay->played():std::size_t(0),pb.size,why.empty()?"":": ",why.c_str());
+    std::fflush(stdout);
+    platform::native_input_replay_hook()=nullptr;platform::native_input_consumed_hook()=nullptr;
 }
 
 void shim_input_shutdown(){

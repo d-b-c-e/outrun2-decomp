@@ -1207,6 +1207,42 @@
  },
  {
   "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "take (playback): GENERIC_READ, OPEN_EXISTING: the recorded settings read once from the verified startup snapshot; writes nothing"
+ },
+ {
+  "file": "windows/source/startup_state.cpp",
+  "line": "{ HANDLE f=CreateFileW(seal.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "startup::verify: GENERIC_READ, OPEN_EXISTING: the bounded read of the startup seal (complete.tsv); writes nothing"
+ },
+ {
+  "file": "windows/source/startup_state.cpp",
+  "line": "if(!CreateDirectoryW(home.c_str(),nullptr))return win32(\"the playback home cannot be made, or is already there\");",
+  "class": "latched-skip",
+  "reason": "startup::seed: the playback's private home <result>\\home (a new folder, never an existing one); only an admitted playback request reaches it: session::take's playback path (ordinary_recording.cpp), which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never takes a request"
+ },
+ {
+  "file": "windows/source/startup_state.cpp",
+  "line": "if(!CreateDirectoryW((home/L\"SaveGame\").c_str(),nullptr))return win32(\"the playback home's SaveGame cannot be made\");",
+  "class": "latched-skip",
+  "reason": "startup::seed: <result>\\home\\SaveGame in the new private home; only an admitted playback request reaches it: session::take's playback path (ordinary_recording.cpp), which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never takes a request"
+ },
+ {
+  "file": "windows/source/startup_state.cpp",
+  "line": "if(!CreateDirectoryW(it->c_str(),nullptr)&&GetLastError()!=ERROR_ALREADY_EXISTS)return win32(\"the playback home cannot hold \"+m.relative.substr(0,80));",
+  "class": "latched-skip",
+  "reason": "startup::seed: the folders under <result>\\home\\SaveGame for a seeded save (the inventory's admitted relative paths only); only an admitted playback request reaches it: session::take's playback path (ordinary_recording.cpp), which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never takes a request"
+ },
+ {
+  "file": "windows/source/startup_state.cpp",
+  "line": "if(!CopyFileW((folder/wide(m.relative)).c_str(),to.c_str(),TRUE))return win32(\"cannot seed \"+m.relative.substr(0,80));",
+  "class": "latched-skip",
+  "reason": "startup::seed: a verified snapshot member copied (fail if it exists) into the new private home, then hashed again; only an admitted playback request reaches it: session::take's playback path (ordinary_recording.cpp), which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never takes a request"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
   "line": "if(!ok){DeleteFileW(tmp.c_str());return false;}",
   "class": "definition",
   "reason": "replace_file_atomically's body: the temp file removed after a failed write"
