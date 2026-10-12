@@ -61,6 +61,42 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 Triple screens: the HUD stays on the centre monitor in both planar and three-view modes, which is STD-007. With
 three views, mode 1's spacing applies to the centre panel's 16:9 only.
 
+## Step 2a, proposed slice (for review; no code yet)
+
+**A finding that step 2 must handle first.** With the centred 4:3 rectangle, the 2D viewport and scissor cover only
+that rectangle.
+- `d3d11_d3d9.cpp` maps a pretransformed vertex from the game's 640-wide viewport to NDC on the CPU (around line 351),
+  then the D3D11 viewport places the NDC range in the 4:3 area.
+- A HUD element moved by the spacing (up to 106.7 UI units at 16:9) would leave NDC [-1, 1] and be clipped.
+
+So mode 1 needs a wider 2D mapping at the same scale:
+- the D3D11 viewport and scissor span the frame, or a span's centre panel;
+- the CPU NDC mapping uses an extended logical width, 640 + 2·ext, offset by ext, where ext = (aspect · 480 − 640) / 2
+  (106.7 at 16:9);
+- unscoped 2D lands where mode 2 puts it: same scale, same centre, up to mode 2's whole-pixel rounding of the 4:3 left
+  edge (exact at 1920 / 2560 wide).
+
+**Slice 2a:**
+1. Device: a "wide 4:3" 2D rectangle for mode 1, as above (`ui_scaling_rect` grows a third state; mode 2 and 0 keep
+   their arithmetic).
+2. Scope capture:
+   - a current scope (off / detect / left / right) that the reconstructed HUD sets and clears;
+   - `SpraniDraw` gains a `spacing` field, filled when `sprani_draw_428a10` records the draw;
+   - `pc_sprani_render_429460` passes the record's value to `layer_429350`. After `matrix_429220`, as Tweaks' 4293F3,
+     that shifts the layer matrix's m[12] by ±ext: detect moves x < 213 left and x ≥ 426 right; left / right force
+     the direction.
+3. First scope only: NaviPub_Disp's own on / off (4BEB31 / 4BEDBE on, 4BEDE0 / 4BEE21 off) in
+   `navi_pub_display_4beb00_impl` / `mission_4bed13`. That covers the race HUD's speed, gear, time and route elements.
+   The disables inside it (rivals, hearts, markers), DispTimeAttack2D's forced sides, the put_scroll positions, ghost
+   gap and C2C come in later slices.
+4. Mode 1 then applies (no fallback). The default stays 2 until the visual check (step 4).
+5. Tests:
+   - the side rule and the extended mapping as pure functions, fixture-tested at 16:9 and on a span's centre panel;
+   - modes 2 and 0 unchanged (the existing checks);
+   - test_d3d11_vertex_path for the device path.
+
+Under triples the HUD stays on the centre panel (ext from the centre panel's 16:9), as STD-007.
+
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the
