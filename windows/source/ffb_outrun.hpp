@@ -36,8 +36,9 @@ struct LegacySettings {
 };
 
 // The owner's accepted values (the owner's OutRun2006Tweaks.ini [FFB] on the Stream Deck route, read 2026-10-12, file dated
-// 2026-10-08): the decomp's defaults, so the decomp feels as the mod does for him. The mod's compiled defaults
-// (LegacySettings{}) stay the parity reference for the goldens.
+// 2026-10-08), as the explicit, labelled preset FFBPreset = owner-2026-10-08 (ffb_live.hpp), for comparing with the mod as
+// the owner drives it; never applied silently. Fresh settings start from the mod's compiled defaults (LegacySettings{}),
+// which are also the parity reference for the goldens.
 LegacySettings owner_accepted();
 
 // The car fields the calculation reads (the PC's EVWORK_CAR, the decomp's car_select.car_799d18).
