@@ -27,6 +27,13 @@ target_compile_features(test_telemetry PRIVATE cxx_std_17)
 target_compile_definitions(test_telemetry PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 add_test(NAME telemetry COMMAND test_telemetry)
 
+# OutRun's own force model (source/ffb_outrun, "outrun-legacy@1") against the OutRun 2006 mod's production calculation:
+# its fixture's goldens, byte for byte (tests/data/ffb/README.md). Software values only; no device.
+add_executable(test_ffb_outrun tests/test_ffb_outrun.cpp source/ffb_outrun.cpp)
+target_include_directories(test_ffb_outrun PRIVATE source)
+target_compile_features(test_ffb_outrun PRIVATE cxx_std_17)
+add_test(NAME ffb_outrun COMMAND test_ffb_outrun ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ffb)
+
 # The input shim's core (windows/shim, docs/INPUT-SHIM.md), slice 1: pure C++17 against a scripted device provider.
 add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)
 target_include_directories(test_shim PRIVATE shim tests vendor/controls)

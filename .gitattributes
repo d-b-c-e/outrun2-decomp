@@ -1,3 +1,5 @@
 # Vendored files are byte-exact copies pinned by hash: never convert their line endings.
 windows/vendor/session/session_writer.h -text
 windows/vendor/telemetry/forza_packet.h -text
+windows/tests/data/ffb/*.expected -text
+windows/tests/data/ffb/*.csv -text

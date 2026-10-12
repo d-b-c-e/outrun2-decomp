@@ -1,0 +1,7 @@
+# Cases generated with the OutRun 2006 mod's own calculation fixture (README.md).
+crash-speed-drop
+contact-edge
+gear-shifts
+splash-water
+drift-idle
+mixed-drive
