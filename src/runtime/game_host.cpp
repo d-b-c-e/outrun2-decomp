@@ -812,6 +812,7 @@ void input_sample(void* user,pf::NativeInputState& out){
     if(s.runtime){const auto m=s.runtime->mode_state.current;
         crash_breadcrumbs().mode=m;
         frame_profile().frame_start(m==16u||pf::native_race_end_mode_active(m),m);}
+    if(s.frame_wait)s.frame_wait();
     const PadSnapshot pad=input_replay().filter(s.read_pad?s.read_pad():PadSnapshot{});
     ensure_autoplay(s);
     auto& ap=autoplay();

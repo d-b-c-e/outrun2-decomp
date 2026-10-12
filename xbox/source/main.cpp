@@ -227,8 +227,8 @@ int or2_xbox_main(int argc,char** argv){
         diag.widescreen=outrun::xbox_runtime::g_widescreen;
         if((down&rt::PadMinus)!=0u)g_overlay.on=!g_overlay.on;
         overlay_frame(diag,active_renderer);};
+    diag.frame_wait=[]{outrun::xbox_runtime::wait_for_frame_latency();};   // OR2_FRAME_LATENCY only: every input sampled after it
     diag.map_input=[&diag,&pad,&input_adapter,&lifecycle](std::uint64_t held,std::uint64_t,const rt::PadSnapshot&,outrun::platform::NativeInputState& out){
-        outrun::xbox_runtime::wait_for_frame_latency();   // OR2_FRAME_LATENCY only: input sampled after the wait
         pad.sample.buttons=std::uint32_t((pad.sample.buttons&~dualsense_mapped())|to_dualsense(held));
         // Autoplay / replayed buttons count as a connected pad (no gamepad on a test PC).
         if(held)pad.sample.connected=true;
