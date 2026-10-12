@@ -10,6 +10,7 @@
 #include <cstring>
 #include <set>
 #include <sstream>
+#include <string>
 #if __has_include(<execinfo.h>)
 #define OR2_HAVE_BACKTRACE 1
 #include <execinfo.h>
@@ -937,6 +938,14 @@ namespace {
 constexpr std::uint32_t DrawDistanceBase=0xb1000000u;
 constexpr std::size_t DrawDistanceSlots=64,DrawDistanceSlot=4097;   // 4096 unique nodes + 0xFFFF
 std::vector<std::uint16_t>& draw_distance_store(){static std::vector<std::uint16_t> v(DrawDistanceSlots*DrawDistanceSlot,0xffffu);return v;}
+// OR2_TRIPLE_WHOLE_STAGE=1 (diagnostic; three views only, a normal process): each stage object is drawn whole (405360
+// with no node list walks every node; stage culling is off with three views), whatever the section lists select. It
+// tells whether the start wedges' surround exists in the stage objects at all (windows/docs/TRIPLE-SCREENS.md "Start
+// wedges"). Costly: a diagnostic run only, never a setting.
+bool triple_whole_stage(){
+    static const bool on=[]{const char* v=std::getenv("OR2_TRIPLE_WHOLE_STAGE");return v&&std::string(v)=="1";}();
+    return on&&g_pc_triple_corrections!=nullptr;
+}
 }
 void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t desc){
     Port p(c);auto& m=c.m;
@@ -965,7 +974,7 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
     const std::uint32_t bp=section&0xffffu;
     const std::uint32_t geo=m.u32(m.u32(0x7d306cu));
     if(m.u32(geo)!=0){
-        p.obj(m.u32(m.u32(desc+8)),0,geo+m.u32(geo+bp*4),0,None,0);
+        p.obj(m.u32(m.u32(desc+8)),0,triple_whole_stage()?0u:geo+m.u32(geo+bp*4),0,None,0);   // (whole: diagnostic)
     }else{
         const std::uint32_t res=m.u32(desc+4);
         const std::int32_t count=std::int32_t(p.call(0x448810u,{res}));
@@ -994,6 +1003,7 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
                 std::copy(merged.begin(),merged.end(),store.begin()+std::ptrdiff_t(slot*DrawDistanceSlot));
                 nodes=DrawDistanceBase+std::uint32_t(slot*DrawDistanceSlot*2u);
             }
+            if(triple_whole_stage())nodes=0;   // OR2_TRIPLE_WHOLE_STAGE (diagnostic): the whole object, no node list
             p.obj(std::uint32_t(i)|base,0,nodes,m.u32(desc+0x70),byte,0);
         }
     }

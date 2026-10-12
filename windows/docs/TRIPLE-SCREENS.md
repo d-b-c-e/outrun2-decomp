@@ -346,6 +346,19 @@ t56.
      All three are the owner's choice; none narrows the view.
 - (b) also predicts cars and course objects vanishing in the outer half of the side panels once they pass behind the
   eye plane. That is a candidate for part of the owner's side flicker, not established.
+- **Results, runs D0 / D2** (hub `triples-20261012`, 2026-10-12 17:00; D1's capture failed):
+  - The wedges are uncovered pixels: magenta in D2, matching D0's black (618 pixels both, 9 magenta only).
+  - KEEP_BEHIND does not fill them, so the near-plane test is not sufficient (not proof of absent geometry).
+  - No magenta after the start in that sample. That separates the wedges from the flicker in this sample only; an
+    intermittent uncovered-pixel defect elsewhere is not ruled out (sana 39719).
+- **Next diagnostic: `OR2_TRIPLE_WHOLE_STAGE=1`** (three views only, a normal process, costly). 44DE10 draws each
+  stage object whole: 405360 with no node list walks every node, and stage culling is off with three views.
+  - Filled wedges: the surround exists in the stage objects, and the section lists do not select it at the grid.
+    That is fixable with the normal framing.
+  - Still uncovered: it is not in the stage objects drawn by 44DE10. Other submissions remain (the course environment
+    model 44CD30, course objects), as does absent content.
+  - Runtime.log now reports `render queue: N node draws dropped (queue full)`. The 404D10 walk drops nodes when a
+    queue is full, which would also look like missing geometry, so a run with drops is read with that in mind.
 
 ### Rig settings and the physical eye (proposed in sana 37643; accepted with option (b), 37757; source slice built)
 

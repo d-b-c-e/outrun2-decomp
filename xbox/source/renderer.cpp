@@ -1,6 +1,7 @@
 #include "d3d11_display.hpp"
 #include "display_fit.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_render_queue.hpp"
 #include "d3d11_d3d9.hpp"
 #include <memory>
 #include <stdexcept>
@@ -403,6 +404,9 @@ void xbox_renderer_shutdown(XboxRenderer& renderer){
     if(r&&r->device)std::fprintf(stdout,"Xbox raster: presented=%u total_us=%llu peak_us=%llu pixels=%llu live_objects=%zu errors=%zu\n",
         r->raster_frames,(unsigned long long)r->raster_us,(unsigned long long)r->raster_peak_us,
         (unsigned long long)r->device->pixels_shaded,r->device->live_objects(),r->device->errors.size());
+    // Node draws the 404D10 walk could not queue (queue full): counted all along, never reported before. Needed to read
+    // the union and OR2_TRIPLE_WHOLE_STAGE runs, where a dropped node would look like missing geometry.
+    std::fprintf(stdout,"render queue: %llu node draws dropped (queue full)\n",(unsigned long long)platform::render_queue_dropped());
     delete r;renderer.impl=nullptr;
 }void xbox_renderer_set_pc_sprites(XboxRenderer&,bool on){g_pc_sprites=on;}
 void xbox_renderer_set_pc_text(XboxRenderer&,bool on){g_pc_text=on;}
