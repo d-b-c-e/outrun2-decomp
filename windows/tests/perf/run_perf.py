@@ -152,7 +152,8 @@ def main():
     if not (0 < o.seconds <= 1800): problems.append("--seconds out of range")
     if o.etw_profile and (not o.etw or o.etw_profile.suffix.lower() != ".wprp" or not o.etw_profile.is_file()):
         problems.append("--etw-profile needs --etw and an existing .wprp file")
-    env = dict(os.environ)
+    # Telemetry off unless asked (unattended runs: SimHub can turn the Forza stream into forces or motion); --env wins.
+    env = dict(os.environ, OR2_TELEMETRY="0")
     for kv in o.env:
         k, sep, v = kv.partition("=")
         if not sep or not re.fullmatch(r"OR2_[A-Z0-9_]+", k): problems.append("--env must be OR2_*=value: %r" % kv)

@@ -5,9 +5,10 @@
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
-    source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp)
-target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session)
-target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt)
+    source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp
+    source/telemetry_forza.cpp source/telemetry_live.cpp)
+target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry)
+target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt ws2_32)
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 
@@ -18,6 +19,13 @@ target_compile_features(test_desktop_controls PRIVATE cxx_std_17)
 target_compile_definitions(test_desktop_controls PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_desktop_controls PRIVATE dxguid)
 add_test(NAME desktop_controls COMMAND test_desktop_controls)
+
+# Forza telemetry and the OutRun 2006 mod's shared-memory block (source/telemetry_forza): settings, car fields, packets.
+add_executable(test_telemetry tests/test_telemetry.cpp source/telemetry_forza.cpp source/desktop_settings.cpp)
+target_include_directories(test_telemetry PRIVATE source vendor/telemetry)
+target_compile_features(test_telemetry PRIVATE cxx_std_17)
+target_compile_definitions(test_telemetry PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+add_test(NAME telemetry COMMAND test_telemetry)
 
 # The input shim's core (windows/shim, docs/INPUT-SHIM.md), slice 1: pure C++17 against a scripted device provider.
 add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)

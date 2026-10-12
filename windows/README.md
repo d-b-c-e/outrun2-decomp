@@ -77,6 +77,22 @@ without a change (top gear, automatic transmission).
 - `runtime.log` gets the shim's start line (`controls: profile ... via shim-ini-controls-1: applied ...`), and the
   game folder gets `host-shutdown.json` at exit.
 
+**Telemetry** (`[Telemetry]`, on by default; toolkit STD-016 / STD-009):
+- A Forza "Data Out" packet to `127.0.0.1:Port` (default 8000) every game tick during START, GAME, the pause menu,
+  GOAL and TIMEUP, and a parked packet (IsRaceOn 0, the same engine constants) at about 10 Hz in the menus. The
+  layout is Forza Horizon's 324 bytes (SimHub: a Forza Horizon 5 game on that port); `Layout = FM7` sends the
+  311-byte FM7 Dash of the OutRun 2006 mod instead.
+- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM is synthesised from
+  speed and gear as the mod does, since OutRun has none. Accelerator and brake are what the race consumed, whichever
+  device drives.
+- The mod's 76-byte shared-memory block (`OutRun2006TelemetryData`, version 1) under `SharedMemName`
+  (`OutRun2006Telemetry`; `none` turns it off), for its SimHub plugin. The decomp has no pad rumble, so the two
+  vibration fields stay 0.
+- `Enabled = false` (or the mod's `Enable = false`) turns it off. A latched test process never sends. `OR2_TELEMETRY=0`
+  turns it off for unattended runs (`tests/perf/run_perf.py` sets it unless a run asks otherwise), and
+  `OR2_TELEMETRY_PORT=N` sends to another port for a test's own listener. `runtime.log` names the layout and port at
+  start, and the packet counts at exit.
+
 Test injection (development only, for Wheelkit's closed-loop tests): see
 `source/test_injection.hpp`. It arms only with a valid
 `%LOCALAPPDATA%\dbce\outrun2006-decomp\inject.on` session and an applied

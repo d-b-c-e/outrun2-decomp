@@ -47,7 +47,13 @@ constexpr const char* Template=
 "; false: a 1280x720 window (or start with --windowed).\n"
 "WindowedBorderless = true\n"
 "; frames queued ahead of the display: 2 (default), 1 the lowest latency, 0 the plain chain as before.\n"
-"FrameLatency = 2\n";
+"FrameLatency = 2\n"
+"\n"
+"[Telemetry]\n"
+"; Forza \"Data Out\" to 127.0.0.1:Port (in SimHub, a Forza Horizon 5 game on that port), plus the\n"
+"; OutRun2006Telemetry shared memory of the OutRun 2006 mod. Layout = FM7 sends the mod's 311-byte FM7 Dash instead.\n"
+"Enabled = true\n"
+"Port = 8000\n";
 constexpr const char* ImportHeader=
 "; OutRun 2006 desktop build (OutRunDesktop.exe). The wheel bindings of this folder's\n"
 "; OutRun2006Tweaks.ini are imported into [Controls] at the first start with the devices connected.\n"
@@ -59,7 +65,13 @@ constexpr const char* ImportHeader=
 "[Window]\n"
 "WindowedBorderless = true\n"
 "; frames queued ahead of the display: 2 (default), 1 the lowest latency, 0 the plain chain as before.\n"
-"FrameLatency = 2\n";
+"FrameLatency = 2\n"
+"\n"
+"[Telemetry]\n"
+"; Forza \"Data Out\" to 127.0.0.1:Port (in SimHub, a Forza Horizon 5 game on that port), plus the\n"
+"; OutRun2006Telemetry shared memory of the OutRun 2006 mod. Layout = FM7 sends the mod's 311-byte FM7 Dash instead.\n"
+"Enabled = true\n"
+"Port = 8000\n";
 }
 bool Ini::load(const std::string& path){
     values_.clear();sections_.clear();path_=path;

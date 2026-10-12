@@ -940,5 +940,11 @@
   "line": "if(e)std::remove(temp.c_str());",
   "class": "redirected",
   "reason": "write_shader_cache: removes its own temp under home()/shadercache"
+ },
+ {
+  "file": "windows/source/telemetry_live.cpp",
+  "line": "t.map=CreateFileMappingA(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(OutRun2006TelemetryData)),t.s.shared_name.c_str());",
+  "class": "in-memory",
+  "reason": "the telemetry shared-memory block (the OutRun 2006 mod's OutRun2006TelemetryData): a page-file mapping (INVALID_HANDLE_VALUE), no file; telemetry_configure returns before it in a latched process"
  }
 ]

@@ -1,0 +1,112 @@
+// The desktop telemetry's pure parts (source/telemetry_forza): settings, the car fields, the Forza packets and the mod's
+// shared-memory block, against the documented byte offsets (toolkit knowledge/TELEMETRY-FORZA.md). No socket, no game.
+#include "telemetry_forza.hpp"
+#include <windows.h>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using namespace outrun::desktop;
+namespace fz=dbce::forza;
+int checks=0;
+void check(bool v,const std::string& what){++checks;if(!v)throw std::runtime_error(what);}
+template<class T> T rd(const std::uint8_t* p,std::size_t off){T v;std::memcpy(&v,p+off,sizeof v);return v;}
+template<class T> void wr(std::vector<std::uint8_t>& b,std::size_t off,T v){std::memcpy(b.data()+off,&v,sizeof v);}
+
+TelemetryCar sample(){
+    TelemetryCar c;c.hud_kmh_1f8=180.0f;c.speed_1c4=0.4f;c.gear_208=4;c.steer_1d0=-0.5f;c.lateral_264=0.25f;c.lateral_268=0.5f;
+    return c;
+}
+
+void test_packets(){
+    std::uint8_t b[400];
+    const int h=telemetry_packet(sample(),true,200,30,1234,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(h==324,"Horizon: 324 bytes");
+    check(rd<std::int32_t>(b,0)==1&&rd<std::uint32_t>(b,4)==1234u,"IsRaceOn 1, timestamp");
+    check(rd<float>(b,8)==TelemetryMaxRpm&&rd<float>(b,12)==TelemetryIdleRpm,"engine constants at 8 / 12");
+    check(std::fabs(rd<float>(b,16)-(900.0f+0.2f*1.0f*7600.0f))<0.01f,"RPM: the mod's synthesis (gear 4 ratio 1.0, speed 0.4/2)");
+    check(std::fabs(rd<float>(b,20)-0.75f)<1e-6f,"accX = the two lateral terms");
+    check(std::fabs(rd<float>(b,256)-50.0f)<1e-4f,"Speed@256 = HUD 180 km/h / 3.6 (STD-009)");
+    check(b[315]==200&&b[316]==30&&b[319]==4,"Accel@315, Brake@316, Gear@319");
+    check(std::int8_t(b[320])==fz::steer11(-0.5f),"Steer@320");
+    check(b[323]=='R',"the mod sentinel in the trailing byte");
+    for(int i=232;i<244;++i)check(b[i]==0,"the Horizon insert stays zero");
+    const int f=telemetry_packet(sample(),true,200,30,1234,fz::FORZA_FM7_DASH_311,b,sizeof b);
+    check(f==311&&std::fabs(rd<float>(b,244)-50.0f)<1e-4f&&b[307]==4,"FM7 Dash: 311 bytes, Speed@244, Gear@307 (the mod's layout)");
+}
+
+void test_edges(){
+    std::uint8_t b[400];
+    auto c=sample();
+    c.hud_kmh_1f8=NAN;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"NaN HUD speed: no packet, not a zero");
+    c.hud_kmh_1f8=-1.0f;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"negative HUD speed: no packet");
+    c.hud_kmh_1f8=INFINITY;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"infinite HUD speed: no packet");
+    c=sample();c.gear_208=0;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(b[319]==1,"gear 0 is sent as 1 (Forza shows 0 as reverse)");
+    c.gear_208=12;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);check(b[319]==10,"gear clamped to 10");
+    c=sample();c.speed_1c4=5.0f;c.gear_208=1;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(rd<float>(b,16)==TelemetryMaxRpm,"RPM clamped to the maximum");
+    c=sample();c.steer_1d0=NAN;c.lateral_264=NAN;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(b[320]==0&&std::isfinite(rd<float>(b,20)),"non-finite steering / lateral become 0, never NaN in the packet");
+    c=sample();c.surface_24c[2]=4;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    bool all=true;for(int i=0;i<4;++i)all=all&&rd<float>(b,148+i*4)==1.0f;check(all,"rough surface: SurfaceRumble 1 on all wheels@148");
+    c=sample();c.surface_24c[0]=1;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(rd<float>(b,148)==0.0f,"asphalt (1): no rumble");
+    check(telemetry_packet(sample(),true,0,0,0,fz::FORZA_HORIZON_324,b,100)==0,"a short buffer: nothing");
+    const int p=telemetry_parked_packet(77,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(p==324&&rd<std::int32_t>(b,0)==0&&rd<float>(b,8)==TelemetryMaxRpm&&b[319]==1&&rd<float>(b,256)==0.0f,
+          "parked: IsRaceOn 0, the same engine constants, gear 1, speed 0");
+}
+
+void test_car_and_modes(){
+    std::vector<std::uint8_t> car(0x10f0,0);
+    wr<std::uint32_t>(car,0x4,0x11u);wr<std::uint32_t>(car,0x8,0x22u);wr<float>(car,0x178,3.0f);wr<float>(car,0x1c4,0.7f);
+    wr<float>(car,0x1d0,0.1f);wr<std::uint32_t>(car,0x1d8,2u);wr<float>(car,0x1f8,123.0f);wr<std::uint32_t>(car,0x208,3u);
+    for(unsigned i=0;i<4;++i)wr<std::uint32_t>(car,0x24c+i*4,i+1);
+    wr<float>(car,0x264,0.5f);wr<float>(car,0x268,-0.25f);
+    const auto c=telemetry_car(car.data(),car.size());
+    check(c.flags_4==0x11u&&c.state_8==0x22u&&c.impact_178==3.0f&&c.speed_1c4==0.7f&&c.steer_1d0==0.1f&&c.prev_gear_1d8==2u,"car fields 4..1D8");
+    check(c.hud_kmh_1f8==123.0f&&c.gear_208==3u&&c.surface_24c[3]==4u&&c.lateral_264==0.5f&&c.lateral_268==-0.25f,"car fields 1F8..268");
+    check(telemetry_car(car.data(),0x200).gear_208==0u,"a short car buffer reads nothing");
+    for(const std::uint32_t m:{13u,16u,18u,19u,20u})check(telemetry_in_gameplay(m),"gameplay mode "+std::to_string(m));
+    for(const std::uint32_t m:{0u,3u,32u,17u})check(!telemetry_in_gameplay(m),"not gameplay "+std::to_string(m));
+    OutRun2006TelemetryData o{};telemetry_shared(c,16,true,9,o);
+    const auto* b=reinterpret_cast<const std::uint8_t*>(&o);
+    check(rd<std::uint32_t>(b,0)==1u&&rd<std::uint32_t>(b,4)==9u&&rd<float>(b,8)==0.7f&&rd<std::uint32_t>(b,28)==3u&&rd<std::uint32_t>(b,32)==2u,
+          "shared block: version, packetId, speed@8, gear@28, prevGear@32");
+    check(rd<std::uint32_t>(b,36)==0x22u&&rd<std::uint32_t>(b,40)==0x11u&&rd<std::uint32_t>(b,44)==1u&&rd<std::uint32_t>(b,68)==16u&&b[72]==1,
+          "shared block: stateFlags@36, carFlags@40, surface@44, gameMode@68, isInGameplay@72");
+}
+
+void test_settings(){
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_desktop_telemetry_test.ini";
+    auto load=[&](const char* body){{std::ofstream f(path,std::ios::binary);f<<body;}Ini i;i.load(path);return i;};
+    auto t=telemetry_settings(load(""),nullptr,nullptr);
+    check(t.enabled&&t.port==8000&&t.layout==fz::FORZA_HORIZON_324&&t.shared_name=="OutRun2006Telemetry"&&t.notes.empty(),"defaults: on, 8000, Horizon (STD-016)");
+    check(!telemetry_settings(load("[Telemetry]\r\nEnabled = false\r\n"),nullptr,nullptr).enabled,"Enabled = false (Wheelkit's key)");
+    check(!telemetry_settings(load("[Telemetry]\r\nEnable = false\r\n"),nullptr,nullptr).enabled,"Enable = false (the mod's key)");
+    t=telemetry_settings(load("[Telemetry]\r\nPort = 18000\r\nLayout = FM7\r\nSharedMemName = none\r\n"),nullptr,nullptr);
+    check(t.port==18000&&t.layout==fz::FORZA_FM7_DASH_311&&t.shared_name.empty(),"Port, FM7 layout, no shared memory");
+    for(const char* bad:{"0","70000","80a","-1"}){
+        t=telemetry_settings(load((std::string("[Telemetry]\r\nPort = ")+bad+"\r\n").c_str()),nullptr,nullptr);
+        check(t.port==8000&&!t.notes.empty(),std::string("Port ")+bad+" refused, 8000 applies");
+    }
+    t=telemetry_settings(load("[Telemetry]\r\nLayout = Sled\r\n"),nullptr,nullptr);
+    check(t.layout==fz::FORZA_HORIZON_324&&!t.notes.empty(),"an unknown layout: Horizon, noted");
+    check(!telemetry_settings(load(""),"0",nullptr).enabled,"OR2_TELEMETRY=0 turns it off");
+    check(telemetry_settings(load(""),"1",nullptr).enabled,"OR2_TELEMETRY=1 leaves it on");
+    check(telemetry_settings(load(""),nullptr,"18001").port==18001,"OR2_TELEMETRY_PORT overrides the port");
+    std::remove(path.c_str());
+}
+
+int main(){
+    try{test_packets();test_edges();test_car_and_modes();test_settings();}
+    catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
+    std::cout<<"desktop telemetry: "<<checks<<" checks passed\n";
+    return 0;
+}

@@ -5,6 +5,7 @@
 // folder, like the original one; settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
+#include "telemetry_forza.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -163,8 +164,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::desktop::shim_input_configure(plan,settings);
         outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter;
     }
+    // Forza telemetry and the mod's shared-memory block, one frame per tick after the input filter (telemetry_forza.hpp).
+    // Off in a latched process; OR2_TELEMETRY=0 turns it off for unattended runs.
+    outrun::desktop::telemetry_configure(settings,plan.latched);
+    outrun::desktop::telemetry_wrap_input_filter();
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
+    outrun::desktop::telemetry_shutdown();
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks
