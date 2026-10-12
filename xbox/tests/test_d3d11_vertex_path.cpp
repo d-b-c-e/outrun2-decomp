@@ -270,6 +270,12 @@ int main(){
         check(same,"spacing leaves the in-range quad's pixels as they were");
         check(at(spaced,28,24,0)>200&&at(spaced,28,24,1)<50,"mode 1: the quad at -8..0 is drawn at 24..32 (same scale)");
         check(at(spaced,12,24,2)<50&&at(spaced,20,24,2)<50,"mode 1: the quad beyond the extension stays clipped");
+        // A game sub-viewport keeps its own clipping: full width but rows 4..44 only (sana 39535), so no extension.
+        u.set_viewport(0,4,64,40,0.f,1.f);
+        const auto partial=frame(8.);
+        check(at(partial,28,24,0)<50,"mode 1 under a full-width, partial-height viewport: no extension (quad left of the 4:3 clipped)");
+        check(at(partial,36,24,1)>200,"mode 1 under a partial-height viewport: the in-range quad still draws");
+        u.set_viewport(0,0,64,48,0.f,1.f);
     }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
     return failures?1:0;

@@ -154,10 +154,10 @@ private:
     ComPtr<ID3D11RasterizerState> fxaa_rasterizer_;ComPtr<ID3D11DepthStencilState> fxaa_depth_;ComPtr<ID3D11BlendState> fxaa_blend_;
     bool msaa_live_{},ui_rect_{},fxaa_{},scene_finished_{},batch_rhw_{};
     double ui_aspect_{4./3.},ui_spacing_{};
-    // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport (a game
-    // sub-viewport keeps its own clipping).
+    // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport, all four
+    // edges (sana 39535); any game sub-viewport, a full-width partial-height one included, keeps its own clipping.
     float ui_extension()const{
-        return ui_rect_&&ui_spacing_>0.&&colour_target_==BackBuffer&&soft_viewport_.x==0.f&&soft_viewport_.w==float(back_width_)?
-            float(ui_spacing_):0.f;}
+        return ui_rect_&&ui_spacing_>0.&&colour_target_==BackBuffer&&soft_viewport_.x==0.f&&soft_viewport_.y==0.f&&
+               soft_viewport_.w==float(back_width_)&&soft_viewport_.h==float(back_height_)?float(ui_spacing_):0.f;}
 };
 }

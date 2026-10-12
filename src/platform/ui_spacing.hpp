@@ -14,13 +14,13 @@ struct UiSpacingGuard {
     UiSpacingGuard(const UiSpacingGuard&)=delete;
     UiSpacingGuard& operator=(const UiSpacingGuard&)=delete;
 };
-// Tweaks' drawFootage rule: the shift of a footage layer whose matrix puts it at x (640-wide UI units). Detect moves the
-// left third (x < 640/3) by -spacing and the right third (x >= 1280/3) by +spacing; left / right force the direction;
-// off, or spacing 0, moves nothing.
+// Tweaks' drawFootage rule: the shift of a footage layer whose matrix puts it at x (640-wide UI units). Detect moves
+// x < 213 by -spacing and x >= 426 by +spacing (Tweaks' integer SCREEN_ONE_THIRD / SCREEN_TWO_THIRD, sana 39535);
+// left / right force the direction; off, or spacing 0, moves nothing.
 inline float ui_spacing_shift(UiSpacing s,float x,float spacing){
     if(!(spacing>0.0f)||s==UiSpacing::off)return 0.0f;
-    if(s==UiSpacing::left||(s==UiSpacing::detect&&x<640.0f/3.0f))return -spacing;
-    if(s==UiSpacing::right||(s==UiSpacing::detect&&x>=1280.0f/3.0f))return spacing;
+    if(s==UiSpacing::left||(s==UiSpacing::detect&&x<213.0f))return -spacing;
+    if(s==UiSpacing::right||(s==UiSpacing::detect&&x>=426.0f))return spacing;
     return 0.0f;
 }
 }

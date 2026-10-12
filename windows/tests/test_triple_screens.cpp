@@ -61,8 +61,10 @@ int main(){
         // third right; left / right force; off or no spacing moves nothing.
         using outrun::platform::UiSpacing;using outrun::platform::ui_spacing_shift;
         CHECK(ui_spacing_shift(UiSpacing::detect,100.f,106.f)==-106.f&&ui_spacing_shift(UiSpacing::detect,500.f,106.f)==106.f);
-        CHECK(ui_spacing_shift(UiSpacing::detect,320.f,106.f)==0.f&&ui_spacing_shift(UiSpacing::detect,213.f,106.f)==-106.f);
-        CHECK(ui_spacing_shift(UiSpacing::detect,427.f,106.f)==106.f&&ui_spacing_shift(UiSpacing::detect,426.f,106.f)==0.f);
+        // Tweaks' integer cutoffs (SCREEN_ONE_THIRD 213, SCREEN_TWO_THIRD 426): 212.9 left, 213 stays; 425.9 stays, 426 right.
+        CHECK(ui_spacing_shift(UiSpacing::detect,320.f,106.f)==0.f&&ui_spacing_shift(UiSpacing::detect,213.f,106.f)==0.f);
+        CHECK(ui_spacing_shift(UiSpacing::detect,212.9f,106.f)==-106.f&&ui_spacing_shift(UiSpacing::detect,425.9f,106.f)==0.f);
+        CHECK(ui_spacing_shift(UiSpacing::detect,426.f,106.f)==106.f&&ui_spacing_shift(UiSpacing::detect,427.f,106.f)==106.f);
         CHECK(ui_spacing_shift(UiSpacing::left,500.f,106.f)==-106.f&&ui_spacing_shift(UiSpacing::right,100.f,106.f)==106.f);
         CHECK(ui_spacing_shift(UiSpacing::off,100.f,106.f)==0.f&&ui_spacing_shift(UiSpacing::detect,100.f,0.f)==0.f);
         {   using outrun::platform::UiSpacingGuard;using outrun::platform::ui_spacing_scope;
