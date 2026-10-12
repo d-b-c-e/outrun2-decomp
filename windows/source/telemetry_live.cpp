@@ -16,7 +16,7 @@ std::uint8_t byte(std::int64_t v){return std::uint8_t(std::clamp<std::int64_t>(v
 }
 namespace {
 struct Live {
-    bool on{};
+    bool on{},wsa{};
     TelemetrySettings s;
     SOCKET sock{INVALID_SOCKET};
     sockaddr_in to{};
@@ -63,6 +63,7 @@ void telemetry_configure(const Ini& settings,bool latched){
     if(!t.s.enabled){std::printf("telemetry: off ([Telemetry] Enabled = false or OR2_TELEMETRY=0)\n");std::fflush(stdout);return;}
     WSADATA w;
     if(WSAStartup(MAKEWORD(2,2),&w)==0){
+        t.wsa=true;   // cleaned up at shutdown even when the socket fails (romi 27774)
         t.sock=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
         t.to.sin_family=AF_INET;t.to.sin_port=htons(t.s.port);t.to.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         if(t.sock==INVALID_SOCKET)std::printf("telemetry: no UDP socket (WSA %d)\n",WSAGetLastError());
@@ -71,7 +72,10 @@ void telemetry_configure(const Ini& settings,bool latched){
         t.map=CreateFileMappingA(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(OutRun2006TelemetryData)),t.s.shared_name.c_str());
         if(t.map)t.shm=static_cast<OutRun2006TelemetryData*>(MapViewOfFile(t.map,FILE_MAP_ALL_ACCESS,0,0,sizeof(OutRun2006TelemetryData)));
         if(t.shm){std::memset(t.shm,0,sizeof *t.shm);t.shm->version=1;}
-        else std::printf("telemetry: shared memory %s not mapped (error %lu)\n",t.s.shared_name.c_str(),GetLastError());
+        else{
+            std::printf("telemetry: shared memory %s not mapped (error %lu)\n",t.s.shared_name.c_str(),GetLastError());
+            if(t.map){CloseHandle(t.map);t.map=nullptr;}   // a mapping without a view is closed now (romi 27774)
+        }
     }
     t.on=t.sock!=INVALID_SOCKET||t.shm;
     std::printf("telemetry: Forza %s to 127.0.0.1:%u%s%s%s\n",t.s.layout==dbce::forza::FORZA_FM7_DASH_311?"FM7 Dash (311 bytes)":"Horizon (324 bytes)",
@@ -87,11 +91,14 @@ void telemetry_wrap_input_filter(){
 }
 
 void telemetry_shutdown(){
-    if(!t.on)return;
-    std::uint8_t buf[dbce::forza::FORZA_HORIZON_324];
-    for(int i=0;i<3;++i)send(buf,telemetry_parked_packet(std::uint32_t(GetTickCount()),t.s.layout,buf,int(sizeof buf)));
-    std::printf("telemetry: %u packets sent, %u failed, %u race frames skipped (invalid HUD speed)\n",t.sent,t.failed,t.skipped);std::fflush(stdout);
-    if(t.sock!=INVALID_SOCKET){closesocket(t.sock);t.sock=INVALID_SOCKET;WSACleanup();}
+    if(t.on){
+        std::uint8_t buf[dbce::forza::FORZA_HORIZON_324];
+        for(int i=0;i<3;++i)send(buf,telemetry_parked_packet(std::uint32_t(GetTickCount()),t.s.layout,buf,int(sizeof buf)));
+        std::printf("telemetry: %u packets sent, %u failed, %u race frames skipped (invalid HUD speed)\n",t.sent,t.failed,t.skipped);std::fflush(stdout);
+    }
+    // Everything opened is closed, whether or not the stream ran.
+    if(t.sock!=INVALID_SOCKET){closesocket(t.sock);t.sock=INVALID_SOCKET;}
+    if(t.wsa){WSACleanup();t.wsa=false;}
     if(t.shm){t.shm->isInGameplay=0;UnmapViewOfFile(t.shm);t.shm=nullptr;}
     if(t.map){CloseHandle(t.map);t.map=nullptr;}
     t.on=false;

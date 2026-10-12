@@ -60,7 +60,7 @@ int telemetry_packet(const TelemetryCar& c,bool race_on,std::uint8_t accel,std::
     const float ratio=g>0u&&g<7u?Ratios[g]:1.0f;
     const float norm=std::clamp(finite(c.speed_1c4)/2.0f,0.0f,1.0f);
     s.currentEngineRpm=std::clamp(TelemetryIdleRpm+norm*ratio*(TelemetryMaxRpm-TelemetryIdleRpm),TelemetryIdleRpm,TelemetryMaxRpm);
-    s.accX=finite(c.lateral_264)+finite(c.lateral_268);
+    s.accX=finite(finite(c.lateral_264)+finite(c.lateral_268));   // two finite terms can still overflow (romi 27774)
     bool rough=false;for(const auto f:c.surface_24c)rough=rough||f>1u;     // sand, gravel, grass...: the mod's rumble
     if(rough)for(auto& r:s.surfaceRumble)r=1.0f;
     d.speed=c.hud_kmh_1f8/3.6f;

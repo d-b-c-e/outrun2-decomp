@@ -52,6 +52,8 @@ void test_edges(){
     check(rd<float>(b,16)==TelemetryMaxRpm,"RPM clamped to the maximum");
     c=sample();c.steer_1d0=NAN;c.lateral_264=NAN;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
     check(b[320]==0&&std::isfinite(rd<float>(b,20)),"non-finite steering / lateral become 0, never NaN in the packet");
+    c=sample();c.lateral_264=3.0e38f;c.lateral_268=3.0e38f;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(std::isfinite(rd<float>(b,20)),"two large lateral terms: the sum is sanitized too (romi 27774)");
     c=sample();c.surface_24c[2]=4;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
     bool all=true;for(int i=0;i<4;++i)all=all&&rd<float>(b,148+i*4)==1.0f;check(all,"rough surface: SurfaceRumble 1 on all wheels@148");
     c=sample();c.surface_24c[0]=1;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
