@@ -2,7 +2,7 @@
 script into a race, N measured seconds, a graceful close, and the evidence in a fresh result folder.
 
     py -3 -B run_perf.py --game <test copy> --keys <keys.json> --seconds 60 --lease-owner claude-zero --result <new dir>
-                         [--etw] [--env OR2_HOST_LIVE=1] [--check-only]
+                         [--etw [--etw-profile cadence.wprp]] [--env OR2_HOST_LIVE=1] [--check-only]
 
 - No OS input and no focus change: keys are posted (PostMessage WM_KEYDOWN / WM_KEYUP, scan code in lParam) to the game's
   own top-level window, which fills desktop_keys() (window_desktop.cpp) as typing would. The game is closed with WM_CLOSE.
@@ -131,6 +131,7 @@ def main():
     a.add_argument("--lease-owner", required=True)
     a.add_argument("--result", type=pathlib.Path, required=True)
     a.add_argument("--etw", action="store_true", help="wpr CPU+GPU over the run; merged after the close")
+    a.add_argument("--etw-profile", type=pathlib.Path, help="with --etw: this .wprp instead of CPU+GPU (cadence.wprp: present and vsync only)")
     a.add_argument("--env", action="append", default=[], help="K=V for the game process")
     a.add_argument("--windowed", action="store_true", help="pass --windowed (1280x720) instead of the borderless window")
     a.add_argument("--startup-seconds", type=float, default=90.0, help="bound for the window to appear")
@@ -149,6 +150,8 @@ def main():
     if empty_savegame and (not (game / "SaveGame").is_dir() or any((game / "SaveGame").iterdir())):
         problems.append("the key script needs an empty SaveGame folder in the test copy")
     if not (0 < o.seconds <= 1800): problems.append("--seconds out of range")
+    if o.etw_profile and (not o.etw or o.etw_profile.suffix.lower() != ".wprp" or not o.etw_profile.is_file()):
+        problems.append("--etw-profile needs --etw and an existing .wprp file")
     env = dict(os.environ)
     for kv in o.env:
         k, sep, v = kv.partition("=")
@@ -159,7 +162,9 @@ def main():
     lp = lease_problem(o.lease_owner)
     if lp: problems.append(lp)
     plan = dict(game=str(game), exeSha256=sha(exe) if exe.exists() else None, keys=str(o.keys), keysSha256=sha(o.keys) if o.keys.exists() else None,
-                steps=len(steps), measureFrom=measure_from, seconds=o.seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems)
+                steps=len(steps), measureFrom=measure_from, seconds=o.seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
+                etwProfile=str(o.etw_profile.resolve()) if o.etw_profile else None,
+                etwProfileSha256=sha(o.etw_profile) if o.etw_profile and o.etw_profile.is_file() else None)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); return 1 if problems else 0
     out.mkdir(parents=True)
@@ -169,7 +174,8 @@ def main():
     proc = None; etw_on = False
     try:
         if o.etw:
-            receipt["wprStart"] = wpr("-start", "CPU", "-start", "GPU", "-filemode"); etw_on = receipt["wprStart"]["exit"] == 0
+            start = ("-start", str(o.etw_profile.resolve())) if o.etw_profile else ("-start", "CPU", "-start", "GPU")
+            receipt["wprStart"] = wpr(*start, "-filemode"); etw_on = receipt["wprStart"]["exit"] == 0
             if not etw_on: raise RuntimeError("wpr -start failed: %s" % receipt["wprStart"]["output"])
         args = [str(exe)] + (["--windowed"] if o.windowed else [])
         launched = time.time(); proc = subprocess.Popen(args, cwd=str(game), env=env); receipt["pid"] = proc.pid

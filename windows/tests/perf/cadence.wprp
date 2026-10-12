@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Display cadence (nene, zero 25531): DxgKrnl present/flip/vsync and DXGI present calls, with process names; no CPU
+     sampling, no context switches, no stacks, so the trace stays small and does not perturb the run (the CPU+GPU
+     profiles wrote 8 GB in one minute). DxgKrnl keywords and level as WPR's built-in GPU profile (0x277, 5).
+     Used by run_perf.py with its etw and etw-profile options; present_cadence.py reads the trace.etl. -->
+<WindowsPerformanceRecorder Version="1.0" Author="dbce" Comments="OutRun display cadence">
+  <Profiles>
+    <SystemCollector Id="CadenceSystem" Name="NT Kernel Logger">
+      <BufferSize Value="1024"/>
+      <Buffers Value="64"/>
+    </SystemCollector>
+    <EventCollector Id="CadenceEvents" Name="Cadence Event Collector">
+      <BufferSize Value="1024"/>
+      <Buffers Value="256"/>
+    </EventCollector>
+    <SystemProvider Id="CadenceSystemProvider">
+      <Keywords>
+        <Keyword Value="ProcessThread"/>
+        <Keyword Value="Loader"/>
+      </Keywords>
+    </SystemProvider>
+    <EventProvider Id="CadenceDxgKrnl" Name="Microsoft-Windows-DxgKrnl" Level="5" NonPagedMemory="true">
+      <Keywords>
+        <Keyword Value="0x277"/>
+      </Keywords>
+    </EventProvider>
+    <EventProvider Id="CadenceDxgi" Name="Microsoft-Windows-DXGI" Level="5">
+      <Keywords>
+        <Keyword Value="0xf"/>
+      </Keywords>
+    </EventProvider>
+    <Profile Id="Cadence.Verbose.File" Name="Cadence" Description="Display cadence: present, flip and vsync events" LoggingMode="File" DetailLevel="Verbose">
+      <Collectors>
+        <SystemCollectorId Value="CadenceSystem">
+          <SystemProviderId Value="CadenceSystemProvider"/>
+        </SystemCollectorId>
+        <EventCollectorId Value="CadenceEvents">
+          <EventProviders>
+            <EventProviderId Value="CadenceDxgKrnl"/>
+            <EventProviderId Value="CadenceDxgi"/>
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

@@ -60,6 +60,24 @@ check(run_perf.parse_profile(two)["frames"] == 10, "the last profile wins")
 for part in run_perf.REFUSED_PARTS:
     check(part in r"e:\games\outrundecompsmoke e:\games\savebackups\outrun d:\steam\steamapps\common".lower(), "refused part %s" % part)
 
+# --etw-profile: preflight only (no lease, no launch: the folder does not exist, so the plan is printed and refused).
+import subprocess, tempfile, xml.etree.ElementTree as ET
+here = pathlib.Path(__file__).resolve().parent
+def plan(*extra):
+    with tempfile.TemporaryDirectory() as t:
+        keys = pathlib.Path(t) / "k.json"; keys.write_text('[{"key": "enter", "at": 1}]', encoding="utf-8")
+        q = subprocess.run([sys.executable, "-B", str(here / "run_perf.py"), "--game", str(pathlib.Path(t) / "none"), "--keys", str(keys),
+                            "--lease-owner", "test", "--result", str(pathlib.Path(t) / "out"), "--check-only", *extra], capture_output=True, text=True)
+        return json.loads(q.stdout)
+wprp = here / "cadence.wprp"
+check(not any("etw-profile" in p for p in plan("--etw", "--etw-profile", str(wprp))["problems"]), "cadence.wprp with --etw is accepted")
+check(any("etw-profile" in p for p in plan("--etw-profile", str(wprp))["problems"]), "--etw-profile without --etw is refused")
+check(any("etw-profile" in p for p in plan("--etw", "--etw-profile", str(here / "missing.wprp"))["problems"]), "a missing profile is refused")
+check(plan("--etw", "--etw-profile", str(wprp))["etwProfileSha256"] == run_perf.sha(wprp), "the plan records the profile's hash")
+root = ET.parse(wprp).getroot()
+check([p.get("Id") for p in root.iter("Profile")] == ["Cadence.Verbose.File"], "cadence.wprp: one file-mode profile")
+check(sorted(p.get("Name") for p in root.iter("EventProvider")) == ["Microsoft-Windows-DXGI", "Microsoft-Windows-DxgKrnl"], "cadence.wprp: DxgKrnl and DXGI only")
+
 print("run_perf: %d failure(s)" % len(failures))
 for f in failures: print("  " + f)
 sys.exit(1 if failures else 0)
