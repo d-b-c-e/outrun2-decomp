@@ -450,6 +450,9 @@ try {
     $requestText = "$($Schema.request)`r`nrequestId=$RequestId`r`naction=record`r`nexpiresUnix=$expires`r`nresult=$Result`r`nrecording=$Recording`r`n"
     Write-New $requestFile $requestText
     $psi = [System.Diagnostics.ProcessStartInfo]::new($exePath); $psi.WorkingDirectory = $GameDir; $psi.UseShellExecute = $false
+    # An automated recording is a plumbing check: its child is muted, whoever calls (sana 38719); the software force
+    # stream is still computed. A human recording keeps the owner's own output.
+    if ($InputOrigin -eq 'automated') { $psi.Environment['DBCE_FFB_MUTE'] = '1' }
     $proc = [System.Diagnostics.Process]::Start($psi)
     $processId = [uint64]$proc.Id; $creation = Get-Creation $proc.Handle   # the handle is held: this pid cannot be another process
     if ($null -eq $creation) { Fail 'the launched process has no creation time' }

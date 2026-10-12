@@ -105,6 +105,7 @@ $common = @('-Exe', 'session_game_fixture.exe', '-PollMilliseconds', '100')
     Check ((& $rawStart "$($s.rec)\recording.json") -ceq (& $rawStart "$cap\recorder-complete.json")) 'happy: recordedUtc is the proof''s startedUtc text, byte for byte'
     Check (@(Get-ChildItem $cap).Count -eq 8 -and -not (Test-Path "$cap\recording.json")) 'happy: the capture holds the six, the proof and the seal; the descriptor is beside it'
     Check (Fence-Clean) 'happy: nothing left in the request folder'
+    Check ((Get-Content "$g\fixture-env.txt" -Raw) -ceq '1') 'happy: an automated recording''s child is muted (DBCE_FFB_MUTE=1, sana 38719)'
     $late = Run-Companion "$Out\happy\stop-late.log" (@('-Stop', '-GameDir', $g, '-Result', $s.res, '-RequestId', $id) + $common)
     Check ($late.code -eq 1 -and $late.text -match 'not running') 'happy: Stop after the close is refused'
 }
@@ -120,6 +121,7 @@ $common = @('-Exe', 'session_game_fixture.exe', '-PollMilliseconds', '100')
     Check ($r.code -eq 2) "abnormal: exit 2, saved but not a clean close (exit $($r.code))"
     Check ($j.saved -and $j.closed -and $j.exitCode -eq 3 -and -not $j.passed) 'abnormal: result.json saved, closed with code 3, not passed'
     Check ((Test-Path "$($s.rec)\recording.json") -and (Test-Path "$($s.rec)\capture\recording-complete.tsv")) 'abnormal: the saved recording and its descriptor stay'
+    Check ((Test-Path "$g\fixture-env.txt") -and "$(Get-Content "$g\fixture-env.txt" -Raw)" -ceq '') 'abnormal: a recording not marked automated keeps the owner''s output (no DBCE_FFB_MUTE)'   # an empty file reads as $null
 }
 
 # 2b. sana 38466: saved and read back, a normal exit, but the descriptor cannot be written: saved, not passed (exit 2).
@@ -238,6 +240,7 @@ function Play([string]$case, [string]$g, $pkg, [string]$options = '', [string[]]
     Check ((Test-Path "$($p.res)\home\SaveGame\license.sav") -and (Sha "$($p.res)\home\SaveGame\profiles\best.bin") -ceq (Sha "$g\SaveGame\profiles\best.bin")) 'playback: the private home seeded from the snapshot'
     Check ((Compare-Object @($before) @(Owner-Files $g)) -eq $null) 'playback: the owner''s game folder byte-identical (nothing added or changed)'
     Check ((Read-Json "$($p.res)\companion.json").action -eq 'playback' -and (Fence-Clean)) 'playback: companion.json names the action; nothing left in the request folder'
+    Check ((Get-Content "$g\fixture-env.txt" -Raw) -ceq '1') 'playback: the child is muted (DBCE_FFB_MUTE=1)'
 
     # 8. The game diverges at one row: complete with valid evidence, not a pass (exit 2), the first divergence named.
     $p = Play 'playback' $g $pkg "diverge-at=5`r`n"

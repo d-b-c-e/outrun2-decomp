@@ -17,6 +17,7 @@
 #include "consumed_replay.hpp"
 #include <windows.h>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iterator>
@@ -70,6 +71,8 @@ int main(){
     std::setvbuf(stdout,nullptr,_IONBF,0);
     const auto dir=exe_dir();
     const auto options=slurp(dir/"fixture-options.txt");
+    // The output policy the companion gave this child (sana 38719): DBCE_FFB_MUTE as the game would read it.
+    {const char* mute=std::getenv("DBCE_FFB_MUTE");std::ofstream f(dir/"fixture-env.txt",std::ios::binary);f<<(mute?mute:"");}
     const bool shim=line(slurp(dir/"OutRunDesktop.ini"),"Backend = Shim");
     WNDCLASSW wc{};wc.lpfnWndProc=window_proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"SessionGameFixture";
     RegisterClassW(&wc);
