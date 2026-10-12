@@ -41,6 +41,20 @@ void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
 )HLSL";
 // The generated sources each declare their own Varying: the FFP one (vertex and pixel stage of the CPU path's draws) and
 // the ps11 / ps14 pixel programs must agree with the vertex programs' (nene 33931), else a loud error.
+// Column 3 of a projection's inverse, by Gauss-Jordan elimination in double with partial pivoting (the affine test of
+// triple_native_standard). False for a singular matrix.
+bool inverse_column3(const std::array<float,16>& m,std::array<double,4>& out){
+    double a[4][8]{};for(int r=0;r<4;++r){for(int k=0;k<4;++k)a[r][k]=double(m[std::size_t(r*4+k)]);a[r][4+r]=1.;}
+    for(int col=0;col<4;++col){
+        int pivot=col;for(int r=col+1;r<4;++r)if(std::fabs(a[r][col])>std::fabs(a[pivot][col]))pivot=r;
+        if(!(std::fabs(a[pivot][col])>1e-12))return false;
+        if(pivot!=col)for(int k=0;k<8;++k)std::swap(a[col][k],a[pivot][k]);
+        const double d=a[col][col];for(int k=0;k<8;++k)a[col][k]/=d;
+        for(int r=0;r<4;++r)if(r!=col){const double f=a[r][col];for(int k=0;k<8;++k)a[r][k]-=f*a[col][k];}
+    }
+    for(int r=0;r<4;++r)out[std::size_t(r)]=a[r][7];
+    return true;
+}
 std::string triple_gs_source(){
     const auto varying=[](const std::string& s){const auto at=s.find("struct Varying{"),end=at==std::string::npos?at:s.find("};",at);
         return end==std::string::npos?std::string{}:s.substr(at,end+2-at);};
@@ -151,10 +165,11 @@ D3D11D3D9Device::~D3D11D3D9Device(){
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     if(platform::g_pc_triple_corrections)
-        std::printf("triple views: %llu draws into three viewports over %llu frames (%llu through an affine matrix); single on the centre: "
+        std::printf("triple views: %llu draws into three viewports over %llu frames (%llu through an affine matrix, %llu of them with a recent "
+                    "projection); single on the centre: "
                     "%llu pretransformed, %llu vertex programs without the projection, %llu projections refused, %llu not triangles, "
                     "%llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
-                    (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
+                    (unsigned long long)triple_draws_affine,(unsigned long long)triple_draws_recent,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
     if(platform::g_pc_triple_corrections){std::size_t unmatched=0;std::uint64_t changes=0;
         for(const auto& p:triple_programs_){unmatched+=p.second.base<0?1u:0u;changes+=p.second.changes;}
@@ -466,7 +481,9 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     if(bound_.topology!=topology){context_->IASetPrimitiveTopology(topology);bound_.topology=topology;}
     if(!bound_.vs_constants){ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);bound_.vs_constants=true;}
     if(bound_.vs!=program->shader.Get()){context_->VSSetShader(program->shader.Get(),nullptr,0);bound_.vs=program->shader.Get();}
-    if(platform::g_pc_triple_corrections){const int match=colour_target_!=BackBuffer?1:triple_native_standard(program,key);triple_bind(false,match!=0,match==2);}
+    if(platform::g_pc_triple_corrections){const std::array<float,16>* projection=nullptr;
+        const int match=colour_target_!=BackBuffer?1:triple_native_standard(program,key,&projection);
+        triple_bind(false,match!=0,match>=2,match==3?projection:nullptr);}
     context_->DrawIndexed(UINT(total),start,base);
     ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
     return true;
@@ -594,15 +611,16 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
 // pretransformed and whose projection is a standard perspective goes to three viewports (the back buffer's thirds)
 // through the geometry shader; any other back-buffer draw stays single on the centre third, where the game's 16:9
 // camera put it. Nothing changes without g_pc_triple_corrections.
-bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
+bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine,const std::array<float,16>* projection){
     const auto corrections=platform::g_pc_triple_corrections;
     if(!corrections)return false;
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
     if(rhw){++triple_single_rhw;triple_unbind();return false;}   // apply_state's ui_rect already keeps it in the centre
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
-    if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),transform_proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
-        triple_proj_=transform_proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
-        float c[52]{};triple_ok_=corrections(transform_proj.data(),c);
+    const auto& proj=projection?*projection:transform_proj;   // a recent projection the program's constants hold, else the current
+    if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
+        float c[52]{};triple_ok_=corrections(proj.data(),c);
         if(triple_ok_){c[48]=fx;c[49]=fy;
             if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
@@ -621,9 +639,9 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     if(!triangles||!standard||!triple_ok_){   // a custom projection (or not triangles): the centre third only
         ++(!triangles?triple_single_topology:!standard?triple_single_unmatched:triple_single_refused);triple_unbind();
         if(triangles&&standard&&triple_refused_logged_.size()<4&&std::none_of(triple_refused_logged_.begin(),triple_refused_logged_.end(),
-               [&](const std::array<float,16>& p){return std::memcmp(p.data(),transform_proj.data(),64)==0;})){
-            triple_refused_logged_.push_back(transform_proj);std::string row;
-            for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,k%4==3&&k<15?"%g / ":"%g ",double(transform_proj[k]));row+=t;}
+               [&](const std::array<float,16>& p){return std::memcmp(p.data(),proj.data(),64)==0;})){
+            triple_refused_logged_.push_back(proj);std::string row;
+            for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,k%4==3&&k<15?"%g / ":"%g ",double(proj[k]));row+=t;}
             std::printf("triple views: projection refused (single on the centre): %s\n",row.c_str());}
         const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
         return false;
@@ -637,7 +655,12 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     if(!triple_logged_){triple_logged_=true;
         std::printf("triple views: back buffer %ux%u, viewports x %.0f / %.0f / %.0f, width %.0f each, height %.0f\n",back_w_,back_h_,
                     double(v[0].TopLeftX),double(v[1].TopLeftX),double(v[2].TopLeftX),double(v[0].Width),double(v[0].Height));}
-    ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;
+    ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;if(projection)++triple_draws_recent;
+    // Remember the projection (a new one replaces the oldest slot; failed scans are retried against it).
+    if(!projection&&std::none_of(triple_recent_.begin(),triple_recent_.end(),
+           [&](const TripleProjection& r){return r.valid&&std::memcmp(r.p.data(),proj.data(),64)==0;})){
+        auto& slot=triple_recent_[triple_recent_next_];triple_recent_next_=(triple_recent_next_+1u)%unsigned(triple_recent_.size());
+        slot.p=proj;slot.valid=inverse_column3(proj,slot.pinv_col3);++triple_xf_generation_;}
     return true;
 }
 void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}}
@@ -649,55 +672,60 @@ void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader
 // found once per program, then checked per draw; a program without one rescans only when the constants or a transform
 // changed since its last failed scan, each register stopping at its first mismatch (nene 30802 / 34449). Each distinct
 // outcome of a program is logged once.
-int D3D11D3D9Device::triple_native_standard(const void* program,const std::string& key){
+int D3D11D3D9Device::triple_native_standard(const void* program,const std::string& key,const std::array<float,16>** projection){
     if(!triple_xf_valid_||std::memcmp(triple_xf_.data(),transform_world.data(),64)!=0||std::memcmp(triple_xf_.data()+16,transform_view.data(),64)!=0||
        std::memcmp(triple_xf_.data()+32,transform_proj.data(),64)!=0){
         std::memcpy(triple_xf_.data(),transform_world.data(),64);std::memcpy(triple_xf_.data()+16,transform_view.data(),64);
         std::memcpy(triple_xf_.data()+32,transform_proj.data(),64);triple_xf_valid_=true;++triple_xf_generation_;
         triple_wvp_=transform_wvp();double scale=0.;for(const float v:triple_wvp_)scale=std::max(scale,double(std::fabs(v)));
         triple_wvp_tolerance_=scale>0.&&std::isfinite(scale)?1e-4*scale:-1.;
-        // Column 3 of P's inverse, by Gauss-Jordan elimination in double with partial pivoting.
-        double a[4][8]{};for(int r=0;r<4;++r){for(int k=0;k<4;++k)a[r][k]=double(transform_proj[std::size_t(r*4+k)]);a[r][4+r]=1.;}
-        triple_pinv_ok_=true;
-        for(int col=0;col<4&&triple_pinv_ok_;++col){
-            int pivot=col;for(int r=col+1;r<4;++r)if(std::fabs(a[r][col])>std::fabs(a[pivot][col]))pivot=r;
-            if(!(std::fabs(a[pivot][col])>1e-12)){triple_pinv_ok_=false;break;}
-            if(pivot!=col)for(int k=0;k<8;++k)std::swap(a[col][k],a[pivot][k]);
-            const double d=a[col][col];for(int k=0;k<8;++k)a[col][k]/=d;
-            for(int r=0;r<4;++r)if(r!=col){const double f=a[r][col];for(int k=0;k<8;++k)a[r][k]-=f*a[col][k];}
-        }
-        for(int r=0;r<4;++r)triple_pinv_col3_[std::size_t(r)]=a[r][7];}
+        triple_pinv_ok_=inverse_column3(transform_proj,triple_pinv_col3_);}
     const auto& wvp=triple_wvp_;const double tolerance=triple_wvp_tolerance_;
     const auto exact=[&](int base){   // !(<=): a NaN register is not a match
         if(!(tolerance>0.))return false;
         for(int i=0;i<4;++i)for(int j=0;j<4;++j)
             if(!(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))<=tolerance))return false;
         return true;};
-    const auto affine=[&](int base){   // (K x P^-1)[r][3] = sum_k K[r][k] Pinv[k][3], with K[r][k] in register base+k, component r
-        if(!triple_pinv_ok_)return false;
+    // (K x P^-1)[r][3] = sum_k K[r][k] Pinv[k][3], with K[r][k] in register base+k, component r; slot -1 is the current
+    // projection, 0..3 a recent one.
+    const auto affine_with=[&](int base,int slot){
+        if(slot<0?!triple_pinv_ok_:!triple_recent_[std::size_t(slot)].valid)return false;
+        const auto& q=slot<0?triple_pinv_col3_:triple_recent_[std::size_t(slot)].pinv_col3;
         for(int r=0;r<4;++r){double s=0.,size=0.;
-            for(int k=0;k<4;++k){const double t=double(vs_constants[std::size_t(base+k)][std::size_t(r)])*triple_pinv_col3_[std::size_t(k)];s+=t;size+=std::fabs(t);}
+            for(int k=0;k<4;++k){const double t=double(vs_constants[std::size_t(base+k)][std::size_t(r)])*q[std::size_t(k)];s+=t;size+=std::fabs(t);}
             // Finite first: inf <= inf would pass the tolerance (sana 34429); a finite size bounds s.
             if(!std::isfinite(size)||!(std::fabs(s-(r==3?1.:0.))<=1e-4*std::max(1.,size)))return false;}
         return true;};
+    const auto affine=[&](int base){return affine_with(base,-1);};
     auto& p=triple_programs_[program];
     const int registers=int(vs_constants.size());
-    bool ok=p.base>=0&&(p.affine?affine(p.base):exact(p.base));
+    // A recent projection that is the current one adds nothing; its slot is skipped.
+    const auto distinct=[&](int slot){return std::memcmp(triple_recent_[std::size_t(slot)].p.data(),transform_proj.data(),64)!=0;};
+    bool ok=p.base>=0&&(!p.affine?exact(p.base):p.projection<0?affine(p.base):affine_with(p.base,p.projection));
     if(!ok&&(p.base>=0||p.failed_constants!=triple_constants_generation_||p.failed_xf!=triple_xf_generation_)){
-        const int was=p.base;const bool was_affine=p.affine;p.base=-1;
+        const int was=p.base,was_projection=p.projection;const bool was_affine=p.affine;p.base=-1;p.projection=-1;
         for(int base=0;base+4<=registers&&p.base<0;++base)if(exact(base)){p.base=base;p.affine=false;}
         for(int base=0;base+4<=registers&&p.base<0;++base)if(affine(base)){p.base=base;p.affine=true;}
+        for(int slot=0;slot<int(triple_recent_.size())&&p.base<0;++slot)if(triple_recent_[std::size_t(slot)].valid&&distinct(slot))
+            for(int base=0;base+4<=registers&&p.base<0;++base)if(affine_with(base,slot)){p.base=base;p.affine=true;p.projection=slot;}
         ok=p.base>=0;
         if(!ok){p.failed_constants=triple_constants_generation_;p.failed_xf=triple_xf_generation_;}
-        if(p.base!=was||p.affine!=was_affine)++p.changes;
+        if(p.base!=was||p.affine!=was_affine||p.projection!=was_projection)++p.changes;
+        if(ok&&p.projection>=0&&!triple_recent_logged_){triple_recent_logged_=true;   // once: the evidence for the cause
+            std::string now,then;const auto& r=triple_recent_[std::size_t(p.projection)].p;
+            for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,"%g ",double(transform_proj[k]));now+=t;std::snprintf(t,sizeof t,"%g ",double(r[k]));then+=t;}
+            std::printf("triple views: vertex program %.80s holds a recent projection, not the current one; current: %s; recent: %s\n",
+                        key.c_str(),now.c_str(),then.c_str());}
     }
+    if(ok&&p.projection>=0&&projection)*projection=&triple_recent_[std::size_t(p.projection)].p;
     // Each distinct outcome of a program is logged once (at most four per program; nene 34449: a program whose
     // constants alternate would otherwise log every flip); the changes are counted for the exit line.
-    const int outcome=p.base<0?-1:p.base*2+(p.affine?1:0);
+    const int outcome=p.base<0?-1:p.base*16+(p.affine?1:0)+((p.projection+1)<<1);
     if(p.logged_n<4&&std::find(p.logged,p.logged+p.logged_n,outcome)==p.logged+p.logged_n){p.logged[p.logged_n++]=outcome;
         if(p.base<0)std::printf("triple views: vertex program %.120s: no matrix of the current projection in its constants (single on the centre)\n",key.c_str());
-        else std::printf("triple views: vertex program %.120s: %s at c%d\n",key.c_str(),p.affine?"an affine matrix x the projection":"world x view x projection",p.base);}
-    return !ok?0:p.affine?2:1;
+        else std::printf("triple views: vertex program %.120s: %s at c%d\n",key.c_str(),!p.affine?"world x view x projection":
+                         p.projection<0?"an affine matrix x the projection":"an affine matrix x a recent projection",p.base);}
+    return !ok?0:!p.affine?1:p.projection<0?2:3;
 }
 void D3D11D3D9Device::flush(){
     if(batch_.empty()||count_only)return;

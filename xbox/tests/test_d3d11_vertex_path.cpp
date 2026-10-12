@@ -173,16 +173,20 @@ int main(){
     // - corrections refused (a projection the rig cannot take): the centre third only, the sides black;
     // - the world moved but the program's constants unchanged: they no longer hold world x view x projection, but still
     //   an affine matrix x the projection, so the GPU path replicates (counted as affine);
-    // - a projective projection the constants do not factor through (identity x P^-1 is not affine): the GPU path keeps
-    //   the draw single on the centre; the CPU path, whose clip positions are its own, replicates.
+    // - a projective projection the constants do not factor through (identity x P^-1 is not affine), drawn first, before
+    //   any projection was remembered: the GPU path keeps the draw single on the centre; the CPU path, whose clip
+    //   positions are its own, replicates;
+    // - the same, drawn last: the constants factor through a projection a replicated draw used before (the device's
+    //   recent projections), so the GPU path replicates with that projection's corrections.
     // The device caches the corrections per projection, so each case sets its own, with the view its inverse: world x
     // view x projection stays the identity the program's constants hold, which the GPU path checks before replicating.
     {
-        struct Case {unsigned type,start,count;int mode;float scale;bool moved,projective;const char* what;};
-        const Case cases[]{{4,2,2,0,1.f,false,false,"three views, identity corrections, list"},{5,8,2,0,2.f,false,false,"three views, identity corrections, strip"},
-                           {4,2,2,1,4.f,false,false,"three views, panel 0 moved +0.5 NDC"},{4,2,2,2,8.f,false,false,"three views, corrections refused"},
-                           {4,2,2,0,16.f,true,false,"three views, affine match (world moved, constants kept)"},
-                           {4,2,2,0,1.f,false,true,"three views, no matrix of the projection (GPU single, CPU replicated)"}};
+        struct Case {unsigned type,start,count;int mode;float scale;bool moved,projective,gpu_single;const char* what;};
+        const Case cases[]{{4,2,2,0,1.f,false,true,true,"three views, no matrix of a projection (GPU single, CPU replicated)"},
+                           {4,2,2,0,1.f,false,false,false,"three views, identity corrections, list"},{5,8,2,0,2.f,false,false,false,"three views, identity corrections, strip"},
+                           {4,2,2,1,4.f,false,false,false,"three views, panel 0 moved +0.5 NDC"},{4,2,2,2,8.f,false,false,false,"three views, corrections refused"},
+                           {4,2,2,0,16.f,true,false,false,"three views, affine match (world moved, constants kept)"},
+                           {4,2,2,0,1.f,false,true,false,"three views, a recent projection (the constants hold one used before)"}};
         constexpr unsigned n=sizeof cases/sizeof cases[0];
         std::vector<std::uint8_t> refs[n][2];   // the single-view images, before any corrections are set
         for(unsigned k=0;k<n;++k){const auto& c=cases[k];
@@ -211,16 +215,17 @@ int main(){
             for(unsigned i=0;i<2;++i){auto& d=*triples[i];d.set_transform(0x100,world);d.set_transform(2,view);d.set_transform(3,c.projective?perspective:scaled);
                 d.begin_frame();d.clear(7,0xff000000,1,0);check(d.draw_indexed_primitive(c.type,1,0,4,c.start,c.count)==0,"three-view draw succeeds");d.end_frame();
                 const auto image=readback(contexts[i]->device.Get(),contexts[i]->context.Get(),d.back_texture());
-                const bool single=c.mode==2||(c.projective&&i==0);
+                const bool single=c.mode==2||(c.gpu_single&&i==0);
                 for(unsigned panel=0;panel<3;++panel)compare_third(image,panel,refs[k][i],c.mode==1&&panel==0?16:0,single&&panel!=1,c.what);}
         }
         g_pc_triple_corrections=nullptr;
         check(tgpu.native_draws()>=n,"the three-view GPU device drew through the GPU vertex path");
-        check(tgpu.triple_draws==4&&tcpu.triple_draws==5,"draws replicated: 4 on the GPU path, 5 on the CPU path");
-        check(tgpu.triple_draws_affine==1&&tcpu.triple_draws_affine==0,"one GPU draw replicated through the affine match");
+        check(tgpu.triple_draws==5&&tcpu.triple_draws==6,"draws replicated: 5 on the GPU path, 6 on the CPU path");
+        check(tgpu.triple_draws_affine==2&&tcpu.triple_draws_affine==0,"two GPU draws replicated through an affine match");
+        check(tgpu.triple_draws_recent==1&&tcpu.triple_draws_recent==0,"one GPU draw replicated with a recent projection");
         check(tgpu.triple_single_refused==1&&tcpu.triple_single_refused==1,"refused corrections keep the draw single");
         check(tgpu.triple_single_unmatched==1&&tcpu.triple_single_unmatched==0,"a program without the projection keeps the draw single");
-        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==4&&tcpu.triple_frames==5,"three-view counts");
+        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==5&&tcpu.triple_frames==6,"three-view counts");
         std::printf("three views: GPU path %llu replicated, CPU path %llu replicated\n",(unsigned long long)tgpu.triple_draws,(unsigned long long)tcpu.triple_draws);
     }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
