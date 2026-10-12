@@ -12,7 +12,7 @@ DxgKrnl vsync events, and the game's own Present calls, over the measured race w
 - The race window: from the game's first Present + measure_from to + seconds (perf.json), less 1 s at each end, as the
   harness measures from the window's appearance, which the first Present follows closely.
 """
-import collections, json, pathlib, statistics, subprocess, sys
+import bisect, collections, json, pathlib, statistics, subprocess, sys
 
 XPERF = pathlib.Path(r"C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\xperf.exe")
 
@@ -21,6 +21,22 @@ def dump(etl, out):
     if not out.exists():
         q = subprocess.run([str(XPERF), "-i", str(etl), "-o", str(out), "-a", "dumper"], capture_output=True, text=True, timeout=1800)
         if q.returncode != 0 or not out.exists(): raise RuntimeError("xperf dumper failed (%d): %s" % (q.returncode, (q.stdout + q.stderr)[-400:]))
+
+
+# DxgKrnl events that carry the present id a later VSyncDPCMultiPlane names, with the field holding it. Logged in the
+# presenting thread while its DXGI Present runs (independent flip / multiplane overlay), they tie a Present call to its
+# id; which ones a driver emits varies, so every one found is tried.
+PRESENT_ID_EVENTS = {"MMIOFlipMultiPlaneOverlay3": "PresentId[PlaneCount]", "MMIOFlipMultiPlaneOverlay": "FlipPresentId"}
+
+
+def as_int(text):
+    try: return int(text.strip().strip("[]").split(":")[0].strip(), 0)
+    except ValueError: return None
+
+
+def percentile(values, q):
+    v = sorted(values)
+    return v[min(len(v) - 1, int(round(q * (len(v) - 1))))] if v else None
 
 
 def fields(line):
@@ -32,6 +48,7 @@ def read(path):
     header, rows, counts = {}, collections.defaultdict(list), collections.Counter()
     in_header = False
     wanted = lambda name: name.endswith("/VSyncDPC/win:Info") or name.endswith("/VSyncDPCMultiPlane/win:Info") or \
+        any(name == "Microsoft-Windows-DxgKrnl/%s/win:Info" % e for e in PRESENT_ID_EVENTS) or \
         name.startswith("Microsoft-Windows-DXGI/Present/") or \
         name.startswith("Microsoft-Windows-DXGI/GetFrameStatistics/")
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -57,6 +74,84 @@ def column(header, name, key):
 def histogram(values):
     c = collections.Counter(values)
     return {str(k): c[k] for k in sorted(c)}
+
+
+def present_to_scanout(header, rows, mine, key, start, end):
+    mp = "Microsoft-Windows-DxgKrnl/VSyncDPCMultiPlane/win:Info"
+    if key[0] != mp: return dict(measured=False, why="no multiplane vsync events (needs VSyncDPCMultiPlane present ids)")
+    s_col, a_col = column(header, mp, "VidPnSourceId"), column(header, mp, "PresentIdOrPhysicalAddress[PlaneCount]")
+    shown = {}
+    for v in rows[mp]:
+        if "source " + v[s_col] != key[1]: continue
+        i = as_int(v[a_col])
+        if i is not None and i not in shown: shown[i] = int(v[1])
+    # The game's Present calls with their threads: start / stop paired per thread in order.
+    calls, open_ = [], {}
+    for v in sorted(rows.get("Microsoft-Windows-DXGI/Present/win:Start", []) + rows.get("Microsoft-Windows-DXGI/Present/win:Stop", []), key=lambda v: int(v[1])):
+        if not mine(v): continue
+        tid, ts = v[3], int(v[1])
+        if v[0].endswith("win:Start"): open_[tid] = ts
+        elif tid in open_: calls.append((open_.pop(tid), ts, tid))
+    by_thread = collections.defaultdict(list)
+    for c in calls: by_thread[c[2]].append(c)
+    found, used = {}, collections.Counter()
+    for name, field in PRESENT_ID_EVENTS.items():
+        full = "Microsoft-Windows-DxgKrnl/%s/win:Info" % name
+        col = column(header, full, field)
+        if col is None: continue
+        for v in rows.get(full, []):
+            ts, tid = int(v[1]), v[3]
+            for c in by_thread.get(tid, []):
+                if c[0] <= ts <= c[1] and c[0] not in found:
+                    i = as_int(v[col])
+                    if i is not None: found[c[0]] = i; used[name] += 1
+                    break
+    lat = [shown[i] - t for t, i in found.items() if start <= t <= end and i in shown and shown[i] >= t]
+    inwin = sum(1 for c in calls if start <= c[0] <= end)
+    if not lat: return dict(measured=False, why="no Present call tied to a shown present id", calls=inwin, tiedCalls=len(found), idEvents=dict(used))
+    ms = [x / 1000 for x in lat]
+    return dict(measured=True, calls=inwin, matched=len(lat), idEvents=dict(used), medianMs=round(statistics.median(ms), 2),
+                p95Ms=round(percentile(ms, 0.95), 2), maxMs=round(max(ms), 2), minMs=round(min(ms), 2))
+
+
+def frame_statistics_latency(header, rows, mine, presents, period_us, start, end):
+    """Present to scan-out from the game's own GetFrameStatistics calls (DXGI logs each): PresentCount names the swap
+    chain's k-th Present (GetLastPresentCount's count), PresentRefreshCount the vblank that showed it, and SyncQPCTime the
+    QPC time of vblank SyncRefreshCount. So present k was shown at SyncQPCTime - (Sync - PresentRefresh) periods. The
+    k-th DXGI Present_Start of the game is the call (the trace starts before the launch, so it holds every Present).
+    QPC is mapped to trace time from the VSyncDPC events' FrameQPCTime. Composed or independent flip alike."""
+    vname = "Microsoft-Windows-DxgKrnl/VSyncDPC/win:Info"
+    qcol = column(header, vname, "FrameQPCTime")
+    pairs = [(int(v[1]), int(v[qcol], 0)) for v in rows.get(vname, []) if qcol is not None and v[qcol].strip()]
+    if len(pairs) < 3: return dict(measured=False, why="no VSyncDPC FrameQPCTime to map QPC to trace time")
+    (t1, q1), (t2, q2) = pairs[0], pairs[-1]
+    slope = (t2 - t1) / (q2 - q1)                      # trace us per QPC tick
+    to_us = lambda q: t1 + (q - q1) * slope
+    mid = pairs[len(pairs) // 2]
+    fit_error_us = abs(to_us(mid[1]) - mid[0])
+    name = "Microsoft-Windows-DXGI/GetFrameStatistics/win:Info"
+    c = {k: column(header, name, k) for k in ("ReturnValue", "PresentCount", "PresentRefreshCount", "SyncRefreshCount", "SyncQPCTime")}
+    if None in c.values(): return dict(measured=False, why="GetFrameStatistics fields missing")
+    period_q = period_us / slope
+    shown, offsets = {}, []
+    for v in rows.get(name, []):
+        ts = int(v[1])
+        if not mine(v) or int(v[c["ReturnValue"]], 0) != 0: continue
+        k, prc, src, sq = (int(v[c[f]], 0) for f in ("PresentCount", "PresentRefreshCount", "SyncRefreshCount", "SyncQPCTime"))
+        if k < 1 or k > len(presents) or src < prc: continue
+        offsets.append(bisect.bisect_right(presents, ts) - k)   # presents made but not yet shown (>= 0 if k is the count)
+        shown.setdefault(k, to_us(sq - (src - prc) * period_q))
+    if not shown: return dict(measured=False, why="no GetFrameStatistics samples of the game")
+    lo, hi = min(offsets), max(offsets)
+    if lo < 0 or hi > 8:
+        return dict(measured=False, why="PresentCount does not index the game's Present calls (offset %d..%d)" % (lo, hi))
+    lat = [shown[k] - presents[k - 1] for k in shown if start <= presents[k - 1] <= end]
+    if not lat: return dict(measured=False, why="no shown present in the window")
+    ms = [x / 1000 for x in lat]
+    return dict(measured=True, method="DXGI frame statistics (PresentCount -> its vblank)", matched=len(ms),
+                calls=sum(1 for t in presents if start <= t <= end), queuedPresents="%d..%d" % (lo, hi), qpcFitErrorUs=round(fit_error_us, 1),
+                medianMs=round(statistics.median(ms), 2), p95Ms=round(percentile(ms, 0.95), 2), maxMs=round(max(ms), 2), minMs=round(min(ms), 2),
+                negative=sum(1 for x in ms if x < 0))
 
 
 def main():
@@ -121,6 +216,13 @@ def main():
         else: holds.append((run, since)); run, since = 1, b[0]
     report["scanout"]["longestHolds"] = [dict(vblanks=h, atSeconds=round((t - start) / 1e6, 3)) for h, t in sorted(holds[1:], reverse=True)[:8]]
 
+    # Present to scan-out: each Present call of the game, tied to its present id by an id event logged on the same thread
+    # inside that call, against the first vblank whose plane 0 shows that id on the game's display. Measured only when
+    # ids tie; otherwise reported as not measured (order matching is ambiguous by whole frames with a queue).
+    report["presentToScanout"] = present_to_scanout(header, rows, mine, key, start, end)
+    if not report["presentToScanout"].get("measured"):
+        report["presentToScanout"] = dict(byPresentId=report["presentToScanout"], **frame_statistics_latency(header, rows, mine, presents, period, start, end))
+
     # Present-call intervals in vblank periods.
     win = [t for t in presents if start <= t <= end]
     gaps = [b - a for a, b in zip(win, win[1:])]
@@ -148,6 +250,11 @@ def main():
     print("present calls: %d, intervals in vblanks %s, max %.2f ms, >20 ms %d, >33 ms %d" % (p["count"], p["intervalVblanks"], p["maxIntervalMs"] or 0, p["over20ms"], p["over33ms"]))
     f = report["frameStatistics"]
     print("frame statistics (the game's own calls): %d samples, %d presents over %d refreshes, %d samples late" % (f["samples"], f["presents"], f["refreshes"], f["samplesLate"]))
+    q = report["presentToScanout"]
+    if q.get("measured"): print("present to scan-out (%s): %d of %d calls: median %.2f ms, p95 %.2f, max %.2f, min %.2f; queued %s, QPC fit error %s us" %
+                               (q.get("method", "present id"), q["matched"], q["calls"], q["medianMs"], q["p95Ms"], q["maxMs"], q["minMs"],
+                                q.get("queuedPresents", "-"), q.get("qpcFitErrorUs", "-")))
+    else: print("present to scan-out: not measured: %s" % q["why"])
     if report["problems"]: print("problems: %s" % report["problems"])
     return 0
 
