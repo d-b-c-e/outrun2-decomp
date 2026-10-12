@@ -109,6 +109,34 @@ So mode 1 needs a wider 2D mapping at the same scale:
 
 Under triples the HUD stays on the centre panel (ext from the centre panel's 16:9), as STD-007.
 
+## Step 2b (sana 40119; built; review pending)
+
+Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe around each Tweaks address):
+- **put_scroll positions** (`put_shift()`: the spacing rounded, as Tweaks' integer AddSpriteSpacing; 0 outside mode 1):
+  - DispTimeAttack2D `stages_4be4b0`: all fifteen 42D280 calls move right. They are 12 source sites, because the
+    `stage_label` lambda is called from two places.
+  - DispRank `position_4b9d80`: all eight 42D280 calls move right.
+  - DispGearPosition (REV) `gear_4b9010`: two 42D280 calls and one 42D5F0 move left.
+  - DispTempHeartNum `request_row_4bb9e0`: the 42CC00 text position moves right.
+  - PutGhostGapInfo `banner_4bddb0`: the name x moves (102, the left banner, left; otherwise right).
+  - Its sub `record_row_4bdac0`: the float copy of f behind x0 moves (4.0 left, otherwise right), unrounded. Later
+    uses of f are unchanged, as in the EXE.
+- **Scopes, as Tweaks sets its global** (no restore inside; `UiSpacingGuard` restores at the display's exit, early
+  returns included):
+  - DispGhostGap `banners_4be020`: banner 0 forced left, banner 1 forced right, set before each call.
+  - DispTimeAttack2D: the sector list forced right (4BE4BC), off for the target marker (4BE4C1), forced left for the
+    car / position badges (4BE4E7), detect from 4BE575.
+  - dispMarkerCheck `line_of_sight_4ba0e0`: off at entry, not restored, so the marker drawn after it is unspaced.
+  - NaviPub_Disp re-enables at 4BEDBE before speed / needle / gear / route / banner.
+  - DispTimeAttackGoal `navi_sector_banners_4bea50`: the banners' last side carries over to the sector list; a guard
+    restores the scope it found.
+- **Not in 2b:**
+  - the C2C speech bubbles, in translated code (`F_4fc830` ... `F_4fe760`) and in `mission_manager_control_496a30`;
+  - the GF request bubble (`banner_open_460970` / `banner_460ad0`);
+  - the C2C goal results (481A40, not ported).
+- **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
+  and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
+  the visual check (step 4).
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the
