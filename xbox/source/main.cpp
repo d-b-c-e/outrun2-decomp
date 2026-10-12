@@ -168,6 +168,9 @@ void wait_for_plus(PadState&){std::fflush(stdout);std::fflush(stderr);}
 int or2_xbox_main(int argc,char** argv){
     std::string backend_error;
     if(!application_initialize(backend_error)){std::fprintf(stderr,"Xbox platform: %s\n",backend_error.c_str());return 1;}
+    // OR2_FRAME_HITCHES: every frame over about 18 ms is logged to runtime.log with the profile buckets that took its
+    // time (the live stutter log, otherwise only in OR2_HOST_HOOKS builds).
+    if(std::getenv("OR2_FRAME_HITCHES"))outrun::xbox_runtime::frame_profile_live()=true;
     std::atexit(application_shutdown);
     // A latched (test) process stays offline: no LAN platform at all (INPUT-SHIM.md section 15).
     if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(outrun::platform::pc_network_bsd_platform());

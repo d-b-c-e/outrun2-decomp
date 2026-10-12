@@ -92,6 +92,8 @@ inline void FrameProfile::add(std::uint64_t key,std::uint64_t ticks){
 constexpr std::uint64_t ProfileEvent=1,ProfileDisplay=2,ProfileRenderer=3;
 // Renderer bucket ids.
 constexpr std::uint32_t ProfAcquire=1,ProfPcFence=2,ProfPcRecord=3,ProfPresent=4,ProfAudio=5,ProfDrawTotal=6,ProfSceneRender=7,ProfPcGpu=8,ProfDeviceDraw=9;
+// Device work that can stall a frame the first time something is used (the D3D11 device, xbox/source/d3d11_d3d9.cpp).
+constexpr std::uint32_t ProfTextureUpload=10,ProfBufferUpload=11,ProfShaderCompile=12,ProfTextureFile=13,ProfRendererIds=14;
 inline std::uint64_t profile_key(std::uint64_t kind,std::uint32_t event,std::uint32_t pc){return (kind<<56)|(std::uint64_t(event)<<32)|pc;}
 struct ProfileScope {
     std::uint64_t key,t0;
@@ -108,14 +110,15 @@ inline void frame_profile_report(std::FILE* f,const FrameProfile& p=frame_profil
         1000.0/(double(p.frame_ticks)/double(p.frames)*tick_ms),double(p.frame_max)*tick_ms);
     std::vector<std::pair<std::uint64_t,ProfileBucket>> v(p.buckets.begin(),p.buckets.end());
     std::sort(v.begin(),v.end(),[](const auto& a,const auto& b){return a.second.ticks>b.second.ticks;});
-    static const char* renderer_names[]{"?","acquire image (GPU/vsync wait)","PC fence wait (GPU)","PC scene record (CPU)","present","audio mix","renderer draw total","PC scene render_frame","PC scene GPU time (timestamps)","PC device draws (CPU, in displays)"};
+    static const char* renderer_names[]{"?","acquire image (GPU/vsync wait)","PC fence wait (GPU)","PC scene record (CPU)","present","audio mix","renderer draw total","PC scene render_frame","PC scene GPU time (timestamps)","PC device draws (CPU, in displays)",
+        "texture create + upload (first use)","GPU buffer create / upload","shader compile (in the draw)","texture from file (decode)"};
     unsigned shown=0;
     for(const auto& [k,b]:v){
         if(++shown>top)break;
         const unsigned kind=unsigned(k>>56),ev=unsigned((k>>32)&0xffffffu),pc=unsigned(k&0xffffffffu);
         const double per_frame=double(b.ticks)/double(p.frames)*tick_ms;
         if(kind==ProfileRenderer)std::fprintf(f,"  %-34s %7.3f ms/frame  max %7.3f ms  calls %llu\n",
-            pc<10u?renderer_names[pc]:"?",per_frame,double(b.max)*tick_ms,(unsigned long long)b.calls);
+            pc<ProfRendererIds?renderer_names[pc]:"?",per_frame,double(b.max)*tick_ms,(unsigned long long)b.calls);
         else if(kind==ProfileDisplay&&ev>=0xfffeu)   // scene renderer hooks: whole display (inclusive) / frame leaf
             std::fprintf(f,"  %s pc %06x %20s %7.3f ms/frame  max %7.3f ms  calls %llu\n",ev==0xffffu?"leaf     ":"display  ",pc,"",
             per_frame,double(b.max)*tick_ms,(unsigned long long)b.calls);
@@ -137,12 +140,12 @@ inline void hitch_report(std::FILE* f,const HitchFrame& h,std::uint64_t duration
         order[n++]=i;
     }
     std::sort(order,order+n,[&](unsigned a,unsigned b){return h.ticks[a]>h.ticks[b];});
-    static const char* names[]{"?","acquire","gpu-wait","record","present","audio","draw","render","gpu-time","draws"};
+    static const char* names[]{"?","acquire","gpu-wait","record","present","audio","draw","render","gpu-time","draws","tex-upload","buf-upload","compile","tex-file"};
     std::fprintf(f,"hitch frame %llu mode %u: %.1f ms |",(unsigned long long)h.number,h.mode,double(duration)*tick_ms);
     for(unsigned k=0;k<n&&k<6;++k){
         const auto key=h.keys[order[k]];const unsigned kind=unsigned(key>>56),ev=unsigned((key>>32)&0xffffffu),pc=unsigned(key&0xffffffffu);
         const double ms=double(h.ticks[order[k]])*tick_ms;
-        if(kind==ProfileRenderer)std::fprintf(f," %s %.1f",pc<10u?names[pc]:"?",ms);
+        if(kind==ProfileRenderer)std::fprintf(f," %s %.1f",pc<ProfRendererIds?names[pc]:"?",ms);
         else if(kind==ProfileDisplay&&ev>=0xfffeu)std::fprintf(f," %s%06x %.1f",ev==0xffffu?"leaf":"disp",pc,ms);
         else std::fprintf(f," %s%u:%06x %.1f",kind==ProfileEvent?"ev":"de",ev,pc,ms);
     }

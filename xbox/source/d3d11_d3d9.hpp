@@ -23,6 +23,7 @@ public:
     void clear(std::uint32_t,std::uint32_t,float,std::uint32_t)override;
     void unlock_rect(std::uint32_t)override;
     void release(std::uint32_t)override;
+    std::uint32_t create_texture_from_file(const platform::PcTextureFileRequest&)override;
     std::uint8_t* lock(std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override;
     void begin_frame();void end_frame();
     // The frame the game drew (RGBA8), for the presenter.

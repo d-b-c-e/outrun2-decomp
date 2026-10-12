@@ -1,4 +1,5 @@
 #include "d3d11_d3d9.hpp"
+#include "frame_profile.hpp"
 #include "pc_hlsl_shaders.hpp"
 #include "fxaa_hlsl.hpp"
 #include <cmath>
@@ -214,6 +215,7 @@ void D3D11D3D9Device::end_frame(){
 D3D11D3D9Device::Texture* D3D11D3D9Device::texture(std::uint32_t handle){
     auto* o=object(handle);if(!o||o->kind!=KTexture)return nullptr;
     if(auto it=textures_.find(handle);it!=textures_.end())return &it->second;
+    ProfileScope prof(profile_key(ProfileRenderer,0,ProfTextureUpload));   // the first use: create and upload every level
     Texture t{};t.cube=o->texture.cube;t.levels=std::max(1u,o->texture.levels);
     const auto& top=o->texture.faces[0][0];
     D3D11_TEXTURE2D_DESC d{};d.Width=top.width;d.Height=top.height;d.MipLevels=t.levels;d.ArraySize=t.cube?6:1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -256,6 +258,11 @@ void D3D11D3D9Device::bind_target(){
     ID3D11ShaderResourceView* none[12]{};context_->PSSetShaderResources(0,12,none);
     context_->OMSetRenderTargets(1,&rtv,dsv);
     bound_.target=true;bound_.rtv=rtv;bound_.dsv=dsv;bound_.textures_set=false;
+}
+// The game's texture loads (the file read and the decode to RGBA in the soft device), timed for the frame profile.
+std::uint32_t D3D11D3D9Device::create_texture_from_file(const platform::PcTextureFileRequest& q){
+    ProfileScope prof(profile_key(ProfileRenderer,0,ProfTextureFile));
+    return PcSoftD3D9Device::create_texture_from_file(q);
 }
 void D3D11D3D9Device::release(std::uint32_t handle){
     PcSoftD3D9Device::release(handle);if(object(handle))return;
@@ -301,6 +308,7 @@ std::uint8_t* D3D11D3D9Device::lock(std::uint32_t h,std::uint32_t offset,std::ui
 ID3D11Buffer* D3D11D3D9Device::gpu_buffer(std::uint32_t h){
     const auto& bytes=object(h)->bytes;auto& g=gpu_buffers_[h];
     if(!g.buffer||g.bytes!=bytes.size()){
+        ProfileScope prof(profile_key(ProfileRenderer,0,ProfBufferUpload));
         D3D11_BUFFER_DESC d{};d.ByteWidth=UINT((bytes.size()+15)&~std::size_t(15));d.Usage=D3D11_USAGE_DEFAULT;
         d.BindFlags=D3D11_BIND_VERTEX_BUFFER|D3D11_BIND_INDEX_BUFFER;
         std::vector<std::uint8_t> initial(d.ByteWidth);std::memcpy(initial.data(),bytes.data(),bytes.size());
@@ -308,6 +316,7 @@ ID3D11Buffer* D3D11D3D9Device::gpu_buffer(std::uint32_t h){
         check(device_->CreateBuffer(&d,&s,&g.buffer),"CreateBuffer(D3D9 buffer)");
         g.bytes=bytes.size();g.dirty_lo=~std::size_t(0);g.dirty_hi=0;++native_stats_.uploads;native_stats_.upload_bytes+=bytes.size();
     }else if(g.dirty_hi>g.dirty_lo){
+        ProfileScope prof(profile_key(ProfileRenderer,0,ProfBufferUpload));
         const std::size_t lo=g.dirty_lo,hi=std::min(g.dirty_hi,bytes.size());
         if(hi>lo){const D3D11_BOX box{UINT(lo),0,0,UINT(hi),1,1};context_->UpdateSubresource(g.buffer.Get(),0,&box,bytes.data()+lo,0,0);
             ++native_stats_.uploads;native_stats_.upload_bytes+=hi-lo;}
@@ -338,6 +347,7 @@ D3D11D3D9Device::NativeProgram* D3D11D3D9Device::native_program(const std::strin
     const bool loaded=!p.code.empty()&&SUCCEEDED(device_->CreateVertexShader(p.code.data(),p.code.size(),nullptr,&p.shader));
     if(!loaded){
         // A program that does not compile stays on the CPU path (a null shader), logged once, never a frame failure.
+        ProfileScope prof(profile_key(ProfileRenderer,0,ProfShaderCompile));
         try{
             const auto code=compile(source,"vs_main","vs_4_1");
             const auto* b=static_cast<const std::uint8_t*>(code->GetBufferPointer());p.code.assign(b,b+code->GetBufferSize());
@@ -521,6 +531,7 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
     const auto cached=read_shader_cache(path);
     const bool loaded=!cached.empty()&&SUCCEEDED(device_->CreatePixelShader(cached.data(),cached.size(),nullptr,&shader));
     if(!loaded){
+        ProfileScope prof(profile_key(ProfileRenderer,0,ProfShaderCompile));
         const auto code=compile(source,"ps_main","ps_4_1");
         check(device_->CreatePixelShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader),"CreatePixelShader");
         write_shader_cache(path,code->GetBufferPointer(),code->GetBufferSize());
