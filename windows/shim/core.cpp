@@ -311,6 +311,13 @@ void Core::read_devices(std::int64_t now){
         s.poll=p_.poll(d.handle);
         if(s.poll==Call::Ok)s.state=p_.state(d.handle,st);   // Poll fills nothing; only a complete state read counts
         s.read_end_us=p_.now_us();
+        SourceRead source;
+        if(p_.source_read(d.handle,source)){
+            if(source.generation && source.sequence && source.start_us>=0 && source.end_us>=source.start_us && source.end_us<=s.read_end_us){
+                s.source_generation=source.generation;s.source_sequence=source.sequence;
+                s.read_start_us=source.start_us;s.read_end_us=source.end_us;
+            }else{s.poll=Call::Gone;s.state=Call::NotCalled;}
+        }
         s.valid=s.poll==Call::Ok&&s.state==Call::Ok;
         const bool pending=s.poll==Call::Pending||s.state==Call::Pending;
         if(s.valid){

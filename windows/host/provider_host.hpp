@@ -19,7 +19,7 @@ namespace dbce::shim::hosting {
 // and the provider alive, so nothing it can still call is ever destroyed under it. The core holds a reference to the
 // provider; members are destroyed in reverse order, the core first.
 struct WorkerState {
-    std::shared_ptr<dbce::shim::DInputProvider> provider;
+    std::shared_ptr<dbce::shim::ProviderOwner> provider;
     std::shared_ptr<dbce::shim::Core> core;
     std::atomic<bool> stop{false};
     std::mutex m; std::condition_variable cv; bool done = false;
@@ -40,9 +40,9 @@ struct ControlWorkerState {
 
 // The release phase's own state: a release still inside a driver call keeps the provider alive (D1).
 struct ReleaseState {
-    std::shared_ptr<dbce::shim::DInputProvider> provider;
+    std::shared_ptr<dbce::shim::ProviderOwner> provider;
     std::mutex m; std::condition_variable cv; bool done = false;
-    dbce::shim::DInputProvider::ShutdownReport rep;
+    dbce::shim::ProviderShutdownReport rep;
 };
 
 struct Report : LifetimeReport {
@@ -70,11 +70,16 @@ public:
     ProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched,
         std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {}, HWND window = nullptr,
         std::int64_t freshness_us = 100'000)
+        :ProviderHost(std::move(folder),std::move(nonce),std::make_shared<dbce::shim::DInputProvider>(input,window),
+                      profile,latched,std::move(recorder),capability,freshness_us){}
+    ProviderHost(std::wstring folder,std::string nonce,std::shared_ptr<dbce::shim::ProviderOwner> provider,
+        const std::string& profile,bool latched,std::unique_ptr<RecorderType> recorder,
+        dbce::shim::Capability capability={},std::int64_t freshness_us=100'000)
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
           recorder_(std::move(recorder)),
           w_(std::make_shared<WorkerState>()),latched_(latched) {
-        if (!recorder_) throw std::invalid_argument("recorder required");
-        w_->provider = std::make_shared<dbce::shim::DInputProvider>(input, window);
+        if (!recorder_ || !provider) throw std::invalid_argument("recorder and provider required");
+        w_->provider = std::move(provider);
         dbce::shim::CoreConfig cfg; cfg.latched = latched; cfg.capability = capability;
         cfg.fresh_us = freshness_us;   // ordinary 100 ms bound; fixture wrapper explicitly supplies its own value
         w_->core = std::make_shared<dbce::shim::Core>(*w_->provider, cfg);
@@ -200,12 +205,12 @@ public:
         auto rs = std::make_shared<ReleaseState>(); rs->provider = w_->provider;
         const int leases = b.leases_ms;
         release_ = std::thread([rs, leases] {
-            dbce::shim::DInputProvider::ShutdownReport rep;
+            dbce::shim::ProviderShutdownReport rep;
             try { rep = rs->provider->shutdown(leases); } catch (...) { rep.detail = "the provider's shutdown threw"; }
             { std::lock_guard<std::mutex> l(rs->m); rs->rep = std::move(rep); rs->done = true; }
             rs->cv.notify_all();
         });
-        dbce::shim::DInputProvider::ShutdownReport rep; bool returned = false;
+        dbce::shim::ProviderShutdownReport rep; bool returned = false;
         const auto release_deadline = Clock::now() + std::chrono::milliseconds(b.leases_ms + b.release_ms);
         {
             std::unique_lock<std::mutex> l(rs->m);

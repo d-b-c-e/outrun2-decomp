@@ -5,6 +5,8 @@
 #define DBCE_SHIM_BUILD
 #endif
 #include "dbce_shim_internal.hpp"
+#include "dbce_shim_bridge.h"
+#include "bridge_provider.hpp"
 #include "control_journal.hpp"
 #include "frame_recorder.hpp"
 #include "journal_identity.hpp"
@@ -13,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <cstdio>
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -57,6 +60,7 @@ struct Shim {
     std::thread::id owner = std::this_thread::get_id();
     std::deque<std::string> reasons;   // the capability's text, alive as long as Core may read it
     std::unique_ptr<Host> host;
+    std::shared_ptr<sh::BridgeProvider> bridge;
     std::string profile_info;          // Core's parse of the profile, fixed at the open
     bool stopped = false, latched = false, capture = false;
     std::vector<std::string> game;     // the capture's game channels, "game.<name>", fixed at the open
@@ -158,14 +162,15 @@ void hold_pending(Shim& s, const sh::Frame& f) {
 }
 
 // One open for both entries: v1's ordinary host and v2's arguments.
-int32_t open_impl(IDirectInput8W* input, const dbce_shim_open_args& a, void** out, char* why, int32_t why_len) {
+int32_t open_impl(IDirectInput8W* input, const dbce_shim_open_args& a, void** out, char* why, int32_t why_len,
+                  std::shared_ptr<sh::BridgeProvider> bridge = {}) {
     auto refuse = [&](int32_t code, const std::string& text) { if (input) input->Release(); return fail(code, text, why, why_len); };
     try {
         if (!out) return refuse(DBCE_SHIM_BAD_ARGUMENT, "out is null");
         *out = nullptr;
         const bool latched = (a.flags & DBCE_SHIM_LATCHED) != 0, capture = (a.flags & DBCE_SHIM_CAPTURE) != 0;
         if (a.flags & ~std::uint32_t(DBCE_SHIM_LATCHED | DBCE_SHIM_CAPTURE)) return refuse(DBCE_SHIM_BAD_ARGUMENT, "unknown open flags");
-        if (!input || !a.folder || !a.nonce || !a.profile || a.profile_len < 0 || a.profile_len > (1 << 20))
+        if ((!input && !bridge) || !a.folder || !a.nonce || !a.profile || a.profile_len < 0 || a.profile_len > (1 << 20))
             return refuse(DBCE_SHIM_BAD_ARGUMENT, "input, folder, nonce and a profile of at most 1 MiB are required");
         const DWORD attributes = GetFileAttributesW(a.folder);
         if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY))
@@ -174,6 +179,7 @@ int32_t open_impl(IDirectInput8W* input, const dbce_shim_open_args& a, void** ou
         if (latched && (!a.session_file || !a.batch_file || a.fences_verified != 1 || a.force_absent != 1))
             return refuse(DBCE_SHIM_REFUSED, "a latched open needs both session files, the caller's verified fences and its process-latched force mute");
         auto shell = std::make_unique<Shim>();
+        shell->bridge = bridge;
         shell->latched = latched; shell->capture = capture;
         if (capture) {
             std::string text;
@@ -210,7 +216,8 @@ int32_t open_impl(IDirectInput8W* input, const dbce_shim_open_args& a, void** ou
         }
         // From here the host owns the DirectInput reference, also when its construction throws.
         auto* in = input; input = nullptr;
-        shell->host = std::make_unique<Host>(a.folder, nonce, in, bytes, latched, std::move(recorder), caps, static_cast<HWND>(a.hwnd));
+        if (bridge) shell->host = std::make_unique<Host>(a.folder,nonce,bridge,bytes,latched,std::move(recorder),caps);
+        else shell->host = std::make_unique<Host>(a.folder, nonce, in, bytes, latched, std::move(recorder), caps, static_cast<HWND>(a.hwnd));
         if (capture) shell->host->recorder().set_devices(shell->host->device_reports());   // one sample slot per profile device
         if (latched) {   // the reviewed control worker and journal, in the run folder
             c::JournalLimits limits; limits.cap_bytes = c::LatchedJournalCap;
@@ -268,9 +275,7 @@ int32_t dbce_shim_open2(const dbce_shim_open_args* args, void** out, char* why, 
     return dbce_shim_open2_with_input(input, args, out, why, why_len);
 }
 
-int32_t dbce_shim_tick(void* handle, dbce_shim_frame* frame) {
-    Shim* s = nullptr;
-    if (const auto r = lookup(handle, s)) return r;
+static int32_t tick_impl(Shim* s, dbce_shim_frame* frame) {
     if (!frame || frame->struct_size != sizeof(dbce_shim_frame)) return DBCE_SHIM_BAD_ARGUMENT;
     try {
         push_pending(*s);
@@ -285,6 +290,63 @@ int32_t dbce_shim_tick(void* handle, dbce_shim_frame* frame) {
         }
         return DBCE_SHIM_OK;
     } catch (...) { return DBCE_SHIM_REFUSED; }
+}
+int32_t dbce_shim_tick(void* handle, dbce_shim_frame* frame) {
+    Shim* s=nullptr;if(const auto r=lookup(handle,s))return r;
+    if(s->bridge)return DBCE_SHIM_BAD_ARGUMENT;
+    return tick_impl(s,frame);
+}
+
+static_assert(sizeof(dbce_shim_bridge_device_v1)==144 && sizeof(dbce_shim_bridge_sample_v1)==232,"bridge extension ABI");
+int32_t dbce_shim_bridge_abi_version(void){return 1;}
+int32_t dbce_shim_bridge_device_size(void){return sizeof(dbce_shim_bridge_device_v1);}
+int32_t dbce_shim_bridge_sample_size(void){return sizeof(dbce_shim_bridge_sample_v1);}
+static int64_t bridge_clock(){LARGE_INTEGER f{},t{};if(!QueryPerformanceFrequency(&f)||f.QuadPart<=0||!QueryPerformanceCounter(&t))return -1;
+    return (t.QuadPart/f.QuadPart)*1000000+(t.QuadPart%f.QuadPart)*1000000/f.QuadPart;}
+static std::string bridge_guid(const uint8_t* bytes){GUID g{};std::memcpy(&g,bytes,sizeof(g));char text[40]{};
+    std::snprintf(text,sizeof(text),"{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",static_cast<unsigned long>(g.Data1),g.Data2,g.Data3,
+        g.Data4[0],g.Data4[1],g.Data4[2],g.Data4[3],g.Data4[4],g.Data4[5],g.Data4[6],g.Data4[7]);return text;}
+int32_t dbce_shim_bridge_open(const dbce_shim_open_args* args,void** out,char* why,int32_t why_len){
+    if(out)*out=nullptr;
+    if(!args || args->struct_size!=sizeof(*args))return fail(DBCE_SHIM_BAD_ARGUMENT,"bridge args size",why,why_len);
+    if(args->flags)return fail(DBCE_SHIM_REFUSED,"bridge control/capture provenance is not qualified",why,why_len);
+    try{return open_impl(nullptr,*args,out,why,why_len,std::make_shared<sh::BridgeProvider>(bridge_clock));}
+    catch(...){return fail(DBCE_SHIM_REFUSED,"bridge allocation failed",why,why_len);}
+}
+int32_t dbce_shim_bridge_devices(void* handle,const dbce_shim_bridge_device_v1* devices,int32_t count){
+    Shim* s=nullptr;if(const auto r=lookup(handle,s))return r;
+    if(!s->bridge || count<0 || count>64 || (count && !devices))return DBCE_SHIM_BAD_ARGUMENT;
+    try{
+        std::vector<sh::BridgeDevice> copied;
+        for(int i=0;i<count;++i){const auto& d=devices[i];
+            if(d.struct_size!=sizeof(d)||d.abi!=1||(d.axis_mask&~255u)||(d.range_mask&~255u)||(d.pov_mask&~15u)||(d.flags&~1u))return DBCE_SHIM_BAD_ARGUMENT;
+            sh::BridgeDevice v;v.generation=d.generation;v.identity={bridge_guid(d.instance),bridge_guid(d.product),"external physical input"};
+            for(int a=0;a<8;++a){v.caps.axis[a]=(d.axis_mask&(1u<<a))!=0;v.caps.range_ok[a]=(d.range_mask&(1u<<a))!=0;v.caps.min[a]=d.minimum[a];v.caps.max[a]=d.maximum[a];}
+            for(int b=0;b<128;++b)v.caps.button[b]=(d.button_mask[b/8]&(1u<<(b%8)))!=0;
+            for(int p=0;p<4;++p)v.caps.pov[p]=(d.pov_mask&(1u<<p))!=0;
+            copied.push_back(v);
+        }
+        std::string why;return s->bridge->devices(copied,why)?DBCE_SHIM_OK:DBCE_SHIM_REFUSED;
+    }catch(...){return DBCE_SHIM_REFUSED;}
+}
+int32_t dbce_shim_bridge_tick(void* handle,const dbce_shim_bridge_sample_v1* samples,int32_t count,dbce_shim_frame* frame){
+    Shim* s=nullptr;if(const auto r=lookup(handle,s))return r;
+    if(!s->bridge)return DBCE_SHIM_BAD_ARGUMENT;
+    s->bridge->finish_frame();
+    if(!frame || frame->struct_size!=sizeof(*frame) || count<0 || count>64 || (count && !samples))return DBCE_SHIM_BAD_ARGUMENT;
+    try{
+        std::vector<sh::BridgeSample> copied;
+        for(int i=0;i<count;++i){const auto& r=samples[i];
+            if(r.struct_size!=sizeof(r)||r.abi!=1||r.reserved||r.reserved2||r.valid>1||r.poll_call>4||r.state_call>4||
+                (r.valid!=((r.poll_call==0 && r.state_call==0)?1:0)))return DBCE_SHIM_BAD_ARGUMENT;
+            sh::BridgeSample v;v.source={r.generation,r.sequence,r.read_start_us,r.read_end_us};
+            v.poll=static_cast<sh::Call>(r.poll_call);v.state=static_cast<sh::Call>(r.state_call);
+            if(r.valid){std::copy(r.axes,r.axes+8,v.raw.axes);std::copy(r.buttons,r.buttons+128,v.raw.buttons);std::copy(r.pov,r.pov+4,v.raw.povs);}
+            copied.push_back(v);
+        }
+        std::string why;if(!s->bridge->samples(copied,why))return DBCE_SHIM_REFUSED;
+        const auto result=tick_impl(s,frame);s->bridge->finish_frame();return result;
+    }catch(...){s->bridge->finish_frame();return DBCE_SHIM_REFUSED;}
 }
 
 int32_t dbce_shim_record(void* handle, uint64_t frame_seq, const double* values, int32_t count) {

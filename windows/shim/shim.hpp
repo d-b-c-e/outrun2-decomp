@@ -51,6 +51,10 @@ static_assert(int(Call::Ok)==0&&int(Call::AcquisitionLost)==1&&int(Call::Gone)==
               "Call values are a published contract");
 using Handle=std::uint64_t;                                   // provider-defined; 0 = none
 struct OpenResult { bool ok{}; std::string why; DeviceInfo opened; ObjectCaps caps; Handle handle{}; };
+// Optional provenance for a copied physical read. A bridge supplies the source's
+// clock/identity, never the time spent copying its cached state. Native providers
+// keep their current measured poll/state interval by returning false.
+struct SourceRead { std::uint64_t generation{},sequence{}; std::int64_t start_us{},end_us{}; };
 class Provider {
 public:
     virtual ~Provider()=default;
@@ -64,6 +68,18 @@ public:
     virtual Call state(Handle,RawState& out)=0;
     // Any thread: monotonic microseconds.
     virtual std::int64_t now_us()=0;
+    virtual bool source_read(Handle,SourceRead&){return false;}
+};
+struct ProviderShutdownReport {
+    int released{},held{};
+    bool input_released{};
+    std::string detail;
+};
+// Host-owned provider lifetime; the pure Core/fake providers still need only
+// Provider. The default host remains the existing DirectInput implementation.
+class ProviderOwner:public Provider {
+public:
+    virtual ProviderShutdownReport shutdown(int wait_ms)=0;
 };
 
 // ---- statuses (section 7)
@@ -141,6 +157,7 @@ struct InjectionMark {
     bool any()const{return axes||povs||buttons.any();}
 };
 struct DeviceSample {
+    std::uint64_t source_generation{},source_sequence{}; // zero for direct reads
     std::uint32_t device{},epoch{};
     std::uint64_t seq{};
     std::int64_t read_start_us{},read_end_us{};

@@ -39,7 +39,7 @@ namespace dbce::shim {
 std::string guid_text(const GUID&);
 bool guid_parse(const std::string& text,GUID& out);
 
-class DInputProvider final:public Provider {
+class DInputProvider final:public ProviderOwner {
 public:
     static constexpr int MaxSlots=64;
     // Takes ownership of `input` (one reference): a real IDirectInput8W from DirectInput8Create, or a test fake.
@@ -53,15 +53,10 @@ public:
     Call state(Handle,RawState& out) override;
     std::int64_t now_us() override;
 
-    struct ShutdownReport {
-        int released{};           // devices released now
-        int held{};               // devices still being read: released later, by the last call to leave
-        bool input_released{};    // DirectInput released now (false: an open/listing was in flight, or a device is held)
-        std::string detail;
-    };
+    using ShutdownReport=ProviderShutdownReport;
     // Stops admission at once, releases what is idle, waits at most wait_ms for calls in progress. Never releases
     // anything a call is using; what remains is released when the last call leaves (see Lifetime above).
-    ShutdownReport shutdown(int wait_ms);
+    ShutdownReport shutdown(int wait_ms) override;
     int misuse()const;            // stale handles, closes refused during a read
     int refused_after_stop()const;
     static Call classify(HRESULT);
