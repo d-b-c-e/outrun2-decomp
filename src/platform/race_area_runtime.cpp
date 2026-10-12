@@ -554,8 +554,9 @@ struct Service {
             const auto path=resource_path(id);
             if(path.size()<7||path.compare(path.size()-7,7,"_pmt.sz")!=0)return;
             std::vector<std::uint8_t> pmt;std::string error;
-            if(!(r->bank_queued(id)||bank_bytes(id,pmt,error)))return;
+            if(!(r->bank_queued(id)||bank_bytes(id,pmt,error))){++o.start_banks_preload_failed;return;}
             if(r->load_bank(id,std::move(pmt),error)){o.banks_loaded.insert(id);++o.start_banks_preloaded;}
+            else ++o.start_banks_preload_failed;   // left to the draw-time load (ensure_bank) and its accounting
         };
         for(std::uint32_t k=0;k<s.scene_owner_resource_count&&k<s.scene_owner_resource_ids.size();++k)one(s.scene_owner_resource_ids[k]);
         for(auto v:s.scene_owner_list_836850)one(v);
@@ -1112,7 +1113,7 @@ std::string native_race_area_status(const NativeRuntimeContext& c){
      <<" ctl="<<o.controls<<"/abort "<<o.control_aborts<<" disp="<<o.displays<<"/abort "<<o.display_aborts
      <<" draws="<<o.last_area_draws<<" | sky init="<<o.sky_inits<<(o.sky_init_failed?"(failed)":"")<<" ctl="<<o.sky_controls
      <<"/abort "<<o.sky_control_aborts<<" disp="<<o.sky_displays<<"/abort "<<o.sky_display_aborts<<" draws="<<o.last_sky_draws
-     <<" banks="<<o.banks_loaded.size()<<" start_preloaded="<<o.start_banks_preloaded<<" skipped="<<o.skipped_objects;
+     <<" banks="<<o.banks_loaded.size()<<" start_preloaded="<<o.start_banks_preloaded<<" start_preload_failed="<<o.start_banks_preload_failed<<" skipped="<<o.skipped_objects;
     if(!o.skipped_ids.empty()){s<<" (not resident:"<<std::hex;for(const auto& [id,n]:o.skipped_ids)s<<" "<<id<<"x"<<std::dec<<n<<std::hex;s<<std::dec<<")";}
     if(!o.last_error.empty())s<<" last="<<o.last_error;
     return s.str();
