@@ -202,7 +202,19 @@ int run_all(int argc,char** argv){
      const auto d=r.drain(dbce::shim::hosting::Clock::now()+std::chrono::seconds(30));
      check(d.outcome==dbce::shim::hosting::RecOutcome::Complete&&d.joined&&r.state()==OrdinaryRecorder::State::Complete,
            "no saver thread and no wait: the host's stop runs the one drain");
-     check(has(slurp(a.request.recording/"capture"/"recorder-complete.json"),"\"stoppedBy\":\"exit\""),"stopped by the exit");}
+     check(has(slurp(a.request.recording/"capture"/"recorder-complete.json"),"\"stoppedBy\":\"exit\""),"stopped by the exit");
+     check(!has(slurp(a.request.recording/"capture"/"recorder-complete.json"),"\"action\""),"a recording's proof names no action (record, as before)");}
+    // A playback's own capture (shim_input.cpp playback mode): no device opened, stopped at the tape's end; its proof says
+    // action playback and names the recording it replayed (sana 37229/37642).
+    {auto a=arm();a.request.action=session::Action::Playback;a.request.package_seal_sha256=std::string(64,'5');
+     OrdinaryRecorder r(a);r.set_devices({playback_no_device()});
+     for(std::uint64_t i=0;i<10;++i)r.push(row(i+1,std::int64_t(i)*16667));
+     r.stop("tape-end");
+     check(saved_within(r)&&r.state()==OrdinaryRecorder::State::Complete,"a playback capture with no device completes: "+r.why());
+     const auto proof=slurp(a.request.recording/"capture"/"recorder-complete.json");
+     check(has(proof,"\"action\":\"playback\",\"sourceSealSha256\":\""+std::string(64,'5')+"\"")&&has(proof,"\"stoppedBy\":\"tape-end\""),
+           "the playback proof: action, the replayed recording's seal, stopped at the tape's end");
+     check(has(slurp(a.request.recording/"capture"/"devices.json"),"playback: no device opened")&&has(slurp(a.request.recording/"capture"/"devices.json"),"\"opened\":false"),"devices.json says no device was opened");}
 
     // A tick that never reached the consumed-input seam: failed, no proof, and the host's stop is not Complete.
     {const auto a=arm();OrdinaryRecorder r(a);r.set_devices(devices());

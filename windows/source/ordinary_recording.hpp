@@ -76,6 +76,9 @@ bool replace_file_atomically(const std::filesystem::path& path,const std::string
 // The managed receipt's fields when it is one flat JSON object of strings, integers and booleans (anything else:
 // nullopt). Strings are kept unescaped only when plain ASCII without escapes; integers and booleans as written.
 std::optional<std::map<std::string,std::string>> flat_json(const std::string& text);
+// A playback's capture device table (shim_input.cpp playback mode): the frame recorder needs one entry, and a playback
+// opens no device, so the one entry says so (not opened, epoch 0, no capabilities; devices.json carries its name).
+dbce::shim::DeviceReport playback_no_device();
 // SHA-256 of a file, streamed, lowercase hex; `bytes` its length. Throws when it cannot be read.
 std::string file_sha256(const std::filesystem::path& p,std::uint64_t& bytes);
 }

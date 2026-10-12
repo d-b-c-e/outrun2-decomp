@@ -550,7 +550,7 @@ bool shim_input_configure_playback(const session::Intake& intake,const Ini& sett
     const auto steering=wheel_steering(settings);
     Steering s;s.sensitivity=steering.sensitivity;s.dead_zone=steering.dead_zone;
     pb.adapter=std::make_unique<Adapter>(parsed.ok?parsed.section.transmission:"",HPattern::Config{},s);
-    pb.rec.set_devices({});   // no device is opened: the capture's device table is empty
+    pb.rec.set_devices({playback_no_device()});   // no device is opened: the table's one entry says so
     platform::native_input_replay_hook()=on_replay_playback;
     platform::native_input_consumed_hook()=on_consumed_playback;
     pb.epoch=std::chrono::steady_clock::now();

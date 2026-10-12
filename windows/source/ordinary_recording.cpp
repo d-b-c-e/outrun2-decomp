@@ -32,6 +32,13 @@ std::uint64_t creation_time(){
 }
 std::string jstr(const std::string& s){std::string j;if(!dbce::shim::control::journal_detail::json_string(j,s,4096))j="null";return j;}
 }
+dbce::shim::DeviceReport playback_no_device(){
+    dbce::shim::DeviceReport d;
+    d.identity.name="playback: no device opened (the tape supplies every tick's input)";
+    d.identity.dev="{00000000-0000-0000-0000-000000000000}";d.identity.prod="{00000000-0000-0000-0000-000000000000}";
+    d.opened=false;d.epoch=0;d.status="not opened (playback)";
+    return d;
+}
 // SHA-256 of a file, streamed (a capture can be hundreds of MB); also the startup snapshot's (startup_state.cpp).
 std::string file_sha256(const std::filesystem::path& p,std::uint64_t& bytes){
     bytes=0;
@@ -150,9 +157,11 @@ std::string OrdinaryRecorder::Shared::admit(const ShimRecorder::Drained& d){
     const auto u=[](std::uint64_t v){return std::to_string(v);};
     const auto b=[](bool v){return std::string(v?"true":"false");};
     const auto g=[](double v){char t[32];std::snprintf(t,sizeof t,"%.17g",v);return std::string(t);};
-    // A playback's own capture says so (sana 37229: the managed validator admits stoppedBy "tape-end" only then); a
+    // A playback's own capture says so (sana 37229: the managed validator admits stoppedBy "tape-end" only then), and
+    // names the recording it replayed (sana 37642: the comparison requires it to be the reference's seal); a
     // recording's proof is unchanged (no action: record, as before).
-    const std::string action=arm.request.action==session::Action::Playback?",\n \"action\":\"playback\"":"";
+    const std::string action=arm.request.action==session::Action::Playback?
+        ",\n \"action\":\"playback\",\"sourceSealSha256\":"+jstr(arm.request.package_seal_sha256):std::string();
     const std::string j="{\n \"schema\":\"outrun.recorder-complete@1\",\n \"requestId\":"+jstr(arm.request.request_id)+action+
         ",\n \"contract\":\"dbce.shim.outrun-capture@2\",\n \"outcome\":\"Complete\",\"joined\":true,\n \"stoppedBy\":"+jstr(stopped_by)+
         ",\n \"report\":{\"attempted\":"+u(r.attempted)+",\"accepted\":"+u(r.accepted)+",\"written\":"+u(r.written)+
