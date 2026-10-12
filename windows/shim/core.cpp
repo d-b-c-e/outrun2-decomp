@@ -62,6 +62,7 @@ void Core::set_profile(const Profile& profile){
     }
     worker_epochs_.assign(devs_.size(),0);
     worker_caps_.assign(devs_.size(),ObjectCaps{});
+    worker_interface_paths_.assign(devs_.size(),std::string{});
     last_dev_status_.assign(devs_.size(),std::string());
     last_status_.fill(Status::Unbound);
     if(cfg_.latched&&(!usable_||bound_.empty())){
@@ -80,12 +81,12 @@ bool Core::service_devices(){
         bool again=false;
         if(r.why==Call::AcquisitionLost)
             for(int t=0;t<cfg_.reacquire_tries&&!again;++t)again=p_.reacquire(r.handle)==Call::Ok;
-        if(!again)p_.close(r.handle);
+        if(!again){p_.close(r.handle);worker_interface_paths_[std::size_t(r.device)].clear();}
         std::lock_guard<std::mutex> l(m_);
         auto& d=devs_[std::size_t(r.device)];
         if(again){
             const auto epoch=++worker_epochs_[std::size_t(r.device)];
-            opened_.push_back({r.device,r.handle,worker_caps_[std::size_t(r.device)],epoch});
+            opened_.push_back({r.device,r.handle,worker_caps_[std::size_t(r.device)],epoch,worker_interface_paths_[std::size_t(r.device)]});
             d.worker_state=DevState::Open;d.worker_reason.clear();
         }else{
             d.worker_state=DevState::Missing;d.worker_reason=std::string("read failed (")+call_name(r.why)+"), reopening";
@@ -121,8 +122,9 @@ bool Core::service_devices(){
         for(int a=0;a<8;++a)if(o.caps.max[std::size_t(a)]<=o.caps.min[std::size_t(a)])o.caps.range_ok[std::size_t(a)]=false;
         const auto epoch=++worker_epochs_[std::size_t(i)];
         worker_caps_[std::size_t(i)]=o.caps;
+        worker_interface_paths_[std::size_t(i)]=o.opened.interface_path;
         std::lock_guard<std::mutex> l(m_);
-        opened_.push_back({i,o.handle,o.caps,epoch});
+        opened_.push_back({i,o.handle,o.caps,epoch,o.opened.interface_path});
         d.worker_state=DevState::Open;d.worker_reason.clear();
     }
     return did;
@@ -289,6 +291,7 @@ void Core::adopt_worker_changes(std::int64_t now){
     for(const auto& o:op){
         auto& d=devs_[std::size_t(o.device)];
         d.state=DevState::Open;d.handle=o.handle;d.caps=o.caps;d.epoch=o.epoch;d.fresh_seen=false;d.pending=false;d.reason.clear();
+        d.interface_path=o.interface_path;
         emit(EventKind::EpochBegin,now,o.device,o.epoch,0,d.id.dev);
         // Rearm (section 6): physical values in an ordinary process only.
         for(const auto& b:bound_)if(b.device==o.device){
@@ -344,7 +347,7 @@ void Core::read_devices(std::int64_t now){
              returned_.push_back({int(i),d.handle,why,d.epoch});
              d.worker_state=DevState::ReadFailed;d.worker_reason=std::string("read failed (")+call_name(why)+")";}
             d.state=DevState::ReadFailed;d.reason=std::string("read failed (")+call_name(why)+")";
-            d.handle=0;d.fresh_seen=false;
+            d.handle=0;d.fresh_seen=false;d.interface_path.clear();
         }
         d.sample=int(frame_.samples.size());
         frame_.samples.push_back(s);
@@ -647,7 +650,9 @@ std::vector<DeviceReport> Core::device_reports()const{
     std::vector<DeviceReport> out;out.reserve(devs_.size());
     for(const auto& d:devs_){
         const bool opened=d.state==DevState::Open;
-        out.push_back({d.id,d.epoch,opened,opened?d.caps:ObjectCaps{},device_status(d)});
+        auto identity=d.id;
+        identity.interface_path=opened?d.interface_path:std::string{};
+        out.push_back({std::move(identity),d.epoch,opened,opened?d.caps:ObjectCaps{},device_status(d)});
     }
     return out;
 }

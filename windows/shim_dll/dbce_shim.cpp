@@ -139,6 +139,7 @@ std::string device_json(const std::vector<sh::DeviceReport>& devices) {
         const auto& r = devices[d];
         j += std::string(d ? "," : "") + "{\"index\":" + std::to_string(d) + ",\"instance\":"; json_string(j, r.identity.dev, 128);
         j += ",\"product\":"; json_string(j, r.identity.prod, 128); j += ",\"name\":"; if (!json_string(j, r.identity.name, 1560)) j += "null";
+        j += ",\"interfacePath\":"; if (!json_string(j, r.identity.interface_path, 1560)) j += "\"\"";
         j += ",\"epoch\":" + std::to_string(r.epoch) + ",\"opened\":" + (r.opened ? "true" : "false") + ",\"status\":";
         if (!json_string(j, r.status, 1560)) j += "null";
         j += "}";
