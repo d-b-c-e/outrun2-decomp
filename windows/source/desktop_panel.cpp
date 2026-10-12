@@ -34,6 +34,8 @@ Panel p;
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
+    int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
+                              // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int sensitivity{100},dead_zone{};
@@ -127,7 +129,7 @@ void page_cameras(bool advanced){
             dbce::panel::Status("Projection now",(std::string(st.aspect>0.f?"one wide view":"one 16:9 view")+" (three projected views not applied: "+
                                 st.projection_note+")").c_str(),dbce::panel::Tone::Warning);
     }
-    if(v.triple!=int(st.mode)||v.projection!=int(st.requested))dbce::panel::Text("The choice applies at the next game start.");
+    if(v.triple!=int(st.mode)||v.projection!=v.projection_start)dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
     static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
     const int before=v.latency;
@@ -266,7 +268,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
-    v.projection=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
+    v.projection=v.projection_start=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
