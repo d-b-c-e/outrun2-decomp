@@ -15,8 +15,11 @@ def pin(root, scopes):
     return dict(commit=git(root, 'rev-parse', 'HEAD'), sha256={p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in git(root, 'ls-files', '--', *scopes).splitlines()})
 tk_scopes = ['native/session', 'dotnet/Dbce.Wheel.Recording', 'dotnet/Dbce.Wheel.Playback/ArtifactSeal.cs', 'Directory.*', 'global.json', 'NuGet.Config']
 before = dict(source=pin(repo, ['.']), toolkit=pin(toolkit, tk_scopes))
-if before['toolkit']['sha256']['native/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or \
-   before['source']['sha256']['windows/vendor/session/session_writer.h'] != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
+# A clean Windows worktree can materialize the same reviewed source as CRLF.
+# Pin every actual file byte above/below; this source-admission comparison ignores only line endings.
+def writer_hash(path): return hashlib.sha256(path.read_bytes().replace(b'\r\n', b'\n')).hexdigest()
+if writer_hash(toolkit / 'native/session/session_writer.h') != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db' or \
+   writer_hash(repo / 'windows/vendor/session/session_writer.h') != 'a9de5d49c55b9b4be464fb173178d20a97972eacff500aee0267e30fb44d19db':
     raise RuntimeError('Unreviewed native writer.')
 result.mkdir(parents=True); (result / 'source-before.json').write_text(json.dumps(before, indent=2)); commands = []
 def run(name, cmd, expected=0):
@@ -71,7 +74,7 @@ if args.mutations:
     }
     for name, (old, new, reason) in managed.items():
         src = result / 'mutations' / name; src.mkdir(parents=True)
-        for f in ['P21Finalizer.csproj', 'Program.cs']: shutil.copyfile(here / 'managed' / f, src / f)
+        for f in ['P21Finalizer.csproj', 'Program.cs', 'RecordingCompletion.cs']: shutil.copyfile(here / 'managed' / f, src / f)
         s = (src / 'Program.cs').read_text()
         if s.count(old) != 1: raise RuntimeError('Mutation anchor changed: ' + name)
         (src / 'Program.cs').write_text(s.replace(old, new))
