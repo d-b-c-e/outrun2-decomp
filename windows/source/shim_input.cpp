@@ -56,10 +56,13 @@ struct NoCapture {
 // The F4 delivery's hand-over of the wheel to and from WheelFfb (ffbdev::Owner over the bridge), on the game thread.
 struct BridgeOwner final:ffbdev::Owner {
     sh::WheelFfbBridge* b{};
-    void begin_open()override{if(b)b->begin_promotion();}
+    bool begin_open()override{return b&&b->begin_promotion();}
     void end_open(bool held)override{if(b)b->end_promotion(held);}
     void begin_release()override{if(b)b->begin_release();}
     void end_release()override{if(b)b->end_release();}
+    bool library_quiet()const override{return !b||b->library_quiet();}
+    bool enter_library()override{return !b||b->enter_library();}
+    void leave_library()override{if(b)b->leave_library();}
 };
 struct Ordinary {
     std::string profile,transmission,folder;

@@ -222,11 +222,23 @@ Wheelkit needs this marker plus the executable identity before it offers to writ
     on its own non-exclusive handle, like any device. While WheelFfb holds it as its force device, the provider reads
     it through WheelFfb's read slot on the exclusive handle. The identity, objects and ranges come from that handle
     (`GetReadSlotCaps`), and Core checks them like any open.
-  - The hand-over runs on the game thread inside the delivery's open and release (`ffbdev::Owner`). The ending
-    phase's handle is closed and marked stale first, so Core's next read is Gone and the epoch ends. Wheel opens are
-    refused until the next phase; Core then reopens the wheel as a new epoch.
-  - WheelFfb is called only in the shared phase, under the bridge's lock or on the game thread. After the release
-    returns, no call into it is in flight, so the library may be unloaded.
+  - The hand-over runs on the game thread inside the delivery's open and release (`ffbdev::Owner`) and never waits
+    for the worker or a driver (romi 32201/32222).
+    - The open first retires the provider's wheel handle (its reads are Gone, so the epoch ends). The worker closes
+      it when Core hands it back. Until then, and while a provider open of the wheel is in flight, the owner answers
+      "not yet": the delivery keeps waiting and asks again with each race sample, and leaving the race cancels it.
+    - Wheel opens are refused while the library opens the wheel. Core then reopens it through the read slot as a new
+      epoch.
+  - The read slot is prepared by the worker once per shared phase, outside the bridge's lock. Later reopens reuse it
+    with no library call.
+  - Release and shutdown change the phase and invalidate the shared handle at once. A worker still preparing the
+    slot closes it when it returns.
+  - The bridge's lock is never held across a driver or library call.
+  - `library_quiet()` counts workers in before they look at the phase, and the force output unloads WheelFfb only
+    when it is quiet, never under a call.
+  - Known limit: WheelFfb serializes its exports, so while the worker prepares the slot a game-thread call into the
+    library waits for it. This is the same class as the delivery's own synchronous calls; the library's hold
+    watchdog does not wait, and it silences the wheel.
 
 Proven reader behavior is reused behind this boundary (R1 Q4). Copying WheelFfb's reader code would not share its
 handle, so the design never claims that it does.

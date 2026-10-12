@@ -191,8 +191,9 @@ target_link_libraries(test_dinput_provider PRIVATE dinput8 dxguid)
 add_test(NAME dinput_provider COMMAND test_dinput_provider)
 # The WheelFfb bridge provider (shim/wheelffb_bridge): the hand-over of the force wheel between the provider's own
 # handle and WheelFfb's read slot, through the real Core and DInputProvider over fake COM and a fake read-slot API.
-add_executable(test_wheelffb_bridge tests/test_wheelffb_bridge.cpp shim/wheelffb_bridge.cpp shim/dinput_provider.cpp shim/parse.cpp shim/core.cpp)
-target_include_directories(test_wheelffb_bridge PRIVATE shim tests vendor/controls vendor/wheelffb)
+add_executable(test_wheelffb_bridge tests/test_wheelffb_bridge.cpp shim/wheelffb_bridge.cpp shim/dinput_provider.cpp shim/parse.cpp shim/core.cpp
+    source/ffb_device.cpp)
+target_include_directories(test_wheelffb_bridge PRIVATE shim host source tests vendor/controls vendor/wheelffb)
 target_compile_features(test_wheelffb_bridge PRIVATE cxx_std_17)
 target_compile_options(test_wheelffb_bridge PRIVATE /W4)
 target_compile_definitions(test_wheelffb_bridge PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)

@@ -35,6 +35,8 @@ struct Live {
     bool stopped{};             // Stop FFB / F8 ended it this session
     bool shim{};                // [Input] Backend = Shim: the shim owns the wheel and hands it over (ffbdev::Owner)
     bool requested{};           // [FFB] Output = wheel
+    ffbdev::Owner* owner{};     // the shim's hand-over (WheelFfb bridge): the library stays loaded until it is quiet
+    bool retained{};            // a stop could not enter the library gate: tried again at the exit (never waited for)
     WheelFfbApi api{};
     ffbdev::Delivery delivery;
     std::uint32_t race_ticks{},sent{},invalid_rows{};
@@ -119,6 +121,23 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     const bool race=compute(rt,intent);
     if(f.output)deliver(race,race?intent:0);
 }
+// Unloads WheelFfb.dll after the delivery's shutdown, unless the shim's bridge may still have a call inside it (a
+// worker preparing the read slot): then it stays loaded for the rest of the process, never freed under a call.
+void unload(){
+    if(f.owner&&!f.owner->library_quiet()){
+        std::printf("ffb: WheelFfb.dll stays loaded: a shim call may still be inside it\n");std::fflush(stdout);return;}
+    WheelFfb_Unload(&f.api);
+}
+// The delivery's shutdown, then the unload; a retained stop (the shim's worker inside the library) unloads nothing and
+// is tried again by the next stop (the exit), which does not wait either.
+void stop_device(){
+    f.delivery.shutdown();
+    if(f.delivery.retained()){
+        if(!f.retained)std::printf("ffb: wheel output stop retained: %s; tried again at the exit\n",f.delivery.why().c_str());
+        std::fflush(stdout);f.retained=true;return;}
+    f.retained=false;
+    unload();
+}
 // F4: the wheel output, when every gate allows it (ffb_device.hpp); false leaves WheelFfb.dll unloaded.
 bool start_output(const Ini& settings,bool latched,std::string& notes){
     const auto cfg=ffb_output_config(settings,latched,std::getenv("DBCE_FFB_MUTE"),notes);
@@ -201,15 +220,14 @@ void ffb_shutdown(){
         "%u non-finite; trace %s\n",f.race_ticks,f.epochs.epoch,f.sent,f.min_held,f.max_held,f.invalid_rows,f.model->refused_ticks(),
         f.model->nonfinite_ticks(),f.trace_path.c_str());
     if(f.trace){std::fclose(f.trace);f.trace=nullptr;}
-    if(f.output){
+    if(f.output||f.retained){
         // Quiesce first (PanicStop, FreeDirectInput: effects stopped, the window subclass removed, the watchdog joined),
         // then unload: never the other way round.
-        f.delivery.shutdown();
+        stop_device();
         const auto& c=f.delivery.counts();
         const std::string why=f.delivery.why().empty()?std::string():" ("+f.delivery.why()+")";
         std::printf("ffb: wheel output %s%s; %u commands (%u keep-alive), %u accepted zeros, %u recoveries, %u transient refusals\n",
             ffbdev::phase_name(f.delivery.phase()),why.c_str(),c.sent,c.keepalive,c.zeroes,c.recoveries,c.transient);
-        WheelFfb_Unload(&f.api);
         f.output=false;
     }
     std::fflush(stdout);
@@ -220,6 +238,7 @@ FfbFrontCheck& ffb_front_check(){static FfbFrontCheck check=own_front;return che
 
 std::string ffb_status_text(){
     // The player's words; runtime.log keeps the gates' full reasons.
+    if(f.retained)return "stopping: a shim call is still inside WheelFfb; the library's watchdog silences the wheel, and the stop completes at the exit";
     if(!f.output){
         if(f.stopped)return "off (stopped)";
         if(!f.shim||!f.requested||f.off.empty())return "off";
@@ -240,13 +259,13 @@ std::string ffb_status_text(){
 bool ffb_output_running(){return f.output;}
 
 const WheelFfbApi* ffb_shim_wheel_api(){return f.output&&f.shim&&f.delivery.phase()==ffbdev::Phase::Waiting?&f.api:nullptr;}
-void ffb_set_shim_owner(ffbdev::Owner* o){if(f.output&&f.shim)f.delivery.set_owner(o);}
+void ffb_set_shim_owner(ffbdev::Owner* o){if(f.output&&f.shim&&f.delivery.phase()==ffbdev::Phase::Waiting){f.delivery.set_owner(o);f.owner=o;}}
 
 void ffb_stop_output(){
     if(!f.output)return;
-    f.delivery.shutdown();   // PanicStop, FreeDirectInput: quiesced before the unload
-    WheelFfb_Unload(&f.api);
+    stop_device();           // PanicStop, FreeDirectInput: quiesced before the unload (or retained, see stop_device)
     f.output=false;f.stopped=true;f.off="stopped by Stop FFB / F8";
-    std::printf("ffb: wheel output stopped by Stop FFB (F8); the software force stream continues\n");std::fflush(stdout);
+    std::printf("ffb: wheel output %s by Stop FFB (F8); the software force stream continues\n",f.retained?"stop pending":"stopped");
+    std::fflush(stdout);
 }
 }

@@ -180,6 +180,75 @@ int main(){
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
     }
 
+    // The shim's owner may still have a call inside the library (a worker preparing the read slot, romi 32222): the
+    // library stays loaded after the shutdown, never freed under a call; once quiet it is unloaded as before.
+    {
+        struct Owner final:outrun::desktop::ffbdev::Owner {
+            bool quiet=false;
+            bool begin_open()override{return false;}
+            void end_open(bool)override{}
+            void begin_release()override{}
+            void end_release()override{}
+            bool library_quiet()const override{return quiet;}
+            bool enter_library()override{return true;}
+            void leave_library()override{}
+        };
+        for(const bool quiet:{false,true}){
+            Owner o;o.quiet=quiet;
+            outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+            outrun::desktop::ffb_set_shim_owner(&o);
+            outrun::desktop::ffb_shutdown();
+            const bool loaded=GetModuleHandleW(L"WheelFfb.dll")!=nullptr;
+            check(quiet?!loaded:loaded,quiet?"the owner quiet: unloaded at shutdown":"the owner not quiet: WheelFfb.dll stays loaded");
+            if(loaded)FreeLibrary(GetModuleHandleW(L"WheelFfb.dll"));   // the test's own clean-up
+        }
+    }
+    // Stop FFB (F8) while the shim's worker is inside the library (romi 32320/32343): the stop is retained, nothing is
+    // asked of the library, the status says stopping and the library stays loaded; the exit completes the stop
+    // (PanicStop, FreeDirectInput) and unloads it.
+    {
+        struct Owner final:outrun::desktop::ffbdev::Owner {
+            bool busy=false;
+            bool begin_open()override{return true;}
+            void end_open(bool)override{}
+            void begin_release()override{}
+            void end_release()override{}
+            bool library_quiet()const override{return !busy;}
+            bool enter_library()override{return !busy;}
+            void leave_library()override{}
+        };
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        const std::string prod="{0006346e-0000-0000-0000-504944564944}";
+        outrun::desktop::g_shim={Wheel,prod,"live",true,true,1};
+        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_wrap_input_filter();
+        Owner o;outrun::desktop::ffb_set_shim_owner(&o);
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        auto& car=rt->event_function36.car_select.car_799d18;
+        const auto putf=[&](std::size_t at,float v){std::memcpy(car.data()+at,&v,4);};
+        putf(0x1c4,40.f);putf(0x1d0,0.4f);putf(0x1d4,0.02f);putf(0x264,6.f);putf(0x268,6.f);
+        const auto filter=outrun::xbox_runtime::input_filter();
+        const auto tick=[&]{outrun::platform::NativeInputState in{};filter(in,rt.get());};
+        tick();                                                // the open, through the owner's hand-over
+        outrun::desktop::g_shim.epoch=2;                       // the steering live again through the force handle
+        for(int i=0;i<60;++i)tick();
+        check(env(L"FAKE_WHEELFFB_CALLS").find(L"InitDirectInput")!=std::wstring::npos,"the output opened with the owner");
+        o.busy=true;
+        const auto before=env(L"FAKE_WHEELFFB_CALLS");
+        outrun::desktop::ffb_stop_output();
+        check(env(L"FAKE_WHEELFFB_CALLS")==before,"F8 with the worker inside: no library call");
+        check(outrun::desktop::ffb_status_text().rfind("stopping",0)==0,"the status says stopping, not stopped");
+        check(GetModuleHandleW(L"WheelFfb.dll")!=nullptr,"the library stays loaded");
+        o.busy=false;
+        outrun::desktop::ffb_shutdown();
+        check(env(L"FAKE_WHEELFFB_CALLS").find(L"PanicStop;FreeDirectInput;",before.size())!=std::wstring::npos,"the exit completes the stop");
+        check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"and unloads the library");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+        outrun::desktop::g_shim={};
+    }
+
     _putenv_s("DBCE_FFB_MUTE","");
     DeleteFileA((folder()+"\\settings.ini").c_str());DeleteFileA((folder()+"\\ffb-trace.csv").c_str());RemoveDirectoryA(folder().c_str());
     std::printf("ffb wiring: %d checks passed\n",checks);

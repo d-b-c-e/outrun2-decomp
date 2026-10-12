@@ -81,7 +81,7 @@ bool device_calls(const Lines& v){
 // What the gate believes must hold on the fake wheel; and the library holds nothing once it stopped or released.
 void invariant(const Delivery& d){
     if(d.silent())CHECK(F.wheel==0);
-    if(d.phase()==Phase::Released||d.phase()==Phase::Stopped)CHECK(!F.di&&!F.worker&&!F.subclass&&F.wheel==0);
+    if((d.phase()==Phase::Released||d.phase()==Phase::Stopped)&&!d.retained())CHECK(!F.di&&!F.worker&&!F.subclass&&F.wheel==0);
     for(const auto& s:F.log)CHECK(s!="ZeroForces");     // void ZeroForces is never relied on
 }
 void step(Delivery& d,const Sample& s,std::int32_t c){d.frame(s,c);invariant(d);}
@@ -99,7 +99,16 @@ void finish(Delivery& d){d.shutdown();invariant(d);CHECK(!F.di&&!F.worker&&!F.su
 // The shim backend's hand-over (ffbdev::Owner): its calls go into the same log, so every order is checked against the
 // library's. The read-slot exports are present (Delivery::start requires them with Config::shim) and never called.
 struct FakeOwner final:Owner {
-    void begin_open()override{note("Owner begin_open");}
+    std::deque<bool> answers;        // begin_open's answers in order (true when empty)
+    bool begin_open()override{
+        bool a=true;if(!answers.empty()){a=answers.front();answers.pop_front();}
+        note(std::string("Owner begin_open ")+(a?"1":"0"));return a;
+    }
+    bool library_quiet()const override{return true;}
+    bool busy=false;                 // the input's worker inside the library: the gate cannot be entered
+    bool entered=false;
+    bool enter_library()override{if(busy)return false;CHECK(!entered);entered=true;return true;}
+    void leave_library()override{CHECK(entered);entered=false;}
     void end_open(bool held)override{note(std::string("Owner end_open ")+(held?"1":"0"));}
     void begin_release()override{note("Owner begin_release");}
     void end_release()override{note("Owner end_release");}
@@ -282,7 +291,7 @@ int main(){
      CHECK(d.phase()==Phase::Waiting&&since(base).empty()&&d.why().find("not live")!=std::string::npos);
      step(d,live(2,1),3000);
      Lines want=OpenSequence;
-     want.insert(std::find(want.begin(),want.end(),std::string("InitDirectInput 4660")),"Owner begin_open");
+     want.insert(want.begin(),"Owner begin_open 1");                             // before the library is touched at all
      want.push_back("Owner end_open 1");
      CHECK(since(base)==want&&d.phase()==Phase::Open&&F.wheel==0);               // the open's tick sends no force
      const auto opened=F.log.size();
@@ -329,13 +338,64 @@ int main(){
      const auto base=F.log.size();step(d,live(0,1),3000);
      const auto got=since(base);
      const auto at=[&](const char* s){return std::find(got.begin(),got.end(),std::string(s))-got.begin();};
-     CHECK(d.phase()==Phase::Released&&at("Owner begin_open")<at("InitDirectInput 4660")&&at("InitDirectInput 4660")<at("FreeDirectInput")&&
+     CHECK(d.phase()==Phase::Released&&at("Owner begin_open 1")<at("InitDirectInput 4660")&&at("InitDirectInput 4660")<at("FreeDirectInput")&&
            at("FreeDirectInput")<at("Owner end_open 0")&&at("Owner end_open 0")==std::ptrdiff_t(got.size())-1);
      for(const auto& s:got)CHECK(s!="PanicStop"&&s!="Owner begin_release");}
     {reset();F.forces={0};F.hr=long(DIERR_INPUTLOST);FakeOwner o;Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
      const auto base=F.log.size();step(d,live(0,1),3000);                          // the starting zero refused
      const auto got=since(base);
      CHECK(d.phase()==Phase::Released&&got.back()=="Owner end_open 0"&&got[got.size()-2]=="FreeDirectInput");}
+
+    // The hand-over never waits (romi 32201): while the owner answers "not yet" nothing touches the library and the
+    // owner is asked again with each race sample in front, even though the steering is not live during it (the
+    // hand-over itself ends the epoch); then the open goes on.
+    {reset();FakeOwner o;o.answers={false,false,false};Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     const auto base=F.log.size();
+     step(d,live(0,1),3000);step(d,live(10,1,false),3000);step(d,live(20,1,false),3000);
+     CHECK((since(base)==Lines{"Owner begin_open 0","Owner begin_open 0","Owner begin_open 0"})&&d.phase()==Phase::Waiting);
+     CHECK(d.why().find("handing the wheel over")!=std::string::npos);
+     step(d,live(30,1,false),3000);
+     CHECK(d.phase()==Phase::Open&&since(base)[3]=="Owner begin_open 1"&&F.log.back()=="Owner end_open 1");
+     step(d,live(40,2),3000);CHECK(F.wheel==3000);                              // E0 was 1: epoch 2 is the shared one
+     finish(d);}
+    // Leaving the race (or the front) during the hand-over cancels it; the next hand-over needs live steering again.
+    {reset();FakeOwner o;o.answers={false};Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     const auto base=F.log.size();
+     step(d,live(0,1),3000);step(d,menu(10),0);
+     CHECK((since(base)==Lines{"Owner begin_open 0","Owner end_open 0"})&&d.phase()==Phase::Waiting);
+     step(d,menu(20),0);step(d,live(30,1,false),3000);
+     CHECK(since(base).size()==2&&d.why().find("not live")!=std::string::npos);
+     o.answers={false};step(d,live(40,1),3000);step(d,race(50,false),3000);       // out of front: cancelled too
+     CHECK(F.log.back()=="Owner end_open 0"&&d.phase()==Phase::Waiting&&!device_calls(since(base)));
+     finish(d);CHECK(F.log.back()=="Owner end_open 0");}                        // no further hand-over to cancel
+    // Shutdown during a hand-over ends it.
+    {reset();FakeOwner o;o.answers={false};Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);
+     step(d,live(0,1),3000);const auto n=F.log.size();d.shutdown();
+     CHECK((since(n)==Lines{"Owner end_open 0"})&&d.phase()==Phase::Stopped);}
+
+    // The library gate (romi 32320): a sample that cannot enter it makes no library call at all; a release that cannot
+    // enter it is retained (no PanicStop or FreeDirectInput, the owner stops reading through the library but does not
+    // take the wheel back) and completes at the next shutdown, which does not wait either.
+    {FakeOwner o;Delivery d=owned(o);
+     step(d,live(10,2),2500);CHECK(F.wheel==2500);F.log.clear();
+     o.busy=true;
+     step(d,live(400,2),2500);                                                  // the hold would be due: still no call
+     CHECK(F.log.empty()&&d.phase()==Phase::Open);
+     o.busy=false;step(d,live(420,2),2500);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0"}));   // the expired hold restarts through a zero
+     F.log.clear();o.busy=true;
+     d.shutdown();
+     CHECK(d.retained()&&d.phase()==Phase::Stopped&&(F.log==Lines{"Owner begin_release"}));
+     CHECK(d.why().find("hold watchdog")!=std::string::npos);
+     F.log.clear();d.shutdown();CHECK(d.retained()&&F.log.empty());           // still busy: again nothing, no wait
+     o.busy=false;d.shutdown();invariant(d);
+     CHECK(!d.retained()&&(F.log==Lines{"PanicStop","Owner begin_release","FreeDirectInput","Owner end_release"}));
+     CHECK(!o.entered);}
+    // A release inside a sample (an epoch change) holds the gate already: it completes in that sample.
+    {FakeOwner o;Delivery d=owned(o);step(d,live(10,2),2500);F.log.clear();
+     step(d,live(20,3),2500);
+     CHECK(d.phase()==Phase::Released&&!d.retained()&&(F.log==Lines{"PanicStop","Owner begin_release","FreeDirectInput","Owner end_release"}));
+     CHECK(!o.entered);}
 
     // set_owner only before the open; native (no owner) never sees an owner call.
     {FakeOwner o,late;Delivery d=owned(o);d.set_owner(&late);

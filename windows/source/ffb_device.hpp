@@ -24,11 +24,18 @@
 //   owner   with the shim input backend the wheel's handles have one owner at a time (INPUT-SHIM.md section 6): an
 //           Owner (the shim's WheelFfb bridge) closes the input's own handle before the library opens the wheel and
 //           reads it through the library while it holds it, and the release hands it back after FreeDirectInput.
-//           Then the steering input itself gates the force (romi 31707): the open needs the input's steer action
-//           live (a valid, fresh sample of that device) in an epoch E0; after it only zeros go out until the steer is
-//           live again in a new epoch E1 (the read through the force handle), within 2 s or a release; a later epoch
-//           change releases; steering that is not live sends a zero. Without an Owner (the native input layer) none of
-//           this applies and the input keeps its own non-exclusive handle as before.
+//           The hand-over never waits (romi 32201): it starts with the steer live (a valid, fresh sample of that
+//           device) in an epoch E0, then the Owner is asked at each race sample in front until its own handle is
+//           closed (leaving the race or the front cancels it); only then the open. After it only zeros go out until
+//           the steer is live again in a new epoch E1 (the read through the force handle), within 2 s or a release;
+//           a later epoch change releases; steering that is not live sends a zero (romi 31707). The library gate
+//           (romi 32320): a sample that cannot enter it (the input's worker is inside the library) makes no library
+//           call at all, so the game thread never waits for the worker; the hold and the expiry treat it as a missed
+//           sample, and the library's own hold watchdog silences the wheel meanwhile. A release that cannot enter it
+//           keeps the wheel the library's (retained: no PanicStop or FreeDirectInput, the input does not take the
+//           wheel back, the library stays loaded) and is tried again by the next shutdown, which does not wait either.
+//           Without an Owner (the native input layer) none of this applies and the input keeps its own non-exclusive
+//           handle as before.
 // Pure decisions over WheelFfbApi's function pointers: tests/test_ffb_delivery.cpp drives them with a fake library.
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -72,10 +79,15 @@ struct Sample {
 class Owner {
 public:
     virtual ~Owner()=default;
-    virtual void begin_open()=0;          // the input's own handle of the wheel closed; the wheel is not read until end_open
-    virtual void end_open(bool held)=0;   // held: the library holds the wheel and the input reads it through the library
+    // True once the input's own handle of the wheel is closed (the library may open it now); false: not yet, asked
+    // again with the next race sample. Never waits.
+    virtual bool begin_open()=0;
+    virtual void end_open(bool held)=0;   // held: the library holds the wheel; else the hand-over ends (failed or cancelled)
     virtual void begin_release()=0;       // before FreeDirectInput: the input stops reading through the library
     virtual void end_release()=0;         // after it: the input reads the wheel on its own handle again
+    virtual bool library_quiet()const=0;  // no call of the input's is inside the library or can start: it may be unloaded
+    virtual bool enter_library()=0;       // the library gate, never waited for: false while the input's worker is inside
+    virtual void leave_library()=0;
 };
 class Delivery {
 public:
@@ -90,6 +102,7 @@ public:
     Phase phase()const{return phase_;}
     const std::string& why()const{return why_;}
     bool silent()const{return silent_;}         // the last command the wheel accepted was zero
+    bool retained()const{return retained_;}     // a release could not enter the library gate: the library keeps the wheel
     struct Counts { std::uint32_t sent{},zeroes{},recoveries{},transient{},keepalive{}; };
     const Counts& counts()const{return counts_;}
 private:
@@ -99,6 +112,7 @@ private:
     bool refused(const Sample&);
     void release(const std::string& why);
     void quiesce();
+    struct Gate;               // the library gate for one sample or one release (owner mode)
     WheelFfbApi api_{};
     Config cfg_{};
     GUID guid_{};
@@ -114,8 +128,11 @@ private:
     std::uint64_t last_send_ms_{};   // the last accepted command or zero
     Counts counts_{};
     Owner* owner_{};
-    bool promoting_{};         // begin_open was called and end_open not yet
+    bool handing_over_{};      // the hand-over started (E0 recorded); begin_open has not said yes yet
+    bool promoting_{};         // begin_open said yes and end_open was not called yet
     bool held_{};              // end_open(true): the owner reads the wheel through the library
+    bool in_library_{};        // this delivery holds the library gate now
+    bool retained_{};          // see retained()
     bool shared_{};            // the steer is live in the epoch read through the force handle (e1_)
     std::uint32_t e0_{},e1_{};
     std::uint64_t opened_ms_{};

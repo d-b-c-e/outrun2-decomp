@@ -104,13 +104,35 @@ bool Delivery::same_device(const std::string& dev)const{
 // guards' window subclass removed, the hold watchdog joined) whenever the library was given a selection. With an
 // Owner the input stops reading through the library before FreeDirectInput and takes the wheel back after it; a
 // failed open hands it back only once the library has freed it, so two owners never hold the wheel at once.
+// The library gate (owner mode): entered once per sample or release, re-entrant within it.
+struct Delivery::Gate {
+    Delivery& d;bool entered{};
+    explicit Gate(Delivery& x):d(x){}
+    bool enter(){
+        if(!d.owner_||d.in_library_)return true;
+        if(!d.owner_->enter_library())return false;
+        d.in_library_=entered=true;return true;
+    }
+    ~Gate(){if(entered){d.in_library_=false;d.owner_->leave_library();}}
+};
+
 void Delivery::quiesce(){
+    Gate gate(*this);
+    if(owner_&&(opened_||native_||held_)&&!gate.enter()){
+        // The input's worker is inside the library: calling it would wait for that worker. The library keeps the
+        // wheel (its hold watchdog silences it); the input stops reading through it but does not take it back.
+        if(held_&&!retained_)owner_->begin_release();
+        if(!retained_)why_="the wheel is left to the library's hold watchdog: a shim call is still inside the library";
+        retained_=true;
+        return;
+    }
+    retained_=false;
     if(opened_)api_.PanicStop();
     if(owner_&&held_)owner_->begin_release();
     if(native_)api_.FreeDirectInput();
     if(owner_&&held_)owner_->end_release();
-    if(owner_&&promoting_)owner_->end_open(false);
-    native_=opened_=promoting_=held_=shared_=false;
+    if(owner_&&(promoting_||handing_over_))owner_->end_open(false);
+    native_=opened_=handing_over_=promoting_=held_=shared_=false;
     silent_=true;
 }
 
@@ -118,7 +140,8 @@ void Delivery::set_owner(Owner* o){if(phase_==Phase::Waiting||phase_==Phase::Off
 
 void Delivery::release(const std::string& why){
     quiesce();
-    phase_=Phase::Released;why_=why;
+    phase_=Phase::Released;
+    if(!retained_)why_=why;else why_=why+"; "+why_;
 }
 
 void Delivery::open_device(const Sample& s){
@@ -131,7 +154,6 @@ void Delivery::open_device(const Sample& s){
     const int n=api_.EnumerateDevices();
     for(int i=0;i<n&&!listed;++i){GUID g{};listed=api_.GetDeviceGuid(i,&g)&&IsEqualGUID(g,guid_);}
     if(!listed){release("the steering device "+cfg_.steer_dev+" is not one of the force-feedback devices");return;}
-    if(owner_){owner_->begin_open();promoting_=true;}   // the input's own handle of the wheel closes first
     // The ABI takes the window as an int; a window handle is 32 bits wide by design, also in 64-bit Windows.
     if(!api_.InitDirectInput(static_cast<int>(reinterpret_cast<std::intptr_t>(s.hwnd)))){
         release("the steering device refused the open (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
@@ -143,7 +165,7 @@ void Delivery::open_device(const Sample& s){
         release("the wheel refused the starting zero (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
     ++counts_.zeroes;
     silent_=true;need_zero_=unacked_=false;last_value_=0;last_send_ms_=s.ms;
-    if(owner_){owner_->end_open(true);promoting_=false;held_=true;shared_=false;e0_=s.steer_epoch;opened_ms_=s.ms;}
+    if(owner_){owner_->end_open(true);promoting_=false;held_=true;shared_=false;opened_ms_=s.ms;}
     phase_=Phase::Open;why_.clear();
 }
 
@@ -170,11 +192,24 @@ bool Delivery::zero(const Sample& s){
 
 void Delivery::frame(const Sample& s,std::int32_t command){
     if(phase_!=Phase::Waiting&&phase_!=Phase::Open)return;
+    Gate gate(*this);
+    if(!gate.enter())return;   // the input's worker is inside the library: no library call this sample
     if(phase_==Phase::Waiting){
-        if(!s.race||!s.front)return;
-        if(!same_device(s.steer_dev)){why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";return;}
+        if(!s.race||!s.front||!same_device(s.steer_dev)){
+            // Out of the race or the front: a hand-over in progress is cancelled (the input reads the wheel again).
+            if(handing_over_){owner_->end_open(false);handing_over_=false;}
+            if(s.race&&s.front)why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";
+            return;
+        }
         if(cfg_.shim&&!owner_){why_="waiting: the shim input has no owner hand-over for the wheel";return;}
-        if(owner_&&!s.steer_live){why_="waiting: the steering input is not live";return;}
+        if(owner_){
+            if(!handing_over_){
+                if(!s.steer_live){why_="waiting: the steering input is not live";return;}
+                e0_=s.steer_epoch;handing_over_=true;   // the hand-over itself ends this epoch: liveness is not asked again
+            }
+            if(!owner_->begin_open()){why_="waiting: the shim is handing the wheel over";return;}
+            handing_over_=false;promoting_=true;          // the input's own handle is closed: the open goes on
+        }
         open_device(s);
         if(phase_!=Phase::Open)return;
     }

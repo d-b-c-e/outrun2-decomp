@@ -793,7 +793,7 @@
  },
  {
   "file": "windows/shim/wheelffb_bridge.cpp",
-  "line": "auto r=inner_->open(listed);",
+  "line": "auto r=inner_->open(listed);   // may sit in the driver: never under the lock",
   "class": "not-a-file",
   "reason": "the wheel in the Inner phase: the DirectInput provider's device open"
  },
