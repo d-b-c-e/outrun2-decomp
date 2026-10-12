@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 using namespace outrun::platform;
 using outrun::driving::Bytes;
@@ -13,7 +15,7 @@ static unsigned checks;
 namespace {
 struct Device final:PcD3D9Device{
     std::vector<std::vector<std::uint8_t>> buffers;std::vector<std::uint32_t> kinds;std::vector<std::uint32_t> calls;
-    std::vector<PcTextureFileRequest> textures;
+    std::vector<PcTextureFileRequest> textures;std::vector<std::vector<std::uint8_t>> texture_bytes;
     std::uint32_t add(std::uint32_t kind){kinds.push_back(kind);buffers.emplace_back();return std::uint32_t(kinds.size());}
     std::uint32_t create_vertex_buffer(std::uint32_t n,std::uint32_t,std::uint32_t,std::uint32_t)override{
         calls.push_back(26);const auto h=add(26);buffers[h-1].resize(n);return h;}
@@ -24,7 +26,8 @@ struct Device final:PcD3D9Device{
     std::uint32_t create_vertex_declaration(const PcVertexElement*)override{calls.push_back(86);return add(86);}
     std::uint32_t create_vertex_shader(const std::uint32_t* t)override{calls.push_back(91);CHECK(t[0]==0xfffe0101u);return add(91);}
     void set_vertex_shader_constant_f(std::uint32_t,const float*,std::uint32_t)override{calls.push_back(94);}
-    std::uint32_t create_texture_from_file(const PcTextureFileRequest& q)override{calls.push_back(0x5001);textures.push_back(q);return add(0x5001);}
+    std::uint32_t create_texture_from_file(const PcTextureFileRequest& q)override{
+        calls.push_back(0x5001);textures.push_back(q);texture_bytes.emplace_back(q.data,q.data+q.size);return add(0x5001);}
     void release(std::uint32_t)override{calls.push_back(2);}
     std::uint32_t get_render_state(std::uint32_t)override{return 0;}
     void set_render_state(std::uint32_t,std::uint32_t)override{}
@@ -44,6 +47,29 @@ struct Device final:PcD3D9Device{
     void set_pixel_shader_constant_f(std::uint32_t,const float*,std::uint32_t)override{}
     std::uint32_t get_declaration(std::uint32_t,PcVertexElement*)override{return 0;}
 };
+// Synthetic PMT: one object, one group (1 VB, 1 IB), one material, one texture (a 4x8 DDS header at video+0x20).
+void synthetic_pmt(PcPmtResources& r,std::vector<std::uint8_t>& video){
+    r.system.assign(0x1b0,0);Bytes s(r.system.data(),r.system.size());
+    video.assign(0xa0,0);for(unsigned k=0;k<12;++k)video[k]=std::uint8_t(0x40+k);
+    std::memcpy(video.data()+0x20,"DDS ",4);video[0x20+12]=8;video[0x20+16]=4;   // dwHeight, dwWidth
+    r.video=video.data();r.video_size=video.size();
+    s.put32(4,1);s.put32(8,1);
+    const std::uint32_t rec=0x18;
+    s.put32(rec+0x04,0x100);s.put32(rec+0x08,0xe0);s.put32(rec+0x0c,0x130);s.put32(rec+0x18,0x80);
+    s.put32(rec+0x30,0xb0);s.put32(rec+0x34,0x150);
+    s.put32(0x80+0x24,1);s.put32(0x80+0x2c,1);
+    s.put32(0xb0,1);s.put32(0xb0+0x18,6);s.put32(0xb0+0x1c,12);s.put32(0xb0+0x20,0x2);s.put32(0xb0+0x28,0);
+    s.put32(0xe0,0xf0);s.put32(0xf0+4,0);
+    s.put32(0x100,0x110);s.put32(0x110+4,0x120);for(unsigned k=0;k<6;++k)s.put8(0x120+k,std::uint8_t(k+1));
+    for(unsigned l=0;l<3;++l)s.puti(0x150+8+l*0x14+0x10,-1);
+    s.put32(0x68+4,0x20);s.put32(0x68+0x10,0);
+}
+// Objects then textures of a synthetic PMT on its own device.
+void load_synthetic(PcPmtResources& r,Device& dev){
+    PcShaderCache cache{};PcShaderGlobals globals{};PcPmtLoadCursor cur{};
+    pmt_objects_begin_42e490(r,cur);CHECK(pmt_objects_step_42e4f0(r,cur,dev,cache,globals));
+    pmt_textures_begin_42e850(r,cur);CHECK(pmt_textures_step_42e8c0(r,cur,dev));
+}
 }
 int main(){
     PcVertexDeclaration d{};
@@ -73,20 +99,7 @@ int main(){
         shader_cache_release_40f650(cache,dev);
         CHECK(cache.entries[0].shader==0&&cache.entries[1].declaration==0);
     }
-    // Synthetic PMT: one object, one group (1 VB, 1 IB), one material, one texture.
-    PcPmtResources r{};r.system.assign(0x1b0,0);Bytes s(r.system.data(),r.system.size());
-    std::vector<std::uint8_t> video(0xa0,0);for(unsigned k=0;k<12;++k)video[k]=std::uint8_t(0x40+k);
-    r.video=video.data();r.video_size=video.size();
-    s.put32(4,1);s.put32(8,1);
-    const std::uint32_t rec=0x18;
-    s.put32(rec+0x04,0x100);s.put32(rec+0x08,0xe0);s.put32(rec+0x0c,0x130);s.put32(rec+0x18,0x80);
-    s.put32(rec+0x30,0xb0);s.put32(rec+0x34,0x150);
-    s.put32(0x80+0x24,1);s.put32(0x80+0x2c,1);
-    s.put32(0xb0,1);s.put32(0xb0+0x18,6);s.put32(0xb0+0x1c,12);s.put32(0xb0+0x20,0x2);s.put32(0xb0+0x28,0);
-    s.put32(0xe0,0xf0);s.put32(0xf0+4,0);
-    s.put32(0x100,0x110);s.put32(0x110+4,0x120);for(unsigned k=0;k<6;++k)s.put8(0x120+k,std::uint8_t(k+1));
-    for(unsigned l=0;l<3;++l)s.puti(0x150+8+l*0x14+0x10,-1);
-    s.put32(0x68+4,0x20);s.put32(0x68+0x10,0);
+    PcPmtResources r{};std::vector<std::uint8_t> video;synthetic_pmt(r,video);Bytes s(r.system.data(),r.system.size());
     Device dev;PcShaderCache cache{};PcShaderGlobals globals{};PcPmtLoadCursor cur{};
     pmt_objects_begin_42e490(r,cur);
     CHECK(s.u32(0x14)==0x18&&r.object_count_0c==1);
@@ -102,6 +115,35 @@ int main(){
     CHECK(s.u32(0x130)==4&&s.u32(0x130+4)==3&&s.u32(0x130+8)==1);
     CHECK(s.u32(0x58)==5);
     CHECK(dev.textures[0].data==video.data()+0x20&&dev.textures[0].size==0x80&&!dev.textures[0].cube&&dev.textures[0].mip_levels==4);
+    // Texture replacement (the Tweaks pack layout). XXH32 reference vectors (python-xxhash 3.x), then the synthetic
+    // texture swapped for <pack>/0_<XXH32>_4x8.dds, matched case-insensitively and loaded with all its mip levels.
+    const auto bytes=[](const char* text){return reinterpret_cast<const std::uint8_t*>(text);};
+    CHECK(pmt_xxh32(bytes(""),0)==0x02cc5d05u&&pmt_xxh32(bytes("abc"),3)==0x32d153ffu);
+    CHECK(pmt_xxh32(bytes("Nobody inspects the spammish repetition"),39)==0xe2293b2fu);   // the 16-byte stripe path
+    CHECK(pmt_xxh32(bytes("abc"),3,0x9e3779b1u)==0xa1ae7709u);
+    {
+        namespace fs=std::filesystem;
+        const auto dir=fs::temp_directory_path()/"or2_texture_replacement_test";
+        fs::remove_all(dir);fs::create_directories(dir/"cs_TEST_pmt");
+        PcPmtResources a{};std::vector<std::uint8_t> av;synthetic_pmt(a,av);a.pack_name="cs_TEST_pmt";
+        char name[64];std::snprintf(name,sizeof name,"0_%X_4x8.DDS",pmt_xxh32(av.data()+0x20,0x80));
+        std::vector<std::uint8_t> dds(0x90,0x5a);std::memcpy(dds.data(),"DDS ",4);
+        {std::ofstream f(dir/"cs_TEST_pmt"/name,std::ios::binary);f.write(reinterpret_cast<const char*>(dds.data()),std::streamsize(dds.size()));}
+        // Off: not consulted, even with a matching file.
+        pmt_texture_replacement_configure(false,dir.string());
+        {Device d;load_synthetic(a,d);CHECK(d.textures[0].data==av.data()+0x20&&pmt_texture_replacement_stats().looked==0);}
+        pmt_texture_replacement_configure(true,dir.string());
+        CHECK(pmt_texture_replacement_stats().files==1);
+        PcPmtResources b{};std::vector<std::uint8_t> bv;synthetic_pmt(b,bv);b.pack_name="cs_TEST_pmt";
+        {Device d;load_synthetic(b,d);
+         CHECK(d.textures[0].size==0x90&&d.textures[0].mip_levels==0xffffffffu&&!d.textures[0].cube&&d.texture_bytes[0]==dds);}
+        // Another bank: no folder of its own and no loose file, so it keeps its texture.
+        PcPmtResources c{};std::vector<std::uint8_t> cv;synthetic_pmt(c,cv);c.pack_name="cs_OTHER_pmt";
+        {Device d;load_synthetic(c,d);CHECK(d.textures[0].data==cv.data()+0x20&&d.textures[0].mip_levels==4);}
+        const auto& st=pmt_texture_replacement_stats();
+        CHECK(st.looked==2&&st.replaced==1&&st.failed==0);
+        pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
+    }
     std::printf("pc pmt loader: %u checks\n",checks);
     return 0;
 }

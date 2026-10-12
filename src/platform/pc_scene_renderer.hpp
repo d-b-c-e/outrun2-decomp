@@ -181,7 +181,7 @@ private:
     std::map<std::uint32_t,std::unique_ptr<Bank>> owned_banks_;
     struct PendingBank { std::uint32_t resource{}; std::unique_ptr<Bank> bank; PcPmtLoadCursor cursor{}; bool textures{}; };
     std::vector<PendingBank> pending_banks_;
-    std::unique_ptr<Bank> open_bank(std::vector<std::uint8_t> pmt,std::string& error);
+    std::unique_ptr<Bank> open_bank(std::vector<std::uint8_t> pmt,std::string& error,std::uint32_t resource);
     bool step_bank(PendingBank& p);                  // one object or texture; true when the bank is complete
     void install_bank(std::uint32_t resource,std::unique_ptr<Bank> bank);
     PcShaderCache shader_cache_{};

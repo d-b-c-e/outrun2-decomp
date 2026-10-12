@@ -1,8 +1,56 @@
 #include "platform/pc_pmt_loader.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <stdexcept>
 namespace outrun::platform {
+// XXH32 (the xxHash 32-bit hash, as OutRun2006Tweaks names its replacement textures with).
+std::uint32_t pmt_xxh32(const std::uint8_t* p,std::size_t len,std::uint32_t seed){
+    constexpr std::uint32_t P1=2654435761u,P2=2246822519u,P3=3266489917u,P4=668265263u,P5=374761393u;
+    auto rotl=[](std::uint32_t x,int r){return (x<<r)|(x>>(32-r));};
+    auto rd=[](const std::uint8_t* q){std::uint32_t v;std::memcpy(&v,q,4);return v;};
+    auto round=[&](std::uint32_t a,std::uint32_t in){a+=in*P2;a=rotl(a,13);return a*P1;};
+    const std::uint8_t* end=p+len;std::uint32_t h;
+    if(len>=16){
+        std::uint32_t v1=seed+P1+P2,v2=seed+P2,v3=seed,v4=seed-P1;
+        const std::uint8_t* limit=end-16;
+        do{v1=round(v1,rd(p));v2=round(v2,rd(p+4));v3=round(v3,rd(p+8));v4=round(v4,rd(p+12));p+=16;}while(p<=limit);
+        h=rotl(v1,1)+rotl(v2,7)+rotl(v3,12)+rotl(v4,18);
+    }else h=seed+P5;
+    h+=std::uint32_t(len);
+    while(p+4<=end){h+=rd(p)*P3;h=rotl(h,17)*P4;p+=4;}
+    while(p<end){h+=std::uint32_t(*p)*P5;h=rotl(h,11)*P1;++p;}
+    h^=h>>15;h*=P2;h^=h>>13;h*=P3;h^=h>>16;return h;
+}
 namespace {
+struct Replacement {
+    bool enabled{};std::filesystem::path root;
+    std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
+    PmtTextureReplacementStats stats;
+};
+Replacement& replacement(){static Replacement r;return r;}
+std::string lower(std::string s){for(auto& ch:s)ch=char(std::tolower(static_cast<unsigned char>(ch)));return s;}
+// The replacement DDS of a bank texture, if the pack has one (Tweaks' search order).
+bool find_replacement(const std::string& pack,std::uint32_t index,const std::uint8_t* data,std::size_t size,std::vector<std::uint8_t>& out){
+    auto& r=replacement();
+    if(size<0x80||std::memcmp(data,"DDS ",4)!=0)return false;
+    std::uint32_t height,width;std::memcpy(&height,data+12,4);std::memcpy(&width,data+16,4);
+    char name[64];std::snprintf(name,sizeof name,"%X_%ux%u.dds",pmt_xxh32(data,size),width,height);
+    const std::string idx=std::to_string(index)+"_"+name,stem=lower(pack);
+    ++r.stats.looked;
+    for(const std::string& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))}){
+        const auto it=r.files.find(key);if(it==r.files.end())continue;
+        std::ifstream f(it->second,std::ios::binary);
+        out.assign(std::istreambuf_iterator<char>(f),std::istreambuf_iterator<char>());
+        if(out.size()>=0x80&&std::memcmp(out.data(),"DDS ",4)==0){++r.stats.replaced;return true;}
+        ++r.stats.failed;out.clear();return false;
+    }
+    return false;
+}
 using driving::Bytes;
 const std::uint8_t* video_bytes(const PcPmtResources& r,std::uint32_t source,std::uint32_t length){
     if(source>r.video_size||length>r.video_size-source)throw std::out_of_range("PMT video section");
@@ -71,6 +119,20 @@ void pmt_textures_begin_42e850(PcPmtResources& r,PcPmtLoadCursor& c){
     c.texture_record_957be0=r.texture_records_04;
     c.texture_95b22c=0;
 }
+void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){
+    auto& r=replacement();r=Replacement{};r.enabled=enabled;
+    if(!enabled)return;
+    std::error_code e;r.root=std::filesystem::u8path(load_folder);
+    for(std::filesystem::recursive_directory_iterator it(r.root,e),end;!e&&it!=end;it.increment(e)){
+        if(!it->is_regular_file(e))continue;
+        auto rel=std::filesystem::relative(it->path(),r.root,e).generic_u8string();
+        if(e||rel.size()<4||lower(rel.substr(rel.size()-4))!=".dds")continue;
+        r.files.emplace(lower(std::string(rel.begin(),rel.end())),it->path());
+    }
+    r.stats.files=std::uint32_t(r.files.size());
+    std::printf("texture replacement: %u scene textures indexed under %s\n",r.stats.files,load_folder.c_str());
+}
+const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
 bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device& device){
     auto s=r.view();
     const auto count=s.u32(8);
@@ -87,6 +149,10 @@ bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device&
     q.width=q.height=0xffffffffu;q.usage=0;q.format=0;q.pool=1;q.filter=1;q.colour_key=0;
     if(caps2){q.cube=true;q.mip_levels=0xffffffffu;q.mip_filter=1;}
     else{q.cube=false;q.mip_levels=4;q.mip_filter=3;}
+    std::vector<std::uint8_t> swap;
+    if(replacement().enabled&&!r.pack_name.empty()&&find_replacement(r.pack_name,c.texture_95b22c,q.data,q.size,swap)){
+        q.data=swap.data();q.size=std::uint32_t(swap.size());q.mip_levels=0xffffffffu;   // the replacement with all its levels
+    }
     s.put32(slot,device.create_texture_from_file(q));
     c.texture_record_957be0+=0x14;
     ++c.texture_95b22c;

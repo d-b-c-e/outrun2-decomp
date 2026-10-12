@@ -65,10 +65,12 @@ needed in a native build.
 | FFB | all | ⬜ | step 4 |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
 | | UIScalingMode, UILetterboxing | ⬜ | |
-| | AnisotropicFiltering, ReflectionResolution, TransparencySupersampling | ⬜ | renderer options |
-| | DrawDistanceIncrease/Behind, DisableVehicleLODs, DisableStageCulling, ScreenEdgeCullFix | ⬜ | readable culling code now |
+| | AnisotropicFiltering, ReflectionResolution, TransparencySupersampling | ✅ | `[Graphics]`, off by default; anisotropy only on samplers linear in both min and mag (the HUD stays sharp); alpha-to-coverage only under MSAA |
+| | DisableVehicleLODs, DisableStageCulling | ✅ | off by default. With all five options on (2026-10-12 A/B, n = 1 vs 2): GPU draws about 2.1x and 1 to 2.5 % of race frames miss vsync; not attributed per option |
+| | DrawDistanceIncrease/Behind, ScreenEdgeCullFix | ⬜ | readable culling code now |
 | | UseHiDefCharacters, CarBaseShadowOpacity, FixZBufferPrecision | ⬜ | |
-| | Scene/UI texture replacement, extract, cache | ⬜ | keep the Tweaks pack layout |
+| | SceneTextureReplacement, TextureBaseFolder | 🟡 | the Tweaks pack layout and names (`<bank>/<index>_<XXH32>_<w>x<h>.dds`); unit-tested, every non-sprite folder of a Tweaks pack names a bank; not yet seen in game |
+| | UI texture replacement, extract, cache | ⬜ | the pack's `spr_*_xst` folders |
 | | UseNewTextureAllocator | ➖ | |
 | Audio | AllowHorn, AllowWAV, AllowFLAC | ⬜ | |
 | CDSwitcher, CDTracks | in-race track switching, track list | ⬜ | |

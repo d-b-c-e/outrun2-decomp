@@ -2,6 +2,8 @@
 #include <chrono>
 #include <cstdio>
 #include "platform/pc_scene_renderer.hpp"
+#include "system/exe_image.hpp"
+#include <cstring>
 #include "enhancements/frame_rate.hpp"
 #include "driving/pc_d3dx.hpp"
 #include <memory>
@@ -42,9 +44,21 @@ void PcSceneRenderer::flush_alpha(){
     render_queue_flush_405890(*flush_,alpha_,order);
     alpha_.count=0;alpha_.matrix_count=0;++alpha_flushes;
 }
-std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error){
+// The bank's file stem from the PC resource filename table 633558 ("\Stage\BEAC\cs_CS_BEAC_pmt.sz" -> "cs_CS_BEAC_pmt"):
+// the folder its replacement textures sit in. Empty when the EXE image or the entry is missing.
+static std::string bank_pack_name(std::uint32_t resource){
+    if(resource>=0x223u)return {};
+    const auto* entry=exe_image_bytes(0x633558u+resource*4u,4);if(!entry)return {};
+    std::uint32_t at;std::memcpy(&at,entry,4);if(!at)return {};
+    std::string path;
+    for(std::uint32_t k=0;k<260;++k){const auto* ch=exe_image_bytes(at+k,1);if(!ch||!*ch)break;path.push_back(char(*ch));}
+    const auto slash=path.find_last_of("\\/");if(slash!=std::string::npos)path=path.substr(slash+1);
+    const auto dot=path.find_last_of('.');if(dot!=std::string::npos)path=path.substr(0,dot);
+    return path;
+}
+std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error,std::uint32_t resource){
     if(pmt.size()<16){error="PMT too small";return nullptr;}
-    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);
+    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);bank->resources.pack_name=bank_pack_name(resource);
     Bytes pb(bank->pmt.data(),bank->pmt.size());
     const auto system=pb.u32(8),video=pb.u32(12);
     if(std::uint64_t(system)+video+16u>bank->pmt.size()){error="PMT sections outside the archive";return nullptr;}
@@ -65,7 +79,7 @@ bool PcSceneRenderer::step_bank(PendingBank& p){
 }
 bool PcSceneRenderer::queue_bank(std::uint32_t resource,std::vector<std::uint8_t> pmt,std::string& error){
     if(owned_banks_.count(resource)||bank_queued(resource)){error.clear();return true;}
-    auto bank=open_bank(std::move(pmt),error);
+    auto bank=open_bank(std::move(pmt),error,resource);
     if(!bank)return false;
     PendingBank p;p.resource=resource;p.bank=std::move(bank);
     pmt_objects_begin_42e490(p.bank->resources,p.cursor);
@@ -97,7 +111,7 @@ bool PcSceneRenderer::load_bank(std::uint32_t resource,std::vector<std::uint8_t>
     for(auto it=pending_banks_.begin();it!=pending_banks_.end();++it)
         if(it->resource==resource){p=std::move(*it);pending_banks_.erase(it);break;}   // queued: finish it now
     if(!p.bank){
-        p.resource=resource;p.bank=open_bank(std::move(pmt),error);
+        p.resource=resource;p.bank=open_bank(std::move(pmt),error,resource);
         if(!p.bank)return false;
         pmt_objects_begin_42e490(p.bank->resources,p.cursor);
     }

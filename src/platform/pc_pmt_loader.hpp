@@ -6,6 +6,7 @@
 // relocation of object fields +04..+38 adds the system base); every device
 // object pointer the PC stores is a PcD3D9Device handle here.
 #include "platform/pc_vertex_shader_setup.hpp"
+#include <string>
 #include <vector>
 namespace outrun::platform {
 struct PcPmtResources {
@@ -17,8 +18,18 @@ struct PcPmtResources {
     std::uint32_t object_table_20{};    // system+0x14
     std::uint32_t texture_table_24{};   // header of the texture handle table
     std::uint32_t texture_records_04{}; // 0x14-byte texture records
+    std::string pack_name;               // the bank's file stem (cs_CS_BEAC_pmt): its texture replacement folder
     driving::Bytes view(){return driving::Bytes(system.data(),system.size());}
 };
+// Scene texture replacement in the OutRun2006Tweaks pack layout (SceneTextureReplacement): a bank texture whose
+// replacement exists under the load folder is created from that DDS instead. Names as Tweaks writes them,
+// "{XXH32 of the original DDS file, upper-case hex}_{width}x{height}.dds", tried as <pack>/<index>_<name>, <pack>/<name>,
+// <index>_<name>, <name> (index = the texture's position in its bank). The folder is indexed once at configure time.
+// Off until configured with enabled = true; replacements are loaded with all their mip levels.
+void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder);
+struct PmtTextureReplacementStats { std::uint32_t files{},looked{},replaced{},failed{}; };
+const PmtTextureReplacementStats& pmt_texture_replacement_stats();
+std::uint32_t pmt_xxh32(const std::uint8_t* data,std::size_t size,std::uint32_t seed=0);
 struct PcPmtLoadCursor {
     std::uint32_t object_95b230{},offset_95b234{},texture_95b22c{},texture_record_957be0{};
 };

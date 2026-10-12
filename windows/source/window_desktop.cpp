@@ -9,6 +9,7 @@
 #include "platform/pc_car_reflection.hpp"
 #include "platform/pc_render_queue.hpp"
 #include "platform/race_ghosts.hpp"
+#include "platform/pc_pmt_loader.hpp"
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
@@ -178,6 +179,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(lods)std::printf("settings: vehicle LODs disabled (other cars at full detail)\n");
         if(cull)std::printf("settings: stage culling disabled (every node drawn)\n");
         outrun::platform::other_car_lods_disabled()=lods;outrun::platform::render_disable_culling()=cull;}
+    // [Graphics] SceneTextureReplacement / TextureBaseFolder, the Tweaks keys: stage, car and object textures replaced
+    // from <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Off when absent; the folder defaults to
+    // "textures". A path that leaves the game folder is refused.
+    {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false);
+        std::string base=settings.text("Graphics","TextureBaseFolder","textures");
+        if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
+            if(on)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
+            base="textures";}
+        outrun::platform::pmt_texture_replacement_configure(on,folder+"/"+base+"/load");}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
@@ -193,6 +203,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     }
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
+    if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files)
+        std::printf("texture replacement: %u replaced of %u looked up (%u failed to read)\n",t.replaced,t.looked,t.failed);
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     return result;
