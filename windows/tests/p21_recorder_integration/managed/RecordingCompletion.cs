@@ -38,7 +38,11 @@ static partial class Program {
         Check(Str(r,"schema")=="outrun.recorder-complete@1"&&Str(r,"contract")==RecordingContract.TrimEnd('\n'),"known recorder completion report");
         Check(Str(r,"requestId")==request&&Str(r,"exeSha256")==exe&&Num(r,"processId")==pid&&Num(r,"processCreationFileTime")==creation,"completion matches expected request and process");
         Check(Str(r,"outcome")=="Complete"&&Bool(r,"joined"),"recorder complete and joined");
-        Check(new[]{"f11","stop-request","limit","exit"}.Contains(Str(r,"stoppedBy")),"known intentional recording stop");
+        var action=r.TryGetProperty("action",out var actionValue)?actionValue.GetString():"record";
+        Check(action is "record" or "playback","known recording action");
+        var stoppedBy=Str(r,"stoppedBy");
+        Check(new[]{"f11","stop-request","limit","exit"}.Contains(stoppedBy)||
+            (stoppedBy=="tape-end"&&action=="playback"),"known intentional recording stop for this action");
         Check(DateTimeOffset.TryParse(Str(r,"startedUtc"),CultureInfo.InvariantCulture,DateTimeStyles.None,out var start)&&
             DateTimeOffset.TryParse(Str(r,"completedUtc"),CultureInfo.InvariantCulture,DateTimeStyles.None,out var end)&&
             start.Offset==TimeSpan.Zero&&end.Offset==TimeSpan.Zero&&end>=start,"ordered UTC recording times");
