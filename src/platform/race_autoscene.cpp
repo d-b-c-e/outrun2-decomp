@@ -1,4 +1,5 @@
 #include "platform/race_autoscene.hpp"
+#include "platform/pc_screen.hpp"
 #include "driving/pc_crash.hpp"
 #include "driving/pc_matrix_stack.hpp"
 #include "driving/pc_x87.hpp"
@@ -227,7 +228,8 @@ void node_setup_4b6510(PcRaceContext& c,std::uint32_t w,std::uint32_t node){
     std::uint32_t f=m.u32(node+0)|0x100u;m.put32(node,f);
     if(!(f&0x200u))m.put32(node,f|0x200u);
 }
-// 4B5A80 (EAX = character): the robot kind.
+// 4B5A80 (EAX = character): the robot kind. [Misc] RestoreJPClarissa (pc_screen.hpp) skips the force of 0xE to 0xF with
+// no motion set (Tweaks NOPs 4B5AE6), so the JP heroine kind stays.
 std::uint32_t robot_kind_4b5a80(PcRaceMemory& m,std::int32_t v){
     const std::int32_t mode=m.i32(0x7d3a7cu);
     std::uint32_t r;
@@ -239,7 +241,7 @@ std::uint32_t robot_kind_4b5a80(PcRaceMemory& m,std::int32_t v){
         if(mode==3)return 0xfu;
         r=(v!=1?1u:0u)+0xdu;
     }
-    if(mode==0&&r==0xeu)r=0xfu;
+    if(mode==0&&r==0xeu&&!g_pc_restore_jp_clarissa)r=0xfu;
     return r;
 }
 // 4B65B0 (EBX = node): a robot record (0x70 bytes in a block) bound to a free event (440890)
