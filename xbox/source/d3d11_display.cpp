@@ -1,5 +1,6 @@
 #include "d3d11_display.hpp"
 #include "native_window.hpp"
+#include "platform_api.hpp"
 #include "platform/pc_dds.hpp"
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
@@ -172,7 +173,10 @@ bool D3D11Display::present(std::string& error){
     auto& g=graphics();screenshot(g);
     const HRESULT hr=g.swap_chain->Present(g_interval,0);
     if(FAILED(hr)){error="Present failed (HRESULT "+std::to_string(unsigned(hr))+")";return false;}
-    if(!pump_window_events()){error="window closed";return false;}
+    // A closed window (WM_CLOSE: the X button, Alt+F4, a test harness) is not a failed frame. It stops the application,
+    // which then exits normally (code 0); only a failed Present fails the frame (render_failed, code 3). It used to
+    // return false here, so every ordinary close exited with code 3 (nene 24770: the P21 seal refused R1-02).
+    if(!pump_window_events())application_shutdown();
     return true;
 }
 }
