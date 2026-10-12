@@ -265,6 +265,19 @@ The `three-projections` status needs counted passes plus a WGC check of the seam
 **F13 (14:01, `53ae4cc`):** 0 unmatched vertex-program draws, and the side sky draws in all nine frames from t40 to
 t56.
 
+### Owner selection: `[Triple] Views` (sana 35626)
+- `[Triple] Views = Planar | Angled`, below the selector. The default is Planar, the look so far.
+- Angled turns on three projected views (experimental): the fixture rig (32 in 16:9 panels, sides at 70 degrees, 8 mm
+  gaps) with the eye matched to the game's FOV. It is not the owner's measured rig yet.
+- Read once at start. It applies only in a normal process with the borderless window over a span wider than 16:9;
+  otherwise runtime.log and the status name the reason.
+- OR2_TRIPLE_VIEWS=1 remains a developer request for the same thing. Both the lods.ini read and the window use the one
+  request.
+- Status (`triple_screens_status()`): requested and applied projection, and the refusal.
+- F6 wording, for the Cameras page: "Projection: One wide view / Three projected views (experimental)".
+- Angled does not become the default for Surround / Separate monitors, as STD-022 implies, until the owner has checked
+  it physically.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,

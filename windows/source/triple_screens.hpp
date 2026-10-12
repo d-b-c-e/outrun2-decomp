@@ -48,12 +48,38 @@ inline float planar_aspect(TripleScreens mode,unsigned width,unsigned height){
     if(std::uint64_t(width)*9u<=std::uint64_t(height)*16u)return 0.f;
     return float(double(width)/double(height));
 }
+// [Triple] Views, below the selector (STD-022 options sit there): Planar, one wide view over the span (the default:
+// Tweaks parity, the look so far), or Angled, three projected views, each at its panel's angle (TRIPLE-SCREENS.md step
+// 4; experimental: the toolkit's fixture rig, 32 in 16:9 panels, sides at 70 degrees, 8 mm gaps, the eye matched to the
+// game's FOV, not yet the owner's measured rig). Read once at start; Angled applies only over a span.
+enum class TripleProjection { planar, angled };
+inline const char* triple_projection_name(TripleProjection p){return p==TripleProjection::angled?"Angled":"Planar";}
+// The two names, case-insensitive, surrounding blanks ignored; anything else gives nothing (logged; Planar applies).
+inline std::optional<TripleProjection> parse_triple_projection(std::string_view text){
+    while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.front())))text.remove_prefix(1);
+    while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.back())))text.remove_suffix(1);
+    std::string s(text);
+    for(auto& c:s)c=char(std::tolower(static_cast<unsigned char>(c)));
+    if(s=="planar")return TripleProjection::planar;
+    if(s=="angled")return TripleProjection::angled;
+    return std::nullopt;
+}
+// What applies when Angled is asked for, and why not otherwise (nullptr: it applies). A latched or test process reads no
+// [Triple] keys at all; Angled needs the borderless window and a span wider than 16:9.
+inline const char* triple_projection_refusal(bool latched,bool borderless,float aspect){
+    if(latched)return "not in a test process";
+    if(!borderless)return "needs the borderless window";
+    if(!(aspect>0.f))return "needs Surround or Separate monitors over a window wider than 16:9";
+    return nullptr;
+}
 // What the window and the views are, for runtime.log and the F6 Cameras page (filled once the window opens).
 struct TripleStatus {
     TripleScreens mode{TripleScreens::off};
     ScreenRect window{};
     std::string where;        // "the primary monitor", "over three monitors", or "refused: <why> (<n> found); the primary monitor"
     float aspect{};           // planar_aspect(): 0 = one 16:9 view; otherwise the planar span's width / height
+    TripleProjection requested{TripleProjection::planar},applied{TripleProjection::planar};
+    std::string projection_note;   // why Angled was not applied ("" when it was, or when Planar was asked for)
 };
 const TripleStatus& triple_screens_status();   // window_desktop.cpp
 // Why triple_span_from_monitors refused, for the log line.

@@ -32,6 +32,21 @@ int main(){
     CHECK(!parse_triple_screens("Surround2"));
     CHECK(std::string(triple_screens_name(TripleScreens::separate))=="Separate monitors");
     CHECK(std::string(triple_screens_name(TripleScreens::off))=="Off");
+    // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
+    // only in a normal process with the borderless window over a span, each refusal named.
+    CHECK(parse_triple_projection("Planar")==TripleProjection::planar);
+    CHECK(parse_triple_projection(" angled\t")==TripleProjection::angled);
+    CHECK(parse_triple_projection("ANGLED")==TripleProjection::angled);
+    CHECK(!parse_triple_projection(""));
+    CHECK(!parse_triple_projection("Three"));
+    CHECK(!parse_triple_projection("on"));
+    CHECK(!parse_triple_projection("Angled views"));
+    CHECK(std::string(triple_projection_name(TripleProjection::angled))=="Angled");
+    CHECK(std::string(triple_projection_name(TripleProjection::planar))=="Planar");
+    CHECK(triple_projection_refusal(false,true,48.f/9.f)==nullptr);
+    CHECK(std::string(triple_projection_refusal(true,true,48.f/9.f))=="not in a test process");
+    CHECK(std::string(triple_projection_refusal(false,false,0.f))=="needs the borderless window");
+    CHECK(std::string(triple_projection_refusal(false,true,0.f)).find("Surround or Separate monitors")!=std::string::npos);
     // The span: the owner's "Sim Racing" layout (three 2560x1440 at x = -2560, 0, 2560) in any order.
     const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440},r{2560,0,5120,1440};
     ScreenRect out{};
