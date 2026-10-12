@@ -51,6 +51,10 @@ check(p and p["frames"] == 1448 and p["avgMs"] == 45.87 and p["fps"] == 21.8 and
 check(p and [b["name"] for b in p["buckets"]] == ["renderer draw total", "display   pc 405830", "disp event   0 pc 4879b0"], "profile rows end at the first other line")
 check(p and p["buckets"][1]["msPerFrame"] == 24.971 and p["buckets"][1]["calls"] == 5796, "row values")
 check(run_perf.parse_profile("no profile here") is None, "no profile -> None")
+check(p["slowFrames"] is None, "no slow-frame line: None (builds before 1d9ca5e)")
+slow = log + "\nframe profile slow race frames: >20 ms 15, >33 ms 1, >50 ms 0, >100 ms 0\n"
+ps = run_perf.parse_profile(slow)
+check(ps["slowFrames"] == dict(over20=15, over33=1, over50=0, over100=0) and len(ps["buckets"]) == 3, "the slow-frame line is captured; buckets unchanged")
 two = log + "\nframe profile (race modes): frames=10 avg=16.67 ms (60.0 fps) max=20.00 ms\n  present  1.000 ms/frame  max 2.000 ms  calls 10\n"
 check(run_perf.parse_profile(two)["frames"] == 10, "the last profile wins")
 for part in run_perf.REFUSED_PARTS:

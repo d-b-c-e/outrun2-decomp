@@ -37,6 +37,8 @@ KEYS.update({c: (s, False) for c, s in zip("asdfghjkl", range(0x1e, 0x27))})
 KEYS.update({c: (s, False) for c, s in zip("zxcvbnm", range(0x2c, 0x33))})
 PROFILE_HEAD = re.compile(r"frame profile \(race modes\): frames=(\d+) avg=([\d.]+) ms \(([\d.]+) fps\) max=([\d.]+) ms")
 PROFILE_ROW = re.compile(r"^\s{2}(.+?)\s+([\d.]+) ms/frame\s+max\s+([\d.]+) ms\s+calls (\d+)\s*$")
+# zero 1d9ca5e: one unindented line after the buckets, the race's slow-frame counts.
+PROFILE_SLOW = re.compile(r"frame profile slow race frames: >20 ms (\d+), >33 ms (\d+), >50 ms (\d+), >100 ms (\d+)")
 
 
 def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
@@ -78,6 +80,10 @@ def parse_profile(text):
         r = PROFILE_ROW.match(l)
         if not r: break
         prof["buckets"].append(dict(name=r.group(1).strip(), msPerFrame=float(r.group(2)), maxMs=float(r.group(3)), calls=int(r.group(4))))
+    slow = [PROFILE_SLOW.search(l) for l in lines[last + 1:]]
+    slow = [m for m in slow if m]
+    prof["slowFrames"] = dict(over20=int(slow[0].group(1)), over33=int(slow[0].group(2)), over50=int(slow[0].group(3)),
+                              over100=int(slow[0].group(4))) if slow else None   # absent in builds before 1d9ca5e
     return prof
 
 
