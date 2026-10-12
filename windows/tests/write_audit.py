@@ -26,8 +26,8 @@ ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host",
 # Not linked into OutRunDesktop.exe: the offline tools, and the Xbox build's own UWP / Win32 entry points (the desktop
 # build has its own, windows/source/window_desktop.cpp). ps5/source is not scanned: its library (outrun_ps5_platform)
 # compiles only src/input, which is scanned under src. The standalone command publisher (control_publish.exe, b173a48:
-# run by the first-loop runner as its own process) is not linked either; no audited file may include its header, so a
-# later link into the game is refused here rather than left unscanned.
+# run by the first-loop runner as its own process) is not linked either. An audited file that includes its header
+# directly is a finding (romi 30058: a direct-use guard only, not a transitive include or link-graph proof).
 EXCLUDE = ["src/tools/", "xbox/source/window_uwp.cpp", "xbox/source/window_win32.cpp",
            "windows/host/control_publish.cpp", "windows/host/control_publish.hpp"]
 STANDALONE_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?control_publish\.hpp[>"]', re.M)
