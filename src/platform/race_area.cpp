@@ -972,7 +972,8 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
         const std::uint32_t base=m.u32(desc+4)<<16;
         const std::uint32_t r=p.call(0x40ecb0u,{});
         const std::uint32_t byte=std::uint32_t(std::int32_t(std::int8_t(std::uint8_t(r%0x28u+1u))));
-        // Tweaks' 44DF6D patch: each object's lists of the nearby sections merged (DrawDistanceIncrease / Behind).
+        // Tweaks' 44DF6D patch (it nops 0x4B bytes: 44DF6D..44DFB8, this per-object 405360 loop, per the listing of 44DE10):
+        // each object's lists of the nearby sections merged (DrawDistanceIncrease / Behind).
         const auto& dd=draw_distance();
         int stage=0,max_sections=0,ahead=0;
         auto& store=draw_distance_store();
@@ -1030,7 +1031,10 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
         }else p.obj(sign,0,0,0,None,0);
     }
     if(m.u32(desc)==0xbu&&p.call(0x44ff10u,{})){
-        if(g_pc_fix_particle_rendering){   // FixParticleRendering (pc_screen.hpp): Tweaks' fireworks object and node list
+        // FixParticleRendering (pc_screen.hpp): Tweaks' fireworks object and node list. Its hook at 44E179 resumes at 44E190:
+        // exactly this 405360(0x630001, 0, 0, 0, -1, 0) (44E179..44E18D), inside the [desc] == 0xB && 44FF10 branch
+        // (44E169 / 44E170), per the REA/Ghidra listing of 44DE10.
+        if(g_pc_fix_particle_rendering){
             static const std::uint16_t nodes[]{0,4,5,6,7,0xb,0xc,0xd,0xe,0x12,0x13,0x14,0x15,0x1a,0x1b,0x1f,0x20,0x21,0xffff};
             constexpr std::uint32_t FireworksNodes=0xb1100000u;      // synthetic PC range (beside the draw-distance lists)
             if(!m.mapped(FireworksNodes,sizeof nodes))m.map_const(FireworksNodes,reinterpret_cast<const std::uint8_t*>(nodes),sizeof nodes);
