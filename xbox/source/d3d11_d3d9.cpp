@@ -340,7 +340,13 @@ void D3D11D3D9Device::unlock_rect(std::uint32_t handle){
 }
 void D3D11D3D9Device::clear(std::uint32_t flags,std::uint32_t c,float z,std::uint32_t stencil){
     if(count_only)return;bind_target();
-    if(flags&1){float rgba[4];colour(c,rgba);context_->ClearRenderTargetView(colour_view(),rgba);}
+    // OR2_TRIPLE_CLEAR_PROBE=1 (diagnostic; three views only, a normal process): back-buffer colour clears are magenta,
+    // so pixels no draw covers show magenta instead of black. It tells "nothing drawn there" from "drawn dark" for the
+    // start wedges (windows/docs/TRIPLE-SCREENS.md "Start wedges").
+    static const bool probe=[]{const char* v=std::getenv("OR2_TRIPLE_CLEAR_PROBE");return v&&std::string(v)=="1";}();
+    if(flags&1){float rgba[4];colour(c,rgba);
+        if(probe&&platform::g_pc_triple_corrections&&colour_target_==BackBuffer){rgba[0]=1.f;rgba[1]=0.f;rgba[2]=1.f;rgba[3]=1.f;}
+        context_->ClearRenderTargetView(colour_view(),rgba);}
     if(auto* dsv=depth_view(depth_target_);dsv&&(flags&6))
         context_->ClearDepthStencilView(dsv,(flags&2?D3D11_CLEAR_DEPTH:0)|(flags&4?D3D11_CLEAR_STENCIL:0),z,UINT8(stencil));
 }

@@ -307,6 +307,37 @@ t56.
   surfaces exist in the stage data is open).
 - The abrupt change on the beach is the car's sand spray ending, in all three panels at once. It is game content.
 
+### Start wedges (open; investigated with the normal framing, owner 2026-10-12)
+
+- **Seen:** at the start grid, with the matched-FOV eye, the outer edge of each side panel shows a black wedge beyond
+  the ground: left below the grandstand, right below the fence line.
+  - Present in every grid frame of G3, G4, H1, H2 and H3.
+  - No stage-section union fills it (up to +1024 ahead / 256 behind).
+- **Where:** the game's P (96.4 degrees horizontal) puts the matched eye 317 mm from the centre panel, so each side
+  panel spans 49 to 121 degrees from the heading. The wedges lie at 107 to 121 degrees: behind the car's lateral line,
+  beside and behind the start line.
+- **Not a fix:** a narrower FOV (`MatchGameFov = false`, run R1) moves them off screen but zooms the centre. The owner
+  rejected that.
+- **Diagnostics with the normal framing** (source-only until reviewed, then one muted run each):
+  1. `OR2_TRIPLE_CLEAR_PROBE=1`: back-buffer colour clears are magenta in three-view runs.
+     - Magenta wedges: nothing is drawn there.
+     - Black wedges: something dark is drawn there (a backdrop, fog or an unlit face), which is a different
+       investigation.
+  2. If nothing is drawn, the candidates are:
+     - (a) no stage geometry behind the start line: the section lists begin there, and G4's union did not help;
+     - (b) course objects or cars culled by the game's visibility tests. 4F0E40 / 4F02D0 drop a sphere wholly behind
+       the centre camera's near plane (+BC), which is exactly where the outer half of each side panel looks. The
+       stage nodes themselves draw with culling off.
+     - A second switch can relax (b) for three views, to tell (a) from (b).
+  3. If (a), the geometry is absent from the stage data. The normal-framing options are then:
+     - a presentation fill for the side panels' empty pixels (sky or ground colour instead of black);
+     - new start-line ground (content);
+     - leaving them.
+
+     All three are the owner's choice; none narrows the view.
+- (b) also predicts cars and course objects vanishing in the outer half of the side panels once they pass behind the
+  eye plane. That is a candidate for part of the owner's side flicker, not established.
+
 ### Rig settings and the physical eye (proposed in sana 37643; accepted with option (b), 37757; source slice built)
 
 **Why.**
@@ -355,6 +386,14 @@ t56.
 - The centre view narrows from 96.4 to 56.4 degrees horizontal (less of the road at once, as a real window), and each
   side panel spans 29 to 91 degrees.
 - This changes what the centre shows, so it is never a default; the owner judges it.
+- **Owner feedback, 2026-10-12, after run R1** (relayed by sana, 38825):
+  - The physical-eye test looked zoomed in and obscured part of the car.
+  - Hiding the missing start geometry that way is **not an acceptable solution**.
+  - Rules that follow from it:
+    - `MatchGameFov = true`, the existing framing, stays the default in every candidate and pilot.
+    - The start wedges are not fixed by a narrowed FOV and are never reported as fixed that way.
+    - The wedges are investigated with the normal framing: visibility and draw bounds (see "Start wedges" below).
+    - Any physical-FOV chase reframing is a separate change, and it must keep the full useful view of the car.
 - The screen tests (4F02D0 and its focal +B4) follow the camera, so culling stays consistent.
 - **Log:** the triple screens line names the rig in use: "the rig (panels 708.4 x 398.5 mm, sides 70.0 deg, gap 8.0 mm,
   eye matched to the game's FOV)", or "eye 660 mm (MatchGameFov = false: the race camera's vertical FOV 33.6 deg)".
