@@ -278,6 +278,35 @@ t56.
 - Angled does not become the default for Surround / Separate monitors, as STD-022 implies, until the owner has checked
   it physically.
 
+### Stage sections for the side views (runs G3-G4, H1-H3, T1-T4; hub `triples-20261012`)
+- The stage's section lists (44DE10) are the game's forward visibility. A side panel looks past 90 degrees. It sees
+  nothing behind the car (the beach's hard line) and sees objects beside the car appear when the forward lists add
+  them, a few sections on. That was the start's rock face, popping in on the right panel after a few metres.
+- Applied Angled views therefore union the lists of **64 sections ahead and 64 behind**, where `[Graphics]`
+  DrawDistanceIncrease / DrawDistanceBehind leave a key at 0 (`triple_default_union`). A set key is kept.
+  OR2_TRIPLE_AHEAD (0..1024) / OR2_TRIPLE_BEHIND (0..256) replace only a default; 0 turns one off for comparisons.
+- **With a lods.ini present** (OutRunDesktop.lods.ini, else OutRun2006Tweaks.lods.ini), Tweaks' rule for an increase
+  above 0 now applies under Angled by default. The car's own section (offset 0) is exempt from the exclusions, and
+  only the other sections' nodes are excluded (`draw_distance_merge`).
+  - Before +64 ahead, the behind-only union skipped excluded nodes at offset 0 as well.
+  - None of the measurements below had a lods.ini (log: "0 excluded nodes").
+- Measured in the perf copy at 2560x1440 x 3, 60 Hz, muted:
+
+  | Union (ahead / behind) | Draws driving (median) | Steps up / down | Side pop-in | Timing |
+  |---|---|---|---|---|
+  | +0 / 64 (the earlier spike default) | 2,000 | 88 / 28 | the rock face | 60 fps, p95 18.3-18.4 ms, p99 19.7-19.8 (T1, T3) |
+  | +64 / 64 (now the default) | 2,529 | 60 / 7 | none found | 60 fps, p95 18.6-18.7 ms, p99 19.7-20.2 (T2, T4) |
+  | +256 / 64 | 3,306 | 4 / 1 | none found | 59.8 fps under capture |
+  | +64 / 256 | 2,547 | 63 / 2 | none found | 60.0 fps under capture |
+  | +1024 / 256 | 3,678 | 1 / 2 | none found | 51 fps under capture |
+
+  - Vsync-capped, so the timing shows pacing, not headroom.
+  - Steps are a change of at least 8 replicated draws that holds 5 frames, over the first 24 s of driving. They include
+    the centre's own horizon additions.
+- Not filled by any union: the black wedges beyond the ground on both outer edges at the start grid (whether those
+  surfaces exist in the stage data is open).
+- The abrupt change on the beach is the car's sand spray ending, in all three panels at once. It is game content.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
