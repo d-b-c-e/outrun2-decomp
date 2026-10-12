@@ -26,6 +26,9 @@ class PcRaceMemory;
 // [Graphics] FixZBufferPrecision (the host's switch; off by default): the main camera's near plane by Tweaks' rule
 // (driving::camera_fix_znear) and the 40BE70 course passes projected with 0.05 (PcSceneRenderer::scene_effect_projection).
 bool& fix_znear();
+// Three projected views with [Triple] MatchGameFov = false (the desktop host's switch; 0, the game's FOV, by default): the
+// vertical FOV in radians the main camera takes in race and goal modes (driving::camera_fov_context).
+float& triple_fov_y();
 // The file stem of model resource `resource` in the PC resource filename table 633558 ("cs_CS_BEAC_pmt"): the folder
 // of the bank's replacement textures. Empty when the entry is missing.
 std::string pc_bank_pack_name(std::uint32_t resource);

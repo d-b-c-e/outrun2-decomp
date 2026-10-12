@@ -1,5 +1,6 @@
 #include "platform/camera_render_binding.hpp"
 #include "platform/embedded_camera_data.hpp"
+#include "system/exe_image.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +18,9 @@ std::array<double,4> column(const platform::MeshPreviewTransform& t,const std::a
     std::array<double,4> o{};for(unsigned row=0;row<4;++row)for(unsigned col=0;col<4;++col)o[row]+=double(t.position[col*4+row])*v[col];return o;}
 }
 int main(){
+    // The camera tables are views of the player's verified EXE image (embedded_camera_data.cpp); without one they are
+    // null and the first camera call threw "null byte view".
+    if(!platform::exe_image_autoload()){std::printf("SKIP: set OR2_EXE to the game's OR2006C2C.cache (the camera tables come from it)\n");return 77;}
     // Real frontend camera: original init then the mode-32 preset control.
     std::vector<std::uint8_t> cam(0x400),live_fe8(0x64c),live_bb0(0x438),live_750(0x5460),arena(8*64);
     Bytes c(cam.data(),cam.size());
@@ -85,6 +89,20 @@ int main(){
         camera_znear_context().armed=false;
         CHECK(c.f32(0xbc)==1.0f&&on.frustum_95bf40[4]==1.0f&&on.slots_95d860[1]!=off.slots_95d860[1]);
         c.putf(0xbc,0.1f);
+    }
+    // [Triple] MatchGameFov = false: 484BD0 takes the context's vertical FOV (+A0, +A4 at the screen aspect, so the focal
+    // +B4 too) while it is above 0, and the game's from +AC again once it is 0; +AC itself is never written.
+    {
+        const float ac=c.f32(0xac);
+        PcCameraDevice game;camera_project_484bd0(c,stack,game,screen,blend);
+        const float a0=c.f32(0xa0),a4=c.f32(0xa4);
+        camera_fov_context().fov_y=0.586f;
+        PcCameraDevice rig;camera_project_484bd0(c,stack,rig,screen,blend);
+        camera_fov_context().fov_y=0.f;
+        CHECK(c.f32(0xa0)==0.586f&&std::fabs(c.f32(0xa4)-float(2.0*std::atan(std::tan(0.293)*640.0/480.0)))<1e-6f);
+        CHECK(std::fabs(c.f32(0xb4)-240.f/std::tan(0.293f))<1e-2f&&c.f32(0xac)==ac&&rig.slots_95d860[1]!=game.slots_95d860[1]);
+        PcCameraDevice back;camera_project_484bd0(c,stack,back,screen,blend);
+        CHECK(c.f32(0xa0)==a0&&c.f32(0xa4)==a4&&back.slots_95d860[1]==game.slots_95d860[1]);
     }
     std::printf("camera render binding: %u checks\n",checks);
 }

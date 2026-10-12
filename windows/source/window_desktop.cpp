@@ -48,13 +48,16 @@ outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // 
 bool triple_angled_requested=false;
 bool triple_latched=false;   // a latched (test) process: no [Triple] keys applied
 outrun::desktop::TripleStatus triple_status;                                    // triple_screens_status()
-// The three-view spike's corrections (pc_screen.hpp g_pc_triple_corrections): the toolkit's fixture rig (32-inch 16:9,
-// eye 660 mm, sides 70 degrees, 8 mm gap; the owner's rig is 1500R curved, approximated flat) matched to the game's
-// own projection each time it changes (triple_rig.hpp triple_views).
+// The [Triple] rig keys (triple_screens.hpp parse_triple_rig), read when Angled is asked for in a normal process; the
+// toolkit's fixture rig (32-inch 16:9, eye 660 mm, sides 70 degrees, 8 mm gap) and MatchGameFov = true otherwise.
+outrun::desktop::TripleRigSettings triple_rig;
+// The three-view corrections (pc_screen.hpp g_pc_triple_corrections): that rig (the owner's 1500R curve approximated
+// flat) matched to the projection the game used each time it changes (triple_rig.hpp triple_views). With MatchGameFov =
+// false the race camera's projection is already the physical eye's, so the match is that eye.
 bool triple_fixture_corrections(const float* projection,float* out){
     outrun::desktop::Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
     outrun::desktop::TripleViews v{};
-    if(!outrun::desktop::triple_views(p,outrun::desktop::fixture_rig(8.),v))return false;
+    if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),v))return false;
     for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
     return true;
 }
@@ -128,11 +131,26 @@ NativeWindow& native_window(){
             auto& dd=outrun::platform::draw_distance();
             const auto u=td::triple_default_union(dd.increase,dd.behind,std::getenv("OR2_TRIPLE_AHEAD"),std::getenv("OR2_TRIPLE_BEHIND"));
             dd.increase=u.ahead;dd.behind=u.behind;if(dd.active())outrun::platform::render_queues_extended()=true;
-            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the toolkit fixture rig "
-                        "(32 in 16:9, eye matched to the game's FOV, sides 70 deg, gap 8 mm), one game render replicated into three "
+            // MatchGameFov = false: the race camera takes the physical eye's vertical FOV (the views' 16:9 screen) in race and
+            // goal modes; the front end keeps the game's. True (the default): the eye follows the game's FOV, as before.
+            char eye[160];
+            // The views take each panel's height from its width and the 16:9 render (triple_views); a saved PanelHeightMm
+            // that differs is named as not used, so arbitrary settings are not reported as exact geometry (sana 38280).
+            const double used_h=triple_rig.panel_width_mm*9./16.;
+            char height[120]="";
+            if(std::fabs(triple_rig.panel_height_mm-used_h)>0.5)
+                std::snprintf(height,sizeof height," (PanelHeightMm %.1f not used: the height follows the width and the 16:9 render)",
+                              triple_rig.panel_height_mm);
+            if(triple_rig.match_game_fov)std::snprintf(eye,sizeof eye,"eye matched to the game's FOV");
+            else{const double fov=td::triple_physical_fov_y(triple_rig,16./9.);outrun::platform::triple_fov_y()=float(fov);
+                std::snprintf(eye,sizeof eye,"eye %.0f mm (MatchGameFov = false: the race camera's vertical FOV %.1f deg)",
+                              triple_rig.eye_distance_mm,fov*180./3.14159265358979323846);}
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the rig "
+                        "(panels %.1f x %.1f mm%s, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
                         "viewports; stage culling off; stage sections drawn +%d ahead and %d behind the car; objects behind the eye "
                         "still culled; the HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),
-                        w.width,w.height,r.left,r.top,span_note.c_str(),dd.increase,dd.behind);
+                        w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,used_h,height,
+                        triple_rig.side_angle_deg,triple_rig.bezel_mm,eye,dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
                         "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
@@ -301,6 +319,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
         const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
         outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),plan.latched);}
+    // [Triple] PanelWidthMm / PanelHeightMm / EyeDistanceMm / SideAngle / BezelMm and MatchGameFov (the portfolio's rig
+    // keys, as Wheelkit writes them): read when Angled is asked for in a normal process. A refused value is logged and its
+    // default applies; the window logs the rig in use.
+    if(outrun::xbox_runtime::triple_angled_requested&&!plan.latched){
+        std::vector<std::string> notes;
+        outrun::xbox_runtime::triple_rig=outrun::desktop::parse_triple_rig([&](const char* key){return settings.text("Triple",key);},notes);
+        for(const auto& n:notes)std::printf("settings: [Triple] %s\n",n.c_str());
+    }
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.

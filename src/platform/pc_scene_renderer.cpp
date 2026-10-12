@@ -166,6 +166,7 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
 }
 bool& fix_znear(){static bool on=false;return on;}
+float& triple_fov_y(){static float fov=0.f;return fov;}
 // Tweaks re-runs all of CalcCameraMatrix around Clr_SceneEffect; only 404310's outputs depend on the near plane (the
 // projection, slot 1, and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so
 // only the projection is rebuilt with 0.05; afterwards the projection in effect before (95D8A0) is put back as it was.
@@ -275,9 +276,12 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             }
             bool answered=false;
             // FixZBufferPrecision: the 484BD0 projections inside this control (the main camera) take Tweaks' near plane.
-            struct Arm{Arm(std::uint32_t mode,std::int32_t model){driving::camera_znear_context()={fix_znear(),mode,model};}
-                       ~Arm(){driving::camera_znear_context().armed=false;}}
-                arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1);
+            // MatchGameFov = false: in race and goal modes only, the rig's vertical FOV; the front end keeps the game's.
+            struct Arm{Arm(std::uint32_t mode,std::int32_t model,bool race){driving::camera_znear_context()={fix_znear(),mode,model};
+                           driving::camera_fov_context().fov_y=race?triple_fov_y():0.f;}
+                       ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context().fov_y=0.f;}}
+                arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1,
+                    driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view);
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}

@@ -44,10 +44,15 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 1. `[Graphics] UIScalingMode` read, with 2 (the decomp's current look) as the default until step 3 is seen in game.
    Mode 0 drops the UI rectangle (stretched).
 2. Mode 1's spacing:
-   - a scope flag (`g_pc_ui_spacing`: off / detect / left / right) set by the reconstructed HUD functions that
-     correspond to Tweaks' scopes;
-   - `layer_429350` applies the x shift when the flag is on.
-   Each scope is mapped from a Tweaks address to the decomp function holding it, in a table in this note, before code.
+   - a scope state (off / detect / left / right) that the reconstructed HUD functions set and clear where Tweaks'
+     scopes begin and end (the map below);
+   - **captured in each `SpraniDraw` record** when `sprani_draw_428a10` records it, and applied per layer by
+     `layer_429350` when the record is rendered. The decomp's HUD draws are deferred: `N::emit` -> `sprani_draw_428a10`
+     only records the matrix; `pc_sprani_render_429460` -> `layer_429350` runs later (race_hud_runtime.cpp). So a
+     global flag read at render time, as first written here, would see the wrong scope.
+   - Tweaks' rule per layer, at render: detect moves m[12] by -spacing below x 213 and +spacing from x 426; left /
+     right force the direction.
+   Each scope is mapped from a Tweaks address to the decomp function holding it, in the table below, before code.
 3. The put_scroll positions, the ghost gap and the time-attack goal, as Tweaks.
 4. A muted visual check at 16:9 across race, time attack and C2C screens, against Tweaks frames if the owner has them.
    Then the default becomes 1, as Tweaks.
@@ -55,3 +60,43 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 
 Triple screens: the HUD stays on the centre monitor in both planar and three-view modes, which is STD-007. With
 three views, mode 1's spacing applies to the centre panel's 16:9 only.
+
+## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
+
+- **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the
+  decomp function whose name ends at the nearest PC address at or below it.
+  - For the instruction-level translations (`bulk_tr.cpp`), the match is checked by the address comments in the
+    function's body.
+  - Offsets are from that function's start.
+  - "Hand" = a per-element reconstruction (names by address); "translated" = `bulk_tr.cpp`'s instruction-level code
+    (`F_xxxxxx`, `Cpu& c`).
+- The two scripts that produced it (`ui_scope_map.py`, `tr_owner.py`, read-only) are committed with step 2.
+
+| Tweaks sites (handler) | Decomp holder | Kind | Note |
+|---|---|---|---|
+| 4293F3 drawFootage (applies the shift) | `layer_429350` +A3, pc_sprite_2d.cpp | hand | runs at render, from the recorded draws |
+| 42A556 draw_sprite_custom_matrix (mode 2 centring) | `draw_42a3a0` +1B6, pc_sprite_2d.cpp | hand | the decomp centres rhw 2D in d3d11_d3d9 already |
+| 42B1E2 / 42B53E / 42BB2F custom_matrix_multi cases | `mask_42a800`, pc_sprite_2d.cpp | hand | the PC function runs to 42BE60 (quad_42be60) |
+| 439400 D3DXMatrixTransformation2D (inline) | `pc_d3dx_transformation_2d`, pc_sprite_2d.cpp | hand | |
+| 449940 Calc3D2D | `project_449940`, race_particles_effects.cpp | hand | exact |
+| 4BEB31 on, 4BEDBE on, 4BEDE0 / 4BEE21 off (NaviPub_Disp) | `navi_pub_display_4beb00_impl`; 4BEDxx in `mission_4bed13`, race_hud_navi.cpp | hand | the decomp splits NaviPub_Disp into parts |
+| 4BEB8E / 4BEBAF rival, 4BEC83 / 4BEC88 online rival | `navi_pub_display_4beb00_impl` | hand | around rival_markers_4bb640 / navi_rival_labels_4bad20 / lan_markers_4bb300 |
+| 4BEBE1 / 4BEBE6 hearts, 4BECBA / 4BECE0 C2C hearts | `navi_pub_display_4beb00_impl` | hand | the heart displays go through `s.heart(...)` services |
+| 4BEA64 off (TimeAttackGoal) | `navi_sector_banners_4bea50` +14 | hand | |
+| 4BA0E0 off (dispMarkerCheck) | `line_of_sight_4ba0e0` +0 | hand | exact |
+| 4BE4BC right, 4BE4C1 off, 4BE4E7 left, 4BE575 on (DispTimeAttack2D) | `stages_4be4b0` | hand | |
+| 4BE5CD ... 4BE9A3 put_scroll right (15) | `stages_4be4b0` +11D ... +4F3 | hand | |
+| 4B9F3A ... 4BA052 put_scroll right (8, DispRank) | `position_4b9d80` +1BA ... +2D2 | hand | |
+| 4B9096 / 4B90B3 / 4B90F6 put_scroll left (REV) | `gear_4b9010` +86 ... +E6 | hand | Tweaks rounds this spacing (REV light offset) |
+| 4BDE3A PutGhostGapInfo; 4BDAE8 its sub | `banner_4bddb0` +8A; `record_row_4bdac0` +28 | hand | |
+| 4BE045 / 4BE083 left, 4BE067 / 4BE0A5 right (DispGhostGap) | `banners_4be020` | hand | |
+| 4BBA89 DispTempHeartNum ("-") | `request_row_4bb9e0` +A9 | hand | |
+| 4BD32E slipstream; 4BD397 / 4BD414 / 4BD472 don't-lose-GF | `scores_4bd230` +FE; `scores_4bd340` | hand | C2C |
+| 496AC7 ... 496C6A C2C speech bubbles (7) | `mission_manager_control_496a30`, mission_manager.cpp | hand | |
+| 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (16) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | an adjustment would sit at the translated instruction (its esp+0 / +4 argument) |
+| 460A21 set_icon_work (GF request bubble) | `banner_open_460970` +B1, race_traffic_heart_setup.inc | hand | the heart code lives in `race_traffic_*.inc` (a first scan of .cpp files missed it) |
+| 460D40 / 460FBC ctrl_icon_work | `banner_460ad0` +270 / +4EC, race_traffic_heart_meter.inc | hand | the function's PC extent is to be confirmed |
+| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | inside 481A40, the C2C request manager's GOAL results (7F9460 method) | **not ported** | race_end_runtime.cpp runs it only if translated, and it is not (`EndUnported` "neither native nor translated"); nothing to map until that path is ported |
+
+- **Open before step 2:** the translated C2C bubbles (`F_4fc830` ... `F_4fe760`): an adjustment in generated code, or
+  a reconstruction first.
