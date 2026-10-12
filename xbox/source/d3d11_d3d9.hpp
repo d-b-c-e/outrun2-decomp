@@ -68,40 +68,31 @@ private:
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
     // Corrections already computed, by projection and pixel-centre fix (six, replaced in turn): draws that alternate
-    // between the current and a remembered projection reuse them instead of computing again (nene 35084).
+    // between projections reuse them instead of computing again (nene 35084).
     struct TripleCorrections { std::array<float,16> p{};float fix[2]{};bool used{},ok{};float c[52]{}; };
     std::array<TripleCorrections,6> triple_corrections_{};unsigned triple_corrections_next_{};
     // Per vertex program: the constant register of its position matrix (-1: none found) and whether that matrix is the
     // current world x view x projection or only some affine matrix x the current projection; the outcomes already
     // logged (each distinct one once, at most four, encoded base*2+affine or -1), how often the outcome changed, and the
     // constant and transform generations of its last failed scan (unchanged since: no rescan; nene 34449).
-    // projection: -1 the current one (SetTransform), 0..3 a recent one (triple_recent_).
-    struct TripleProgram { int base{-1};bool affine{};int projection{-1};unsigned logged_n{};int logged[4]{};std::uint64_t changes{},failed_constants{~0ull},failed_xf{~0ull}; };
+    struct TripleProgram { int base{-1};bool affine{};unsigned logged_n{};int logged[4]{};std::uint64_t changes{},failed_constants{~0ull},failed_xf{~0ull}; };
     std::map<const void*,TripleProgram> triple_programs_;
     // The world x view x projection those registers are compared with, its tolerance, and column 3 of the inverse
     // projection (the affine test): computed again only when a transform changes (world, view, projection as last seen).
     std::array<float,48> triple_xf_{};std::array<float,16> triple_wvp_{};double triple_wvp_tolerance_{};bool triple_xf_valid_{};
     std::array<double,4> triple_pinv_col3_{};bool triple_pinv_ok_{};
-    // The last four distinct projections a back-buffer draw replicated with, and their inverse's column 3: a program's
-    // constants may hold one of them while SetTransform already holds another pass's (the second rig picture's side sky
-    // went black in some frames). Slots are replaced oldest first and keep their index until then. A match against one
-    // is compatibility, not proof: the affine test sees only the depth row, so the current projection is preferred.
-    struct TripleProjection { std::array<float,16> p{};std::array<double,4> pinv_col3{};bool valid{}; };
-    std::array<TripleProjection,4> triple_recent_{};unsigned triple_recent_next_{};bool triple_recent_logged_{};
     std::uint64_t triple_xf_generation_{},triple_constants_generation_{};   // a transform change; a vertex constants upload
     std::vector<std::array<float,16>> triple_refused_logged_;   // refused projections already logged (at most 4)
     unsigned triple_frame_draws_{};
-    // triple_native_standard: 0 no matrix of a projection, 1 world x view x projection, 2 an affine matrix x the current
-    // projection, 3 an affine matrix x a recent projection (written to *projection; else the current one).
-    bool triple_bind(bool rhw,bool standard,bool affine=false,const std::array<float,16>* projection=nullptr);void triple_unbind();
-    int triple_native_standard(const void* program,const std::string& key,const std::array<float,16>** projection);
+    // triple_native_standard: 0 no matrix of the current projection, 1 world x view x projection, 2 an affine matrix x it.
+    bool triple_bind(bool rhw,bool standard,bool affine=false);void triple_unbind();int triple_native_standard(const void* program,const std::string& key);
 public:
     // Three-view counts (runtime.log at exit): draws into three viewports (of them, through a vertex program whose
     // matrix is an affine one x the projection, not the current world x view x projection); draws kept single on the
     // centre panel because pretransformed (rhw: HUD, menus, screen-space particles), a vertex program with no matrix of
     // the current projection in its constants, a projection the rig refuses, not triangles (the geometry shader takes
     // only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
-    std::uint64_t triple_draws{},triple_draws_affine{},triple_draws_recent{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
+    std::uint64_t triple_draws{},triple_draws_affine{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
         triple_single_topology{},triple_single_target{},triple_frames{};
 private:
     bool native_enabled_{true};

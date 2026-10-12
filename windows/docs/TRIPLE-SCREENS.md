@@ -253,6 +253,15 @@ The `three-projections` status needs counted passes plus a WGC check of the seam
 - That column of M meets only P's depth row, so it bears only on clip z. Clip x, y and w, and so the side placement, are
   exact for any M. The tolerance is now 1e-3 relative.
 
+**F12 (13:55, `5e2552d`):**
+- The side sky draws in all nine frames from t40 to t56.
+- Unmatched draws fell to 44, all of them the sky program at moments when the camera is turned. There its w scale was
+  0.9989 (1.1e-3 off), while its projective terms were 1e-6.
+- The w scale (row 3 of M's column 3) only scales the depth row, and the side panels then get the sky's own depth row.
+  It now only needs to be finite and between 0.5 and 2. Rows 0..2 stay at 1e-3 relative.
+- The recent-projection fallback never matched in F10, F11 or F12, so it is removed (sana 35380/35428, nene 35423).
+- F12's timing is not qualified: a peer's build and ctest overlapped the run.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
