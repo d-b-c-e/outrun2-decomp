@@ -46,6 +46,9 @@ struct PcFrameServices {
     PcEnvironmentRenderTables environment;
     // [84A318] as read after the layers (a layer callback, 4BFA20, writes it); unset: in.mode_84a318.
     std::function<std::uint32_t()> mode_84a318{};
+    // FixZBufferPrecision: called with true before and false after the 40BE70 course passes of a layer that has
+    // them (the lens flare projects with near plane 0.05, as Tweaks' Clr_SceneEffect hook). Unset: nothing.
+    std::function<void(bool)> scene_effect_projection{};
 };
 void frame_render_449050(PcFlushContext&,PcFrameState&,const PcFrameInputs&,PcFrameServices&);
 // Pieces, exposed for the tests.

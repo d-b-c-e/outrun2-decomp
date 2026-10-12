@@ -165,6 +165,24 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
 }
+bool& fix_znear(){static bool on=false;return on;}
+// Tweaks re-runs all of CalcCameraMatrix here; only 404310's outputs depend on the near plane (the projection, slot 1,
+// and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so only the projection
+// is rebuilt: with 0.05 for the passes, then from the camera's own +BC (what the control applied) after them.
+void PcSceneRenderer::scene_effect_projection(bool begin){
+    Bytes vehicle(nullptr,0),camera(nullptr,0);
+    if(!vehicle_camera||!vehicle_camera(vehicle,camera)||camera.size()<0x3b4u)return;
+    driving::PcCameraDevice d;
+    driving::pc_matrix_push(matrices_);
+    driving::camera_perspective_404310(matrices_,camera.f32(0xa0),camera.f32(0xb8),begin?0.05f:camera.f32(0xbc),camera.f32(0xc0),
+        camera.f32(0xc4),camera.f32(0xc8),d);
+    driving::camera_device_store(matrices_,d,1);
+    driving::pc_matrix_pop(matrices_);
+    std::array<float,16> m{};std::memcpy(m.data(),d.slots_95d860[1].data(),64);
+    render_set_matrix_410f90(*flush_,m,1);
+    device_.set_transform(3,m.data());   // D3DTS_PROJECTION
+    view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
+}
 void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uint8_t>& before){
     auto after=std::make_shared<std::vector<std::uint8_t>>(camera.data(),camera.data()+0x3b4);
     enhancements::display_note(this,[this,camera,before,after]{
@@ -246,6 +264,10 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
                 if(race_camera_inputs(race))control.race=&race;
             }
             bool answered=false;
+            // FixZBufferPrecision: the 484BD0 projections inside this control (the main camera) take Tweaks' near plane.
+            struct Arm{Arm(std::uint32_t mode,std::int32_t model){driving::camera_znear_context()={fix_znear(),mode,model};}
+                       ~Arm(){driving::camera_znear_context().armed=false;}}
+                arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1);
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
@@ -546,6 +568,7 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
         if(profile)profile(1u,pc,std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-t0).count()));},events,scene_,
         environment_.lights_899b98.data()+0x140,display,tables};
     sv.mode_84a318=mode_84a318;
+    if(fix_znear())sv.scene_effect_projection=[this](bool begin){scene_effect_projection(begin);};
     if(layer_callback)for(std::uint32_t k=0;k<frame_.layers.size();++k)frame_.layers[k].callback=layer_callback(k);
     frame_render_449050(*flush_,frame_,in,sv);
     ++frames;

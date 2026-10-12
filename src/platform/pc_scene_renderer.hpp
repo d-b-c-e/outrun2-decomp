@@ -23,6 +23,9 @@
 #include <string>
 namespace outrun::platform {
 class PcRaceMemory;
+// [Graphics] FixZBufferPrecision (the host's switch; off by default): the main camera's near plane by Tweaks' rule
+// (driving::camera_fix_znear) and the 40BE70 course passes projected with 0.05 (PcSceneRenderer::scene_effect_projection).
+bool& fix_znear();
 // The file stem of model resource `resource` in the PC resource filename table 633558 ("cs_CS_BEAC_pmt"): the folder
 // of the bank's replacement textures. Empty when the entry is missing.
 std::string pc_bank_pack_name(std::uint32_t resource);
@@ -193,6 +196,8 @@ private:
     driving::PcCameraScreen screen_{};
     std::vector<std::uint8_t> camera_live_fe8_,camera_live_bb0_,camera_live_750_;
     void apply_camera(const driving::PcCameraDevice&,driving::Bytes camera);
+    // FixZBufferPrecision around 40BE70: the main camera's projection with near plane 0.05 (begin) or its own +BC.
+    void scene_effect_projection(bool begin);
     // Port enhancement (enhancements/frame_rate.hpp): the 485FE0 view redone
     // between ticks from the camera before (`before`) and after this tick.
     void note_camera_replay(driving::Bytes camera,const std::vector<std::uint8_t>& before);

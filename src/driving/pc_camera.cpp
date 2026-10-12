@@ -93,9 +93,18 @@ void camera_view_482f20(Bytes c,PcMatrixStack& s,PcCameraDevice& d,float f){
     pc_matrix_pop(s);
     copy_words(c,0x384,0x128,3);copy_words(c,0x390,0xf8,3);copy_words(c,0x39c,0x104,3);
 }
+CameraZnearContext& camera_znear_context(){static CameraZnearContext z;return z;}
+float camera_fix_znear(Bytes c,std::uint32_t mode,std::int32_t car_model){
+    const std::int8_t view=c.i8(0x34a);const float timer=c.f32(0x364);
+    const bool game=mode==0x10u,goal=mode==0x13u;
+    if((view==2||view==0)&&timer==0.f&&(game||goal))return 1.0f;
+    if(timer!=0.f||!game)return 0.1f;
+    return car_model==7?0.2f:0.25f;
+}
 void camera_project_484bd0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,
     const PcCameraScreen& screen,const PcCameraBlend& blend){
     c.check(0,0x3b4);
+    if(const auto& z=camera_znear_context();z.armed)c.putf(0xbc,camera_fix_znear(c,z.mode_78026c,z.car_model));
     pc_matrix_push(s);
     camera_fov_483c10(c,screen);
     camera_perspective_404310(s,c.f32(0xa0),c.f32(0xb8),c.f32(0xbc),c.f32(0xc0),c.f32(0xc4),c.f32(0xc8),d);

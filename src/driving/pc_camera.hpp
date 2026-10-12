@@ -45,6 +45,16 @@ void camera_perspective_404310(PcMatrixStack&,float fov,float aspect,float near_
     float far_z,float shift_x,float shift_y,PcCameraDevice&);
 // 482F20: interpolated view matrix into slot 0 and +140, previous state update.
 void camera_view_482f20(Bytes camera,PcMatrixStack&,PcCameraDevice&,float blend);
+// [Graphics] FixZBufferPrecision (the Tweaks key, off by default; OutRun2006Tweaks hooks_graphics.cpp). The game's
+// near plane +BC is 0.1 against a 5000 far plane, which leaves the 24-bit depth buffer little precision far away
+// (distant z-fighting, far objects not drawing). While the context is armed (the host arms it around the main camera's
+// 485FE0 control), 484BD0 first writes Tweaks' near plane to +BC, as Tweaks' CalcCameraMatrix hook does.
+struct CameraZnearContext { bool armed{}; std::uint32_t mode_78026c{}; std::int32_t car_model{-1}; };
+CameraZnearContext& camera_znear_context();
+// Tweaks' rule: 1.0 in the chase or bumper view (+34A 2 or 0) with no camera switch running (+364 == 0) in GAME (0x10)
+// or GOAL (0x13); 0.1 during a switch or outside GAME; otherwise (the in-car view in GAME) 0.25, or 0.2 for the
+// 360SP (car model 7, which still shows a gap at 0.25).
+float camera_fix_znear(Bytes camera,std::uint32_t mode_78026c,std::int32_t car_model);
 // 484BD0: projection (slot 1), view, inverse view +1C0, pixel scales +B0/+B4.
 void camera_project_484bd0(Bytes camera,PcMatrixStack&,PcCameraDevice&,
     const PcCameraScreen&,const PcCameraBlend&);

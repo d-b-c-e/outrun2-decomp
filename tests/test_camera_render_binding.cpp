@@ -69,5 +69,22 @@ int main(){
     v.putf(0x58,0.5f);for(unsigned k=0;k<16;++k)v.putf(0xb0+k*4,float(k));
     const auto display=platform::vehicle_display_46c140(v);
     CHECK(display.model==9&&display.colour_scale==0.5f&&at(display.world,3,3)==15.f);
+    // FixZBufferPrecision: Tweaks' near-plane rule, and 484BD0 taking it only while armed.
+    {
+        std::vector<std::uint8_t> z(0x3b4);Bytes zc(z.data(),z.size());
+        auto rule=[&](std::int8_t view,float timer,std::uint32_t mode,std::int32_t model){
+            zc.put8(0x34a,std::uint8_t(view));zc.putf(0x364,timer);return camera_fix_znear(zc,mode,model);};
+        CHECK(rule(2,0.f,0x10,1)==1.0f&&rule(0,0.f,0x10,1)==1.0f&&rule(2,0.f,0x13,1)==1.0f);   // chase / bumper, GAME / GOAL
+        CHECK(rule(2,0.5f,0x10,1)==0.1f&&rule(1,0.f,0x13,1)==0.1f&&rule(2,0.f,0x0d,1)==0.1f);   // switching, GOAL in-car, START
+        CHECK(rule(1,0.f,0x10,1)==0.25f&&rule(1,0.f,0x10,7)==0.2f&&rule(3,0.f,0x10,-1)==0.25f); // in-car (360SP 0.2)
+        c.put8(0x34a,2);c.putf(0x364,0.f);c.putf(0xbc,0.1f);
+        PcCameraDevice off;camera_project_484bd0(c,stack,off,screen,blend);
+        CHECK(c.f32(0xbc)==0.1f&&off.frustum_95bf40[4]==0.1f);                                   // not armed: the game's
+        camera_znear_context()={true,0x10,1};
+        PcCameraDevice on;camera_project_484bd0(c,stack,on,screen,blend);
+        camera_znear_context().armed=false;
+        CHECK(c.f32(0xbc)==1.0f&&on.frustum_95bf40[4]==1.0f&&on.slots_95d860[1]!=off.slots_95d860[1]);
+        c.putf(0xbc,0.1f);
+    }
     std::printf("camera render binding: %u checks\n",checks);
 }
