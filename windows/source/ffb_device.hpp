@@ -10,11 +10,11 @@
 //           one of the library's force-feedback devices; strict selection opens exactly it (never a name or an
 //           index); the exit guards install; the hold watchdog is set (SetHoldTimeoutMs); then an accepted zero
 //           (SetDeviceForcesXY(0, 0) returns 1) before anything else. One attempt per process.
-//   force   in the race and in front, a command goes out when it changes, and the held value again every 100 ms, so
+//   force   in the race and in front, a command goes out when it changes, and a held force again every 100 ms, so
 //           the library's 250 ms hold watchdog silences the wheel once the game stops sampling (a stall, a hang).
 //   silence only an accepted SetDeviceForcesXY(0, 0) counts (ZeroForces returns nothing, and clears the watchdog's
 //           record even when the stop failed). Out of the race or out of front, after a refused command, and after a
-//           sampling gap longer than the hold: an accepted zero, tried every sample, before the next command; none
+//           held force older than the hold: an accepted zero, tried every sample, before the next command; none
 //           within 2 s releases the device. Any refusal other than the mod's transient set, or a change or loss of
 //           the steering device, releases at once. A release is final for the process.
 //   release and shutdown: PanicStop (when opened), then FreeDirectInput whenever the library was given a device
@@ -88,8 +88,7 @@ private:
     bool unacked_{};           // a zero is due and not yet accepted, since unacked_ms_
     std::uint64_t unacked_ms_{};
     std::int32_t last_value_{};
-    std::uint64_t last_send_ms_{},last_frame_ms_{};
-    bool have_frame_{};
+    std::uint64_t last_send_ms_{};   // the last accepted command or zero
     Counts counts_{};
 };
 }

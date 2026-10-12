@@ -151,9 +151,6 @@ bool Delivery::zero(const Sample& s){
 
 void Delivery::frame(const Sample& s,std::int32_t command){
     if(phase_!=Phase::Waiting&&phase_!=Phase::Open)return;
-    // A sampling gap longer than the hold: the library's watchdog may have stopped the wheel; restart through a zero.
-    const bool gap=have_frame_&&s.ms-last_frame_ms_>std::uint64_t(HoldMs);
-    have_frame_=true;last_frame_ms_=s.ms;
     if(phase_==Phase::Waiting){
         if(!s.race||!s.front)return;
         if(!same_device(s.steer_dev)){why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";return;}
@@ -163,7 +160,10 @@ void Delivery::frame(const Sample& s,std::int32_t command){
     // One device epoch: the opened instance must stay the input layer's steering device.
     if(!same_device(s.steer_dev)){release("the steering device changed or was lost");return;}
     const bool drive=s.race&&s.front;
-    if(gap||!drive)need_zero_=true;
+    // A held force older than the hold (since the last accepted command, whatever the sampling did): the library's
+    // watchdog may have stopped the wheel, so it restarts through an accepted zero (romi 29717).
+    const bool expired=last_value_!=0&&s.ms-last_send_ms_>std::uint64_t(HoldMs);
+    if(expired||!drive)need_zero_=true;
     if(!drive){
         if(!silent_||unacked_)zero(s);    // until accepted, or released after SilenceMs
         return;
@@ -171,7 +171,7 @@ void Delivery::frame(const Sample& s,std::int32_t command){
     if(need_zero_&&!zero(s))return;
     const std::int32_t c=std::clamp<std::int32_t>(command,-10000,10000);
     const bool repeat=c==last_value_;
-    if(repeat&&s.ms-last_send_ms_<KeepAliveMs)return;
+    if(repeat&&(c==0||s.ms-last_send_ms_<KeepAliveMs))return;   // a held zero needs no refresh (the watchdog acts on force)
     if(api_.SetDeviceForcesXY(c,0)!=1){refused(s);return;}
     ++counts_.sent;if(repeat)++counts_.keepalive;
     last_value_=c;last_send_ms_=s.ms;silent_=c==0;

@@ -204,8 +204,15 @@ int main(){
      CHECK(d.phase()==Phase::Released&&(since(F.log.size()-2)==Lines{"PanicStop","FreeDirectInput"}));
      const auto n=F.log.size();step(d,race(30),2500);CHECK(F.log.size()==n);}
 
-    // a sampling gap longer than the hold (a stall): the library's watchdog may have stopped the wheel, so an
-    // accepted zero comes before the held value is sent again.
+    // a held force older than the hold since its last accepted command (a stall): the library's watchdog may have
+    // stopped the wheel, so an accepted zero comes before the held value is sent again; also when no single sampling
+    // gap exceeds the hold (romi 29717: 0 / 90 / 290 ms).
+    {Delivery d=opened();
+     step(d,race(10),2500);step(d,race(100),2500);step(d,race(300),2500);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0"}));
+     F.log.clear();step(d,race(360),0);step(d,race(700),0);step(d,race(710),100);   // a held zero never expires
+     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0","SetDeviceForcesXY 100 0"}));
+     finish(d);}
     {Delivery d=opened();
      step(d,race(10),2500);step(d,race(261),2500);step(d,race(262),2500);step(d,race(370),2500);
      CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0","SetDeviceForcesXY 2500 0"}));
