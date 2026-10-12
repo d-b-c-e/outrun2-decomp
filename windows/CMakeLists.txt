@@ -208,6 +208,7 @@ if(Python3_FOUND)
     add_test(NAME write_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 add_test(NAME shim_first_loop_timing COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_run_timing.py)
+add_test(NAME shim_first_loop_consumed_compare COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_compare_consumed.py)
 # The first loop's publish through the shared native publisher (b173a48): its own fixture (a fresh folder, removed
 # first), and the control worker's snapshot open reading throughout (live r1-01's failure; ReplaceFileW the control).
 add_test(NAME shim_first_loop_publish_clean COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/publish-fixture)

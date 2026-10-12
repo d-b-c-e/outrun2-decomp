@@ -191,6 +191,26 @@ def read_export(finalizer, capture, dest):
     if q.returncode != 0: raise ValueError("the sealed capture does not verify: %s" % ((q.stdout + q.stderr).strip().splitlines() or [""])[0][:300])
 
 
+CONSUMED_END = re.compile(r"input shim: consumed replay end at input tick (\d+) \(mode (\d+)\): (\d+) of (\d+) rows played")
+
+
+def export_recording(finalizer, capture, dest):
+    """A saved ordinary recording's fresh export (P21Finalizer --export-recording, sana aefe991): its recording seal,
+    stream, report and the proof's own identity verified again; then every row has the consumed-playback channels."""
+    proof = json.loads((capture / "recorder-complete.json").read_text())
+    q = subprocess.run(["dotnet", str(finalizer), "--export-recording", str(capture), proof["requestId"], proof["exeSha256"],
+                        str(proof["processId"]), str(proof["processCreationFileTime"]), str(dest)], capture_output=True, text=True, timeout=600)
+    if q.returncode != 0: raise ValueError("the saved recording does not verify: %s" % ((q.stdout + q.stderr).strip().splitlines() or [""])[0][:300])
+    rows = 0; keys = set()
+    for line in dest.read_text(encoding="utf-8").splitlines():
+        if line.startswith("ROW "):
+            if rows and "final.pcDrive" not in keys: raise ValueError("export row %d has no final.pcDrive (recorded before the replay seam)" % (rows - 1))
+            rows += 1; keys = set()
+        else: keys.add(line.split(" ", 1)[0])
+    if not rows or "final.pcDrive" not in keys: raise ValueError("the export has no rows with final.pcDrive")
+    return rows
+
+
 def verdict(receipt):
     """Astra 16766: diagnostics are saved either way; any unmet condition fails the run."""
     failures = ["error: %s" % e for e in receipt["errors"]]
@@ -199,6 +219,17 @@ def verdict(receipt):
         failures.append("exit not normal (code %r, forced %r)" % (receipt.get("exitCode"), receipt.get("forced")))
     if (receipt.get("host") or {}).get("state") != "resolved": failures.append("host shutdown not resolved")
     if not (receipt.get("journal") or {}).get("qualifies"): failures.append("control journal does not qualify")
+    c = receipt.get("consumed")
+    if c is not None:   # a consumed playback run: the whole tape played, and the game followed the recording (sana 35159)
+        if not c.get("playbackComplete"): failures.append("consumed playback incomplete: %s" % c.get("playbackEnd"))
+        cmp = c.get("compare")
+        if not isinstance(cmp, dict): failures.append("no consumed comparison: %s" % str(cmp)[:200])
+        elif not cmp.get("valid"): failures.append("the comparison evidence is not valid: %s" % "; ".join(cmp.get("problems") or [])[:400])
+        else:
+            if cmp.get("fedEqualRows") != cmp.get("playedRows"): failures.append("the fed words differ from the recording: %s" % json.dumps(cmp.get("fedFirstDifference")))
+            if not cmp.get("followed"): failures.append("the game did not follow the recording: first divergence %s" % json.dumps(cmp.get("firstDivergence")))
+        receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
+        return failures
     seal_result = receipt.get("seal")
     if not (isinstance(seal_result, dict) and seal_result.get("exit") == 0): failures.append("capture not sealed: %s" % str(seal_result)[:200])
     r3 = receipt.get("r3")
@@ -246,6 +277,9 @@ def main():
     a.add_argument("--finalizer", type=pathlib.Path, help="the reviewed P21Finalizer.dll (p21_recorder_integration/managed)")
     a.add_argument("--replay-tool", type=pathlib.Path, help="capture_replay.exe (R2), built with the candidate")
     a.add_argument("--replay-of", type=pathlib.Path, help="R3: a passing first-loop result folder whose sealed capture is played")
+    a.add_argument("--consumed-replay", type=pathlib.Path,
+                   help="consumed playback (consumed_replay.hpp): a saved ordinary recording of this candidate (the folder holding its "
+                        "sealed capture\\); its fresh --export-recording is played at the 453BB0 seam from the first input tick, no presses")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     o = a.parse_args()
@@ -271,8 +305,21 @@ def main():
     if not ini.exists() or ini.read_text(encoding="utf-8") != PROFILE:
         problems.append("the test folder's OutRunDesktop.ini is not the test profile")
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
-    if not o.replay_tool or not o.replay_tool.exists(): problems.append("no --replay-tool capture_replay.exe to replay the capture")
-    tape = None; tape_rows = 0; tape_source = None; replay_timeout = None
+    consumed = o.consumed_replay is not None
+    if consumed and o.replay_of: problems.append("--consumed-replay and --replay-of are exclusive")
+    if not consumed and (not o.replay_tool or not o.replay_tool.exists()): problems.append("no --replay-tool capture_replay.exe to replay the capture")
+    tape = None; tape_rows = 0; tape_source = None; replay_timeout = None; reference = None
+    if consumed:   # the same candidate plays its own saved recording, exported fresh from its recording seal (sana 35159)
+        reference = o.consumed_replay.resolve(); tape = out / "tape.tsv"
+        try:
+            proof = json.loads((reference / "capture" / "recorder-complete.json").read_text())
+            if not (reference / "capture" / "recording-complete.tsv").exists(): problems.append("--consumed-replay has no recording seal")
+            if not o.candidate.exists() or proof.get("exeSha256") != sha(o.candidate):
+                problems.append("--consumed-replay was recorded by another build (%s, this run %s)" % (str(proof.get("exeSha256"))[:16], sha(o.candidate)[:16] if o.candidate.exists() else None))
+            with tempfile.TemporaryDirectory() as t:   # the preflight writes nothing it keeps
+                tape_rows = export_recording(o.finalizer, reference / "capture", pathlib.Path(t) / "tape.tsv")
+            replay_timeout = tape_rows / 30.0 + 60.0   # a cold cache's slow frames: at least half the recorded rate
+        except (OSError, ValueError, KeyError) as e: problems.append("--consumed-replay unusable: %s" % e)
     if o.replay_of:   # R3: only a passing first run whose sealed capture verifies again is played
         first = o.replay_of.resolve(); tape_source = first / "run" / "capture"; tape = out / "tape.tsv"
         try:
@@ -309,13 +356,20 @@ def main():
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
-    if tape:   # the run's own fresh export of the verified sealed source: the tape the game plays and the report compares
+    if tape and consumed:   # the recording's fresh export, verified again: the tape the seam plays
+        if export_recording(o.finalizer, reference / "capture", tape) != tape_rows: raise SystemExit("the saved recording changed after the preflight")
+        plan["tapeSha256"] = sha(tape); plan["consumedReplay"] = str(reference)
+    elif tape:   # the run's own fresh export of the verified sealed source: the tape the game plays and the report compares
         read_export(o.finalizer, tape_source, tape); plan["tapeSha256"] = sha(tape)
         if len(compare_replay.tape(str(tape))) != tape_rows: raise SystemExit("the sealed source changed after the preflight")
     receipt = dict(plan=plan, started=time.strftime("%Y-%m-%dT%H:%M:%S%z"), presses=[], batches=[], forced=False, errors=[],
                    injection="inject action <id> <n>: the shim resolves each action through the test profile's declared binding "
                              "inverse into a raw sample of that bound R12 object; not a physical hardware trial (Astra 16520)")
-    if tape:
+    if consumed:
+        receipt["consumed"] = dict(playbackComplete=False, playbackEnd=None, compare=None, reference=str(reference),
+            label="consumed playback: the saved recording's final.* words put back at 453BB0 from the first input tick (no presses, "
+                  "no live input); an input/startup proof, not route fidelity (pose and heading not compared)")
+    elif tape:
         receipt["r3"] = dict(playbackComplete=False, playbackEnd=None, compare=None, firstRoute=r1.get("route"),
             label="menus: injected presses as above; race: the first run's recorded normalized Frame actions, played at the adapter "
                   "boundary while the live latched session is Running (Astra 16754): not physical input, not a raw-to-Core replay, no route claim")
@@ -328,7 +382,8 @@ def main():
     try:
         lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
         if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it
-            wrote_ini = True; ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n" % tape).encode("utf-8"))
+            wrote_ini = True
+            ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n%s" % (tape, "Mode = consumed\n" if consumed else "")).encode("utf-8"))
         DBCE.mkdir(parents=True, exist_ok=True)
         start = time.time(); budget = race_budget(replay_timeout)
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
@@ -340,18 +395,29 @@ def main():
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
             publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
-        phase = "menus"; phase_at = 0; race_at = None; window_at = None; scripted = 0
-        while time.time() < loop_deadline(start, o.seconds, race_at, budget) and proc.poll() is None:
+        phase = "consumed" if consumed else "menus"; phase_at = 0; race_at = None; window_at = None; scripted = 0
+        consumed_deadline = start + o.seconds + (replay_timeout or 0)
+        while time.time() < (consumed_deadline if consumed else loop_deadline(start, o.seconds, race_at, budget)) and proc.poll() is None:
             time.sleep(0.2)
             if log.exists():
                 text = log.read_text(encoding="utf-8", errors="replace"); new = text.splitlines()[seen:]; seen += len(new); lines += new
                 for l in new:
                     m = SIGNAL.search(l)
                     if m: mode = int(m.group(3)); race = m.group(4) is not None
+                    ce = CONSUMED_END.search(l)
+                    if ce and consumed:
+                        receipt["consumed"]["playbackEnd"] = l.strip(); phase_at = phase_at or time.time()
+                        receipt["consumed"]["playbackComplete"] = ce.group(3) == ce.group(4) and int(ce.group(4)) == tape_rows
                     e = REPLAY_END.search(l)
-                    if e and tape:
+                    if e and tape and not consumed:
                         receipt["r3"]["playbackEnd"] = l.strip()
                         receipt["r3"]["playbackComplete"] = e.group(2) == e.group(3) and int(e.group(3)) == tape_rows and e.group(4) == "tape complete"
+            if phase == "consumed":   # no presses: the tape drives from the first tick; end a moment after its last row
+                if race and race_at is None: race_at = time.time()
+                if window_at is None and windows_of(proc.pid): window_at = time.time(); receipt["windowSeconds"] = round(window_at - start, 3)
+                if receipt["consumed"]["playbackEnd"] and time.time() - phase_at > 2.0:
+                    phase = "end"; batch(["end"]); break
+                continue
             if phase == "menus":
                 if race: race_at = time.time()
                 if race and tape: phase, phase_at = "replay", time.time(); continue   # the shim plays the tape from the race entry
@@ -411,10 +477,18 @@ def main():
             if leased:
                 try: lease("Exit")
                 except Exception as e: receipt["errors"].append(repr(e))
-        try: seal(out, proc, created, receipt, o.finalizer)
-        except Exception as e: receipt["errors"].append("seal: %r" % e)
-        try: replay(out, receipt, o.replay_tool)
-        except Exception as e: receipt["errors"].append("replay: %r" % e)
+        if consumed:   # the run's own @2 capture is evidence, compared with the recording (not P21-sealed: no recording seal)
+            receipt["seal"] = "not sealed (consumed playback run: its @2 capture is compared, not sealed)"
+            try:
+                q = subprocess.run([sys.executable, "-B", str(HERE / "compare_consumed.py"), str(reference / "capture" / "source.jsonl"),
+                                    str(out / "run" / "capture" / "source.jsonl")], capture_output=True, text=True, timeout=600)
+                receipt["consumed"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
+            except Exception as e: receipt["errors"].append("consumed compare: %r" % e)
+        else:
+            try: seal(out, proc, created, receipt, o.finalizer)
+            except Exception as e: receipt["errors"].append("seal: %r" % e)
+            try: replay(out, receipt, o.replay_tool)
+            except Exception as e: receipt["errors"].append("replay: %r" % e)
         if tape and isinstance(receipt.get("replay"), dict) and receipt["replay"].get("exit") == 0:
             q = subprocess.run([sys.executable, "-B", str(HERE / "compare_replay.py"), str(tape), str(out / "validated.tsv")],
                                capture_output=True, text=True, timeout=600)
