@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -75,6 +76,20 @@ inline const char* triple_projection_refusal(bool latched,bool borderless,Triple
     if(mode==TripleScreens::separate&&!separate_span)return "Separate monitors found no three-monitor span";
     if(!(aspect>0.f))return "needs a window wider than 16:9";
     return nullptr;
+}
+// The stage-section union applied Angled views draw where [Graphics] leaves DrawDistanceIncrease / DrawDistanceBehind at
+// 0: 64 ahead and 64 behind. Behind fills the side views past 90 degrees (the beach's hard line); ahead stops the side
+// views' pop-in of stage objects that the forward lists add only a few sections on (the start's rock face). Hub
+// triples-20261012: runs H1-H3, timing T1-T4 (+64 ahead: same 60 fps, p95 +0.2-0.4 ms). OR2_TRIPLE_AHEAD (0..1024) /
+// OR2_TRIPLE_BEHIND (0..256) replace a default, never a set key; any other text in them is ignored.
+struct TripleUnion { int ahead{},behind{}; };
+inline int triple_union_env(const char* text,int fallback,int max){
+    if(!text)return fallback;
+    char* end=nullptr;const long n=std::strtol(text,&end,10);
+    return end!=text&&!*end&&n>=0&&n<=max?int(n):fallback;
+}
+inline TripleUnion triple_default_union(int increase,int behind,const char* env_ahead,const char* env_behind){
+    return {increase>0?increase:triple_union_env(env_ahead,64,1024),behind>0?behind:triple_union_env(env_behind,64,256)};
 }
 // What the window and the views are, for runtime.log and the F6 Cameras page (filled once the window opens).
 struct TripleStatus {

@@ -119,22 +119,18 @@ NativeWindow& native_window(){
         if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
         if(triple_status.applied==td::TripleProjection::angled){
             outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;outrun::platform::render_disable_culling()=true;
-            // The side panels look past 90 degrees, behind the car, where the stage's section lists (the game's own
-            // forward visibility, 44DE10) draw nothing (the second rig picture: the beach ending in a hard line). Unless
-            // [Graphics] DrawDistanceBehind is set, the spike unions the lists of 64 sections behind (OR2_TRIPLE_BEHIND,
-            // 0..256, overrides). Tweaks' caution for that key applies: some models show their back faces from behind.
+            // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
+            // 44DE10) draw nothing behind the car and add objects beside it only a few sections on. Where [Graphics]
+            // leaves a key at 0, the views union 64 sections ahead and 64 behind (td::triple_default_union). Tweaks'
+            // caution for DrawDistanceBehind applies: some models show their back faces from behind.
             auto& dd=outrun::platform::draw_distance();
-            if(dd.behind==0){
-                int behind=64;
-                if(const char* b=std::getenv("OR2_TRIPLE_BEHIND")){char* end=nullptr;const long n=std::strtol(b,&end,10);
-                    if(end!=b&&!*end&&n>=0&&n<=256)behind=int(n);}
-                dd.behind=behind;if(dd.active())outrun::platform::render_queues_extended()=true;
-            }
+            const auto u=td::triple_default_union(dd.increase,dd.behind,std::getenv("OR2_TRIPLE_AHEAD"),std::getenv("OR2_TRIPLE_BEHIND"));
+            dd.increase=u.ahead;dd.behind=u.behind;if(dd.active())outrun::platform::render_queues_extended()=true;
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the toolkit fixture rig "
                         "(32 in 16:9, eye matched to the game's FOV, sides 70 deg, gap 8 mm), one game render replicated into three "
-                        "viewports; stage culling off; %d stage sections behind the car drawn; objects behind the eye still culled; the "
-                        "HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),w.width,w.height,
-                        r.left,r.top,span_note.c_str(),dd.behind);
+                        "viewports; stage culling off; stage sections drawn +%d ahead and %d behind the car; objects behind the eye "
+                        "still culled; the HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),
+                        w.width,w.height,r.left,r.top,span_note.c_str(),dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
                         "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
@@ -320,7 +316,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
             return int(v);};
         dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
-        // Angled views may set sections behind later (native_window): their exclusions are read here too.
+        // Angled views may set sections ahead and behind later (native_window): their exclusions are read here too.
         const bool spike=outrun::xbox_runtime::triple_angled_requested&&!outrun::xbox_runtime::triple_latched;
         const char* from=nullptr;std::size_t excluded=0;
         if(dd.active()||spike)
@@ -328,7 +324,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
                 std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
                 const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
                 excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
-        if(spike&&!dd.active())std::printf("settings: three-view spike: %zu excluded nodes for its sections behind (%s)\n",excluded,
+        if(spike&&!dd.active())std::printf("settings: three-view spike: %zu excluded nodes for its sections ahead and behind (%s)\n",excluded,
             from?from:"no lods.ini");
         if(dd.active()){
             outrun::platform::render_queues_extended()=true;

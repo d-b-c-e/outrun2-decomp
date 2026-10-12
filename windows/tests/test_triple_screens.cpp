@@ -52,6 +52,21 @@ int main(){
     // still gives a planar aspect, but no three panels.
     CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::separate,false,21.f/9.f))=="Separate monitors found no three-monitor span");
     CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::surround,false,0.f))=="needs a window wider than 16:9");
+    // The Angled default union: 64 / 64 where [Graphics] leaves a key at 0. A set key is kept and the environment never
+    // replaces it; an environment value in range (strtol: leading blanks pass) replaces only a default, 0 included;
+    // anything else is ignored.
+    {   auto same=[](TripleUnion u,int a,int b){return u.ahead==a&&u.behind==b;};
+        CHECK(same(triple_default_union(0,0,nullptr,nullptr),64,64));
+        CHECK(same(triple_default_union(256,0,nullptr,nullptr),256,64));
+        CHECK(same(triple_default_union(0,256,nullptr,nullptr),64,256));
+        CHECK(same(triple_default_union(1024,256,"8","8"),1024,256));
+        CHECK(same(triple_default_union(0,0,"0","0"),0,0));
+        CHECK(same(triple_default_union(0,0,"1024","256"),1024,256));
+        CHECK(same(triple_default_union(0,0,"1025","257"),64,64));
+        CHECK(same(triple_default_union(0,0,"-1",""),64,64));
+        CHECK(same(triple_default_union(0,0,"64x"," 32"),64,32));
+        CHECK(same(triple_default_union(0,0,"abc","1e2"),64,64));
+    }
     // The span: the owner's "Sim Racing" layout (three 2560x1440 at x = -2560, 0, 2560) in any order.
     const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440},r{2560,0,5120,1440};
     ScreenRect out{};
