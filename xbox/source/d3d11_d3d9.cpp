@@ -734,6 +734,16 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
                         key.c_str(),now.c_str(),then.c_str());}
     }
     if(ok&&p.projection>=0&&projection)*projection=&triple_recent_[std::size_t(p.projection)].p;
+    // Diagnostics (F10: the side sky still black in most frames, no recent projection matched): the first six unmatched
+    // draws log the registers c64..c67 (where every match so far was) and the current transforms, to see what the
+    // constants hold instead.
+    static unsigned unmatched_dumps=0;
+    if(!ok&&unmatched_dumps<6&&registers>=68){++unmatched_dumps;
+        std::string k,t;
+        for(int r=64;r<68;++r)for(int j=0;j<4;++j){char b[24];std::snprintf(b,sizeof b,"%g ",double(vs_constants[std::size_t(r)][std::size_t(j)]));k+=b;}
+        for(const auto* m:{&transform_world,&transform_view,&transform_proj}){t+="| ";
+            for(unsigned j=0;j<16;++j){char b[24];std::snprintf(b,sizeof b,"%g ",double((*m)[j]));t+=b;}}
+        std::printf("triple views: unmatched %.60s: c64..c67 %s; world, view, projection %s\n",key.c_str(),k.c_str(),t.c_str());}
     // Each distinct outcome of a program is logged once (at most four per program; nene 34449: a program whose
     // constants alternate would otherwise log every flip); the changes are counted for the exit line.
     const int outcome=p.base<0?-1:p.base*16+(p.affine?1:0)+((p.projection+1)<<1);
