@@ -30,6 +30,7 @@ struct Live {
     xbox_runtime::InputFilter inner{};
     RaceEpochs epochs;
     bool output{};              // F4: the delivery started (WheelFfb.dll loaded, gates set)
+    std::string off;            // why there is no wheel output (the F6 panel's status)
     WheelFfbApi api{};
     ffbdev::Delivery delivery;
     std::uint32_t race_ticks{},sent{},invalid_rows{};
@@ -112,19 +113,19 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
 // F4: the wheel output, when every gate allows it (ffb_device.hpp); false leaves WheelFfb.dll unloaded.
 bool start_output(const Ini& settings,bool latched,std::string& notes){
     const auto cfg=ffb_output_config(settings,latched,std::getenv("DBCE_FFB_MUTE"),notes);
-    if(!cfg.output)return false;
-    if(const auto why=ffbdev::load_refusal(cfg);!why.empty()){std::printf("ffb: no wheel output: %s\n",why.c_str());return false;}
+    const auto off=[](const std::string& why){f.off=why;std::printf("ffb: no wheel output: %s\n",why.c_str());return false;};
+    if(!cfg.output){f.off=ffbdev::load_refusal(cfg);return false;}   // the default: no line of its own
+    if(const auto why=ffbdev::load_refusal(cfg);!why.empty())return off(why);
     wchar_t exe[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,exe,MAX_PATH);
     std::wstring path=n&&n<MAX_PATH?std::wstring(exe,n):std::wstring();
     const auto slash=path.find_last_of(L"\\/");
-    if(slash==std::wstring::npos){std::printf("ffb: no wheel output: the game folder is unknown\n");return false;}
+    if(slash==std::wstring::npos)return off("the game folder is unknown");
     path=path.substr(0,slash+1)+L"WheelFfb.dll";
     WheelFfb_Load(&f.api,path.c_str());   // a partial resolve is judged by Delivery::start (the exports it uses)
-    if(!f.api.module){std::printf("ffb: no wheel output: WheelFfb.dll not found beside the game\n");return false;}
+    if(!f.api.module)return off("WheelFfb.dll not found beside the game");
     if(!f.delivery.start(f.api,cfg)){
-        std::printf("ffb: no wheel output: %s\n",f.delivery.why().c_str());
         WheelFfb_Unload(&f.api);          // start() creates no library state: safe to unload
-        return false;
+        return off(f.delivery.why());
     }
     std::printf("ffb: wheel output to the steering device %s (WheelFfb %d); it opens in the race, in front\n",cfg.steer_dev.c_str(),
         f.api.GetWheelFfbVersion());
@@ -203,5 +204,21 @@ void ffb_shutdown(){
     }
     std::fflush(stdout);
     f.on=false;
+}
+
+std::string ffb_status_text(){
+    if(!f.output)return "off: "+(f.off.empty()?std::string("no wheel output"):f.off);
+    const auto& why=f.delivery.why();
+    return std::string("wheel ")+ffbdev::phase_name(f.delivery.phase())+(why.empty()?"":": "+why);
+}
+
+bool ffb_output_running(){return f.output;}
+
+void ffb_stop_output(){
+    if(!f.output)return;
+    f.delivery.shutdown();   // PanicStop, FreeDirectInput: quiesced before the unload
+    WheelFfb_Unload(&f.api);
+    f.output=false;f.off="stopped (Stop FFB / F8) for this session";
+    std::printf("ffb: wheel output stopped by Stop FFB (F8); the software force stream continues\n");std::fflush(stdout);
 }
 }

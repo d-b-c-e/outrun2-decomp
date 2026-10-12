@@ -95,6 +95,27 @@ void test_write_section(){
     std::remove(path.c_str());
 }
 
+// write_key (the F6 panel's saves): one key, every other byte kept; repeated writes do not grow the file.
+void test_write_key(){
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_desktop_write_key_"+std::to_string(GetCurrentProcessId())+".ini";
+    const std::string controls="[Controls]\r\nSchema = 1\r\nsteer = axis 0 dev={d71b8350-61b7-11f1-8001-444553540000}\r\n";
+    {std::ofstream f(path,std::ios::binary);f<<"; head\r\n"<<controls<<"\r\n[FFB]\r\n; tuning\r\nffbspringstrength = 0.45\r\nFFBDamperStrength = 0.10\r\n\r\n[Window]\r\nFrameLatency = 2\r\n";}
+    std::string error;
+    check(write_key(path,"FFB","FFBSpringStrength","0.30",error),"replace (key in another case): "+error);
+    check(write_key(path,"FFB","FFBGlobalStrength","0.80",error),"append to the section: "+error);
+    check(write_key(path,"Triple","Screens","Separate monitors",error),"a new section: "+error);
+    const auto read=[&]{std::ifstream f(path,std::ios::binary);std::stringstream s;s<<f.rdbuf();return s.str();};
+    const std::string want="; head\r\n"+controls+"\r\n[FFB]\r\n; tuning\r\nFFBSpringStrength = 0.30\r\nFFBDamperStrength = 0.10\r\n"
+        "FFBGlobalStrength = 0.80\r\n\r\n[Window]\r\nFrameLatency = 2\r\n\r\n[Triple]\r\nScreens = Separate monitors\r\n";
+    check(read()==want,"file after the writes:\n"+read());
+    for(int i=0;i<3;++i)check(write_key(path,"FFB","FFBSpringStrength","0.30",error),"rewrite: "+error);
+    check(read()==want,"repeated writes keep the file as it was (no blank lines added)");
+    Ini ini;ini.load(path);
+    check(ini.text("FFB","FFBSpringStrength")=="0.30"&&ini.text("Controls","steer").rfind("axis 0",0)==0&&ini.text("Triple","Screens")=="Separate monitors",
+          "the game's reader sees the new values and the controls untouched");
+    std::remove(path.c_str());
+}
 void test_injection(){
     std::string nonce,why;std::uint64_t expires=0;
     check(inject::parse_session("nonce=abcdefgh\nexpires=1000",900,nonce,expires,why)&&nonce=="abcdefgh"&&expires==1000,"session");
@@ -147,7 +168,7 @@ void test_wheel_steering(){
 }
 
 int main(){
-    try{test_report();test_import();test_write_section();test_injection();test_wheel_steering();}
+    try{test_report();test_import();test_write_section();test_write_key();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;

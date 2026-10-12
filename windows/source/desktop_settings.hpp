@@ -33,6 +33,10 @@ WheelSteering wheel_steering(float sensitivity,float dead_zone);
 WheelSteering wheel_steering(const Ini& settings);   // [Wheel] SteeringSensitivity / SteeringDeadZone
 // Replaces [section]'s body in the file (or appends the section); every other byte of the file is kept.
 bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error);
+// One key of [section] set to `value` in the file as it is now (re-read, so another writer's lines, Wheelkit's
+// [Controls] among them, are kept): every line of that key (any case) becomes "key = value", or the line is added;
+// the section's other lines, comments included, and the rest of the file are kept (write_section).
+bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error);
 // OutRunDesktop.ini in `folder`, written with comments when it does not exist. When it is new and the folder has
 // an OutRun2006Tweaks.ini, the new file is left without [Controls] so that the Tweaks bindings get imported.
 // create_if_missing=false (a latched test process): read only; a missing file is simply empty.

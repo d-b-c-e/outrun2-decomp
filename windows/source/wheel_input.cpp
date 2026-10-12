@@ -271,6 +271,16 @@ std::string wheel_input_steer_device(){
     return b?b->device->dev:std::string();
 }
 
+std::string wheel_input_status_text(){
+    if(!g.configured)return "the wheel input is not in use (another input backend)";
+    if(g.section.schema==0)return "no [Controls] profile yet: bind the controls in Wheelkit";
+    std::string s="profile \""+g.section.profile+"\""+(g.section.revision.empty()?"":" (revision "+g.section.revision+")")+", "+
+        std::to_string(g.section.bound.size())+" bindings";
+    const Bound* steer=nullptr;for(const auto& b:g.bound)if(b.action=="steer")steer=&b;
+    if(!steer)return s+"; steering: no device bound or connected at start";
+    return s+"; steering: "+steer->device->name+(steer->device->connected?" connected":" not connected");
+}
+
 void wheel_input_configure(const Ini& ini){
     g.settings_path=ini.path();
     const auto slash=g.settings_path.find_last_of("\\/");g.folder=slash==std::string::npos?".":g.settings_path.substr(0,slash);

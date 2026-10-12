@@ -160,6 +160,21 @@ bool write_section(const std::string& path,const std::string& section,const std:
     if(std::rename(temp.c_str(),path.c_str())!=0){error="cannot replace "+path;return false;}
     return true;
 }
+bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error){
+    Ini now;now.load(path);   // the file as it is now
+    auto lines=now.section_lines(section);
+    while(!lines.empty()&&trim(lines.back()).empty())lines.pop_back();   // write_section keeps the trailing blanks
+    bool found=false;
+    for(auto& l:lines){
+        const auto t=trim(l);
+        if(t.empty()||t[0]==';'||t[0]=='#')continue;
+        const auto eq=t.find('=');
+        if(eq==std::string::npos||lower(trim(t.substr(0,eq)))!=lower(key))continue;
+        l=key+" = "+value;found=true;
+    }
+    if(!found)lines.push_back(key+" = "+value);
+    return write_section(path,section,lines,error);
+}
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     Ini ini;
     const auto own=folder+"/OutRunDesktop.ini";

@@ -19,4 +19,6 @@ void wheel_input_shutdown();
 // The instance GUID ("{...}", lower case) of the device the steer binding reads, while it is connected; "" otherwise
 // (no binding, the device absent or lost, or this backend not in use). The force output's device identity (ffb_device.hpp).
 std::string wheel_input_steer_device();
+// For the F6 panel's Controls page: the profile and revision, how many bindings apply, and the steering device's state.
+std::string wheel_input_status_text();
 }

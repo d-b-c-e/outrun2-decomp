@@ -1012,5 +1012,29 @@
   "line": "ImFileHandle f = ImFileOpen(ini_filename, \"wt\");",
   "class": "config-disabled",
   "reason": "SaveIniSettingsToDisk: every call is under io.IniFilename != NULL or passes it (null here, desktop_panel.cpp), and it returns for a null name"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "const bool ok=write_key(p.ini,section,key,value,error);",
+  "class": "latched-skip",
+  "reason": "the F6 panel's save of one key into OutRunDesktop.ini: save() returns before it in a latched process (p.latched)"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error){",
+  "class": "definition",
+  "reason": "write_key, a watched writer wrapper (its call sites are audited)"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "return write_section(path,section,lines,error);",
+  "class": "definition",
+  "reason": "write_key's body: write_section on the path its caller passes"
+ },
+ {
+  "file": "windows/source/desktop_settings.hpp",
+  "line": "bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error);",
+  "class": "definition",
+  "reason": "write_key's declaration"
  }
 ]

@@ -42,4 +42,9 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
 // Installs the per-tick computation after the current input filter (call after it is chosen). No-op when off.
 void ffb_wrap_input_filter();
 void ffb_shutdown();
+// For the F6 panel: the wheel output's state ("off: <why>", or the delivery's phase and why), whether it was started,
+// and Stop FFB (F8, STD-004): the device quiesced and released for this process, then the DLL unloaded.
+std::string ffb_status_text();
+bool ffb_output_running();
+void ffb_stop_output();
 }

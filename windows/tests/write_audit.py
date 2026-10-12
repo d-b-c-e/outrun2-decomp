@@ -35,7 +35,8 @@ STANDALONE_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?control_publ
 SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
             "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home",
-            "ImFileOpen"]   # Dear ImGui's file helper (vendor/native): its call sites are audited, not only its fopen
+            "ImFileOpen",   # Dear ImGui's file helper (vendor/native): its call sites are audited, not only its fopen
+            "write_key"]    # one settings key (desktop_settings.cpp, the F6 panel's saves)
 
 OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|fopen_s|_wfopen_s|freopen|_wfreopen|freopen_s|_wfreopen_s|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
 # CRT descriptor opens (2b audit review): flagged unless the flags are visibly read only (O_RDONLY, no write flag).

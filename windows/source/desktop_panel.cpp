@@ -3,8 +3,13 @@
 #include "desktop_panel.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
+#include "ffb_live.hpp"
 #include "native_window.hpp"
+#include "telemetry_forza.hpp"
+#include "triple_screens.hpp"
+#include "wheel_input.hpp"
 #include "platform/runtime_input.hpp"
+#include <cmath>
 #include "dbce_panel.h"
 #include "dbce_panel_input.h"
 #include "imgui.h"
@@ -24,14 +29,101 @@ struct Panel {
     LARGE_INTEGER freq{},last{};
 };
 Panel p;
+// The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
+// and applies at the next game start (the owner's choice is never half-applied to a running game).
+struct Values {
+    int triple{},latency{2};
+    bool telemetry{true};int layout{};
+    int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
+    int sensitivity{100},dead_zone{};
+};
+Values v;
+int pct(float f){return int(std::lround(double(f)*100.0));}
+std::string fraction(int percent){char t[16];std::snprintf(t,sizeof t,"%.2f",percent/100.0);return t;}
 // The toolkit's own lines already start with "panel:"; ours get the prefix here.
 void log_line(const char* line){std::printf(std::strncmp(line,"panel:",6)==0?"%s\n":"panel: %s\n",line);std::fflush(stdout);}
-// The Help page's own lines (the panel draws the version, the UI scale and the frame rate itself).
-void draw_page(dbce::panel::Page page,bool){
-    if(page!=dbce::panel::PAGE_HELP)return;
-    dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
-    dbce::panel::Text("The other pages arrive with the settings they control; controls are bound in Wheelkit.");
+// One key into OutRunDesktop.ini (the file Wheelkit reads); never in a test run.
+void save(const char* section,const char* key,const std::string& value){
+    if(p.latched){dbce::panel::NoteSaved(false,"a test run saves nothing");return;}
+    std::string error;
+    const bool ok=write_key(p.ini,section,key,value,error);
+    dbce::panel::NoteSaved(ok,ok?"applies at the next game start":error.c_str());
+    std::printf("panel: [%s] %s = %s %s\n",section,key,value.c_str(),ok?"saved":("NOT saved: "+error).c_str());std::fflush(stdout);
 }
+bool percent_key(const char* label,int* value,int max,int def,const char* key,const char* help=nullptr){
+    if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
+    save("FFB",key,fraction(*value));return true;
+}
+void page_controls(bool){
+    dbce::panel::Status("Controls",wheel_input_status_text().c_str());
+    dbce::panel::Text("Bindings are set in Wheelkit ([Controls] of the settings file).");
+    if(dbce::panel::Slider("Steering sensitivity",&v.sensitivity,10,300,100,"%d%%"))save("Wheel","SteeringSensitivity",fraction(v.sensitivity));
+    if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))save("Wheel","SteeringDeadZone",fraction(v.dead_zone));
+}
+void page_ffb(bool advanced){
+    const auto status=ffb_status_text();
+    dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
+    dbce::panel::Text("The wheel output stays off unless the settings file says [FFB] Output = wheel (an owner check at the rig); "
+                      "Stop FFB and F8 stop it for this session.");
+    const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
+    percent_key("Strength",&v.global,100,pct(d.global_strength),"FFBGlobalStrength");
+    if(!advanced)return;
+    percent_key("Centering",&v.spring,200,pct(d.spring),"FFBSpringStrength");
+    percent_key("Damping",&v.damper,200,pct(d.damper),"FFBDamperStrength");
+    percent_key("Cornering load",&v.weight,200,pct(d.steering_weight),"FFBSteeringWeight");
+    percent_key("Grip loss",&v.grip,100,pct(d.grip_loss),"FFBGripLoss");
+    percent_key("Weight transfer",&v.transfer,200,pct(d.weight_transfer),"FFBWeightTransfer");
+    percent_key("Wall impact",&v.wall,200,pct(d.wall_impact),"FFBWallImpact");
+    percent_key("Gear shift",&v.gear,200,pct(d.gear_shift),"FFBGearShift");
+    percent_key("Road texture",&v.road,200,pct(d.road_texture),"FFBRoadTexture");
+    percent_key("Tire slip",&v.slip,200,pct(d.tire_slip),"FFBTireSlip");
+    percent_key("Engine idle",&v.idle,100,pct(d.engine_idle),"FFBEngineIdle");
+    if(dbce::panel::OffOn("Invert force",&v.invert))save("FFB","FFBInvertForce",v.invert?"true":"false");
+}
+void page_cameras(bool advanced){
+    static const char* const modes[]{"Off","Surround","Separate monitors"};
+    if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
+        "Separate monitors: one window over three equal side-by-side monitors."))
+        save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));
+    const auto& st=triple_screens_status();
+    char now[256];
+    if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1 (planar, not three views)",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
+    else std::snprintf(now,sizeof now,"%s, %s, one 16:9 view",triple_screens_name(st.mode),st.where.c_str());
+    dbce::panel::Status("Now",now);
+    if(v.triple!=int(st.mode))dbce::panel::Text("The choice applies at the next game start.");
+    if(!advanced)return;
+    static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
+    if(dbce::panel::Choice("Frame latency",latency,4,&v.latency,"Frames the swap chain may queue; fewer is less input lag, more is smoother."))
+        save("Window","FrameLatency",std::to_string(v.latency));
+}
+void page_telemetry(bool advanced){
+    if(dbce::panel::OffOn("Telemetry",&v.telemetry,"Forza Data Out to 127.0.0.1 and the OutRun 2006 mod's shared memory (SimHub, dashboards)."))
+        save("Telemetry","Enabled",v.telemetry?"true":"false");
+    if(advanced){
+        static const char* const layouts[]{"Forza Horizon (324 bytes)","Forza Motorsport 7 (311 bytes)"};
+        if(dbce::panel::Choice("Packet layout",layouts,2,&v.layout))save("Telemetry","Layout",v.layout?"FM7":"Horizon");
+    }
+    dbce::panel::Text("Changes apply at the next game start.");
+}
+void draw_page(dbce::panel::Page page,bool advanced){
+    switch(page){
+    case dbce::panel::PAGE_CONTROLS:page_controls(advanced);break;
+    case dbce::panel::PAGE_FFB:page_ffb(advanced);break;
+    case dbce::panel::PAGE_CAMERAS:page_cameras(advanced);break;
+    case dbce::panel::PAGE_TELEMETRY:page_telemetry(advanced);break;
+    case dbce::panel::PAGE_HELP:
+        dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
+        dbce::panel::Text("Controls are bound in Wheelkit.");
+        break;
+    default:break;
+    }
+}
+// Stop FFB (the header command and F8, STD-004): the wheel released for this session and [FFB] Output = none saved.
+void stop_ffb(){
+    ffb_stop_output();
+    if(!p.latched)save("FFB","Output","none");
+}
+bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
 void release_backend(){
     if(p.backend){ImGui_ImplDX11_Shutdown();p.backend=false;}
     p.device=nullptr;
@@ -95,17 +187,30 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
     if(!folder.empty())p.dev=folder+"\\OutRunDesktop.panel-dev.txt";   // none for a latched run without its folder
     p.name="OutRun 2006 desktop (decomp)";
+    // The pages' values as the settings file holds them now (the same readers the game uses at start).
+    v=Values{};
+    v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
+    {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
+    {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
+    {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
+     v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
+     v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
+     v.idle=pct(s.engine_idle);v.invert=s.invert;}
+    {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
     dbce::panel::Config c;
     c.modName=p.name.c_str();
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing
+    for(const auto page:{dbce::panel::PAGE_CONTROLS,dbce::panel::PAGE_FFB,dbce::panel::PAGE_CAMERAS,dbce::panel::PAGE_TELEMETRY})c.pages[page]=true;
     c.drawPage=draw_page;
+    c.ffbOn=ffb_output_running;c.stopFfb=stop_ffb;   // Stop FFB / F8 (STD-004)
     c.log=log_line;
     c.devFile=p.dev.empty()?nullptr:p.dev.c_str();
+    c.triplesOn=triples_on;
     dbce::panel::Configure(c);
     xbox_runtime::present_overlay()=overlay;
     p.configured=true;
-    std::printf("panel: F6 settings panel ready (Help page; %s; dev channel %s)\n",latched?"a test run: nothing saved":"[Panel] kept in the settings file",
-        p.dev.empty()?"off":p.dev.c_str());
+    std::printf("panel: F6 settings panel ready (Controls, FFB, Cameras, Telemetry, Help; %s; dev channel %s)\n",
+        latched?"a test run: nothing saved":"saves to the settings file",p.dev.empty()?"off":p.dev.c_str());
     std::fflush(stdout);
 }
 
