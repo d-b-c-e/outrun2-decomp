@@ -37,4 +37,10 @@ std::uint32_t ending_model_452340(PcRaceContext&);
 // 44B890 (event 0x186 function 0x44 display): 409F30, 4044E0(6), 405360(452340, 0, 0, 0, -1, 0),
 // 4044E0(7), 40A010 as draw leaves.
 void ending_area_display_44b890(PcRaceContext&);
+// [Misc] RestoreJPClarissa (pc_screen.hpp; Tweaks hooks_misc.cpp, off by default): the ending's heroine as the JP model.
+// ending_jp_motion_set: the motion set 4527F0 leaves in [7D3A7C] (Tweaks' mid hook at 4529A5: 3, the USA heroine,
+// becomes 2). ending_heroine_resource: the resource for 5A4618 entry `index` whose table value is `value` (Tweaks
+// patches entry 1 from 0xCF, obj_chr_gal_usa_pmt, to 0xCE, obj_chr_gal_pmt). Identity while the key is off.
+std::int32_t ending_jp_motion_set(std::int32_t set);
+std::uint32_t ending_heroine_resource(std::uint32_t index,std::uint32_t value);
 }

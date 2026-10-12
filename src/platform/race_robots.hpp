@@ -96,6 +96,9 @@ std::uint32_t race_robot_driver_chara_487ee0(PcRaceContext&);
 // become LH00 (10) and GH00 (7); the non-console constants L00 9 (48803A) and G00_USA 6 (488044) become LH00 and
 // GH00_USA (8). Everything else is returned unchanged. table: a table read (index = its entry) or a constant.
 // race_robots.cpp and the native 488090 path both use these.
+// [Misc] RestoreJPClarissa (pc_screen.hpp; Tweaks hooks_misc.cpp, off by default) also goes through the passenger's
+// constants: 6 (488044) becomes G00 5, or GH00 7 with hi-def characters, and 8 (48804E, mode 3) becomes GH00 7. So
+// both 487F50 sites pass their constants here, 8 included.
 std::uint32_t race_robot_hidef_driver(bool table,std::uint32_t index,std::uint32_t chrset);
 std::uint32_t race_robot_hidef_passenger(bool table,std::uint32_t index,std::uint32_t chrset);
 bool race_robot_hand_motion_487940(const PcRaceMemory&,std::uint32_t motion_id);

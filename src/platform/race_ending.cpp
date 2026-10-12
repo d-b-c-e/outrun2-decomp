@@ -1,8 +1,13 @@
 #include "platform/race_ending.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/vehicle_model_draw.hpp"
 #include "driving/pc_matrix_stack.hpp"
 #include <cstring>
 namespace outrun::platform {
+std::int32_t ending_jp_motion_set(std::int32_t set){return g_pc_restore_jp_clarissa&&set==3?2:set;}
+std::uint32_t ending_heroine_resource(std::uint32_t index,std::uint32_t value){
+    return g_pc_restore_jp_clarissa&&index==1u&&value==0xcfu?0xceu:value;
+}
 namespace {
 std::uint32_t call(PcRaceContext& c,std::uint32_t pc,std::initializer_list<std::uint32_t> args){
     PcRaceCall k;k.pc=pc;k.argc=std::uint32_t(args.size());
@@ -128,6 +133,8 @@ void ending_choice_4527f0(PcRaceContext& c){
             break;
         }
     }
+    // RestoreJPClarissa: Tweaks' mid hook at 4529A5, where both branches join (written only when it changes the set).
+    if(const std::int32_t set=m.i32(0x7d3a7cu),jp=ending_jp_motion_set(set);jp!=set)m.put32(0x7d3a7cu,std::uint32_t(jp));
     call(c,0x44fcc0u,{0u});call(c,0x44fce0u,{0u});
     request(c,0x57u,8u);
     request(c,0xd0u,2u);                                                // VM snippet 44794F: push 0xD0 (measured)
@@ -138,7 +145,9 @@ void ending_choice_4527f0(PcRaceContext& c){
     if(col>4&&col!=-1)request(c,m.u32(0x5a4740u+std::uint32_t(col)*24u),9u);
     request(c,m.u32(0x5a46a0u+(std::uint32_t(m.u8(0x7d3a88u))+std::uint32_t(col)*2u)*8u),9u);
     request(c,0xccu,2u);
-    if(const std::int32_t set=m.i32(0x7d3a7cu))request(c,m.u32(0x5a4618u+std::uint32_t((set-1)%3)*4u),9u);
+    if(const std::int32_t set=m.i32(0x7d3a7cu)){
+        const std::uint32_t entry=std::uint32_t((set-1)%3);
+        request(c,ending_heroine_resource(entry,m.u32(0x5a4618u+entry*4u)),9u);}
     else{request(c,0xcdu,9u);request(c,0xcfu,9u);}
     for(std::uint32_t i=0;i<15u;++i)request(c,m.u32(0x5a4838u+(m.u32(0x638e98u)*0x13u+i)*4u),9u);
     call(c,0x4f2020u,{m.u32(0x5a4874u+m.u32(0x638e98u)*0x4cu),0u});

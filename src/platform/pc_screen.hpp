@@ -45,6 +45,12 @@ inline bool g_pc_fix_lens_flare_path=true;
 // and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;
 // rob_disp.cpp 488B80).
 inline bool g_pc_use_hidef_characters=true;
+// [Misc] RestoreJPClarissa (the Tweaks key, off by default there and here; hooks_misc.cpp): Clarissa as the Japanese
+// release has her, not the USA model the PC uses, in O2SP arcade mode and in the arcade ending. Gameplay: 487F50's
+// non-console constants G00_USA 6 (488044) and GH00_USA 8 (48804E) become G00 5 (GH00 7 with hi-def characters) and
+// GH00 7 (race_robots.hpp race_robot_hidef_passenger). Ending: race_ending.hpp ending_jp_motion_set /
+// ending_heroine_resource and race_autoscene.cpp 4B5A80 (the 4B5AE6 force of 0xE to 0xF skipped).
+inline bool g_pc_restore_jp_clarissa=false;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'

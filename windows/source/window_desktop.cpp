@@ -387,6 +387,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // character sets in gameplay (pc_screen.hpp).
     outrun::platform::g_pc_use_hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
     if(!outrun::platform::g_pc_use_hidef_characters)std::printf("settings: hi-def characters off (the standard character sets)\n");
+    // [Misc] RestoreJPClarissa, the Tweaks key (off unless set true, as there): Clarissa's Japanese model in O2SP arcade
+    // mode and the arcade ending (pc_screen.hpp).
+    outrun::platform::g_pc_restore_jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
+    if(outrun::platform::g_pc_restore_jp_clarissa)std::printf("settings: Clarissa's Japanese model restored (O2SP arcade and ending)\n");
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);

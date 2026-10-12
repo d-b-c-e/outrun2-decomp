@@ -6,6 +6,7 @@
 #include "platform/embedded_vehicle_draw_data.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/race_robots.hpp"
+#include "platform/race_ending.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -90,6 +91,19 @@ int main(){
     CHECK(race_robot_hidef_driver(true,0,11)==11&&race_robot_hidef_driver(false,0,11)==11);
     CHECK(race_robot_hidef_passenger(true,4,5)==5&&race_robot_hidef_passenger(false,0,6)==6&&race_robot_hidef_passenger(true,3,9)==9);
     g_pc_use_hidef_characters=true;
+    // RestoreJPClarissa (off by default): the O2SP constants 6 -> G00 5 (GH00 7 with hi-def) and 8 -> GH00 7, the tables
+    // and L00 untouched beyond what hi-def does; the ending's motion set 3 -> 2 and 5A4618 entry 1 0xCF -> 0xCE only.
+    CHECK(!g_pc_restore_jp_clarissa&&ending_jp_motion_set(3)==3&&ending_heroine_resource(1,0xcf)==0xcf);
+    g_pc_restore_jp_clarissa=true;
+    CHECK(race_robot_hidef_passenger(false,0,6)==7&&race_robot_hidef_passenger(false,0,8)==7&&race_robot_hidef_passenger(false,0,9)==10);
+    CHECK(race_robot_hidef_passenger(true,4,5)==7&&race_robot_hidef_passenger(true,0,6)==6&&race_robot_hidef_passenger(true,0,8)==8);
+    g_pc_use_hidef_characters=false;
+    CHECK(race_robot_hidef_passenger(false,0,6)==5&&race_robot_hidef_passenger(false,0,8)==7&&race_robot_hidef_passenger(false,0,9)==9);
+    CHECK(race_robot_hidef_passenger(true,4,5)==5);
+    g_pc_use_hidef_characters=true;
+    CHECK(ending_jp_motion_set(3)==2&&ending_jp_motion_set(1)==1&&ending_jp_motion_set(0)==0&&ending_jp_motion_set(2)==2);
+    CHECK(ending_heroine_resource(1,0xcf)==0xce&&ending_heroine_resource(0,0xcd)==0xcd&&ending_heroine_resource(2,0xcf)==0xcf);
+    g_pc_restore_jp_clarissa=false;
     std::printf("car base shadow: %u checks\n",checks);
     return 0;
 }

@@ -203,6 +203,10 @@ std::uint32_t race_robot_hidef_driver(bool table,std::uint32_t index,std::uint32
     return table?(index==0u?12u:chrset):(chrset==11u?12u:chrset);
 }
 std::uint32_t race_robot_hidef_passenger(bool table,std::uint32_t index,std::uint32_t chrset){
+    if(!table&&g_pc_restore_jp_clarissa){                                     // Tweaks patches 488045 and 48804F
+        if(chrset==6u)return g_pc_use_hidef_characters?7u:5u;
+        if(chrset==8u)return 7u;
+    }
     if(!g_pc_use_hidef_characters)return chrset;
     if(table)return index==3u?10u:index==4u?7u:chrset;
     return chrset==9u?10u:chrset==6u?8u:chrset;
@@ -855,7 +859,7 @@ struct Passenger : Port {
             }
             return race_robot_hidef_passenger(true,pick,m.u32(0x6549c8u+pick*4u));
         }
-        if(m.u32(0x78026cu)==3u)return 8;
+        if(m.u32(0x78026cu)==3u)return race_robot_hidef_passenger(false,0,8u);   // 48804E (RestoreJPClarissa: 7)
         const std::uint32_t v=m.u32(0x780258u);
         return race_robot_hidef_passenger(false,0,v==1u||v==3u||v==4u||v==5u?9u:6u);
     }

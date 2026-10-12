@@ -3740,8 +3740,8 @@ std::uint32_t native_scene_owner_service(NativeRuntimeContext& context,std::uint
             else if(!console)index=race_robot_hidef_driver(false,0u,11u);
             else{if(pick>=6u||!exe_view().u32(0x6549b0u+list[pick]*4u,index))return fault(pc);index=race_robot_hidef_driver(true,list[pick],index);}
         }else if(!console){
-            index=context.mode_state.current==3u?8u:
-                race_robot_hidef_passenger(false,0u,(variant==1u||variant==3u||variant==4u||variant==5u)?9u:6u);
+            index=race_robot_hidef_passenger(false,0u,context.mode_state.current==3u?8u:
+                (variant==1u||variant==3u||variant==4u||variant==5u)?9u:6u);
         }else{
             if(pick>=6u)return fault(pc);
             const std::uint32_t k=list[pick];
