@@ -24,11 +24,12 @@ go upstream as small pull requests (first: `tweaks-exe`).
    rig, the closed-loop qualification (STD-034), hot-plug.
 2a. ⬜ **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
    our own D3D11 renderer, standard pages, each later feature adds its controls.
-3. ⬜ **Triple screens**: true per-screen projection (triple toolkit math, STD-007/015/019/022). Per panel a yaw offset in
-   `camera_view_482f20` and a matching off-centre frustum in
-   `camera_perspective_404310` (it already builds `D3DXMatrixPerspectiveOffCenterRH`
-   and the culling planes); the scene closure of `Presenter::set_pc_scene` drawn
-   three times into three viewports; the HUD on the centre panel.
+3. 🟡 **Triple screens** (`windows/docs/TRIPLE-SCREENS.md`): `[Triple] Screens` Off / Surround / Separate monitors
+   with the planar span (the Tweaks parity floor) is done and seen at the rig. True per-screen projection
+   (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
+   into three viewports, each with its clip correction from the toolkit rig math. First rig pictures 2026-10-12: three
+   projections with the side sky. Open: culling for the union of the three frusta, the F6 selector, the owner's
+   physical check.
 4. ⬜ **Force feedback**: the force model of the Tweaks fork
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
@@ -80,8 +81,9 @@ needed in a native build.
 | CDSwitcher, CDTracks | in-race track switching, track list | ⬜ | |
 | Window | WindowedBorderless, hidden cursor, DPI | ✅ | borderless over the primary monitor |
 | | WindowPositionX/Y, AutoDetectResolution | ⬜ | |
-| Triple | Screens | ⬜ | step 3 |
+| Triple | Screens | ✅ | the planar span, as Tweaks: one wide Hor+ view over three equal monitors, HUD and menus centred; Off keeps an unstretched 16:9. Projected views (beyond Tweaks): a default-off spike, see step 3 |
 | Misc | SkipIntroLogos, DisableCountdownTimer, EnableLevelSelect, EnableHollyCourse2, RestoreJPClarissa, ShowOutRunMilesOnMenu, AllowCharacterSelection, RandomHighwayAnimSets | ⬜ | |
 | | DemonwareServerOverride, ProtectLoginData | ⬜ | online play; upstream has the LAN layer |
 | Overlay, WheelSettings | in-game overlay, F6 wheel page | ⬜ | |
-| Bugfixes | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, FixLensFlarePath, FixIncorrectShading, FixParticleRendering, FixFullPedalChecks, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting. FixParticleRendering (Tweaks default on) = two parts: draw_418cf0's screen mapping uses the full width/height where the Xbox code had half (grass off screen; Tweaks halves sx, sy and the size at 419009), and the Metropolis fireworks (44DE10 object 0x630001 without a node list; Tweaks draws 0x1A000A with a fixed list) |
+| Bugfixes | FixLensFlarePath, FixIncorrectShading | 🟡 | on by default as in Tweaks. FixLensFlarePath: 44A630's offsets read from `Media\lens_flare_offset.bin` (where the game ships it) when present, else `common\`; runtime.log names the source. FixIncorrectShading: 40E140's TWOSIDE lighting entries (73F04C / 73F050) link the DOUBLE fragments (61FB48 / 61FC88), unit-tested in test_pc_shader_programs. Neither yet seen in game |
+| | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, FixParticleRendering, FixFullPedalChecks, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting. FixParticleRendering (Tweaks default on) = two parts: draw_418cf0's screen mapping uses the full width/height where the Xbox code had half (grass off screen; Tweaks halves sx, sy and the size at 419009), and the Metropolis fireworks (44DE10 object 0x630001 without a node list; Tweaks draws 0x1A000A with a fixed list) |

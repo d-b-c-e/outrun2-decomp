@@ -30,6 +30,16 @@ inline bool g_pc_screen_edge_cull_fix=true;
 // - Metropolis fireworks: 44DE10 draws object 0x630001 with no node list (node 0: road barriers instead); Tweaks draws
 //   0x1A000A with the node list of DrawDistanceBehind = 2 in its place (race_area.cpp).
 inline bool g_pc_fix_particle_rendering=true;
+// [Bugfixes] FixIncorrectShading (the Tweaks key, on by default there and here; hooks_bugfixes.cpp): materials with
+// double-sided lighting (cutscene characters, some stage models) link the TWOSIDE lighting fragment, which only flips
+// the light direction. Tweaks points the TWOSIDE_LAMBERT / TWOSIDE_SPECULAR entries of 40E140's lighting table
+// (73F04C, 73F050) at the DOUBLE_LAMBERT / DOUBLE_SPECULAR fragments (61FB48, 61FC88); pc_vertex_shader_setup.cpp
+// links those in their place. Only one side is then shaded correctly, as in Tweaks.
+inline bool g_pc_fix_incorrect_shading=true;
+// [Bugfixes] FixLensFlarePath (the Tweaks key, on by default there and here): 44A630 reads \common\lens_flare_offset.bin,
+// but the game ships it in Media\, so the sun offsets stay zero. With the fix the Media\ copy is read when it exists
+// (as Tweaks, which repoints the path only then), else the common\ one (race_course_passes.cpp).
+inline bool g_pc_fix_lens_flare_path=true;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'
