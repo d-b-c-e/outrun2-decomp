@@ -343,8 +343,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::platform::g_pc_disable_countdown_timer=settings.flag("Misc","DisableCountdownTimer",false);
     std::printf("settings: countdown timer %s\n",outrun::platform::g_pc_disable_countdown_timer?
         "DISABLED ([Misc] DisableCountdownTimer = true: the race clock stands still; not stock rules)":"on (stock rules)");
-    // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md step 1; 2, keep centred, by default here until
-    // Tweaks' 1 is built): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp).
+    // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md; 2, keep centred, by default here until Tweaks'
+    // 1 is checked in game): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp); 1
+    // spaces the HUD to the edges (partial: the note says which parts).
     {   std::string note;
         outrun::xbox_runtime::g_ui_scaling_mode=outrun::xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note);
         if(!note.empty())std::printf("settings: [Graphics] %s\n",note.c_str());

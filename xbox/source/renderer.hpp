@@ -16,7 +16,7 @@ namespace outrun::xbox_runtime {
 // (Options > Settings): the 3D scene full width, the 2D layer 4:3.
 inline bool g_widescreen=false;
 // [Graphics] UIScalingMode as parsed (display_fit.hpp parse_ui_scaling_mode / ui_scaling_rect): 2, keep centred, unless
-// the desktop host reads 0.
+// the desktop host reads 0 or 1.
 inline unsigned g_ui_scaling_mode=2u;
 
 

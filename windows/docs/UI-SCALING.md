@@ -212,9 +212,27 @@ ints.
     - In mode 2 it appears in no frame of the same phase. That fits an element that sits past the 4:3 right edge
       (643.7..676 units if unshifted). Mode 2's 4:3 viewport hides it, and mode 1's full-screen extension shows it. A
       +80 shift alone would have left it on screen in mode 2.
-    - Not yet known:
-      - which routine draws it;
-      - whether Tweaks' mode 1 shows it too.
+    - **Source trace (sana GO 40933 a; static, no code change):**
+      - **Owner:** the START display. GAD_PUB display 4998C0, mode 13, calls 499A30 (`gad_start_499a30`,
+        `race_end_modes.cpp`).
+      - **When it runs:** only with 43F860 = [780260], the console flag that the SUMO_FE init sets. That holds in
+        this build's frontend races.
+      - **What it draws:** the player-list animation 0x490001 at (0, 0), layer 4. Its frame is the START frame
+        count minus 50, capped at 5 per player; the player count 8367F0 comes from 456D60, which is 1 offline.
+      - **Single player:** the frame stops at 5, and the function returns before the per-player icons
+        (`players <= 1`). The player list's "1P" row is left where frame 5 puts it, just past the 640 edge.
+      - **Spacing:** the draw is queued outside NaviPub_Disp, with `ui_spacing_scope()` off, so it is unshifted.
+        That is consistent with the measured position.
+    - **Tweaks (code reading, no run):**
+      - No `hooks_uiscaling.cpp` site touches 499A30.
+      - Its replacement for draw_sprite_custom places every sprite at scaleY·x plus the 4:3 offset
+        (`hooks_uiscaling.cpp`, the KeepCentered / OnlineArcade branch), and nothing clips to the 4:3 area.
+      - So Tweaks' modes 1 and 2 should both draw this "1P" at x 2251 at 2560x1440. Vanilla stretches 640 to the
+        screen edge, which keeps it off screen.
+      - In the decomp, mode 1 matches that reading, and mode 2's 4:3 viewport hides it, as vanilla does.
+    - **Not confirmed:**
+      - frame 5's layer positions in 0x490001 (no sprani dump was made);
+      - a Tweaks frame of the start camera.
 - **Limits:**
   - one route, one run per mode, one aspect;
   - not exercised:
