@@ -174,6 +174,58 @@ ints.
     a reconstruction of these functions first, is the open choice.
 - **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
   decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
+## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
+
+- **Setup:** one bounded run per mode with the same exe (6547538, `ui1`), muted, in the perf copy. Window
+  2560x1440 (16:9, so the UI is 3 px per unit and spacing is 80 units), ordinary FOV. Route: OutRun Palm Beach start,
+  about 20 s of driving.
+- **Captures:**
+  - PrintWindow shots at t+30 / 40 / 50 s;
+  - the 60 fps clip, which holds the window at half scale.
+- **Method:** each element is cut from the mode-2 shot and searched for in the mode-1 shot. The search covers ±400 px
+  across and ±6 px down, by minimum mean absolute difference. For each HUD element the best match scores at least
+  1.8 times better than the best position more than 8 px away. The car moves with the scene, so its control match
+  is weaker at t+50: 16.6 against 19.7.
+- **Displacement, measured at t+40 and t+50 (both agree):**
+
+  | Element | Mode 2 x (px) | Moved | Mode 1 x (px) |
+  |---|---|---|---|
+  | Total Time label + timer | 470 | −240 | 230 |
+  | position map | 476 | −240 | 236 |
+  | speedometer dial | 480 | −240 | 240 |
+  | km/h | 876 | −240 | 636 |
+  | gear row | 516 | −240 | 276 |
+  | Score label | 1630 | +240 | 1870 |
+  | Score bar (to its end) | 1850..2050 | +240 | 2090..2290 |
+  | centre Time | 1050 | 0 | 1050 |
+  | player car (control) | 1020 | 0 | 1020 |
+
+  - −240 / +240 px is the expected 80 units at 3 px per unit, with no vertical change.
+- **Clipping:**
+  - **Normal HUD:** every moved element is fully drawn. None reaches a window edge; the extremes are 230 px on the
+    left and 2290 px on the right.
+  - **New in mode 1: a "1P" banner in the start camera:**
+    - Red "1P" at x 2251..2348, y 180..240.
+    - A grey bar runs from about 2320 px to the window's right edge (2560), where the window cuts it off.
+    - It holds that position through the countdown camera (every clip frame from the camera cut to the HUD's
+      arrival) and is gone once the race HUD is up.
+    - In mode 2 it appears in no frame of the same phase. That fits an element that sits past the 4:3 right edge
+      (643.7..676 units if unshifted). Mode 2's 4:3 viewport hides it, and mode 1's full-screen extension shows it. A
+      +80 shift alone would have left it on screen in mode 2.
+    - Not yet known:
+      - which routine draws it;
+      - whether Tweaks' mode 1 shows it too.
+- **Limits:**
+  - one route, one run per mode, one aspect;
+  - not exercised:
+    - time attack (sectors, rank, REV, ghost gap, goal banners);
+    - C2C (missions, bubbles, scores);
+    - rivals, LAN, records, the heart meter;
+  - no performance or frame-time reading.
+- **Evidence:** the project hub's `artifacts/outrun-perf-20261011/ui-scaling-20261012/` holds:
+  - shots, logs and the 1P crop;
+  - the two measuring scripts, `hud_shift.py` and `red_bbox.py`.
+
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the
