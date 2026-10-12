@@ -178,9 +178,9 @@ void screenshot(Graphics& g){
 // so a change in Settings applies at once without another mode switch.
 namespace { unsigned g_refresh=0,g_interval=1; }
 // The top of a frame with OR2_FRAME_LATENCY: wait until the swap chain takes another frame, so the input sampled
-// next is as recent as the queue allows. Called first in map_input, so the wheel paths (DirectInput in the input
-// filter) and the keyboard are sampled after it; the pad snapshot (game_host read_pad) is taken before map_input,
-// so a gamepad is not (nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
+// next is as recent as the queue allows. Called through GameHost::frame_wait, first in each input sample and before
+// read_pad, so the pad snapshot, the wheel paths (DirectInput in the input filter) and the keyboard are all sampled
+// after it (romi 26392, nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
 // Present). Not alertable, so an APC cannot end it early. No effect without the variable.
 void wait_for_frame_latency(){
     if(!g_latency_wait)return;
