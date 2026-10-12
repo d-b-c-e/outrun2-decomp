@@ -22,7 +22,8 @@
 import bisect, json, pathlib, re, sys
 
 # Everything linked into OutRunDesktop.exe: all of src (conservative), the Xbox core's sources and headers, windows/.
-ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host", "windows/vendor/session", "windows/shim_dll"]
+ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host", "windows/vendor/session", "windows/shim_dll",
+         "windows/vendor/native"]   # the F6 panel and its Dear ImGui (vendored, linked into OutRunDesktop.exe)
 # Not linked into OutRunDesktop.exe: the offline tools, and the Xbox build's own UWP / Win32 entry points (the desktop
 # build has its own, windows/source/window_desktop.cpp). ps5/source is not scanned: its library (outrun_ps5_platform)
 # compiles only src/input, which is scanned under src. The standalone command publisher (control_publish.exe, b173a48:
@@ -33,7 +34,8 @@ EXCLUDE = ["src/tools/", "xbox/source/window_uwp.cpp", "xbox/source/window_win32
 STANDALONE_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?control_publish\.hpp[>"]', re.M)
 SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
-            "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home"]
+            "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home",
+            "ImFileOpen"]   # Dear ImGui's file helper (vendor/native): its call sites are audited, not only its fopen
 
 OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|fopen_s|_wfopen_s|freopen|_wfreopen|freopen_s|_wfreopen_s|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
 # CRT descriptor opens (2b audit review): flagged unless the flags are visibly read only (O_RDONLY, no write flag).
@@ -215,7 +217,10 @@ def preprocess(text):
             i += 1; continue
         if state in ("string", "char"):
             quote = '"' if state == "string" else "'"
-            if c == "\\" and i + 1 < n and text[i + 1] != "\n":
+            # A backslash before a line end (LF or CRLF: a line continuation) is not an escape pair; taking "\\\r" as one
+            # put the \r in one copy and two blanks in the other, so a CRLF file lost column alignment (ImGui's DX11
+            # backend's shader strings).
+            if c == "\\" and i + 1 < n and text[i + 1] not in "\r\n":
                 cur_nc.append(text[i:i + 2]); cur_code.append("  "); i += 2; continue
             if c == quote:
                 state = "code"; cur_nc.append(c); cur_code.append(c); i += 1; continue
@@ -350,6 +355,7 @@ CLASSES = {
     "unreferenced": "a writer with no call site in the audited code; a new call is flagged as a wrapper call",
     "seeded-read": "reads writable state that the fence copies into the run folder (saves, options)",
     "home-definition": "home() itself, or where it is set (the desktop entry gives the latched run folder)",
+    "config-disabled": "vendored code whose write runs only under a setting this build never sets (Dear ImGui: io.IniFilename and io.LogFilename are null, desktop_panel.cpp)",
 }
 
 # The guards the latched-skip / latched-read-only / wheel-off / entry-redirected classifications rely on. Each must exist

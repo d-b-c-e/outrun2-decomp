@@ -952,5 +952,65 @@
   "line": "f.trace=std::fopen(path.c_str(),\"w\");",
   "class": "entry-redirected",
   "reason": "the software force trace: latched, the run folder the latched entry passes (fence plan.run_root\\ffb-trace.csv); ordinary, only with OR2_FFB_TRACE (cleared by the latch)"
+ },
+ {
+  "file": "windows/vendor/native/panel/dbce_panel.cpp",
+  "line": "if (!WritePrivateProfileStringA(\"Panel\", key, value, g_cfg.iniPath)) {",
+  "class": "latched-skip",
+  "reason": "the F6 panel's [Panel] View / Scale / Page in OutRunDesktop.ini: iniPath is null in a latched process (desktop_panel_configure), so the panel returns before this"
+ },
+ {
+  "file": "windows/vendor/native/panel/dbce_panel.cpp",
+  "line": "HANDLE f = CreateFileA(g_cfg.devFile, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);",
+  "class": "not-a-file",
+  "reason": "the F6 panel's dev channel: a read-only open (GENERIC_READ, OPEN_EXISTING) of the command file; writes nothing"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "ImFileHandle ImFileOpen(const char* filename, const char* mode)",
+  "class": "definition",
+  "reason": "Dear ImGui's file helper ImFileOpen (a watched wrapper)"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "return ::_wfopen(filename_wbuf, mode_wbuf);",
+  "class": "definition",
+  "reason": "ImFileOpen's body (its call sites are audited)"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "return fopen(filename, mode);",
+  "class": "definition",
+  "reason": "ImFileOpen's body (its call sites are audited)"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui_internal.h",
+  "line": "static inline ImFileHandle ImFileOpen(const char*, const char*) { return NULL; }",
+  "class": "definition",
+  "reason": "ImFileOpen under IMGUI_DISABLE_FILE_FUNCTIONS (opens nothing)"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui_internal.h",
+  "line": "IMGUI_API ImFileHandle ImFileOpen(const char* filename, const char* mode);",
+  "class": "definition",
+  "reason": "ImFileOpen's declaration"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "if ((f = ImFileOpen(filename, mode)) == NULL)",
+  "class": "not-a-file",
+  "reason": "ImFileLoadToMemory: both callers pass \"rb\" (the font file the panel loads, imgui_draw.cpp; the ini load, not reached with io.IniFilename null)"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "ImFileHandle f = ImFileOpen(filename, \"ab\");",
+  "class": "config-disabled",
+  "reason": "LogToFile: returns before this without a file name, and io.LogFilename is null; the panel never logs to a file"
+ },
+ {
+  "file": "windows/vendor/native/third_party/imgui/imgui.cpp",
+  "line": "ImFileHandle f = ImFileOpen(ini_filename, \"wt\");",
+  "class": "config-disabled",
+  "reason": "SaveIniSettingsToDisk: every call is under io.IniFilename != NULL or passes it (null here, desktop_panel.cpp), and it returns for a null name"
  }
 ]
