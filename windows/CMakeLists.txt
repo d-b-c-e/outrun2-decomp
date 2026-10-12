@@ -122,6 +122,14 @@ target_include_directories(test_outrun_adapter PRIVATE shim tests source vendor/
 target_compile_features(test_outrun_adapter PRIVATE cxx_std_17)
 target_compile_options(test_outrun_adapter PRIVATE /W4)
 add_test(NAME outrun_adapter COMMAND test_outrun_adapter)
+# The native controls consumer for Wheelkit's Apply Controls fixtures (sana 40461/40764): OutRunDesktop.ini read as an
+# ordinary start reads it (Ini, the backend choice, the shim profile bytes, read_profile, outrun_capability), as JSON.
+add_executable(outrun_controls_consumer tests/controls_consumer.cpp source/desktop_settings.cpp source/outrun_adapter.cpp
+    shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(outrun_controls_consumer PRIVATE shim tests source vendor/controls ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(outrun_controls_consumer PRIVATE cxx_std_17)
+target_compile_options(outrun_controls_consumer PRIVATE /W4)
+target_compile_definitions(outrun_controls_consumer PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 
 # R2 (Astra 16754): the adapter/action replay of a sealed OutRunDesktop capture, offline (a tool, given a capture).
 add_executable(capture_replay tests/capture_replay.cpp source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp
@@ -227,6 +235,8 @@ if(Python3_FOUND)
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 add_test(NAME shim_first_loop_timing COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_run_timing.py)
 add_test(NAME shim_first_loop_consumed_compare COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_compare_consumed.py)
+add_test(NAME controls_consumer COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_controls_consumer.py
+    $<TARGET_FILE:outrun_controls_consumer> ${CMAKE_CURRENT_SOURCE_DIR}/tests/controls_consumer)
 # The first loop's publish through the shared native publisher (b173a48): its own fixture (a fresh folder, removed
 # first), and the control worker's snapshot open reading throughout (live r1-01's failure; ReplaceFileW the control).
 add_test(NAME shim_first_loop_publish_clean COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/publish-fixture)
