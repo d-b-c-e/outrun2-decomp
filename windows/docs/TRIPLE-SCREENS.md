@@ -235,6 +235,15 @@ The `three-projections` status needs counted passes plus a WGC check of the seam
 - **HUD and menus**: on the centre only. In the menus the side panels are black.
 - Captures were PrintWindow and a GDI copy of the composed desktop, not WGC.
 
+**Second picture** (13:06, `be3c520`, the affine match):
+- **The side sky draws**, with clouds continuous across the seams.
+- 2,251,414 draws replicated, 2,023,516 of them through the affine match (the world is in the constants only, not in
+  SetTransform). 3,519 single: programs without the projection. 0 projections refused.
+- 24 programs, every match at c64.
+- Remaining edge: track sections are chosen for the centre camera, so a side panel's ground can end at a hard line
+  against the sky. The culling union is still open.
+- One program flipping between outcomes flooded runtime.log (max frame 109 ms); `67d9cbd` logs each outcome once.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
