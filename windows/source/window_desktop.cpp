@@ -203,8 +203,17 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     }
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
-    if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files)
-        std::printf("texture replacement: %u replaced of %u looked up (%u failed to read)\n",t.replaced,t.looked,t.failed);
+    if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files){
+        std::printf("texture replacement: %u replaced of %u looked up (%u kept stock: unreadable, unusable or not created)\n",
+            t.replaced,t.looked,t.failed);
+        // Banks the pack covers, one line each; the others named once (a stage variant the pack lacks shows up here).
+        std::string others;unsigned uncovered=0;
+        for(const auto& [bank,b]:outrun::platform::pmt_texture_replacement_banks()){
+            if(b.folder){std::printf("texture replacement: %s %u of %u replaced (%u kept stock)\n",bank.c_str(),b.replaced,b.looked,b.failed);continue;}
+            ++uncovered;if(others.size()<400)others+=(others.empty()?"":", ")+bank;
+        }
+        if(uncovered)std::printf("texture replacement: %u banks without a pack folder: %s%s\n",uncovered,others.c_str(),others.size()>=400?", ...":"");
+    }
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     return result;

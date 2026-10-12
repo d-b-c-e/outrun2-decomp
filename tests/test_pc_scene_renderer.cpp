@@ -51,6 +51,11 @@ int main(int argc,char** argv){
         // display 49F500 -> 46C140 at layer 8.
         platform::RetailAssetStore store;std::string error;
         require(platform::retail_asset_store_open(store,argv[1],&error),"retail root");
+        // Texture replacement folders: the file stems of the 633558 paths (Tweaks' pack folder names).
+        std::printf("bank names: bb=%s db=%s fe=%s 1=%s\n",platform::pc_bank_pack_name(0xbb).c_str(),platform::pc_bank_pack_name(0xdb).c_str(),
+            platform::pc_bank_pack_name(0xfe).c_str(),platform::pc_bank_pack_name(1).c_str());
+        require(platform::pc_bank_pack_name(0xdb)=="cs_CS_BEAC_pmt"&&platform::pc_bank_pack_name(0xbb)=="obj_pc_color_pmt","bank pack names");
+        require(platform::pc_bank_pack_name(0xfe)=="obj_course_obj_cs_beac_pmt"&&platform::pc_bank_pack_name(0x223).empty(),"bank pack names 2");
         std::vector<std::uint8_t> colour,f50;
         require(platform::retail_asset_read_relative_inflated(store,"COMMON/obj_pc_color_pmt.sz",colour,128u<<20,&error),"colour bank archive");
         require(platform::retail_asset_read_relative_inflated(store,platform::VehicleResourcePaths[0],f50,128u<<20,&error),"F50 archive");

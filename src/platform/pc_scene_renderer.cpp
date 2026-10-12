@@ -46,7 +46,7 @@ void PcSceneRenderer::flush_alpha(){
 }
 // The bank's file stem from the PC resource filename table 633558 ("\Stage\BEAC\cs_CS_BEAC_pmt.sz" -> "cs_CS_BEAC_pmt"):
 // the folder its replacement textures sit in. Empty when the EXE image or the entry is missing.
-static std::string bank_pack_name(std::uint32_t resource){
+std::string pc_bank_pack_name(std::uint32_t resource){
     if(resource>=0x223u)return {};
     const auto* entry=exe_image_bytes(0x633558u+resource*4u,4);if(!entry)return {};
     std::uint32_t at;std::memcpy(&at,entry,4);if(!at)return {};
@@ -58,7 +58,7 @@ static std::string bank_pack_name(std::uint32_t resource){
 }
 std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error,std::uint32_t resource){
     if(pmt.size()<16){error="PMT too small";return nullptr;}
-    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);bank->resources.pack_name=bank_pack_name(resource);
+    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);bank->resources.pack_name=pc_bank_pack_name(resource);
     Bytes pb(bank->pmt.data(),bank->pmt.size());
     const auto system=pb.u32(8),video=pb.u32(12);
     if(std::uint64_t(system)+video+16u>bank->pmt.size()){error="PMT sections outside the archive";return nullptr;}

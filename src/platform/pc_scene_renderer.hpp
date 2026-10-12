@@ -23,6 +23,9 @@
 #include <string>
 namespace outrun::platform {
 class PcRaceMemory;
+// The file stem of model resource `resource` in the PC resource filename table 633558 ("cs_CS_BEAC_pmt"): the folder
+// of the bank's replacement textures. Empty when the entry is missing.
+std::string pc_bank_pack_name(std::uint32_t resource);
 class PcSceneRenderer {
 public:
     explicit PcSceneRenderer(PcD3D9Device& device);

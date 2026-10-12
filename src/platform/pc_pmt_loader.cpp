@@ -29,7 +29,9 @@ namespace {
 struct Replacement {
     bool enabled{};std::filesystem::path root;
     std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
+    std::map<std::string,int> folders;                   // lower-case first components of those paths
     PmtTextureReplacementStats stats;
+    std::map<std::string,PmtTextureReplacementBank> banks;
 };
 Replacement& replacement(){static Replacement r;return r;}
 std::string lower(std::string s){for(auto& ch:s)ch=char(std::tolower(static_cast<unsigned char>(ch)));return s;}
@@ -72,11 +74,12 @@ bool find_replacement(const std::string& pack,std::uint32_t index,const std::uin
     std::uint32_t height,width;std::memcpy(&height,data+12,4);std::memcpy(&width,data+16,4);
     char name[64];std::snprintf(name,sizeof name,"%X_%ux%u.dds",pmt_xxh32(data,size),width,height);
     const std::string idx=std::to_string(index)+"_"+name,stem=lower(pack);
-    ++r.stats.looked;
+    auto& bank=r.banks[pack];if(!bank.looked)bank.folder=r.folders.count(stem)!=0;
+    ++r.stats.looked;++bank.looked;
     for(const std::string& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))}){
         const auto it=r.files.find(key);if(it==r.files.end())continue;
         if(read_replacement(it->second,out)&&replacement_usable(out,cube))return true;
-        ++r.stats.failed;out.clear();return false;
+        ++r.stats.failed;++bank.failed;out.clear();return false;
     }
     return false;
 }
@@ -156,12 +159,15 @@ void pmt_texture_replacement_configure(bool enabled,const std::string& load_fold
         if(!it->is_regular_file(e))continue;
         auto rel=std::filesystem::relative(it->path(),r.root,e).generic_u8string();
         if(e||rel.size()<4||lower(rel.substr(rel.size()-4))!=".dds")continue;
-        r.files.emplace(lower(std::string(rel.begin(),rel.end())),it->path());
+        const auto key=lower(std::string(rel.begin(),rel.end()));
+        if(const auto slash=key.find('/');slash!=std::string::npos)r.folders.emplace(key.substr(0,slash),0);
+        r.files.emplace(key,it->path());
     }
     r.stats.files=std::uint32_t(r.files.size());
     std::printf("texture replacement: %u scene textures indexed under %s\n",r.stats.files,load_folder.c_str());
 }
 const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
+const std::map<std::string,PmtTextureReplacementBank>& pmt_texture_replacement_banks(){return replacement().banks;}
 bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device& device){
     auto s=r.view();
     const auto count=s.u32(8);
@@ -182,7 +188,9 @@ bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device&
     if(replacement().enabled&&!r.pack_name.empty()&&find_replacement(r.pack_name,c.texture_95b22c,q.data,q.size,q.cube,swap)){
         auto alt=q;alt.data=swap.data();alt.size=std::uint32_t(swap.size());   // the same request, the pack's file
         handle=device.create_texture_from_file(alt);
-        if(handle)++replacement().stats.replaced;else ++replacement().stats.failed;   // not created: the stock texture
+        auto& bank=replacement().banks[r.pack_name];
+        if(handle){++replacement().stats.replaced;++bank.replaced;}
+        else{++replacement().stats.failed;++bank.failed;}   // not created: the stock texture
     }
     if(!handle)handle=device.create_texture_from_file(q);
     s.put32(slot,handle);

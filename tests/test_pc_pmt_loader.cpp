@@ -163,6 +163,9 @@ int main(){
          CHECK(Bytes(r.system.data(),r.system.size()).u32(0x58)!=0);}
         const auto& st=pmt_texture_replacement_stats();
         CHECK(st.looked==5&&st.replaced==1&&st.failed==3);
+        const auto& banks=pmt_texture_replacement_banks();
+        const auto& test=banks.at("cs_TEST_pmt");CHECK(test.folder&&test.looked==2&&test.replaced==1&&test.failed==1);
+        CHECK(!banks.at("cs_OTHER_pmt").folder&&banks.at("cs_OTHER_pmt").looked==1&&banks.at("cs_SHORT_pmt").failed==1);
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     std::printf("pc pmt loader: %u checks\n",checks);
