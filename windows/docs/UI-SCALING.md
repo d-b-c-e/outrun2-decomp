@@ -61,6 +61,119 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 Triple screens: the HUD stays on the centre monitor in both planar and three-view modes, which is STD-007. With
 three views, mode 1's spacing applies to the centre panel's 16:9 only.
 
+## Step 2a (accepted, sana 38916; built: see the ROADMAP row and the commit)
+
+**A finding that step 2 must handle first.** With the centred 4:3 rectangle, the 2D viewport and scissor cover only
+that rectangle.
+- `d3d11_d3d9.cpp` maps a pretransformed vertex from the game's 640-wide viewport to NDC on the CPU (around line 351),
+  then the D3D11 viewport places the NDC range in the 4:3 area.
+- A HUD element moved by the spacing (up to 106.7 UI units at 16:9) would leave NDC [-1, 1] and be clipped.
+
+So mode 1 needs a wider 2D mapping at the same scale:
+- the D3D11 viewport and scissor span the frame, or a span's centre panel;
+- the CPU NDC mapping uses an extended logical width, 640 + 2·ext, offset by ext, where ext = (aspect · 480 − 640) / 2
+  (106.7 at 16:9);
+- unscoped 2D lands where mode 2 puts it: same scale, same centre, up to mode 2's whole-pixel rounding of the 4:3 left
+  edge (exact at 1920 / 2560 wide).
+
+**Slice 2a:**
+1. Device: a "wide 4:3" 2D rectangle for mode 1, as above (`ui_scaling_rect` grows a third state; mode 2 and 0 keep
+   their arithmetic).
+2. Scope capture:
+   - a current scope (off / detect / left / right) that the reconstructed HUD sets and clears;
+   - `SpraniDraw` gains a `spacing` field, filled when `sprani_draw_428a10` records the draw;
+   - `pc_sprani_render_429460` passes the record's value to `layer_429350`. After `matrix_429220`, as Tweaks' 4293F3,
+     that shifts the layer matrix's m[12] by ± Tweaks' HUD amount (see below): detect moves x < 213 left and x ≥ 426 right; left / right force
+     the direction.
+3. NaviPub_Disp's scope, with its own disables, placed by the calls in 4BEB00..4BEE40 of the EXE:
+   - on (detect) from 4BEB31: score, clocks, time attack, OutRun, Heart Attack, LAN and mission bodies, then speed,
+     needle, gear, route, stage banner, warning (re-asserted at 4BEDBE);
+   - unspaced inside it:
+     - the rival labels / markers (4BEB8E .. 4BEBAF);
+     - the heart service 462CD0 (4BEBE1 .. 4BEBE6);
+     - the LAN markers (4BEC83 .. 4BEC88);
+   - off from 4BEDE0: level, split, ghost, lap, countdown, and the 4BEDF0 tail (its own guard, since the decomp
+     reaches it early for mode != 16).
+   - Guards (`UiSpacingGuard`, platform/ui_spacing.hpp) restore the scope on every return.
+   - DispTimeAttack2D's forced sides, the put_scroll positions, ghost gap and C2C come in later slices, so mode 1 is
+     **partial**: the log note says so.
+4. Mode 1 applies (no fallback). The default stays 2 until the visual check (step 4). Pool sprites drawn by 428170
+   capture the scope current then (off), as Tweaks' global would be.
+5. Tests:
+   - `test_triple_screens`: parse (1 is partial), the rectangle and spacing at 16:9, at 21:9 and on a span's centre
+     panel (4:3 plus both spacings = the centre panel, never past it), the side rule, and the guard's nesting;
+   - `test_d3d11_vertex_path`, on WARP:
+     - an in-range pretransformed quad has the same pixels with and without spacing;
+     - one left of the 4:3 is clipped in mode 2 and drawn at the same scale in mode 1;
+     - one beyond the extension stays clipped.
+
+Under triples the HUD stays on the centre panel (ext from the centre panel's 16:9), as STD-007.
+
+**Correction (after 2b): the HUD moves by Tweaks' amount, not by the margin.**
+- Tweaks' AddSpriteSpacing adds margin_px / screen_scale.x to a 640-space x, and its mode-1 sprite path draws that x
+  at screen_scale.y (the draw_sprite_custom_matrix_mid and D3DXMatrixTransformation2D hooks).
+- On screen that is margin x scaleY / scaleX: in these units 320 (1 - 4 / (3A)), i.e. 80 at 16:9 (three quarters of
+  the 106.7 margin) and 137.1 at 21:9.
+- `ui_scaling_rect` returns it as `.hud`, and pc_screen.hpp `g_pc_ui_spacing` carries it for layer_429350 and the
+  put_scroll fixes.
+- The device extension stays the full margin (`.spacing`), so nothing moved is clipped.
+- 2a and 2b as first committed moved by the margin; fixed before integration.
+
+## Step 2b (sana 40119; built; review pending)
+
+Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe around each Tweaks address):
+- **put_scroll positions** (`put_shift()`: the spacing rounded, as Tweaks' integer AddSpriteSpacing; 0 outside mode 1):
+  - DispTimeAttack2D `stages_4be4b0`: all fifteen 42D280 calls move right. They are 12 source sites, because the
+    `stage_label` lambda is called from two places.
+  - DispRank `position_4b9d80`: all eight 42D280 calls move right.
+  - DispGearPosition (REV) `gear_4b9010`: two 42D280 calls and one 42D5F0 move left.
+  - DispTempHeartNum `request_row_4bb9e0`: the 42CC00 text position moves right.
+  - PutGhostGapInfo `banner_4bddb0`: the name x moves (102, the left banner, left; otherwise right).
+  - Its sub `record_row_4bdac0`: the float copy of f behind x0 moves (4.0 left, otherwise right), unrounded. Later
+    uses of f are unchanged, as in the EXE.
+- **Scopes, as Tweaks sets its global** (no restore inside; `UiSpacingGuard` restores at the display's exit, early
+  returns included):
+  - DispGhostGap `banners_4be020`: banner 0 forced left, banner 1 forced right, set before each call.
+  - DispTimeAttack2D: the sector list forced right (4BE4BC), off for the target marker (4BE4C1), forced left for the
+    car / position badges (4BE4E7), detect from 4BE575.
+  - dispMarkerCheck `line_of_sight_4ba0e0`: off at entry, not restored, so the marker drawn after it is unspaced.
+  - NaviPub_Disp re-enables at 4BEDBE before speed / needle / gear / route / banner.
+  - DispTimeAttackGoal `navi_sector_banners_4bea50`: the banners' last side carries over to the sector list; a guard
+    restores the scope it found.
+- **Not in 2b:**
+  - the C2C speech bubbles, in translated code (`F_4fc830` ... `F_4fe760`) and in `mission_manager_control_496a30`;
+  - the GF request bubble (`banner_open_460970` / `banner_460ad0`);
+  - the C2C goal results (481A40, not ported).
+- **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
+  and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
+  the visual check (step 4).
+## Step 2c: the remaining C2C sites (the hand-reconstructed ones built; the translated ones and 481A40 not)
+
+From objdump of OR2006C2C.exe around each site; "R" is right by the spacing, unrounded for floats and rounded for
+ints.
+- **Scores, hand-reconstructed** (`race_hud_navi.cpp`), put_scroll R through `put_shift()` as in 2b (**built**):
+  - "test your slipstream": 4BD32E, the one 42D280 call in `scores_4bd230`;
+  - "don't lose your girlfriend": 4BD397 / 4BD414 / 4BD472, the three 42D280 calls in `scores_4bd340`.
+- **Mission-manager speech bubbles, hand-reconstructed** (`mission_manager.cpp`, `mission_manager_control_496a30`):
+  - the seven sites (496AC7, 496B14, 496B39, 496B94, 496BE1, 496C10, 496C6A) each move the float on top of the stack,
+    which is the bubble's x of 170.0 (0x432A0000);
+  - four are 465860's x (the decomp's `configure(..., 170.0f, ...)`) and three are 4653C0's x (`motion`: 4653C0(170,
+    -80, 0.2, 0));
+  - the decomp calls `motion` four times (lines 339 / 340 / 344 / 345), against three hooked 4653C0 sites in the EXE:
+    the second element's two calls share the tail at 496C54 .. 496C6A, so all four are hooked.
+  - **Built:** the four `configure(..., 170.0f + HUD shift, ...)` and `motion`'s 4653C0 x (floats, unrounded).
+- **The GF request bubble, hand-reconstructed** (`race_traffic_heart_*.inc`):
+  - 460A21 (`banner_open_460970` +B1): a float x in xmm0;
+  - 460D40 / 460FBC (`banner_460ad0` +270 / +4EC): float x in xmm0; at 460FBC Tweaks also writes it back to [esp].
+  - **Built:** x 176 ([5B02A4]) plus the HUD shift in the open (460A21) and reopen (460FBC) stores, and in their
+    translations (Tweaks writes the moved xmm0 over the pushed 176). The bobbing centre 7F8BBC also moves (460D40).
+- **GF speech bubbles, rank emoji, rank text: translated code** (`bulk_tr.cpp` `F_4fc830`, `F_4fc9a0`, `F_4fcd40`,
+  `F_4fd4e0`, `F_4fe760`; 16 sites).
+  - Floats at [esp] or [esp+4] at instruction boundaries.
+  - An edit would sit inside generated code at those addresses, so a small address-keyed hook in the translation, or
+    a reconstruction of these functions first, is the open choice.
+- **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
+  decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the

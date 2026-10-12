@@ -241,6 +241,42 @@ int main(){
         check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==7&&tcpu.triple_frames==5,"three-view counts");
         std::printf("three views: GPU path %llu replicated, CPU path %llu replicated\n",(unsigned long long)tgpu.triple_draws,(unsigned long long)tcpu.triple_draws);
     }
+    // UIScalingMode's 2D rectangle (display_fit.hpp ui_scaling_rect; windows/docs/UI-SCALING.md steps 1 / 2a) on a back
+    // buffer wider than 4:3: logical 64 x 48 on 128 x 48, so the 4:3 rectangle is 64 px wide from x 32. A pretransformed
+    // quad at logical x 0..8 lands at 32..40 with or without spacing; one at -8..0 is clipped by the plain rectangle
+    // (mode 2, as before) and drawn at 24..32 with a spacing of 8 (mode 1: same scale, wider mapping); one at -24..-16
+    // stays clipped even then (outside the extension, as a span's other panels are).
+    {   Gpu ug{};const D3D_FEATURE_LEVEL ui_levels[]{D3D_FEATURE_LEVEL_10_1};
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,ui_levels,1,D3D11_SDK_VERSION,&ug.device,nullptr,&ug.context))){
+            std::printf("FAIL no WARP D3D11 device for the UI rectangle\n");return 1;}
+        D3D11D3D9Device u(ug.device.Get(),ug.context.Get(),64,48);u.resize_back_buffer(128,48);
+        u.reset_state();u.set_render_state(RS_CULLMODE,CULL_NONE);u.set_render_state(RS_ZENABLE,0);u.set_viewport(0,0,64,48,0.f,1.f);
+        u.set_texture_stage_state(0,1,2);u.set_texture_stage_state(0,2,0);u.set_texture_stage_state(0,4,2);u.set_texture_stage_state(0,5,0);
+        u.set_fvf(0x44);   // XYZRHW | DIFFUSE
+        struct V {float x,y,z,rhw;std::uint32_t c;};
+        const auto quad=[&](float x0,float x1,std::uint32_t c){
+            const V v[4]{{x0,8,0,1,c},{x1,8,0,1,c},{x0,40,0,1,c},{x1,40,0,1,c}};u.draw_primitive_up(5,2,v,sizeof(V));};
+        const auto frame=[&](double spacing){
+            u.set_ui_rect(true,4./3.,spacing);u.begin_frame();u.clear(1,0xff000000,1,0);
+            quad(0,8,0xff00ff00);quad(-8,0,0xffff0000);quad(-24,-16,0xff0000ff);u.end_frame();
+            return readback(ug.device.Get(),ug.context.Get(),u.back_texture());};
+        const auto at=[](const std::vector<std::uint8_t>& im,unsigned x,unsigned y,unsigned ch){
+            return im.size()>=128u*48u*4u?unsigned(im[(y*128u+x)*4u+ch]):0u;};
+        const auto plain=frame(0.),spaced=frame(8.);
+        check(at(plain,36,24,1)>200&&at(plain,36,24,0)<50,"mode 2: the in-range quad at the 4:3 rectangle's x 32..40");
+        check(at(plain,28,24,0)<50&&at(plain,12,24,2)<50,"mode 2: quads left of the 4:3 rectangle are clipped (unchanged)");
+        bool same=true;
+        for(unsigned x=32;x<44;++x)for(unsigned ch=0;ch<3;++ch)same=same&&(at(plain,x,24,ch)==at(spaced,x,24,ch));
+        check(same,"spacing leaves the in-range quad's pixels as they were");
+        check(at(spaced,28,24,0)>200&&at(spaced,28,24,1)<50,"mode 1: the quad at -8..0 is drawn at 24..32 (same scale)");
+        check(at(spaced,12,24,2)<50&&at(spaced,20,24,2)<50,"mode 1: the quad beyond the extension stays clipped");
+        // A game sub-viewport keeps its own clipping: full width but rows 4..44 only (sana 39535), so no extension.
+        u.set_viewport(0,4,64,40,0.f,1.f);
+        const auto partial=frame(8.);
+        check(at(partial,28,24,0)<50,"mode 1 under a full-width, partial-height viewport: no extension (quad left of the 4:3 clipped)");
+        check(at(partial,36,24,1)>200,"mode 1 under a partial-height viewport: the in-range quad still draws");
+        u.set_viewport(0,0,64,48,0.f,1.f);
+    }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
     return failures?1:0;
 }

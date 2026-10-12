@@ -3,6 +3,8 @@
 #include "platform/frontend_text.hpp"
 #include "platform/race_hud_navi.hpp"
 #include "platform/race_hud.hpp"
+#include "platform/ui_spacing.hpp"
+#include "platform/pc_screen.hpp"
 #include "driving/pc_x87.hpp"
 #include "driving/pc_d3dx.hpp"
 #include <algorithm>
@@ -25,6 +27,10 @@ X87 fild_u32(std::uint32_t v){
 // _ftol2 582194: 64-bit truncation of ST0; EAX is the low dword
 // (indefinite -> 0).
 std::uint32_t ftol(X87 v){return std::uint32_t(std::uint64_t(driving::x87_ftol64(v)));}
+// UIScalingMode 1 (windows/docs/UI-SCALING.md step 2b): Tweaks' fixed position fixes (put_scroll_AdjustPosition*,
+// AddSpriteSpacing on an int) add the HUD spacing, rounded, to the x of chosen 42D280 / 42D5F0 / 42CC00 calls, whatever
+// the scope; 0 in modes 0 and 2 (pc_screen.hpp g_pc_ui_spacing).
+std::int32_t put_shift(){return g_pc_ui_spacing>0.0f?std::int32_t(std::lround(g_pc_ui_spacing)):0;}
 // cvttss2si: out of range and NaN give 0x80000000.
 std::int32_t cvtt(float v){
     if(!std::isfinite(v)||v>=2147483648.0f||v<-2147483648.0f)return std::int32_t(0x80000000u);
@@ -539,13 +545,13 @@ bool scores_4bd340(N& n){
     auto& m=n.m;
     const auto r=n.rival_47da80();const bool first=r&&m.u8(r+0x74)==0;
     auto buf=format_int("%04d",(m.i32(0x836388)+5)/6);
-    n.draw(0x42d280,{0x2c019e,0x1e1,0x36,0,F4,0xffffffffu});
+    n.draw(0x42d280,{0x2c019e,std::uint32_t(0x1e1+put_shift()),0x36,0,F4,0xffffffffu});
     if(!digits(n,first?0xd:1,0x227,0x49,buf))return false;
     if(r){
         buf=format_int("%04d",(m.i32(r+0x98)+5)/6);
-        n.draw(0x42d280,{0x2c019e,0x1e1,0x54,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c019e,std::uint32_t(0x1e1+put_shift()),0x54,0,F4,0xffffffffu});
         if(!digits(n,first?1:0xd,0x227,0x67,buf))return false;
-        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1f5,m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1f5+std::uint32_t(put_shift()),m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
     }
     return true;
 }
@@ -558,7 +564,7 @@ bool scores_4bd230(N& n,std::uint32_t car){
     if(!digits(n,live?1:0xd,0x1e1,0x49,buf))return false;
     if(const auto r=n.rival_47da80()){
         if(!digits(n,1,0x1e1,0x67,score7(m.i32(r+0x98))))return false;
-        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1e1,m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
+        n.draw(0x42d280,{0x2c027b,m.u32(0x688d60)+0x1e1+std::uint32_t(put_shift()),m.u32(0x688d64)+0x67,0,F4,0xffffffffu});
     }
     return true;
 }
@@ -662,24 +668,24 @@ bool position_4b9d80(N& n,std::uint32_t car){
     if(tens>0){
         o1=std::int8_t(m.u8(0x6891f4+tens));o2=std::int8_t(m.u8(0x6891e8+ones));
         if(!tok(0x5c6cc0,tens,t))return false;
-        n.draw(0x42d280,{t,std::uint32_t(o1+o2+0x1be),0x42,0,F2,colour2});
+        n.draw(0x42d280,{t,std::uint32_t(o1+o2+0x1be+put_shift()),0x42,0,F2,colour2});
         if(!tok(0x5c6cc0,ones,t))return false;
-        n.draw(0x42d280,{t,std::uint32_t(o2+0x1e6),0x42,0,F2,colour2});
+        n.draw(0x42d280,{t,std::uint32_t(o2+0x1e6+put_shift()),0x42,0,F2,colour2});
     }else{
         o2=std::int8_t(m.u8(0x6891e8+ones));
         if(!tok(0x5c6cc0,ones,t))return false;
-        n.draw(0x42d280,{t,std::uint32_t(o2+0x1e6),0x42,0,F2,colour2});
+        n.draw(0x42d280,{t,std::uint32_t(o2+0x1e6+put_shift()),0x42,0,F2,colour2});
     }
     const auto lang=m.u32(0x7d2698);
     if(!tok(0x5c6ce8,suffix,t))return false;
-    n.draw(0x42d280,{t,0x20a,(lang==4u||lang==3u)?0x38u:0x56u,0,F2,colour});
+    n.draw(0x42d280,{t,std::uint32_t(0x20a+put_shift()),(lang==4u||lang==3u)?0x38u:0x56u,0,F2,colour});
     if(ctens>0){
-        if(!tok(0x5c6c98,ctens,t))return false;n.draw(0x42d280,{t,0x22c,0x46,0,F2,0xffffffffu});
-        if(!tok(0x5c6c98,cones,t))return false;n.draw(0x42d280,{t,0x23c,0x46,0,F2,0xffffffffu});
+        if(!tok(0x5c6c98,ctens,t))return false;n.draw(0x42d280,{t,std::uint32_t(0x22c+put_shift()),0x46,0,F2,0xffffffffu});
+        if(!tok(0x5c6c98,cones,t))return false;n.draw(0x42d280,{t,std::uint32_t(0x23c+put_shift()),0x46,0,F2,0xffffffffu});
     }else{
-        if(!tok(0x5c6c98,cones,t))return false;n.draw(0x42d280,{t,0x22c,0x46,0,F2,0xffffffffu});
+        if(!tok(0x5c6c98,cones,t))return false;n.draw(0x42d280,{t,std::uint32_t(0x22c+put_shift()),0x46,0,F2,0xffffffffu});
     }
-    n.draw(0x42d280,{0x3000f,0x21c,0x44,0,F2,0xffffffffu});
+    n.draw(0x42d280,{0x3000f,std::uint32_t(0x21c+put_shift()),0x44,0,F2,0xffffffffu});
     return true;
 }
 // 4BCF10(car): speedometer digits and the speed-lines sprite.
@@ -727,10 +733,10 @@ bool gear_4b9010(N& n,std::uint32_t car){
     std::uint32_t t;if(!rd32(n,0x5c6da8+idx*4,t))return false;
     n.draw(0x429530,{t,0,0,9,0});
     if(m.u8(car+0x13)!=1)return true;
-    n.draw(0x42d280,{0x2c00d3,0x95,0x132,0,F4,0xffffffffu});
-    n.draw(0x42d280,{0x2c0115,0x95,0x146,0,F4,0xffffffffu});
+    n.draw(0x42d280,{0x2c00d3,std::uint32_t(0x95-put_shift()),0x132,0,F4,0xffffffffu});
+    n.draw(0x42d280,{0x2c0115,std::uint32_t(0x95-put_shift()),0x146,0,F4,0xffffffffu});
     if((m.u32(0x95af0c)&8u)&&m.u32(car+0x48)>0x1edcu&&m.u32(car+0x208)<m.u32(spec+0x10a0))
-        n.draw(0x42d5f0,{0x30002,0x28,0x12,0x40a00000u,0xffffffffu,0x8000});
+        n.draw(0x42d5f0,{0x30002,std::uint32_t(0x28-put_shift()),0x12,0x40a00000u,0xffffffffu,0x8000});
     return true;
 }
 // 4B9100: route map markers (not drawn during a mission unless variant 4).
@@ -825,6 +831,9 @@ bool countdown_4bda30(N& n){
 // 2.5 apart along the camera-to-car direction. 43EB60 is the course query.
 bool line_of_sight_4ba0e0(N& n,std::uint32_t car,bool& visible){
     using driving::x87_float;using driving::x87_sqrt;
+    // UIScalingMode 1 (step 2b): Tweaks' dispMarkerCheck turns spacing off here and does not restore it, so the marker
+    // the caller draws next is unspaced until someone re-enables (NaviPub_Disp at 4BEDBE). The callers' guards restore.
+    ui_spacing_scope()=UiSpacing::off;
     auto& m=n.m;visible=false;
     const auto cam=m.u32(0x79f574)+0xd4,pos=car+0x14;
     const float cx=m.f32(cam),cy=m.f32(cam+4),cz=m.f32(cam+8),px=m.f32(pos),py=m.f32(pos+4),pz=m.f32(pos+8);
@@ -1067,7 +1076,7 @@ bool request_row_4bb9e0(N& n,std::uint32_t row,std::int32_t value){
     if(value<0){
         a=std::int32_t(0u-std::uint32_t(value));colour=0xffff0000u;
         n.draw(0x42ca60,{3});n.draw(0x42cc60,{F1,F1});n.draw(0x42ccb0,{1});n.draw(0x42cca0,{colour});
-        text_pos_42cc00(n,a>=100?0x1fe:(a<10?0x21e:0x20e),std::int32_t(row)*0x15+0x43);
+        text_pos_42cc00(n,(a>=100?0x1fe:(a<10?0x21e:0x20e))+put_shift(),std::int32_t(row)*0x15+0x43);   // Tweaks 4BBA89
         text_42cce0(n,0x5c18c4,"-");
     }
     id_4297f0(n,colour);
@@ -1560,7 +1569,10 @@ bool record_row_4bdac0(N& n,std::uint32_t cmp,std::uint32_t blk,std::int32_t x,f
     auto& m=n.m;
     const std::int32_t edi=30;
     if(m.u8(0x830394)){
-        const std::int32_t x0=cvtt(f+44.0f);                                                   // [5B0270]
+        // UIScalingMode 1, Tweaks 4BDAE8 (PutGhostGapInfo_sub): the register copy of f moves by the HUD spacing (left
+        // for the left banner's 4.0, else right) before + 44; the later uses of f read the argument and do not move.
+        const float fs=g_pc_ui_spacing>0.0f?(f==4.0f?-g_pc_ui_spacing:g_pc_ui_spacing):0.0f;
+        const std::int32_t x0=cvtt((f+fs)+44.0f);                                              // [5B0270]
         image_42d280(n,0x2c0049,x0,edi+0xd0,0xffffffffu);image_42d280(n,0x2c00d4,x0,edi+0xe4,0xffffffffu);
         image_42d280(n,0x2c011a,x0,edi+0xf8,0xffffffffu);
         if(m.i32(0x656234)<0x3c&&m.u8(0x7f8ef0))image_42d280(n,0x2c009e,cvtt(f+100.0f),edi+0x94,0xffffffffu);
@@ -1596,6 +1608,7 @@ bool banner_4bddb0(N& n,std::uint32_t i,std::uint32_t token,std::uint32_t flag,s
     float f0,f1;std::int32_t ebp,x;
     if(i==0){f0=70.0f;f1=4.0f;ebp=0x66;x=0x30;}
     else{f0=456.0f;f1=403.0f;ebp=0x1eb;x=0x1bf;if(flag){f0=477.0f;ebp=0x200;}}
+    ebp+=ebp==0x66?-put_shift():put_shift();   // UIScalingMode 1, Tweaks 4BDE3A: the name's x, left banner (102) left
     m.putf(0x688dd0,189.0f);m.putf(0x688dcc,196.0f);m.putf(0x84491c,30.0f);m.putf(0x844920,30.0f);
     if(!record_row_4bdac0(n,0x844780+i*16u,blk,x,f1,rec))return false;
     std::int8_t badge,frame;float bx;
@@ -1641,13 +1654,17 @@ bool banners_4be020(N& n){
     auto& m=n.m;
     if(m.i32(0x7d3934)<=0)return true;                                                // 450670
     std::uint8_t f=m.u8(0x844894);
+    // UIScalingMode 1 (step 2b): Tweaks forces the left banner (index 0) left and the right one right just before each
+    // call (4BE045 / 4BE083 left, 4BE067 / 4BE0A5 right) and does not restore it: the last side stays for what follows
+    // (callers that need otherwise set it; their guards restore the scope when they return).
     if(f&4u){
+        ui_spacing_scope()=UiSpacing::left;
         if(!banner_4bddb0(n,0,0x2c0032,0,0x8446b0))return false;
-        if(m.u8(0x8448a6)&&!banner_4bddb0(n,1,0x2c0036,1,0x8446d4))return false;
+        if(m.u8(0x8448a6)){ui_spacing_scope()=UiSpacing::right;if(!banner_4bddb0(n,1,0x2c0036,1,0x8446d4))return false;}
         return true;
     }
-    if(f&1u){if(!banner_4bddb0(n,0,0x2c0034,0,0x8446b0))return false;f=m.u8(0x844894);}
-    if((f&2u)&&!banner_4bddb0(n,1,0x2c0035,0,0x8446b0))return false;
+    if(f&1u){ui_spacing_scope()=UiSpacing::left;if(!banner_4bddb0(n,0,0x2c0034,0,0x8446b0))return false;f=m.u8(0x844894);}
+    if(f&2u){ui_spacing_scope()=UiSpacing::right;if(!banner_4bddb0(n,1,0x2c0035,0,0x8446b0))return false;}
     return true;
 }
 // 4BE150: the passed sectors split list (844848 + k * 16, k <= [7D3874]): frame
@@ -1709,11 +1726,20 @@ bool target_marker_4bbaf0(N& n,std::uint32_t t){
 // ghost row (467840 under 48B310 / 48B350) or the next stage label, and the running time.
 bool stages_4be4b0(N& n,std::uint32_t car){
     auto& m=n.m;
-    if(!banners_4be020(n)||!sector_list_4be150(n))return false;
+    // UIScalingMode 1 (step 2b), Tweaks' DispTimeAttack2D: the banners (their own sides), the sector list forced right
+    // (4BE4BC), off for the target marker (4BE4C1), forced left for the car / position badges (4BE4E7), detect from
+    // 4BE575 on. Every put_scroll image here (all fifteen 42D280 calls) moves right by the rounded spacing. The scope is
+    // set as Tweaks sets it; NaviPub_Disp's guard restores it when the display returns.
+    auto image=[&](std::uint32_t tok,std::int32_t x,std::int32_t y,std::uint32_t colour){image_42d280(n,tok,x+put_shift(),y,colour);};
+    if(!banners_4be020(n))return false;
+    ui_spacing_scope()=UiSpacing::right;
+    if(!sector_list_4be150(n))return false;
+    ui_spacing_scope()=UiSpacing::off;
     if(m.u8(0x8448a6)){
         const std::uint32_t t=m.u8(0x81044c)==1u?m.u32(0x810438):0u;                // 47F120
         if(!target_marker_4bbaf0(n,t))return false;
     }
+    ui_spacing_scope()=UiSpacing::left;
     const bool ta=m.u8(0x830394)!=0;
     if(ta)n.draw(0x429530,{m.u8(car+0x13)==1?0x2c00aau:0x2c00a9u,0xc2dc0000u,0x40000000u,5,1});
     else{
@@ -1725,11 +1751,11 @@ bool stages_4be4b0(N& n,std::uint32_t car){
     for(std::uint32_t r=0;r<5;++r){if(!rd32(n,0x5c7080+r*8,rx[r])||!rd32(n,0x5c7084+r*8,ry[r]))return false;}
     auto stage_label=[&](std::uint32_t row,std::int32_t number)->bool{
         if(row>=5)return n.fail(0x4be5b8);
-        image_42d280(n,0x2c0042,std::int32_t(rx[row]),std::int32_t(ry[row]),0xffffffffu);
+        image(0x2c0042,std::int32_t(rx[row]),std::int32_t(ry[row]),0xffffffffu);
         const std::int32_t tens=number/10,ones=number%10;std::uint32_t tok;
-        if(tens>0){if(!rd32(n,0x5c7058+std::uint32_t(tens)*4,tok))return false;image_42d280(n,tok,std::int32_t(rx[row])+m.i32(0x689220),std::int32_t(ry[row]),0xffffffffu);}
+        if(tens>0){if(!rd32(n,0x5c7058+std::uint32_t(tens)*4,tok))return false;image(tok,std::int32_t(rx[row])+m.i32(0x689220),std::int32_t(ry[row]),0xffffffffu);}
         if(!rd32(n,0x5c7058+std::uint32_t(ones)*4,tok))return false;
-        image_42d280(n,tok,std::int32_t(rx[row])+m.i32(0x68921c)+m.i32(0x689220),std::int32_t(ry[row]),0xffffffffu);
+        image(tok,std::int32_t(rx[row])+m.i32(0x68921c)+m.i32(0x689220),std::int32_t(ry[row]),0xffffffffu);
         return true;
     };
     auto split=[&](std::uint32_t v,std::uint16_t& a,std::uint16_t& b,std::uint16_t& c){
@@ -1738,6 +1764,7 @@ bool stages_4be4b0(N& n,std::uint32_t car){
         b=std::uint16_t(mins*0xffc4u-std::uint16_t(h*0xe10u)+total);c=std::uint16_t(v-total*1000u);
         if(h>0||a>=10){a=9;b=0x3b;c=0x3e7;}
     };
+    ui_spacing_scope()=UiSpacing::detect;                                              // Tweaks 4BE575
     const std::uint32_t lvl=n.level_44c940(m.u32(car+0x68));
     std::int32_t first=std::int32_t(lvl)-4;if(first<0)first=0;
     std::int32_t s=first;std::int32_t py=0x53;
@@ -1747,11 +1774,11 @@ bool stages_4be4b0(N& n,std::uint32_t car){
             if(!stage_label(row,s+1))return false;
             if(m.u8(0x844895+std::uint32_t(s+1))){
                 id_4297f0(n,0xff00ff00u);
-                image_42d280(n,0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xff00ff00u);
-                image_42d280(n,0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xff00ff00u);
+                image(0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xff00ff00u);
+                image(0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xff00ff00u);
             }else{
-                image_42d280(n,0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xffffffffu);
-                image_42d280(n,0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xffffffffu);
+                image(0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xffffffffu);
+                image(0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xffffffffu);
             }
             std::uint16_t a,b,c;split(m.u32(0x7d3954+std::uint32_t(s)*4u),a,b,c);   // 4505A0
             if(!navi_digits_4ba9d0_impl(n.s,0xa,0x1cc,py,time_text("%1d %02d %03d",a,b,c),9,1.0f))return false;
@@ -1764,7 +1791,7 @@ bool stages_4be4b0(N& n,std::uint32_t car){
     if(ta&&m.i32(0x656234)<0x3c){
         const std::uint32_t t=ghost_time_467840(n,1,0,3);
         if(t){
-            image_42d280(n,0x2c0049,0x193,0x5f,0xffffffffu);image_42d280(n,0x2c0059,0x1cd,0x5d,0xffffffffu);image_42d280(n,0x2c0010,0x1ff,0x5b,0xffffffffu);
+            image(0x2c0049,0x193,0x5f,0xffffffffu);image(0x2c0059,0x1cd,0x5d,0xffffffffu);image(0x2c0010,0x1ff,0x5b,0xffffffffu);
             std::uint16_t a,b,c;split(t,a,b,c);
             if(!navi_digits_4ba9d0_impl(n.s,0xa,0x1cc,0x68,time_text("%1d %02d %03d",a,b,c),9,1.0f))return false;
         }
@@ -1772,8 +1799,8 @@ bool stages_4be4b0(N& n,std::uint32_t car){
     }
     if(!skip_label&&!stage_label(row,s+1))return false;
     if(row>=5)return n.fail(0x4be958);
-    image_42d280(n,0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xffffffffu);
-    image_42d280(n,0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xffffffffu);
+    image(0x2c0059,std::int32_t(rx[row])+0x42,std::int32_t(ry[row])-6,0xffffffffu);
+    image(0x2c0010,std::int32_t(rx[row])+0x74,std::int32_t(ry[row])-8,0xffffffffu);
     {   // 449B30([7D3930] frames, 0.0) under the x87 precision
         X87 st=fild_u32(m.u32(0x7d3930));
         st=(st+X87(0.0f))*X87(bf(0x3c881469u));
@@ -1829,6 +1856,7 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     if(m.u32(0x8447f8)==0)return true;
     const auto md=n.mode();const auto car=n.car();
     auto tail=[&](bool release){
+        const UiSpacingGuard unspaced(UiSpacing::off);                          // after Tweaks' 4BEDE0 / 4BEE21 offs
         if(release&&m.i32(0x844700)>=0){n.sprite_release(m.i32(0x844700));m.put32(0x844700,0xffffffffu);}
         m.put32(0x842c10,1);
         if(!s.heart||!s.heart(s.heart_user,0x46ed20u))return n.fail(0x46ed20);   // 46ED20 pair markers (state 9)
@@ -1836,6 +1864,11 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     if(md==0xdu){m.put32(0x842c10,0);if(!s.heart||!s.heart(s.heart_user,0x46ed20u))return n.fail(0x46ed20);return !s.missing;}
     const auto var=n.variant();
     if(var!=6u&&var!=9u&&var!=2u&&var!=1u&&var!=0u&&var!=7u&&var!=3u&&var!=4u)return n.fail(var<=9u?0x4beb3f:0x4bedb8);
+    // UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a; Tweaks hooks_uiscaling.cpp): NaviPub_Disp's HUD is spaced to
+    // the screen edges from 4BEB31 (on) to 4BEDE0 (off), re-asserted at 4BEDBE. Inside it the rival labels / markers
+    // (4BEB8E..4BEBAF), the heart service 462CD0 (4BEBE1..4BEBE6) and the LAN markers (4BEC83..4BEC88) are unspaced;
+    // from 4BEDE0 on (level, split, ghost, lap, countdown, the 4BEDF0 tail) nothing is. The guards restore on every exit.
+    const UiSpacingGuard spaced(UiSpacing::detect);
     if(var==1u&&m.u32(0x8446ec)){n.draw(0x429530,{0x2c002f,0,0,3,0});if(!score_4bd480(n,car))return false;}   // 4BEB46
     if(md!=16u)return tail(true);                                               // 4BEDF0 protected test: mode != 16
     if(var==0u||var==7u){                                                       // 4BEBF0
@@ -1845,25 +1878,30 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     }else if(var==1u){                                                          // 4BEB74 OutRun
         n.draw(0x429530,{0x2c002e,0,0,3,0});
         if(!clock_4bd900(n))return false;
-        if(m.u32(0x80fb14)){if(!navi_rival_labels_4bad20_impl(s,car))return false;}
-        else if(!rival_markers_4bb640(n))return false;
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEB8E .. 4BEBAF
+            if(m.u32(0x80fb14)){if(!navi_rival_labels_4bad20_impl(s,car))return false;}
+            else if(!rival_markers_4bb640(n))return false;}
         final_stretch_4bb890(n,car);
     }else if(var==2u){                                                          // 4BEBB9 Heart Attack
         if(!tracked_45b790(n))return false;
         n.draw(0x429530,{0x2c0030,0,0,1,0});
         if(!requests_4bcd50(n))return false;
-        if(!s.heart||!s.heart(s.heart_user,0x462cd0u))return n.fail(0x462cd0);
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEBE1 .. 4BEBE6
+            if(!s.heart||!s.heart(s.heart_user,0x462cd0u))return n.fail(0x462cd0);}
         if(!clock_4bd900(n))return false;
     }else if(var==3u||var==4u){                                                 // 4BEC3D LAN races
         // 456D50: [7DE784] (CommRace: a player has finished) hides the 2C004C panel
         if(!(m.r.mapped(0x7de784,1)&&m.u8(0x7de784)))n.draw(0x429530,{0x2c004c,0,0,3,0});
         if(n.selection()&&n.mission_type()==0u&&m.u32(0x8446d0)){if(!position_4b9d80(n,car))return false;}   // 4957F0 / 495B20 / 8446D0
-        if(!lan_markers_4bb300(n))return false;
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEC83 .. 4BEC88
+            if(!lan_markers_4bb300(n))return false;}
         ranks_4b99e0(n,car);
         if(!messages_456540(n))return false;
     }else if(!mission_4bed13(n,s,car))return false;
+    ui_spacing_scope()=UiSpacing::detect;   // Tweaks 4BEDBE re-enables (a marker check or the time-attack sides may have left it)
     if(!speed_4bcf10(n,car)||!needle_4b8f30(n,car)||!gear_4b9010(n,car)||!route_4b9100(n)||!stage_banner_4b9450(n))return false;
     warning_4ba070(n,car);
+    const UiSpacingGuard unspaced(UiSpacing::off);                              // Tweaks 4BEDE0: off from here on
     if(m.i16(0x8446e8)>0){                                                      // 4BD0A0
         if(var==2u){if(!level_4bd0a0(n))return false;}
         else if(var==1u)split_4b9320(n,1);
@@ -1903,7 +1941,10 @@ bool navi_pub_destroy_4b8df0(NaviPubServices& s){return s.m&&guarded(s,[&]{retur
 bool navi_digits_4ba9d0(NaviPubServices& s,std::uint32_t style,std::int32_t x,std::int32_t y,const std::string& text,std::uint32_t layer,float alpha){
     return s.m&&guarded(s,[&]{return navi_digits_4ba9d0_impl(s,style,x,y,text,layer,alpha);});}
 bool navi_sector_banners_4bea50(NaviPubServices& s){
-    return s.m&&guarded(s,[&]{N n(s,*s.m);return banners_4be020(n)&&sector_list_4be150(n);});
+    // UIScalingMode 1 (step 2b), Tweaks' DispTimeAttackGoal: the banners set their sides and leave the last one for the
+    // sector list; 4BEA64 then turns spacing off. The guard restores the scope this display found (off outside the HUD).
+    return s.m&&guarded(s,[&]{N n(s,*s.m);const UiSpacingGuard keep(ui_spacing_scope());
+                              return banners_4be020(n)&&sector_list_4be150(n);});
 }
 bool navi_rival_labels_4bad20(NaviPubServices& s,std::uint32_t car){return s.m&&guarded(s,[&]{return navi_rival_labels_4bad20_impl(s,car);});}
 // 4B04D0 (variant 9 display, attack running): for each rank 0..2 the first car of the

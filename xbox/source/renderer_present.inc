@@ -20,8 +20,12 @@ bool present_frame(RendererImpl& r){
         const bool span=platform::g_pc_wide_aspect>0.f;
         // The 2D layer's rectangle (display_fit.hpp ui_scaling_rect): the centred 4:3 on 16:9 and on a planar span, or
         // with UIScalingMode 0 stretched over the frame, or over the span's centre panel.
-        const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect);
-        r.device->set_ui_rect(ui.on,ui.aspect);r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
+        // Mode 1: the device widens the 2D mapping by the margin (ui.spacing), and the HUD moves by Tweaks' own amount
+        // (ui.hud, three quarters of the margin at 16:9): layer_429350 and the put_scroll positions read it.
+        const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect,
+                                      double(FramebufferWidth)/double(FramebufferHeight));
+        r.device->set_ui_rect(ui.on,ui.aspect,ui.spacing);platform::g_pc_ui_spacing=float(ui.hud);
+        r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
         r.device->begin_frame();
         if(!r.start_loading_visible&&r.scene){
             r.device->clear(3u,0xff000000u,1.0f,0u);

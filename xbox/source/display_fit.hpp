@@ -33,23 +33,35 @@ inline unsigned planar_width(unsigned height,float aspect){
 // - 2, keep centred (the default here until step 2 is seen): the centred 4:3, on 16:9 and on a span, as before.
 // - 0, stretched: over the 16:9 frame; on a span over its centre panel only (a third of the span's width), so the HUD
 //   stays on the centre monitor (STD-007).
-// - Tweaks' 1, Online Arcade (keep centred plus HUD spacing to the edges), is not built yet: parse_ui_scaling_mode
-//   gives 2 for it, with a note.
-struct UiScalingRect { bool on{}; double aspect{}; };
-inline UiScalingRect ui_scaling_rect(unsigned mode,bool widescreen,float span_aspect){
+// - 1, Online Arcade (step 2a, partial): the centred 4:3 plus two amounts for the frame (or a span's centre panel) of
+//   aspect A, in 640-wide UI units at the 4:3 scale:
+//   - `spacing`, (A * 480 - 640) / 2 = 320 (3A/4 - 1): the margin, by which the device widens the 2D mapping (106.7 at
+//     16:9), so nothing moved is clipped;
+//   - `hud`, Tweaks' own HUD shift: its AddSpriteSpacing adds margin_px / screen_scale.x to a 640-space x that its mode-1
+//     sprite path then draws at screen_scale.y (draw_sprite_custom_matrix_mid / D3DXMatrixTransformation2D hooks). In
+//     these units that is 320 (1 - 4 / (3A)): 80 at 16:9, 137.1 at 21:9, three quarters of the margin at 16:9.
+struct UiScalingRect { bool on{}; double aspect{}; double spacing{}; double hud{}; };
+inline UiScalingRect ui_scaling_rect(unsigned mode,bool widescreen,float span_aspect,double frame_aspect=16./9.){
     const bool span=span_aspect>0.f;
-    if(mode==0u)return span?UiScalingRect{true,double(span_aspect)/3.}:UiScalingRect{false,0.};
-    return {widescreen||span,4./3.};
+    if(mode==0u)return span?UiScalingRect{true,double(span_aspect)/3.,0.,0.}:UiScalingRect{false,0.,0.,0.};
+    const bool on=widescreen||span;
+    if(mode==1u&&on){
+        const double a=span?double(span_aspect)/3.:frame_aspect,spacing=(a*480.-640.)/2.,hud=320.*(1.-4./(3.*a));
+        return {true,4./3.,spacing>0.?spacing:0.,spacing>0.?hud:0.};
+    }
+    return {on,4./3.,0.,0.};
 }
-// The key's value: "0" or "2" (blanks around ignored; empty = 2). "1" and anything else give 2, and `note` says why.
+// The key's value: "0", "1" or "2" (blanks around ignored; empty = 2); anything else gives 2, and `note` says why. 1 is
+// partial for now (step 2a), and `note` says so.
 inline unsigned parse_ui_scaling_mode(std::string_view text,std::string& note){
     while(!text.empty()&&(text.front()==' '||text.front()=='\t'))text.remove_prefix(1);
     while(!text.empty()&&(text.back()==' '||text.back()=='\t'||text.back()=='\r'))text.remove_suffix(1);
     note.clear();
     if(text.empty()||text=="2")return 2u;
     if(text=="0")return 0u;
-    if(text=="1")note="UIScalingMode = 1 (Online Arcade: HUD spacing to the screen edges) is not built yet; 2 (keep centred) applies";
-    else note="UIScalingMode = "+std::string(text.substr(0,32))+" refused (0, 1 or 2); 2 (keep centred) applies";
+    if(text=="1"){note="UIScalingMode = 1 (Online Arcade) is partial: the main race HUD (NaviPub_Disp) is spaced to the edges; "
+                       "time attack, the ghost gap, C2C and the put_scroll positions are not yet";return 1u;}
+    note="UIScalingMode = "+std::string(text.substr(0,32))+" refused (0, 1 or 2); 2 (keep centred) applies";
     return 2u;
 }
 }

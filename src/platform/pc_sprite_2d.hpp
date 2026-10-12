@@ -30,6 +30,7 @@
 #include "platform/pc_render_flush.hpp"
 #include "platform/frontend_sprites.hpp"
 #include "driving/pc_matrix_stack.hpp"
+#include "platform/ui_spacing.hpp"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -75,6 +76,7 @@ struct PcSprite2dState {
     std::uint32_t mask_986b28{},mask_986b2c{},mask_986b30{};
     std::vector<std::uint8_t> masks_986b34;                  // 0x30 * 0xB8
     std::int32_t id_7551b4{-1};
+    std::uint8_t ui_spacing{};   // UiSpacing of the draw being rendered (set around 429460 by its caller; 0 = none)
     // ---- flush ----
     std::uint32_t blend_956bf8{},blend_956b94{},blend_956b98{},w956bfc{};
     // Render-state shadow 8606F0 ([893D20]): saved words and dirty bytes the flush uses.

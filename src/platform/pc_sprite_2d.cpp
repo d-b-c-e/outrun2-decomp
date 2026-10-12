@@ -1,10 +1,12 @@
 #include "platform/pc_sprite_2d.hpp"
+#include "platform/pc_screen.hpp"
 #include "driving/pc_d3dx.hpp"
 #include "driving/pc_x87.hpp"
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
 namespace outrun::platform {
+UiSpacing& ui_spacing_scope(){static UiSpacing s=UiSpacing::off;return s;}
 namespace {
 using driving::X87;
 using driving::x87_float;
@@ -353,7 +355,13 @@ void layer_429350(Ctx& c,std::uint32_t layer,float frame,float scale,std::uint32
     const bool footage=(c.u8(layer+0x48)&1u)!=0u;
     const float local=x87_float(((X87(frame)-X87(c0))*(X87(e6)*X87(K_frame_62818c)))+X87(d4));
     const float alpha=x87_float(X87(c.f32(layer+0x2c))*X87(K_percent_6281c0)*X87(scale));
-    if(footage){footage_428bd0(c,c.u32(layer+8),layer,local,alpha,list_layer);pop_4291d0(c);return;}
+    if(footage){
+        // UIScalingMode 1 (step 2a): Tweaks' drawFootage hook (4293F3) moves a scoped draw's footage layer by the HUD
+        // spacing, from the x its full matrix gives it (the stack top's m[12]); popped again below.
+        if(c.s.ui_spacing&&g_pc_ui_spacing>0.0f&&c.st){
+            auto top=c.st->current();const float x=top.f32(0x30);
+            if(const float dx=ui_spacing_shift(UiSpacing(c.s.ui_spacing),x,g_pc_ui_spacing);dx!=0.0f)top.putf(0x30,x+dx);}
+        footage_428bd0(c,c.u32(layer+8),layer,local,alpha,list_layer);pop_4291d0(c);return;}
     const auto comp=c.u32(layer+8);
     if(window_48bcf0(c,comp,local)){
         const auto count=c.i32(comp+0x1c);

@@ -241,8 +241,9 @@ void render_scene_draw(NativeRuntimeContext& c,NativeRaceHudRuntime& o,PcD3D9Dev
     auto& s=native_sprite2d(c).state;
     s.mask_986b28=0;s.id_7551b4=d.id_7551b4;
     s.flag_9564f4=d.depth==1u?1u:0u;s.flag_9564f8=d.depth==2u?1u:0u;   // 428AF0 (3D sprites)
+    s.ui_spacing=d.spacing;                                             // UIScalingMode 1 (layer_429350)
     pc_sprani_render_429460(s,device,st,root,d.frame,d.scale,d.layer);
-    s.flag_9564f4=0;s.flag_9564f8=0;
+    s.flag_9564f4=0;s.flag_9564f8=0;s.ui_spacing=0;
     driving::pc_matrix_pop(st);
 }
 // Glyphs no RaceHudGlyphRange draw covers (text a service produced directly, such as
