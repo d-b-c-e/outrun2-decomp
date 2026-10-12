@@ -1182,6 +1182,30 @@
   "reason": "stop_requested: GENERIC_READ, OPEN_EXISTING: the bounded read of the request-bound stop.request; writes nothing"
  },
  {
+  "file": "windows/source/shim_input.cpp",
+  "line": "if(!o.echo.open(o.record->result/L\"keys-seen.tsv\"))",
+  "class": "latched-skip",
+  "reason": "the diagnostic key echo (key_echo.hpp, sana 36438): keys-seen.tsv, CREATE_NEW, in the request's result folder, opened only when Play with Recording arms (shim_input_configure_ordinary, if(o.record)); ordinary play only: o.record is set only by shim_input_arm_recording from session::take, which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never records here, so the echo never opens"
+ },
+ {
+  "file": "windows/source/key_echo.hpp",
+  "line": "bool open(const std::filesystem::path& file){",
+  "class": "definition",
+  "reason": "KeyEcho::open: the echo's one file, CREATE_NEW; its call site is audited (shim_input.cpp)"
+ },
+ {
+  "file": "windows/source/key_echo.hpp",
+  "line": "h_=CreateFileW(file.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "definition",
+  "reason": "KeyEcho::open's body: CREATE_NEW (never over an existing file), shared for reading; its call site is audited"
+ },
+ {
+  "file": "windows/source/key_echo.hpp",
+  "line": "if(!WriteFile(h_,text.data(),DWORD(text.size()),&n,nullptr)||n!=text.size()){",
+  "class": "definition",
+  "reason": "KeyEcho::tick: appends only to the handle KeyEcho::open created (or a test's adopted handle); its call sites are audited"
+ },
+ {
   "file": "windows/source/ordinary_recording.cpp",
   "line": "if(!ok){DeleteFileW(tmp.c_str());return false;}",
   "class": "definition",
