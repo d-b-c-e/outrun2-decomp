@@ -149,6 +149,16 @@ target_link_libraries(test_ordinary_recording PRIVATE bcrypt)
 # --cross-volume: the request in %TEMP% and its folders in the build tree, on another volume here (C: and E:; the 12:56
 # pilot's failure). The test fails when the two are on one volume.
 add_test(NAME ordinary_recording COMMAND test_ordinary_recording --cross-volume ${CMAKE_CURRENT_BINARY_DIR}/cross-volume)
+# Consumed playback: the replay channels, the strict tape, the seam's rows then neutral, and the seam fixture through the
+# race update's own readers (race_input.cpp) for the keyboard table and every joystick configuration.
+add_executable(test_consumed_replay tests/test_consumed_replay.cpp source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/race_input.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_consumed_replay PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_consumed_replay PRIVATE cxx_std_17)
+target_compile_options(test_consumed_replay PRIVATE /W4 /WX)
+target_compile_definitions(test_consumed_replay PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_consumed_replay PRIVATE bcrypt)
+add_test(NAME consumed_replay COMMAND test_consumed_replay)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
 add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp

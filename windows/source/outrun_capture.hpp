@@ -25,6 +25,7 @@ constexpr std::int64_t NotReplay=-2;
 struct Snapshot {
     dbce::shim::Frame frame; Signals signals; platform::NativeInputState sink; GameView view; std::int64_t tape_row=NotReplay;
     bool has_consumed{}; platform::NativeInputState consumed{}; KeyboardProvenance keyboard{};
+    bool pc_drive{};   // the race update's PC-layer argument at the seam (runtime_input.hpp InputConsumedHook)
 };
 
 inline rec::Channels signal_channels(const Signals& s){
@@ -49,6 +50,12 @@ inline rec::Channels consumed_channels(const Snapshot& s){
     c["final.pcOverlay"]=f.pc_overlay;c["final.pcOverlayYield"]=f.pc_overlay_yield;
     c["final.pcButtons"]=f.pc_device.buttons_04;
     c["final.pcSteer"]=f.pc_device.axes_94[0x0e];c["final.pcAccel"]=f.pc_device.axes_94[0x0d];c["final.pcBrake"]=f.pc_device.axes_94[0x0c];
+    // Additive (sana 35159): what consumed playback needs besides the 35 above. pcDrive is the race update's PC-layer
+    // argument (it depends on the PC layer's own record); the four axes are the ones joystick configurations 2 and 3 read
+    // (race_input.cpp 5A7B50: 0x17/0x18 and 0x01/0x03).
+    c["final.pcDrive"]=s.pc_drive;
+    c["final.pcAxis01"]=f.pc_device.axes_94[0x01];c["final.pcAxis03"]=f.pc_device.axes_94[0x03];
+    c["final.pcAxis17"]=f.pc_device.axes_94[0x17];c["final.pcAxis18"]=f.pc_device.axes_94[0x18];
     const auto& k=s.keyboard;
     c["keyboard.enter"]=k.enter;c["keyboard.esc"]=k.esc;c["keyboard.up"]=k.up;c["keyboard.down"]=k.down;
     c["keyboard.left"]=k.left;c["keyboard.right"]=k.right;c["keyboard.any"]=k.any;c["keyboard.drives"]=k.drives;
@@ -121,6 +128,21 @@ inline Consumed decoded_consumed(const rec::Channels& c){
     auto& k=r.keyboard;
     k.enter=b("keyboard.enter");k.esc=b("keyboard.esc");k.up=b("keyboard.up");k.down=b("keyboard.down");
     k.left=b("keyboard.left");k.right=b("keyboard.right");k.any=b("keyboard.any");k.drives=b("keyboard.drives");
+    return r;
+}
+// Consumed playback (consumed_replay.hpp): a row's consumed input as the replay seam puts it back, with the race
+// update's PC-layer argument. Strict, and stricter than decoded_consumed: the additive channels must be there (a tape
+// recorded before the replay seam has no final.pcDrive and cannot be played), pcDrive exactly 0 or 1.
+struct Replayed { platform::NativeInputState input; bool pc_drive{}; };
+inline Replayed decoded_replay(const rec::Channels& c){
+    Replayed r;r.input=decoded_consumed(c).input;
+    if(!c.count("final.pcDrive"))throw std::runtime_error("the row has no final.pcDrive (recorded before the replay seam)");
+    const double d=c.at("final.pcDrive");
+    if(d!=0.0&&d!=1.0)throw std::runtime_error("final.pcDrive is not 0 or 1");
+    r.pc_drive=d==1.0;
+    auto& a=r.input.pc_device.axes_94;
+    a[0x01]=std::int16_t(rec::number(c,"final.pcAxis01",INT16_MIN,INT16_MAX));a[0x03]=std::int16_t(rec::number(c,"final.pcAxis03",INT16_MIN,INT16_MAX));
+    a[0x17]=std::int16_t(rec::number(c,"final.pcAxis17",INT16_MIN,INT16_MAX));a[0x18]=std::int16_t(rec::number(c,"final.pcAxis18",INT16_MIN,INT16_MAX));
     return r;
 }
 // The adapter signal fields that differ between two ticks (replay comparisons; empty when every field is equal).

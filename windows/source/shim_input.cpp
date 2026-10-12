@@ -8,6 +8,7 @@
 #include "ordinary_recording.hpp"
 #include "outrun_recorder.hpp"
 #include "outrun_replay.hpp"
+#include "consumed_replay.hpp"
 #include "provider_host.hpp"
 #include "shim_steer.hpp"
 #include "wheelffb_bridge.hpp"
@@ -43,6 +44,12 @@ struct State {
     std::unique_ptr<Adapter> adapter;
     bool replay_run{};                         // [ShimReplay] Tape= names a tape: an R3 replay run (outrun_replay.hpp)
     std::unique_ptr<Tape> tape;                // null in a replay run whose tape was refused: nothing is played
+    // [ShimReplay] Mode = consumed: consumed playback (consumed_replay.hpp) instead of R3. The run records @2 rows at the
+    // consumed seam (pending from the filter, pushed by the consumed hook), each with the tape row it played.
+    bool consumed_run{};
+    std::unique_ptr<ConsumedReplay> consumed;
+    std::optional<Snapshot> consumed_pending;
+    bool consumed_missed_logged{},consumed_end_logged{};
     SignalLog log;
     StartReports reports;
 };
@@ -127,6 +134,10 @@ void start(){
         CaptureSettings capture;
         capture.folder=std::filesystem::path(g.plan.run_root)/L"capture";capture.profile=g.profile;
         capture.run_nonce=g.plan.nonce;capture.adapter_version=AdapterVersion;
+        if(g.consumed_run){   // the replay's own @2 capture, compared with the recording's (other latched runs stay @1)
+            capture.contract=CaptureContract2;
+            capture.context="OutRunDesktop latched consumed replay run; devices.json carries the device table and caps";
+        }
         g.host=std::make_unique<h::ProviderHost<ShimRecorder>>(g.plan.run_root,g.plan.nonce,input,g.profile,true,
             std::make_unique<ShimRecorder>(capture),outrun_capability(),hwnd);
     }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());return;}
@@ -197,11 +208,29 @@ bool stop_requested(){
     if(!logged){logged=true;std::printf("input shim: stop.request ignored: it does not name this request\n");std::fflush(stdout);}
     return false;
 }
+// Consumed playback (latched): the seam's replacement of this tick's input, and the run's own @2 row once consumed.
+void on_replay(platform::NativeInputState& in,bool& pc_drive,const platform::NativeRuntimeContext& context){
+    if(!g.consumed)return;
+    const bool was=g.consumed->ended();
+    g.consumed->apply(in,pc_drive);
+    if(!was&&g.consumed->ended()&&!g.consumed_end_logged){
+        g.consumed_end_logged=true;
+        std::printf("input shim: consumed replay end at input tick %llu (mode %u): %zu of %zu rows played; neutral from here\n",
+            (unsigned long long)g.consumed->ticks(),context.mode_state.current,g.consumed->played(),g.consumed->size());std::fflush(stdout);
+    }
+}
+void on_consumed_latched(const platform::NativeInputState& in,const platform::NativeRuntimeContext&,bool pc_drive){
+    if(!g.consumed_pending||!g.host)return;
+    auto& s=*g.consumed_pending;
+    s.consumed=in;s.has_consumed=true;s.pc_drive=pc_drive;s.tape_row=g.consumed?g.consumed->last_row():-1;
+    g.host->recorder().push(s);
+    g.consumed_pending.reset();
+}
 // The consumed-input seam (platform::native_input_consumed_hook, after 453BB0's arbitration and race update): what
 // the game consumed completes this tick's row, which is pushed now (romi 33134: the final effective input).
-void on_consumed(const platform::NativeInputState& in,const platform::NativeRuntimeContext&){
+void on_consumed(const platform::NativeInputState& in,const platform::NativeRuntimeContext&,bool pc_drive){
     if(!o.pending)return;
-    o.pending->consumed=in;o.pending->has_consumed=true;
+    o.pending->consumed=in;o.pending->has_consumed=true;o.pending->pc_drive=pc_drive;
     o.rec.push(*o.pending);
     o.pending.reset();
     if(!o.rec.recording()){   // the recorder refused this row or its start: stopped by the recorder itself
@@ -221,7 +250,23 @@ void shim_input_configure(const fence::Plan& plan,const Ini& settings){
     g.transmission=parsed.ok?parsed.section.transmission:"";
     // R3: a replay run loads its tape before the game loop starts. A refused tape plays nothing (the run stays neutral).
     const auto tape=settings.text("ShimReplay","Tape");
-    if(!tape.empty()){
+    const auto mode=settings.text("ShimReplay","Mode");
+    if(!tape.empty()&&!mode.empty()){
+        // Consumed playback: admitted here only, in a latched process. Any Mode but "consumed", or a refused tape, holds
+        // the seam neutral for the whole run (never the live input; sana 35159).
+        g.consumed_run=true;
+        std::unique_ptr<ConsumedTape> t;std::string why=mode=="consumed"?"":"[ShimReplay] Mode = "+mode+" is not consumed";
+        if(why.empty()){
+            try{t=std::make_unique<ConsumedTape>(std::filesystem::u8path(tape));}catch(const std::exception& e){why=e.what();}
+        }
+        if(t)std::printf("input shim: consumed replay tape %s: %zu rows (frames %llu..%llu); row i plays at input tick i\n",tape.c_str(),t->size(),
+            (unsigned long long)t->row(0).seq,(unsigned long long)t->row(t->size()-1).seq);
+        else std::printf("input shim: consumed replay refused: %s; the seam holds neutral\n",why.c_str());
+        std::fflush(stdout);
+        g.consumed=std::make_unique<ConsumedReplay>(std::move(t),why);
+        platform::native_input_replay_hook()=on_replay;
+        platform::native_input_consumed_hook()=on_consumed_latched;
+    }else if(!tape.empty()){
         g.replay_run=true;
         try{
             g.tape=std::make_unique<Tape>(std::filesystem::u8path(tape));
@@ -252,7 +297,10 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     }
     resolved_report(*g.host,g.reports);
     g.adapter->apply(*frame,v,out);
-    g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
+    if(g.consumed_run){   // the row is completed and pushed at the consumed seam (on_consumed_latched)
+        if(g.consumed_pending&&!g.consumed_missed_logged){g.consumed_missed_logged=true;std::printf("input shim: a tick missed the consumed seam\n");}
+        g.consumed_pending=Snapshot{*frame,g.adapter->signals(),out,v,-1};
+    }else g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
     log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
 }
 

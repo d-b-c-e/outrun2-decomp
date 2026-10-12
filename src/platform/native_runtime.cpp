@@ -43,6 +43,7 @@ bool requests_call(NativeRuntimeContext& c,std::uint32_t pc,std::initializer_lis
 
 namespace outrun::platform {
 InputConsumedHook& native_input_consumed_hook(){static InputConsumedHook hook=nullptr;return hook;}
+InputReplayHook& native_input_replay_hook(){static InputReplayHook hook=nullptr;return hook;}
 
 // 448B90 (object name database, object_db.hpp). State 0: the async request of
 // \Common\object_db_bin.sz (read synchronously), 1: the build, then 0. A missing file is
@@ -4722,8 +4723,10 @@ std::uint32_t native_frame_platform_call(void* user,std::uint32_t pc,const std::
                 if(st.updates%60u==1u)std::fprintf(stderr,"[input] updates %u bits %08x steer %d accel %d brake %d\n",
                     st.updates,d.buttons_04,d.axes_94[0xe],d.axes_94[0xd],d.axes_94[0xc]);}
         }
-        race_input_update_453bb0(*b.context,in.pc_device,in.pc_input_layer&&in.pc_record_used&&driving::Bytes(const_cast<std::uint8_t*>(native_pc_input_record(*b.context)),0x1d4).u32(0x1d0)==0u);
-        if(const auto consumed=native_input_consumed_hook())consumed(in,*b.context);
+        bool pc_drive=in.pc_input_layer&&in.pc_record_used&&driving::Bytes(const_cast<std::uint8_t*>(native_pc_input_record(*b.context)),0x1d4).u32(0x1d0)==0u;
+        if(const auto replay=native_input_replay_hook())replay(in,pc_drive,*b.context);   // consumed playback (latched only)
+        race_input_update_453bb0(*b.context,in.pc_device,pc_drive);
+        if(const auto consumed=native_input_consumed_hook())consumed(in,*b.context,pc_drive);
     }
     if(pc==0x43fa20u&&b.context&&b.use_native_mode_control)
         (void)native_runtime_mode_control(*b.context,b.mode);
