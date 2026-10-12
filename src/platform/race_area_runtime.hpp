@@ -145,7 +145,7 @@ struct NativeRaceAreaRuntime {
     std::map<std::uint32_t,std::uint32_t> draws_by_pc;
     std::vector<PcVehicleDrawCall> draw_list;          // display draw list (reused)
     std::set<std::uint32_t> banks_loaded;
-    std::uint32_t start_banks_preloaded{};   // START's model banks loaded at 44CB00 (preload_start_banks)
+    std::uint32_t start_banks_preloaded{},start_banks_preload_failed{};   // START's model banks loaded at 44CB00 (preload_start_banks)
     bool initialized{},sky_initialized{},init_failed{},sky_init_failed{},colour_hooked{};
 };
 NativeRaceAreaRuntime& native_race_area(NativeRuntimeContext&);
