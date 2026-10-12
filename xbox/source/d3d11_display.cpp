@@ -57,7 +57,6 @@ struct QuadVertex {float p[2],c[4],uv[2];};
 }
 ID3D11Device* D3D11Display::device()const{return graphics().device.Get();}
 ID3D11DeviceContext* D3D11Display::context()const{return graphics().context.Get();}
-D3D11Display::~D3D11Display(){if(graphics().context)graphics().context->ClearState();}
 bool D3D11Display::open(unsigned w,unsigned h,std::string& error){
     try{
         width_=w;height_=h;auto* dev=graphics().device.Get();
@@ -156,6 +155,25 @@ void screenshot(Graphics& g){
 // when it offers it; 60 / 120 fps are then paced by the present interval,
 // so a change in Settings applies at once without another mode switch.
 namespace { unsigned g_refresh=0,g_interval=1; }
+// The display's cadence from DXGI frame statistics: the refreshes between successive displayed presents. A gap above
+// the present interval is a present that missed its vblank, which the player sees; CPU frame times also jitter
+// with the frame queue (Present blocks at varying offsets from vblank), so they overstate stutter.
+namespace {
+struct Cadence { UINT present{},sync{};bool have{};std::uint64_t presents{},refreshes{},late{},disjoint{},samples{};unsigned max_gap{}; } g_cadence;
+void sample_cadence(IDXGISwapChain1* swap_chain){
+    DXGI_FRAME_STATISTICS s{};const HRESULT hr=swap_chain->GetFrameStatistics(&s);
+    if(hr==DXGI_ERROR_FRAME_STATISTICS_DISJOINT){g_cadence.have=false;++g_cadence.disjoint;return;}
+    if(FAILED(hr))return;
+    ++g_cadence.samples;
+    if(!g_cadence.have){g_cadence.have=true;g_cadence.present=s.PresentCount;g_cadence.sync=s.SyncRefreshCount;return;}
+    const UINT presents=s.PresentCount-g_cadence.present;if(!presents)return;
+    const UINT refreshes=s.SyncRefreshCount-g_cadence.sync;
+    g_cadence.present=s.PresentCount;g_cadence.sync=s.SyncRefreshCount;
+    g_cadence.presents+=presents;g_cadence.refreshes+=refreshes;
+    if(refreshes>presents*g_interval)++g_cadence.late;   // at least one of them was shown a refresh or more late
+    g_cadence.max_gap=std::max(g_cadence.max_gap,unsigned((refreshes+presents-1)/presents));
+}
+}
 unsigned output_refresh(){
     if(!g_refresh){
         // Development: OR2_XBOX_REFRESH_HZ=N stands for the output's rate (120 Hz checks on a 60 Hz monitor).
@@ -173,10 +191,17 @@ bool D3D11Display::present(std::string& error){
     auto& g=graphics();screenshot(g);
     const HRESULT hr=g.swap_chain->Present(g_interval,0);
     if(FAILED(hr)){error="Present failed (HRESULT "+std::to_string(unsigned(hr))+")";return false;}
+    sample_cadence(g.swap_chain.Get());
     // A closed window (WM_CLOSE: the X button, Alt+F4, a test harness) is not a failed frame. It stops the application,
     // which then exits normally (code 0); only a failed Present fails the frame (render_failed, code 3). It used to
     // return false here, so every ordinary close exited with code 3 (nene 24770: the P21 seal refused R1-02).
     if(!pump_window_events())application_shutdown();
     return true;
+}
+D3D11Display::~D3D11Display(){
+    if(g_cadence.samples)std::fprintf(stdout,"display cadence: %llu presents over %llu refreshes at present interval %u; %llu late (a gap above the interval), largest gap %u refreshes; %llu disjoint\n",
+        (unsigned long long)g_cadence.presents,(unsigned long long)g_cadence.refreshes,g_interval,(unsigned long long)g_cadence.late,g_cadence.max_gap,(unsigned long long)g_cadence.disjoint);
+    else std::fprintf(stdout,"display cadence: no frame statistics from the swap chain\n");
+    if(graphics().context)graphics().context->ClearState();
 }
 }

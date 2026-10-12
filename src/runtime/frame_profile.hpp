@@ -56,7 +56,7 @@ inline bool& frame_profile_live(){static bool live=false;return live;}
 // its number, game mode, duration and the buckets that took the most time in
 // that frame (ticks summed per bucket key over the frame, all modes).
 struct HitchFrame {
-    static constexpr unsigned Slots=96;
+    static constexpr unsigned Slots=512;   // a race frame has more than 96 keys; a dropped key showed as unprofiled time
     std::uint64_t keys[Slots]{},ticks[Slots]{};unsigned n{};
     std::uint64_t start{},number{};std::uint32_t mode{};
     void add(std::uint64_t key,std::uint64_t t){
