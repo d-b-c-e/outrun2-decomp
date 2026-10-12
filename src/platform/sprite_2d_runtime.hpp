@@ -32,6 +32,8 @@ struct NativeSprite2d {
     std::vector<FrontendListImage> images;
     std::vector<FrontendWindowIcon> icons;                   // 429530 immediate scene draws
     std::uint32_t ui_displays{},ui_glyphs{},ui_images{},ui_icons{};
+    // native_sprite2d_warm_start_banks: the START (start_mode.init_calls) and the request taken next, and the counts.
+    std::uint32_t warm_start_inits{},warm_cursor{},start_warmed{},start_warm_failed{},start_warm_already{};
 };
 NativeSprite2d& native_sprite2d(NativeRuntimeContext&);
 // 755860[bank-0x20]: the SPRANI animation path of a pool bank (null outside 0x20..0x4A).
@@ -40,6 +42,13 @@ const char* native_sprite2d_ani_path(std::uint32_t bank);
 void native_sprite2d_ensure_bank(NativeRuntimeContext&,PcD3D9Device& device,std::uint32_t bank);
 // 639CB8[bank]: the English XST of a 2D bank, nullptr when the bank has none.
 const char* native_sprite2d_xst_path(std::uint32_t bank);
+// START's sprite banks, behind its loading picture (game_host.cpp: mode 13, START stage < 65), as the PC loads them in
+// its loading stages (429870 / 429960). They are START's scene owner 49B390 requests in modes 8 and 9
+// (scene_owner_49ba80.cpp: 0x2B always, the car's meter, the mode's rank / fight / extra banks), which the port only
+// read as resources: each bank was loaded at its first draw instead, a whole bank inside a race frame (0x2B, the
+// final-stretch sprite of NAVI_PUB 4BEB00, 15-20 ms in perf P2-P4). Each request is taken once per START as it is
+// made; a bank that does not load keeps its first-draw load and its bank_status. Counted in the status line.
+void native_sprite2d_warm_start_banks(NativeRuntimeContext&,PcD3D9Device& device);
 // Event 398 SPRANI: init 427E30 (the pool allocations are cleared,
 // race_hud.hpp sprani_init_427e30, whenever the event is set up) and, in
 // GAME (mode 16), control 427F70 (the pool tick with the 427F70 clock);
