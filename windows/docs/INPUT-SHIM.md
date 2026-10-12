@@ -236,9 +236,14 @@ Wheelkit needs this marker plus the executable identity before it offers to writ
   - The bridge's lock is never held across a driver or library call.
   - `library_quiet()` counts workers in before they look at the phase, and the force output unloads WheelFfb only
     when it is quiet, never under a call.
-  - Known limit: WheelFfb serializes its exports, so while the worker prepares the slot a game-thread call into the
-    library waits for it. This is the same class as the delivery's own synchronous calls; the library's hold
-    watchdog does not wait, and it silences the wheel.
+  - The library gate (romi 32320): WheelFfb serializes its exports, so the worker holds the gate while it prepares
+    the slot and the delivery only tries it.
+    - A sample that cannot enter makes no library call. The library's hold watchdog, which does not wait, silences
+      the wheel meanwhile.
+    - A release that cannot enter is retained (no PanicStop or FreeDirectInput, the library kept loaded, F6 says
+      "stopping") and completes at the next shutdown or the exit, which does not wait either.
+  - Known limit: the delivery's own synchronous driver calls (the open's InitDirectInput, a command's
+    SetDeviceForcesXY) run on the game thread, as without the bridge.
 
 Proven reader behavior is reused behind this boundary (R1 Q4). Copying WheelFfb's reader code would not share its
 handle, so the design never claims that it does.
