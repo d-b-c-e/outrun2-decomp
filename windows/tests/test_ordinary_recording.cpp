@@ -204,6 +204,15 @@ int run_all(int argc,char** argv){
            "no saver thread and no wait: the host's stop runs the one drain");
      check(has(slurp(a.request.recording/"capture"/"recorder-complete.json"),"\"stoppedBy\":\"exit\""),"stopped by the exit");
      check(!has(slurp(a.request.recording/"capture"/"recorder-complete.json"),"\"action\""),"a recording's proof names no action (record, as before)");}
+    // A playback's budget (sana 37845): a recording at its own limit (18,000 rows) replays with its tail; the writer's duration
+    // limit follows a budget above 300 s (the preflight at the first row refuses a capture its limits cannot hold).
+    check(playback_capture_seconds(100,60)==300.0&&playback_capture_seconds(18000,60)>=double(18000+60+120)/60.0,"the playback budget");
+    {auto a=arm(60,playback_capture_seconds(18000,60));a.request.action=session::Action::Playback;a.request.package_seal_sha256=std::string(64,'6');
+     OrdinaryRecorder r(a);r.set_devices({playback_no_device()});
+     for(std::uint64_t i=0;i<5;++i)r.push(row(i+1,std::int64_t(i)*16667));
+     check(r.recording(),"a playback capture armed for an 18,000-row tape passes the writer's preflight");
+     r.stop("tape-end");
+     check(saved_within(r)&&r.state()==OrdinaryRecorder::State::Complete,"and completes: "+r.why());}
     // A playback's own capture (shim_input.cpp playback mode): no device opened, stopped at the tape's end; its proof says
     // action playback and names the recording it replayed (sana 37229/37642).
     {auto a=arm();a.request.action=session::Action::Playback;a.request.package_seal_sha256=std::string(64,'5');

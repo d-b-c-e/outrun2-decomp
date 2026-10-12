@@ -527,19 +527,18 @@ bool shim_input_configure_playback(const session::Intake& intake,const Ini& sett
     std::string profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))profile+=line+"\n";
     const auto parsed=sh::read_profile(profile);
-    OrdinaryRecorder::Arm a;
-    a.request=intake.request;a.profile=profile;a.exe_sha256=intake.exe_sha256;a.adapter_version=AdapterVersion;
-    const double budget=a.hz*a.seconds;
-    pb.rec=OrdinaryRecorder(std::move(a));
     // The tape the start's check hashed (session::take): read, then hashed again, so the rows played are those bytes.
     std::unique_ptr<ConsumedTape> tape;std::string why;
     try{tape=std::make_unique<ConsumedTape>(intake.request.tape);}catch(const std::exception& e){why=e.what();}
     if(tape){
         try{std::uint64_t n=0;if(file_sha256(intake.request.tape,n)!=intake.request.tape_sha256)why="the tape changed after the start's check";}
         catch(const std::exception& e){why=e.what();}
-        // The replay's capture holds every played row and the tail, with two seconds to spare under its budget.
-        if(why.empty()&&double(tape->size()+TapeEndRows+120)>budget)why="the tape has more rows than the replay's capture can hold";
     }
+    // The replay's capture holds every played row and the tail (sana 37845: a recording at its own limit replays too).
+    OrdinaryRecorder::Arm a;
+    a.request=intake.request;a.profile=profile;a.exe_sha256=intake.exe_sha256;a.adapter_version=AdapterVersion;
+    if(tape)a.seconds=playback_capture_seconds(tape->size(),TapeEndRows,a.hz);
+    pb.rec=OrdinaryRecorder(std::move(a));
     if(!why.empty()){
         pb.rec.fail("the tape cannot be played: "+why);pb.rec.publish_status(true);
         std::printf("input shim: playback refused: the tape cannot be played: %s\n",why.c_str());std::fflush(stdout);

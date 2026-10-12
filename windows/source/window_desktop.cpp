@@ -225,6 +225,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         intake=session::take(session::request_path(),std::filesystem::u8path(folder),outrun::desktop::shim_backend_selected(owner),
                              std::uint64_t(std::time(nullptr)));
     }
+    // A refused playback or an unreadable request is never ordinary play, and leaves the owner's files alone (sana 37845):
+    // it ends here, before the game folder's runtime.log is opened or a settings file made. Its reason is the status.json
+    // in its own result folder, or the .refused-<pid>-<n> request kept beside the request file.
+    if(intake.kind==session::Intake::Kind::Exit)return 4;
     const bool playback=intake.kind==session::Intake::Kind::Playback;
     if(playback){
         cleared=fence::clear_development_switches();
@@ -260,8 +264,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
                            session::utf8(intake.request.startup/L"OutRunDesktop.ini")+" with this rig's [Window] and [Triple]");
         std::printf("settings: %s%s\n",settings.path().c_str(),intake.has_recorded_settings?"":" (the recording had no settings file: defaults)");
     }else settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);
-    // The session request's outcome (taken above). A refused playback or an unreadable request never becomes ordinary
-    // play: exit 4 here, before the frontend.
+    // The session request's outcome (taken above; a refused playback or an unreadable request already ended the process).
     if(!plan.latched){
         switch(intake.kind){
         case session::Intake::Kind::None:break;
@@ -274,10 +277,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             break;
         case session::Intake::Kind::Refused:
             std::printf("session: record request refused (%s); ordinary play without a capture\n",intake.why.c_str());break;
-        case session::Intake::Kind::Exit:
-            std::printf("session: request refused (%s); not ordinary play, the game does not start\n",intake.why.c_str());
-            std::fflush(stdout);
-            return 4;
+        case session::Intake::Kind::Exit:return 4;   // ended above, before anything was written
         }
     }
     bool borderless=settings.flag("Window","WindowedBorderless",true);

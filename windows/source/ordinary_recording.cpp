@@ -192,6 +192,7 @@ OrdinaryRecorder::OrdinaryRecorder(Arm a):s_(std::make_shared<Shared>()){
     CaptureSettings c;
     c.folder=s.capture;c.profile=s.arm.profile;c.run_nonce=s.arm.request.request_id;c.adapter_version=s.arm.adapter_version;
     c.hz=s.arm.hz;c.seconds=s.arm.seconds;c.contract=CaptureContract2;c.context=Context;
+    if(c.seconds>c.limits.seconds)c.limits.seconds=c.seconds;   // a playback's budget (playback_capture_seconds); a recording's is 300 s
     s.max_bytes=c.limits.bytes;s.slots=c.slots;   // the budget the proof names: the settings the recorder runs with (romi 33720)
     s.rec=std::make_unique<ShimRecorder>(std::move(c));
     s.pid=GetCurrentProcessId();s.creation=creation_time();s.started_utc=iso_now();
