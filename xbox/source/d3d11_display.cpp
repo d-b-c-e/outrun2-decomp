@@ -16,10 +16,13 @@ namespace {
 // many frames queued at most, waited at the top of the frame before the input sample (wait_for_frame_latency).
 // Unset: the default chain, as before (up to 3 frames queued, Present blocks).
 HANDLE g_latency_wait=nullptr;   // owned by the process, like the swap chain (graphics(), never torn down): closed at exit
-std::uint64_t g_latency_waits=0,g_latency_timeouts=0;   // frames waited; waits that hit the 1 s cap (an occluded window)
+std::uint64_t g_latency_waits=0,g_latency_timeouts=0,g_latency_failures=0;   // frames waited; 1 s cap hit; WAIT_FAILED
+// The whole value must be exactly 1, 2 or 3; anything else (empty, "1junk", "+1", overflow) is refused and logged.
 unsigned frame_latency_request(){
     const char* v=std::getenv("OR2_FRAME_LATENCY");if(!v)return 0u;
-    const unsigned n=unsigned(std::strtoul(v,nullptr,10));return n>=1u&&n<=3u?n:0u;
+    if((v[0]=='1'||v[0]=='2'||v[0]=='3')&&v[1]=='\0')return unsigned(v[0]-'0');
+    std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=\"%.32s\" refused (must be exactly 1, 2 or 3); default latency\n",v);
+    return 0u;
 }
 constexpr const char* Shader=R"HLSL(
 struct VsIn{float2 p:POSITION;float4 c:COLOR0;float2 uv:TEXCOORD0;};
@@ -63,6 +66,8 @@ Graphics& graphics(){
         ComPtr<IDXGISwapChain2> chain2;check(g.swap_chain.As(&chain2),"IDXGISwapChain2 (OR2_FRAME_LATENCY)");
         const bool set=SUCCEEDED(chain2->SetMaximumFrameLatency(latency));
         g_latency_wait=chain2->GetFrameLatencyWaitableObject();
+        // A flagged chain without its object would run unthrottled: refuse rather than continue silently.
+        if(!g_latency_wait)throw std::runtime_error("OR2_FRAME_LATENCY: GetFrameLatencyWaitableObject returned no handle");
         std::fprintf(stdout,"Xbox display: frame latency %u%s (waitable object, waited before the input sample; OR2_FRAME_LATENCY)\n",
                      set?latency:1u,set?"":" (SetMaximumFrameLatency refused: the waitable default)");
     }
@@ -186,11 +191,13 @@ void wait_for_frame_latency(){
     if(!g_latency_wait)return;
     ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
     ++g_latency_waits;
-    if(WaitForSingleObjectEx(g_latency_wait,1000,FALSE)==WAIT_TIMEOUT)++g_latency_timeouts;
+    const DWORD r=WaitForSingleObjectEx(g_latency_wait,1000,FALSE);
+    if(r==WAIT_TIMEOUT)++g_latency_timeouts;
+    else if(r==WAIT_FAILED)++g_latency_failures;
 }
 void report_frame_latency(){
-    if(g_latency_wait)std::fprintf(stdout,"frame latency waits: %llu frames, %llu timed out (1 s cap)\n",
-        (unsigned long long)g_latency_waits,(unsigned long long)g_latency_timeouts);
+    if(g_latency_wait)std::fprintf(stdout,"frame latency waits: %llu frames, %llu timed out (1 s cap), %llu failed (WAIT_FAILED)\n",
+        (unsigned long long)g_latency_waits,(unsigned long long)g_latency_timeouts,(unsigned long long)g_latency_failures);
 }
 unsigned output_refresh(){
     if(!g_refresh){
