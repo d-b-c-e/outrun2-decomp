@@ -28,6 +28,10 @@ struct ProfileBucket { std::uint64_t ticks{},max{},calls{}; };
 struct FrameProfile {
     bool active{};                                   // set per frame by main (race modes)
     std::uint64_t frames{},frame_ticks{},frame_max{},last_frame_start{};
+    // Race frames longer than 20 / 33 / 50 / 100 ms: the hitches an average and a maximum hide (release builds have no
+    // stutter log).
+    static constexpr std::uint64_t SlowMs[4]{20,33,50,100};
+    std::uint64_t slow[4]{};
     std::map<std::uint64_t,ProfileBucket> buckets;   // key: (kind<<56)|(event<<32)|pc
     void add_one(std::uint64_t key,std::uint64_t ticks){
         if(!active)return;
@@ -37,7 +41,8 @@ struct FrameProfile {
     void frame_start(bool race,std::uint32_t mode=0);
     void frame_start_one(bool race){
         const std::uint64_t now=OR2_PROFILE_TICK();
-        if(active&&last_frame_start){const auto d=now-last_frame_start;++frames;frame_ticks+=d;frame_max=std::max(frame_max,d);}
+        if(active&&last_frame_start){const auto d=now-last_frame_start;++frames;frame_ticks+=d;frame_max=std::max(frame_max,d);
+            for(unsigned k=0;k<4;++k)if(d*1000u>SlowMs[k]*OR2_PROFILE_FREQ())++slow[k];}
         active=race;last_frame_start=race?now:0u;
     }
 };
@@ -117,6 +122,9 @@ inline void frame_profile_report(std::FILE* f,const FrameProfile& p=frame_profil
         else std::fprintf(f,"  %s event %3u pc %06x %13s %7.3f ms/frame  max %7.3f ms  calls %llu\n",kind==ProfileEvent?"ctrl":"disp",ev,pc,"",
             per_frame,double(b.max)*tick_ms,(unsigned long long)b.calls);
     }
+    // After the buckets, unindented, so a reader of the header and the indented bucket lines is unaffected.
+    std::fprintf(f,"frame profile slow race frames: >20 ms %llu, >33 ms %llu, >50 ms %llu, >100 ms %llu\n",
+        (unsigned long long)p.slow[0],(unsigned long long)p.slow[1],(unsigned long long)p.slow[2],(unsigned long long)p.slow[3]);
     if(&p==&frame_profile())platform::pc_perf_report(f,p.frames);
 }
 inline void hitch_report(std::FILE* f,const HitchFrame& h,std::uint64_t duration){
