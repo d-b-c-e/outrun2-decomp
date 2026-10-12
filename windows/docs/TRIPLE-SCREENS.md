@@ -120,6 +120,20 @@ Status 2026-10-12: design only.
 - **Unattended checks**: source angles and rendered seams can be checked unattended. Physical comfort waits for the
   owner.
 
+## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
+
+In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
+`map_const`). The camera reads its own copy, `PcCameraScreen`, which `set_screen` updates.
+
+| Reader | What | Class |
+| --- | --- | --- |
+| 483C10 `camera_fov_483c10` | FOV from `PcCameraScreen` (Hor+) | per pass (each view's width) |
+| 484EE0 / game_host +B8 | the camera aspect | per pass |
+| 418CF0 `race_particles_draw.cpp` (2 sites) and its size at 419009 | screen mapping of the screen-space particles from the current view-projection, with the constant 640/480 | per pass through the matrices. Its output is pretransformed (rhw), and the `ui_rect` that keeps the HUD in the centred 4:3 also applies to rhw batches: check where these land at 16:9 today and at the span |
+| 415630 (from 414F00, the glare in layer 6: `pc_frame_render.cpp:130`) | glare and flare, divides by [740C8C] | per pass |
+| 40E4D0 (from 418080) | **writes** both words | not on the native path while they are mapped constant. Verify before step 4 |
+| 2D flush 42D710 / pc_sprite_2d | its own 640x480 layout, no read of the words | centre only (`ui_rect`) |
+
 ## Presentation path today (read 2026-10-12, shapes steps 1 and 2)
 
 - `renderer_present.inc` composes a fixed 1280x720 virtual frame:

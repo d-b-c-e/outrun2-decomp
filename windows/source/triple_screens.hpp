@@ -4,6 +4,7 @@
 // Design and review: windows/docs/TRIPLE-SCREENS.md.
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,6 +41,21 @@ inline bool triple_span_from_monitors(std::vector<ScreenRect> r,ScreenRect& out)
     out={r[0].left,r[0].top,r[2].right,r[0].bottom};
     return true;
 }
+// The planar span's aspect (pc_screen.hpp g_pc_wide_aspect): the window's width / height when the selector is not Off
+// and the window is wider than 16:9; 0 otherwise (one 16:9 view, fitted).
+inline float planar_aspect(TripleScreens mode,unsigned width,unsigned height){
+    if(mode==TripleScreens::off||!width||!height)return 0.f;
+    if(std::uint64_t(width)*9u<=std::uint64_t(height)*16u)return 0.f;
+    return float(double(width)/double(height));
+}
+// What the window and the views are, for runtime.log and the F6 Cameras page (filled once the window opens).
+struct TripleStatus {
+    TripleScreens mode{TripleScreens::off};
+    ScreenRect window{};
+    std::string where;        // "the primary monitor", "over three monitors", or "refused: <why> (<n> found); the primary monitor"
+    float aspect{};           // planar_aspect(): 0 = one 16:9 view; otherwise the planar span's width / height
+};
+const TripleStatus& triple_screens_status();   // window_desktop.cpp
 // Why triple_span_from_monitors refused, for the log line.
 inline const char* triple_span_refusal(const std::vector<ScreenRect>& r){
     if(r.size()!=3)return "not exactly three monitors";

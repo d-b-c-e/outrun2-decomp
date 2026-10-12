@@ -38,6 +38,7 @@ namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true;
 outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
+outrun::desktop::TripleStatus triple_status;                                    // triple_screens_status()
 BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
     MONITORINFO i{};i.cbSize=sizeof i;
     if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
@@ -87,8 +88,15 @@ NativeWindow& native_window(){
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
         if(span_note.empty())span_note="the primary monitor";
-        std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centred%s\n",td::triple_screens_name(triple),
-                    w.width,w.height,r.left,r.top,span_note.c_str(),triple==td::TripleScreens::off?"":" (the wide views are not implemented yet)");
+        // The planar span (step 2): wider than 16:9 and not Off gives one wide frustum over the whole window.
+        outrun::platform::g_pc_wide_aspect=td::planar_aspect(triple,w.width,w.height);
+        triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
+        if(outrun::platform::g_pc_wide_aspect>0.f)
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
+                        "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
+                        r.left,r.top,span_note.c_str(),double(outrun::platform::g_pc_wide_aspect));
+        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centred\n",td::triple_screens_name(triple),
+                         w.width,w.height,r.left,r.top,span_note.c_str());
     }else{
         if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
                                                       "no --windowed); one 16:9 view\n",td::triple_screens_name(triple));
@@ -96,6 +104,7 @@ NativeWindow& native_window(){
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,
                              r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
         w.width=1280;w.height=720;
+        triple_status={triple,{},"a 1280x720 window (not borderless)",0.f};
     }
     SetForegroundWindow(static_cast<HWND>(w.hwnd));
     return w;
@@ -120,6 +129,7 @@ unsigned select_refresh_rate(unsigned){
 void set_borderless(bool on){borderless=on;}
 void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
 }
+const outrun::desktop::TripleStatus& outrun::desktop::triple_screens_status(){return outrun::xbox_runtime::triple_status;}
 // A crash writes its address and the return addresses on the stack (as
 // offsets in the executable, for llvm-symbolizer with the PDB) to runtime.log.
 static LONG WINAPI crash_report(EXCEPTION_POINTERS* e){

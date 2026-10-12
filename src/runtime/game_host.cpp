@@ -423,8 +423,10 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     trace_mark("pc_scene");
     // Widescreen: the PC screen the camera sees becomes 16:9 (its FOV 483C10
     // widens, Hor+); the camera's aspect +B8 (set by 484EE0 at init) follows.
+    // A planar span (pc_screen.hpp g_pc_wide_aspect, desktop [Triple] Screens)
+    // widens it to the window the same way.
     if(s.pc_scene&&s.runtime){
-        const float width=s.widescreen?480.f*16.f/9.f:640.f;
+        const float width=pf::g_pc_wide_aspect>0.f?480.f*pf::g_pc_wide_aspect:s.widescreen?480.f*16.f/9.f:640.f;
         if(s.pc_scene->screen_width()!=width){
             s.pc_scene->set_screen(width,480.f);
             pf::g_pc_view_half_width=width*0.5f;

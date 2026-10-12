@@ -19,4 +19,10 @@ inline DisplayFit display_fit(unsigned chain_w,unsigned chain_h,unsigned frame_w
     }
     return {0,0,chain_w,chain_h};
 }
+// The planar span's scene width (TRIPLE-SCREENS.md step 2): the chosen height times the window's aspect, rounded to
+// whole pixels and then up to even, as resolution_at does for 16:9.
+inline unsigned planar_width(unsigned height,float aspect){
+    const auto w=std::uint64_t(double(height)*double(aspect)+0.5);
+    return unsigned((w+1u)&~std::uint64_t(1));
+}
 }

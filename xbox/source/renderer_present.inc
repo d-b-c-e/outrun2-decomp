@@ -17,7 +17,8 @@ bool present_frame(RendererImpl& r){
         // binary always executes the pixel shaders and presents every frame.
         r.device->count_only=!rasterize;
         if(r.video_pending){r.video_pending=false;r.device->resize_back_buffer(r.video_width,r.video_height);}
-        r.device->set_ui_rect(g_widescreen);r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
+        const bool span=platform::g_pc_wide_aspect>0.f;   // planar span: the 2D keeps its centred 4:3 too
+        r.device->set_ui_rect(g_widescreen||span);r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
         r.device->begin_frame();
         if(!r.start_loading_visible&&r.scene){
             r.device->clear(3u,0xff000000u,1.0f,0u);
@@ -46,7 +47,8 @@ bool present_frame(RendererImpl& r){
             const auto& pc=*r.device;
             const auto ow=g_widescreen?FramebufferWidth:FramebufferHeight*4u/3u;
             const auto ox=(FramebufferWidth-ow)/2u;
-            display.pc_frame(pc.back_texture(),int(ox),0,int(ow),int(FramebufferHeight));
+            if(span)display.pc_frame_window(pc.back_texture());   // the planar span over the whole window
+            else display.pc_frame(pc.back_texture(),int(ox),0,int(ow),int(FramebufferHeight));
             // The title movie stays 4:3 in a 16:9 frame.
             constexpr auto mw=FramebufferHeight*4u/3u,mx=(FramebufferWidth-mw)/2u;
             if(r.movie_visible&&!r.movie_rgba.empty())display.rgba(&r.movie_rgba,r.movie_rgba.data(),r.movie_width,r.movie_height,int(mx),0,int(mw),int(FramebufferHeight));
