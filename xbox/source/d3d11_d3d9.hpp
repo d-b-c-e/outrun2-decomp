@@ -67,14 +67,17 @@ private:
     // triangle into three viewports with the panel's clip correction; corrections cached per projection.
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
-    // Per vertex program: the constant register of its position matrix (-1: none found), whether that matrix is the
-    // current world x view x projection or only some affine matrix x the current projection, and whether it was logged.
-    struct TripleProgram { int base{-1};bool affine{},logged{}; };
+    // Per vertex program: the constant register of its position matrix (-1: none found) and whether that matrix is the
+    // current world x view x projection or only some affine matrix x the current projection; the outcomes already
+    // logged (each distinct one once, at most four, encoded base*2+affine or -1), how often the outcome changed, and the
+    // constant and transform generations of its last failed scan (unchanged since: no rescan; nene 34449).
+    struct TripleProgram { int base{-1};bool affine{};unsigned logged_n{};int logged[4]{};std::uint64_t changes{},failed_constants{~0ull},failed_xf{~0ull}; };
     std::map<const void*,TripleProgram> triple_programs_;
     // The world x view x projection those registers are compared with, its tolerance, and column 3 of the inverse
     // projection (the affine test): computed again only when a transform changes (world, view, projection as last seen).
     std::array<float,48> triple_xf_{};std::array<float,16> triple_wvp_{};double triple_wvp_tolerance_{};bool triple_xf_valid_{};
     std::array<double,4> triple_pinv_col3_{};bool triple_pinv_ok_{};
+    std::uint64_t triple_xf_generation_{},triple_constants_generation_{};   // a transform change; a vertex constants upload
     std::vector<std::array<float,16>> triple_refused_logged_;   // refused projections already logged (at most 4)
     unsigned triple_frame_draws_{};
     // triple_native_standard: 0 no matrix of the current projection, 1 world x view x projection, 2 an affine matrix x it.

@@ -156,6 +156,10 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                     "%llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
                     (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
+    if(platform::g_pc_triple_corrections){std::size_t unmatched=0;std::uint64_t changes=0;
+        for(const auto& p:triple_programs_){unmatched+=p.second.base<0?1u:0u;changes+=p.second.changes;}
+        std::printf("triple views: %zu vertex programs classified, %zu without a match at their last draw, %llu changes of outcome\n",
+                    triple_programs_.size(),unmatched,(unsigned long long)changes);}
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
@@ -450,7 +454,8 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     constants[1024]=1.f/soft_viewport_.w;constants[1025]=1.f/soft_viewport_.h;constants[1026]=0.f;constants[1027]=0.f;
     if(std::memcmp(constants,vs_shadow_.data(),sizeof constants)!=0){
         D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vs_constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertex constants)");
-        std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);}
+        std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);
+        ++triple_constants_generation_;}
     for(unsigned s=0;s<streams.size()&&s<16;++s)if(slots&(1u<<s)){
         ID3D11Buffer* b=gpu_buffer(streams[s].buffer);const UINT stride=streams[s].stride,offset=streams[s].offset;
         if(bound_.vb[s]!=b||bound_.vb_stride[s]!=stride||bound_.vb_offset[s]!=offset){
@@ -641,13 +646,14 @@ void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader
 // position is then some view-space point times P, which is all the correction needs (nene 30684). The current world x
 // view x projection is tried first (exactly that form); then any affine M, which takes a sky drawn with the camera's
 // rotation but not its translation (the side sky was black at the first rig picture, 2026-10-12). The register is
-// found once per program, then checked per draw; a program without one rescans per draw, each register stopping at its
-// first mismatch (nene 30802). Each program is logged once with what it matched.
+// found once per program, then checked per draw; a program without one rescans only when the constants or a transform
+// changed since its last failed scan, each register stopping at its first mismatch (nene 30802 / 34449). Each distinct
+// outcome of a program is logged once.
 int D3D11D3D9Device::triple_native_standard(const void* program,const std::string& key){
     if(!triple_xf_valid_||std::memcmp(triple_xf_.data(),transform_world.data(),64)!=0||std::memcmp(triple_xf_.data()+16,transform_view.data(),64)!=0||
        std::memcmp(triple_xf_.data()+32,transform_proj.data(),64)!=0){
         std::memcpy(triple_xf_.data(),transform_world.data(),64);std::memcpy(triple_xf_.data()+16,transform_view.data(),64);
-        std::memcpy(triple_xf_.data()+32,transform_proj.data(),64);triple_xf_valid_=true;
+        std::memcpy(triple_xf_.data()+32,transform_proj.data(),64);triple_xf_valid_=true;++triple_xf_generation_;
         triple_wvp_=transform_wvp();double scale=0.;for(const float v:triple_wvp_)scale=std::max(scale,double(std::fabs(v)));
         triple_wvp_tolerance_=scale>0.&&std::isfinite(scale)?1e-4*scale:-1.;
         // Column 3 of P's inverse, by Gauss-Jordan elimination in double with partial pivoting.
@@ -671,19 +677,24 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
         if(!triple_pinv_ok_)return false;
         for(int r=0;r<4;++r){double s=0.,size=0.;
             for(int k=0;k<4;++k){const double t=double(vs_constants[std::size_t(base+k)][std::size_t(r)])*triple_pinv_col3_[std::size_t(k)];s+=t;size+=std::fabs(t);}
-            if(!(std::fabs(s-(r==3?1.:0.))<=1e-4*std::max(1.,size)))return false;}
+            // Finite first: inf <= inf would pass the tolerance (sana 34429); a finite size bounds s.
+            if(!std::isfinite(size)||!(std::fabs(s-(r==3?1.:0.))<=1e-4*std::max(1.,size)))return false;}
         return true;};
     auto& p=triple_programs_[program];
     const int registers=int(vs_constants.size());
     bool ok=p.base>=0&&(p.affine?affine(p.base):exact(p.base));
-    if(!ok){
+    if(!ok&&(p.base>=0||p.failed_constants!=triple_constants_generation_||p.failed_xf!=triple_xf_generation_)){
         const int was=p.base;const bool was_affine=p.affine;p.base=-1;
         for(int base=0;base+4<=registers&&p.base<0;++base)if(exact(base)){p.base=base;p.affine=false;}
         for(int base=0;base+4<=registers&&p.base<0;++base)if(affine(base)){p.base=base;p.affine=true;}
         ok=p.base>=0;
-        if(p.logged&&(p.base!=was||p.affine!=was_affine))p.logged=false;   // log a change of what it matches
+        if(!ok){p.failed_constants=triple_constants_generation_;p.failed_xf=triple_xf_generation_;}
+        if(p.base!=was||p.affine!=was_affine)++p.changes;
     }
-    if(!p.logged){p.logged=true;
+    // Each distinct outcome of a program is logged once (at most four per program; nene 34449: a program whose
+    // constants alternate would otherwise log every flip); the changes are counted for the exit line.
+    const int outcome=p.base<0?-1:p.base*2+(p.affine?1:0);
+    if(p.logged_n<4&&std::find(p.logged,p.logged+p.logged_n,outcome)==p.logged+p.logged_n){p.logged[p.logged_n++]=outcome;
         if(p.base<0)std::printf("triple views: vertex program %.120s: no matrix of the current projection in its constants (single on the centre)\n",key.c_str());
         else std::printf("triple views: vertex program %.120s: %s at c%d\n",key.c_str(),p.affine?"an affine matrix x the projection":"world x view x projection",p.base);}
     return !ok?0:p.affine?2:1;
