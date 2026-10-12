@@ -25,6 +25,12 @@ private:
     std::map<std::string,std::vector<std::string>> sections_;  // lower-case section -> raw lines
     std::string path_;
 };
+// [Wheel] steering as both input paths read it (wheel_input.cpp, and the shim backend's outrun_adapter Steering):
+// sensitivity (default 1) and dead zone (default 0, clamped to 0..0.9). strtof accepts "nan" and "inf"; a non-finite
+// value is the default, so neither path clamps or rounds a NaN (romi 25900). Finite values are unchanged.
+struct WheelSteering { float sensitivity{1.f},dead_zone{0.f}; };
+WheelSteering wheel_steering(float sensitivity,float dead_zone);
+WheelSteering wheel_steering(const Ini& settings);   // [Wheel] SteeringSensitivity / SteeringDeadZone
 // Replaces [section]'s body in the file (or appends the section); every other byte of the file is kept.
 bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error);
 // OutRunDesktop.ini in `folder`, written with comments when it does not exist. When it is new and the folder has

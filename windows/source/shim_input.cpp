@@ -207,8 +207,8 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     const auto parsed=sh::read_profile(o.profile);
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.folder=folder;
-    o.steering.sensitivity=settings.number("Wheel","SteeringSensitivity",1.f);
-    o.steering.dead_zone=std::clamp(settings.number("Wheel","SteeringDeadZone",0.f),0.f,0.9f);
+    const auto steering=wheel_steering(settings);   // as wheel_input reads it; non-finite values are the defaults
+    o.steering.sensitivity=steering.sensitivity;o.steering.dead_zone=steering.dead_zone;
     o.debug=std::getenv("OR2_INPUT_DEBUG")!=nullptr;
     o.configured=true;
 }

@@ -122,8 +122,32 @@ void test_injection(){
 }
 }
 
+// [Wheel] steering as both input paths read it (romi 25900): strtof accepts "nan" / "inf"; those become the defaults,
+// finite values pass unchanged (the dead zone clamped to 0..0.9 as before).
+void test_wheel_steering(){
+    auto same=[](WheelSteering w,float s,float z){return w.sensitivity==s&&w.dead_zone==z;};
+    check(same(wheel_steering(NAN,NAN),1.f,0.f),"NaN: the defaults");
+    check(same(wheel_steering(INFINITY,-INFINITY),1.f,0.f),"infinities: the defaults");
+    check(same(wheel_steering(1.5f,0.95f),1.5f,0.9f),"finite: unchanged, dead zone clamped to 0.9");
+    check(same(wheel_steering(0.8f,-0.2f),0.8f,0.f),"a negative dead zone clamps to 0");
+    check(same(wheel_steering(-1.f,0.1f),-1.f,0.1f),"a finite negative sensitivity passes, as before");
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_desktop_steering_test.ini";
+    {std::ofstream f(path,std::ios::binary);f<<"[Wheel]\r\nSteeringSensitivity = nan\r\nSteeringDeadZone = inf\r\n";}
+    Ini bad;bad.load(path);
+    check(std::isnan(bad.number("Wheel","SteeringSensitivity",1.f))&&std::isinf(bad.number("Wheel","SteeringDeadZone",0.f)),
+          "the reader does return nan / inf for these strings (so the case is real)");
+    check(same(wheel_steering(bad),1.f,0.f),"[Wheel] nan / inf: the defaults");
+    {std::ofstream f(path,std::ios::binary);f<<"[Wheel]\r\nSteeringSensitivity = 1.25\r\nSteeringDeadZone = 0.05\r\n";}
+    Ini good;good.load(path);
+    check(same(wheel_steering(good),1.25f,0.05f),"[Wheel] finite values as written");
+    Ini none;none.load(path+".missing");
+    check(same(wheel_steering(none),1.f,0.f),"no file: the defaults");
+    std::remove(path.c_str());
+}
+
 int main(){
-    try{test_report();test_import();test_write_section();test_injection();}
+    try{test_report();test_import();test_write_section();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;

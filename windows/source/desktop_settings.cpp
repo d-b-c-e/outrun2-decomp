@@ -1,6 +1,7 @@
 #include "desktop_settings.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -90,6 +91,15 @@ float Ini::number(const std::string& section,const std::string& key,float fallba
     const auto v=text(section,key);if(v.empty())return fallback;
     char* end=nullptr;const float n=std::strtof(v.c_str(),&end);
     return end&&end!=v.c_str()?n:fallback;
+}
+WheelSteering wheel_steering(float sensitivity,float dead_zone){
+    WheelSteering w;
+    if(std::isfinite(sensitivity))w.sensitivity=sensitivity;
+    if(std::isfinite(dead_zone))w.dead_zone=std::clamp(dead_zone,0.f,0.9f);
+    return w;
+}
+WheelSteering wheel_steering(const Ini& settings){
+    return wheel_steering(settings.number("Wheel","SteeringSensitivity",1.f),settings.number("Wheel","SteeringDeadZone",0.f));
 }
 bool Ini::flag(const std::string& section,const std::string& key,bool fallback)const{
     const auto v=lower(text(section,key));

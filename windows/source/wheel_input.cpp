@@ -182,10 +182,13 @@ bool import_legacy_bindings(){
     if(!write_section(g.settings_path,"Controls",body,error)||!write_section(g.settings_path,"ControlsImport",marker,error)){
         std::printf("controls: legacy import failed: %s\n",error.c_str());return false;}
     if(!own.has_section("Wheel")){
-        const float sensitivity=src.number("DirectInput","SteeringSensitivity",1.f),zone=src.number("Controls","SteeringDeadZone",0.f);
+        float sensitivity=src.number("DirectInput","SteeringSensitivity",1.f),zone=src.number("Controls","SteeringDeadZone",0.f);
+        if(!std::isfinite(sensitivity))sensitivity=1.f;   // never "nan" or "inf" into [Wheel] (romi 25900)
+        if(!std::isfinite(zone))zone=0.f;
         char a[32],b[32];std::snprintf(a,sizeof a,"%g",double(sensitivity));std::snprintf(b,sizeof b,"%g",double(zone));
         write_section(g.settings_path,"Wheel",{std::string("SteeringSensitivity = ")+a,std::string("SteeringDeadZone = ")+b},error);
-        g.sensitivity=sensitivity;g.dead_zone=std::clamp(zone,0.f,0.9f);
+        const auto steering=wheel_steering(sensitivity,zone);
+        g.sensitivity=steering.sensitivity;g.dead_zone=steering.dead_zone;
     }
     std::printf("controls: imported %zu binding line(s) from %s into [Controls] (backup %s)\n",body.size()-4,src.path().c_str(),backup.c_str());
     for(const auto& n:notes)std::printf("controls: import note: %s\n",n.c_str());
@@ -266,8 +269,8 @@ std::uint32_t gear_pulses(const platform::NativeRuntimeContext* runtime,bool rac
 void wheel_input_configure(const Ini& ini){
     g.settings_path=ini.path();
     const auto slash=g.settings_path.find_last_of("\\/");g.folder=slash==std::string::npos?".":g.settings_path.substr(0,slash);
-    g.sensitivity=ini.number("Wheel","SteeringSensitivity",1.f);
-    g.dead_zone=std::clamp(ini.number("Wheel","SteeringDeadZone",0.f),0.f,0.9f);
+    const auto steering=wheel_steering(ini);   // non-finite values are the defaults (romi 25900)
+    g.sensitivity=steering.sensitivity;g.dead_zone=steering.dead_zone;
     g.section=ctl::parseSection(ini.section_lines("Controls"));
     // No canonical section yet: import the Tweaks bindings once (this file's [DirectInput], else the folder's
     // OutRun2006Tweaks.ini). The marker makes it once; a canonical [Controls] is never remapped from them.
