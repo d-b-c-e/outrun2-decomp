@@ -876,6 +876,22 @@ bool native_race_bank_ensure(NativeRuntimeContext& c,PcSceneRenderer& r,std::uin
     Service sv{c,native_race_area(c),&r};
     return sv.ensure_bank(resource);
 }
+std::int32_t native_race_area_player_stage_unique(const NativeRuntimeContext& cc){
+    // Read-only: the same cached mapping the player car's GetRoadOfs reads (native_race_area_memory without a rebuild).
+    auto& c=const_cast<NativeRuntimeContext&>(cc);
+    auto& o=native_race_area(c);
+    if(!o.initialized)return -1;
+    const auto& car=c.event_function36.car_select.car_799d18;
+    if(car.size()<0x6cu)return -1;
+    std::uint32_t key;std::memcpy(&key,car.data()+0x68,4);
+    try{
+        auto& mem=o.memory;
+        std::uint32_t rec=0;const std::int32_t n=mem.i32(0x7d33c4u);const std::uint32_t base=mem.u32(0x7d33bcu);
+        for(std::int32_t k=0;k<n;++k)if(mem.u32(base+std::uint32_t(k)*0x78u+4u)==key){rec=base+std::uint32_t(k)*0x78u;break;}
+        return mem.i32(mem.u32(rec?rec+0x14u:0x7d2df4u));
+    }catch(const PcRaceUnmapped&){return -1;}
+}
+
 PcRaceMemory& native_race_area_memory(NativeRuntimeContext& c,PcSceneRenderer* renderer,bool rebuild_now){
     auto& o=native_race_area(c);
     if(!rebuild_now)return o.memory;

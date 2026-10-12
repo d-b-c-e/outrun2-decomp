@@ -219,6 +219,11 @@ void race_objects_copy_4efd20(const PcRaceMemory&,std::uint32_t e,std::uint32_t 
 // mirrors START's 44D720 words 7D33BC/7D3188 while 44CB00 has not run;
 // rebuild=false returns the memory as the current AREA callback built it.
 PcRaceMemory& native_race_area_memory(NativeRuntimeContext&,PcSceneRenderer* renderer,bool rebuild);
+// The player car's stage unique id: 44DC50 on the car's +68 key (the course record whose +4 matches, [[rec+14]], else
+// [[7D2DF4]]), as the GetRoadOfs port reads it for the player car, from the AREA's cached memory (no rebuild, no
+// write). -1 before 44CB00 has run or when a word is unmapped. For readers outside the race (the desktop force
+// model's surface LUT, ffb_live.cpp).
+std::int32_t native_race_area_player_stage_unique(const NativeRuntimeContext&);
 // Executes a race draw list (405360 / 4056D0 on resident banks, 4044A0 /
 // 4044C0 / 4044E0 LOD threshold, 4044F0, 404540, 4052B0, 4052C0, 405350)
 // on the renderer. Returns the objects drawn.

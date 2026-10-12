@@ -10,7 +10,7 @@ every common tick of the replayed span is identical, 1 otherwise, 2 on unusable 
 """
 import csv, json, pathlib, sys
 
-INPUTS = ("speed_1c4", "steer_1d0", "steer_rate_1d4", "lateral_264", "lateral_268", "gear_208", "state_8", "pedal_34", "roughness", "water")
+INPUTS = ("speed_1c4", "steer_1d0", "steer_rate_1d4", "lateral_264", "lateral_268", "gear_208", "state_8", "pedal_34", "roughness", "water", "stage")
 
 
 def load(folder):
@@ -34,13 +34,14 @@ def main():
     # the race the replay drives is the first epoch in both (one race per first-loop run)
     common = sorted(k for k in a if k in b and k[0] == 1)
     if not common: print("no common race ticks"); return 2
+    cols = [c for c in INPUTS if c in a[common[0]] and c in b[common[0]]]   # v4 adds the stage; a v3 pair has none
     same_in = same_held = same_intent = 0; first = None; worst = {}
     for k in common:
         x, y = a[k], b[k]
-        ins = all(x[c] == y[c] for c in INPUTS)
+        ins = all(x[c] == y[c] for c in cols)
         same_in += ins; same_held += x["held"] == y["held"]; same_intent += x["intent"] == y["intent"]
         if (not ins or x["held"] != y["held"]) and first is None: first = dict(epoch=k[0], raceTick=k[1], r1=dict(x), r3=dict(y))
-        for c in INPUTS + ("held", "intent"):
+        for c in tuple(cols) + ("held", "intent"):
             try: d = abs(float(x[c]) - float(y[c]))
             except ValueError: continue
             worst[c] = max(worst.get(c, 0.0), d)

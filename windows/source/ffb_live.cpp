@@ -3,6 +3,7 @@
 #include "native_window.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
+#include "platform/race_area_runtime.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -48,11 +49,13 @@ void frame(const platform::NativeRuntimeContext* rt){
     if(f.epochs.reset_now)f.model->reset();
     const auto& b=rt->event_function36.car_select.car_799d18;
     const auto car=ffb::car_signals(b.data(),b.size());
-    // The surface: the game's LUT over the four tyres (the mod's Surface: max roughness), stage unknown (-1).
+    // The surface: the game's LUT over the four tyres (the mod's Surface: max roughness) with the player's stage
+    // (GetStageUniqueNum(GetNowStageNum(8)) in the mod; the race area's 44DC50 read here, -1 when not yet known).
+    const std::int32_t stage=platform::native_race_area_player_stage_unique(*rt);
     float roughness=0.0f;std::uint32_t water=0;
     if(b.size()>=0x260u){
         const int load_coli=int(at<std::uint32_t>(b.data(),0x5c));
-        for(unsigned i=0;i<4;++i)roughness=std::max(roughness,float(ffb::surface_roughness(at<std::uint32_t>(b.data(),0x24c+i*4u),load_coli,-1,&water)));
+        for(unsigned i=0;i<4;++i)roughness=std::max(roughness,float(ffb::surface_roughness(at<std::uint32_t>(b.data(),0x24c+i*4u),load_coli,stage,&water)));
     }
     const unsigned bad=validity(car,roughness);
     Row row;
@@ -65,10 +68,10 @@ void frame(const platform::NativeRuntimeContext* rt){
     if(bad)++f.invalid_rows;
     f.min_held=f.race_ticks==1?held:std::min(f.min_held,held);
     f.max_held=f.race_ticks==1?held:std::max(f.max_held,held);
-    if(f.trace)std::fprintf(f.trace,"%u,%u,%u,%u,%lu,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%.9g,%u,%u,%d,%d,%.9g,%d\n",
+    if(f.trace)std::fprintf(f.trace,"%u,%u,%u,%u,%lu,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%.9g,%u,%d,%u,%d,%d,%.9g,%d\n",
         mode,f.epochs.epoch,f.race_ticks,rt->frame_state.frame_counter_95af0c,GetTickCount(),
         double(car.speed_1c4),double(car.steer_1d0),double(car.steer_rate_1d4),double(car.lateral_264),double(car.lateral_268),
-        car.gear_208,car.state_8,car.pedal_34,double(roughness),water,bad,row.sent?1:0,held,double(scale),intent);
+        car.gear_208,car.state_8,car.pedal_34,double(roughness),water,stage,bad,row.sent?1:0,held,double(scale),intent);
 }
 void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(f.inner)f.inner(out,rt);
@@ -91,7 +94,7 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
     f.trace_path=path;f.source=source;
     f.trace=std::fopen(path.c_str(),"w");
     if(!f.trace){std::printf("ffb: trace %s not writable; nothing computed\n",path.c_str());std::fflush(stdout);f.model.reset();return;}
-    std::fprintf(f.trace,"# dbce.outrun-decomp.ffb-trace,3,model=outrun-legacy@1,output=none (no device),periodics=fallback,stage=unknown,"
+    std::fprintf(f.trace,"# dbce.outrun-decomp.ffb-trace,4,model=outrun-legacy@1,output=none (no device),periodics=fallback,stage=race area 44DC50 (-1 unknown),"
         "settings=%s,seam=input sample (the previous tick's car),process=%s\n",source.c_str(),latched?"latched":"ordinary");
     std::fprintf(f.trace,"# FFBGlobalStrength=%.9g FFBSpringStrength=%.9g FFBDamperStrength=%.9g FFBSteeringWeight=%.9g FFBWallImpact=%.9g "
         "FFBGearShift=%.9g FFBRoadTexture=%.9g FFBTireSlip=%.9g FFBGripLoss=%.9g FFBWeightTransfer=%.9g FFBLateralDeadzone=%.9g "
@@ -101,9 +104,9 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
     std::fprintf(f.trace,"# invalid bits: 1 speed, 2 steer, 4 steer rate, 8 lateral 264, 16 lateral 268, 32 roughness (inputs as read, "
         "before the model's guards); held = the last command (the deadband holds it); intent = held x FFBGlobalStrength\n");
     std::fprintf(f.trace,"mode,epoch,race_tick,frame_95af0c,ms,speed_1c4,steer_1d0,steer_rate_1d4,lateral_264,lateral_268,gear_208,state_8,"
-        "pedal_34,roughness,water,invalid,sent,held,global_strength,intent\n");
+        "pedal_34,roughness,water,stage,invalid,sent,held,global_strength,intent\n");
     f.on=true;
-    std::printf("ffb: outrun-legacy@1 software force stream to %s (%s); output none (no device), periodics fallback, stage unknown\n",
+    std::printf("ffb: outrun-legacy@1 software force stream to %s (%s); output none (no device), periodics fallback, stage from the race area\n",
         path.c_str(),source.c_str());
     std::fflush(stdout);
 }
