@@ -12,17 +12,24 @@
 #include <stdexcept>
 namespace outrun::xbox_runtime {
 namespace {
-// OR2_FRAME_LATENCY=1..3 (opt-in, a measured experiment): the swap chain's frame latency waitable object with that
-// many frames queued at most, waited at the top of the frame before the input sample (wait_for_frame_latency).
-// Unset: the default chain, as before (up to 3 frames queued, Present blocks).
+// Frame latency: 1..3 uses the swap chain's frame latency waitable object with that many frames queued at most,
+// waited at the top of the frame before the input sample (wait_for_frame_latency); 0 is the plain chain (up to 3 frames
+// queued, Present blocks). The host's setting (set_frame_latency: the desktop's [Window] FrameLatency, default 2) or
+// 0 for a host that sets none; OR2_FRAME_LATENCY overrides it (tests). Measured (perf P5 ETW, Present-to-scan-out
+// median): 0 61.7 ms, 2 28.5 ms, 1 11.8 ms, every race frame on cadence at each.
+unsigned g_latency_setting=0;
 HANDLE g_latency_wait=nullptr;   // owned by the process, like the swap chain (graphics(), never torn down): closed at exit
 std::uint64_t g_latency_waits=0,g_latency_timeouts=0,g_latency_failures=0;   // frames waited; 1 s cap hit; WAIT_FAILED
-// The whole value must be exactly 1, 2 or 3; anything else (empty, "1junk", "+1", overflow) is refused and logged.
+// OR2_FRAME_LATENCY must be exactly 0, 1, 2 or 3; anything else (empty, "1junk", "+1", overflow) is refused and logged,
+// and the host's setting applies.
 unsigned frame_latency_request(){
-    const char* v=std::getenv("OR2_FRAME_LATENCY");if(!v)return 0u;
-    if((v[0]=='1'||v[0]=='2'||v[0]=='3')&&v[1]=='\0')return unsigned(v[0]-'0');
-    std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=\"%.32s\" refused (must be exactly 1, 2 or 3); default latency\n",v);
-    return 0u;
+    const char* v=std::getenv("OR2_FRAME_LATENCY");
+    if(v&&v[0]>='0'&&v[0]<='3'&&v[1]=='\0'){
+        std::fprintf(stdout,"Xbox display: frame latency %c from OR2_FRAME_LATENCY (overrides the setting %u)\n",v[0],g_latency_setting);
+        return unsigned(v[0]-'0');
+    }
+    if(v)std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=\"%.32s\" refused (must be exactly 0, 1, 2 or 3); the setting %u applies\n",v,g_latency_setting);
+    return g_latency_setting;
 }
 constexpr const char* Shader=R"HLSL(
 struct VsIn{float2 p:POSITION;float4 c:COLOR0;float2 uv:TEXCOORD0;};
@@ -199,6 +206,7 @@ void report_frame_latency(){
     if(g_latency_wait)std::fprintf(stdout,"frame latency waits: %llu frames, %llu timed out (1 s cap), %llu failed (WAIT_FAILED)\n",
         (unsigned long long)g_latency_waits,(unsigned long long)g_latency_timeouts,(unsigned long long)g_latency_failures);
 }
+void set_frame_latency(unsigned frames){g_latency_setting=frames<=3u?frames:0u;}
 unsigned output_refresh(){
     if(!g_refresh){
         // Development: OR2_XBOX_REFRESH_HZ=N stands for the output's rate (120 Hz checks on a 60 Hz monitor).

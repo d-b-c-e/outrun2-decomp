@@ -44,7 +44,9 @@ constexpr const char* Template=
 "\n"
 "[Window]\n"
 "; false: a 1280x720 window (or start with --windowed).\n"
-"WindowedBorderless = true\n";
+"WindowedBorderless = true\n"
+"; frames queued ahead of the display: 2 (default), 1 the lowest latency, 0 the plain chain as before.\n"
+"FrameLatency = 2\n";
 constexpr const char* ImportHeader=
 "; OutRun 2006 desktop build (OutRunDesktop.exe). The wheel bindings of this folder's\n"
 "; OutRun2006Tweaks.ini are imported into [Controls] at the first start with the devices connected.\n"
@@ -54,7 +56,9 @@ constexpr const char* ImportHeader=
 "SteeringDeadZone = 0.0\n"
 "\n"
 "[Window]\n"
-"WindowedBorderless = true\n";
+"WindowedBorderless = true\n"
+"; frames queued ahead of the display: 2 (default), 1 the lowest latency, 0 the plain chain as before.\n"
+"FrameLatency = 2\n";
 }
 bool Ini::load(const std::string& path){
     values_.clear();sections_.clear();path_=path;
