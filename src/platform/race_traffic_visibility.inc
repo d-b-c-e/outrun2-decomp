@@ -122,7 +122,7 @@
             const float sr=std::fabs(smul(r,ww));
             pf(S,sx);pf(S+4,sy);pf(S+8,sz);pf(S+0xc,sr);
             bool on=true;
-            if(gt(f32(cam+0xbc),ssub(r,sz)))on=false;
+            if(!triple_keep_behind()&&gt(f32(cam+0xbc),ssub(r,sz)))on=false;   // OR2_TRIPLE_KEEP_BEHIND (diagnostic)
             else if(gt(ssub(ssub(0.0f,sz),r),f32(cam+0xc0)))on=false;
             else if(gt(low,sadd(sx,sr)))on=false;
             else if(gt(ssub(sx,sr),high))on=false;

@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <functional>
 #include <stdexcept>
+#include <string>
 namespace outrun::platform {
 ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float half_width,bool fix){
     if(fix&&half_width!=320.0f)return {-half_width,half_width};
@@ -21,6 +22,14 @@ ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float ha
 }
 namespace {
 using driving::X87;
+// OR2_TRIPLE_KEEP_BEHIND=1 (diagnostic; three views only, a normal process): the object and car view tests 4F0E40 and
+// 4F02D0 keep spheres wholly behind the centre camera's near plane (+BC), which the side panels see past 90 degrees
+// (windows/docs/TRIPLE-SCREENS.md "Start wedges", candidate b). The visibility bits also feed game logic (4F02D0's
+// nearest visible car), so this is for a diagnostic run only, never a setting.
+bool triple_keep_behind(){
+    static const bool on=[]{const char* v=std::getenv("OR2_TRIPLE_KEEP_BEHIND");return v&&std::string(v)=="1";}();
+    return on&&g_pc_triple_corrections!=nullptr;
+}
 std::uint32_t bits(float f){std::uint32_t u;std::memcpy(&u,&f,4);return u;}
 float from_bits(std::uint32_t u){float f;std::memcpy(&f,&u,4);return f;}
 // CVTTSS2SI: truncation, the integer indefinite value when out of range/NaN.
@@ -2796,7 +2805,7 @@ struct T {
     // 4F02D0(camera, sphere, out): the projected sphere inside the depth range and the screen bounds.
     std::uint32_t view_4f02d0(std::uint32_t cam,std::uint32_t in,std::uint32_t out){
         project_449e70(f32(cam+0xb4),in,out);
-        if(gt(f32(cam+0xbc),ssub(f32(in+0xc),f32(out+8))))return 0;
+        if(!triple_keep_behind()&&gt(f32(cam+0xbc),ssub(f32(in+0xc),f32(out+8))))return 0;
         if(gt(ssub(ssub(0.0f,f32(out+8)),f32(in+0xc)),f32(cam+0xc0)))return 0;
         // x bounds 5DA2D4 / 6281C8 (-320 / 320): the port's widescreen view widens them.
         const float half=g_pc_view_half_width==320.0f?K(0x6281c8u):g_pc_view_half_width;

@@ -319,16 +319,21 @@ t56.
 - **Not a fix:** a narrower FOV (`MatchGameFov = false`, run R1) moves them off screen but zooms the centre. The owner
   rejected that.
 - **Diagnostics with the normal framing** (source-only until reviewed, then one muted run each):
-  1. `OR2_TRIPLE_CLEAR_PROBE=1`: back-buffer colour clears are magenta in three-view runs.
-     - Magenta wedges: nothing is drawn there.
-     - Black wedges: something dark is drawn there (a backdrop, fog or an unlit face), which is a different
+  1. `OR2_TRIPLE_CLEAR_PROBE=1` (sana reviewed, 38911): back-buffer colour clears are magenta in three-view runs.
+     - Magenta wedges are evidence of uncovered pixels only. They do not say whether an asset is missing or culled;
+       the second test does.
+     - Black wedges: something covers them (a dark draw, fog, or post-processing or overlay masking); a different
        investigation.
+     - Run it beside a normal-FOV baseline, and restore the scratch state.
   2. If nothing is drawn, the candidates are:
      - (a) no stage geometry behind the start line: the section lists begin there, and G4's union did not help;
      - (b) course objects or cars culled by the game's visibility tests. 4F0E40 / 4F02D0 drop a sphere wholly behind
        the centre camera's near plane (+BC), which is exactly where the outer half of each side panel looks. The
        stage nodes themselves draw with culling off.
-     - A second switch can relax (b) for three views, to tell (a) from (b).
+     - `OR2_TRIPLE_KEEP_BEHIND=1` (diagnostic; three views, a normal process) relaxes (b): 4F0E40 and 4F02D0 keep
+       spheres behind the near plane. The visibility bits also feed game logic (the nearest visible car), so it is
+       for a diagnostic run only.
+     - Wedges that fill with it point to (b); wedges still uncovered point to (a).
   3. If (a), the geometry is absent from the stage data. The normal-framing options are then:
      - a presentation fill for the side panels' empty pixels (sky or ground colour instead of black);
      - new start-line ground (content);
