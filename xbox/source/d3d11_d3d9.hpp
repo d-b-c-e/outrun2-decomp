@@ -67,17 +67,26 @@ private:
     // triangle into three viewports with the panel's clip correction; corrections cached per projection.
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
-    std::map<const void*,int> triple_wvp_base_;   // vertex program -> the constant register of its world-view-projection (-1: none)
-    // The world x view x projection those registers are compared with, and its tolerance: computed again only when a
-    // transform changes (world, view, projection as last seen).
+    // Per vertex program: the constant register of its position matrix (-1: none found), whether that matrix is the
+    // current world x view x projection or only some affine matrix x the current projection, and whether it was logged.
+    struct TripleProgram { int base{-1};bool affine{},logged{}; };
+    std::map<const void*,TripleProgram> triple_programs_;
+    // The world x view x projection those registers are compared with, its tolerance, and column 3 of the inverse
+    // projection (the affine test): computed again only when a transform changes (world, view, projection as last seen).
     std::array<float,48> triple_xf_{};std::array<float,16> triple_wvp_{};double triple_wvp_tolerance_{};bool triple_xf_valid_{};
+    std::array<double,4> triple_pinv_col3_{};bool triple_pinv_ok_{};
+    std::vector<std::array<float,16>> triple_refused_logged_;   // refused projections already logged (at most 4)
     unsigned triple_frame_draws_{};
-    bool triple_bind(bool rhw,bool standard);void triple_unbind();bool triple_native_standard(const void* program);
+    // triple_native_standard: 0 no matrix of the current projection, 1 world x view x projection, 2 an affine matrix x it.
+    bool triple_bind(bool rhw,bool standard,bool affine=false);void triple_unbind();int triple_native_standard(const void* program,const std::string& key);
 public:
-    // Three-view counts (runtime.log at exit): draws into three viewports; draws kept single on the centre panel because
-    // pretransformed (rhw: HUD, menus, screen-space particles), custom projection, not triangles (the geometry shader
-    // takes only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
-    std::uint64_t triple_draws{},triple_single_rhw{},triple_single_custom{},triple_single_topology{},triple_single_target{},triple_frames{};
+    // Three-view counts (runtime.log at exit): draws into three viewports (of them, through a vertex program whose
+    // matrix is an affine one x the projection, not the current world x view x projection); draws kept single on the
+    // centre panel because pretransformed (rhw: HUD, menus, screen-space particles), a vertex program with no matrix of
+    // the current projection in its constants, a projection the rig refuses, not triangles (the geometry shader takes
+    // only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
+    std::uint64_t triple_draws{},triple_draws_affine{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
+        triple_single_topology{},triple_single_target{},triple_frames{};
 private:
     bool native_enabled_{true};
     struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};

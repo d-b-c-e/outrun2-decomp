@@ -199,10 +199,15 @@ undone before the correction and re-applied after it, with the new w.
 - **Geometry shader**: triangles only (lists and strips). Those are the only draws the device makes: draw_native takes
   lists and strips, flush draws a list, and points and lines are already not drawn. Any other topology would stay
   single, counted as "not triangles". Its Varying is taken from the generated vertex source, not copied.
-- **Which draws replicate**: back-buffer draws whose clip position is the standard one, meaning FFP draws (the CPU's
-  world x view x projection) and vertex programs whose constants hold the current world x view x projection. The
-  latter is a heuristic: a program that holds that matrix but projects otherwise would be replicated wrongly.
-  Pretransformed draws and custom projections stay single on the centre.
+- **Which draws replicate**: back-buffer draws whose clip position is a view-space point times the current projection.
+  - FFP draws: the CPU's world x view x projection.
+  - Vertex programs whose constants hold M x P, with P the current projection and M affine. The current world x view x
+    projection is tried first; then any affine M, such as a sky drawn with the camera's rotation but not its
+    translation.
+  - This is a heuristic. A program whose constants factor that way but project otherwise would be replicated wrongly.
+    runtime.log names each program once with what it matched.
+  - Pretransformed draws, programs with no such matrix, and projections the rig refuses stay single on the centre.
+    Each is counted separately in the exit line, and each refused projection is logged once.
 - **Tests**:
   - `test_triple_screens`: corrections against a direct per-panel projection to 1e-9, through the fix;
   - `test_d3d11_vertex_path`: the replication on WARP through both vertex paths, each third against the single view;
@@ -217,6 +222,18 @@ Known limits, judged at the rig, before any default (nene 30684):
 - the eye distance is the matched-FOV one; a physical eye distance is a later option, under the F6 selector.
 
 The `three-projections` status needs counted passes plus a WGC check of the seams, not counts alone.
+
+**First rig picture** (2026-10-12 12:54, `bb91f82`, perf copy, muted; hub `artifacts/outrun-perf-20261011/triples-20261012`):
+- 60.0 fps over 1973 race frames, max 35.0 ms; 0 device errors.
+- Over 2095 frames: 1,533,365 draws replicated. Single on the centre: 203,723 pretransformed, 707,861 "custom" (not yet
+  split by reason), 1,119,793 other targets.
+- **Seams**: in the race the side panels continue the scene with their yawed projections (grandstands left, buildings
+  right). Road, fences and buildings carry through both seams, folding at each one; the 8 mm fixture bezel is skipped.
+  Physical straightness is for the owner to judge.
+- **Omission: the side sky was black.** Its draws were among the custom ones. The affine match above is the candidate
+  fix, with the reasons now counted.
+- **HUD and menus**: on the centre only. In the menus the side panels are black.
+- Captures were PrintWindow and a GDI copy of the composed desktop, not WGC.
 
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
