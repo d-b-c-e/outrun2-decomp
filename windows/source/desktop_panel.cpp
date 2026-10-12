@@ -33,7 +33,7 @@ Panel p;
 // The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
-    int triple{},latency{2};
+    int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     bool telemetry{true};int layout{};
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int sensitivity{100},dead_zone{};
@@ -105,18 +105,29 @@ void page_ffb(bool advanced){
 void page_cameras(bool advanced){
     static const char* const modes[]{"Off","Surround","Separate monitors"};
     {const int before=v.triple;
-     if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: one wide view in a Surround desktop's "
-         "wide window. Separate monitors: one wide view in one window over three equal side-by-side monitors."))
+     if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
+         "Separate monitors: one window over three equal side-by-side monitors. Projection, below, chooses what they show."))
          keep(&v.triple,before,[&]{return save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));});}
     const auto& st=triple_screens_status();
-    char now[256];
-    if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1 (planar, not three views)",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
+    char now[320];
+    if(st.applied==TripleProjection::angled)
+        std::snprintf(now,sizeof now,"%s, %s, three projected views (experimental)",triple_screens_name(st.mode),st.where.c_str());
+    else if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
     else std::snprintf(now,sizeof now,"%s, %s, one 16:9 view",triple_screens_name(st.mode),st.where.c_str());
     dbce::panel::Status("Now",now);
-    // romi 31510: the span is one planar view; never imply three angled views before they exist.
-    dbce::panel::Text("Surround and Separate monitors both draw one wide view across the screens; separate angled side views "
-                      "are not built yet.");
-    if(v.triple!=int(st.mode))dbce::panel::Text("The choice applies at the next game start.");
+    // [Triple] Views, below the selector and only when it is not Off (STD-022 options sit there; sana 35626 wording).
+    if(v.triple!=int(TripleScreens::off)){
+        static const char* const projections[]{"One wide view","Three projected views (experimental)"};
+        const int before=v.projection;
+        if(dbce::panel::Choice("Projection",projections,2,&v.projection,"One wide view: one picture across the screens, as Tweaks. "
+            "Three projected views: each side screen shows its own angle, for the preset rig (32-inch 16:9 panels, sides at "
+            "70 degrees, 8 mm gaps, the eye matched to the game's field of view), not yet your measured rig."))
+            keep(&v.projection,before,[&]{return save("Triple","Views",triple_projection_name(TripleProjection(v.projection)));});
+        if(st.requested==TripleProjection::angled&&st.applied!=TripleProjection::angled)
+            dbce::panel::Status("Projection now",(std::string(st.aspect>0.f?"one wide view":"one 16:9 view")+" (three projected views not applied: "+
+                                st.projection_note+")").c_str(),dbce::panel::Tone::Warning);
+    }
+    if(v.triple!=int(st.mode)||v.projection!=int(st.requested))dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
     static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
     const int before=v.latency;
@@ -158,12 +169,13 @@ void stop_ffb(){
     else stop_error=pending_failure;
 }
 bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
-// The frame-rate readout's display suffix (STD-023, romi 31510): the span is one planar view, never "triples on".
+// The frame-rate readout's display suffix (STD-023, romi 31510): what the span shows, never "triples on".
 // The present thread only (the readout and its log line).
 const char* display_text(){
     static char text[96];
     const auto& st=triple_screens_status();
     if(st.mode==TripleScreens::off||!(st.aspect>0.f))std::snprintf(text,sizeof text,"one 16:9 view");
+    else if(st.applied==TripleProjection::angled)std::snprintf(text,sizeof text,"%s span, three projected views (experimental)",triple_screens_name(st.mode));
     else std::snprintf(text,sizeof text,"%s span, one wide view %.2f:1",triple_screens_name(st.mode),double(st.aspect));
     return text;
 }
@@ -254,6 +266,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
+    v.projection=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
