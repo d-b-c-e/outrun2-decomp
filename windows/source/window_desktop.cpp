@@ -6,6 +6,7 @@
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
 #include "telemetry_forza.hpp"
+#include "ffb_live.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -168,9 +169,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // Off in a latched process; OR2_TELEMETRY=0 turns it off for unattended runs.
     outrun::desktop::telemetry_configure(settings,plan.latched);
     outrun::desktop::telemetry_wrap_input_filter();
+    // Force feedback F2 (ffb_live.hpp): the model computed for an OR2_FFB_TRACE trace only; no device output at all.
+    outrun::desktop::ffb_configure(settings,plan.latched);
+    outrun::desktop::ffb_wrap_input_filter();
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::telemetry_shutdown();
+    outrun::desktop::ffb_shutdown();
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks

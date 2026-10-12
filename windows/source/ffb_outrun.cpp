@@ -34,6 +34,14 @@ std::string validate(const LegacySettings& s){
     return {};
 }
 
+LegacySettings owner_accepted(){
+    LegacySettings s;
+    s.global_strength=1.0f;s.spring=0.3f;s.damper=0.2f;s.steering_weight=1.0f;s.wall_impact=1.0f;s.rumble_strip=0.6f;
+    s.gear_shift=0.3f;s.road_texture=0.2f;s.tire_slip=0.8f;s.grip_loss=0.6f;s.weight_transfer=0.8f;s.lateral_deadzone=1.5f;
+    s.engine_idle=0.08f;s.use_periodic_effects=true;s.invert=false;
+    return s;
+}
+
 float LegacyForce::strength_scale()const{return std::isfinite(s_.global_strength)?std::clamp(s_.global_strength,0.0f,1.0f):0.0f;}
 
 void LegacyForce::reset(){

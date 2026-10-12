@@ -4,6 +4,9 @@
 // reproduce byte for byte here. Plus the periodic envelopes, the contact edge, reset and the non-finite guards.
 //     test_ffb_outrun <tests/data/ffb>
 #include "ffb_outrun.hpp"
+#include "ffb_live.hpp"
+#include <windows.h>
+#include <cstdio>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -184,10 +187,29 @@ void test_settings(){
     check(r.ok&&m.nonfinite_ticks()==0,"extreme valid settings and signals: bounded, no non-finite intermediate");
 }
 
+void test_settings_parse(){
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_ffb_settings_test.ini";
+    auto load=[&](const char* body){{std::ofstream f(path,std::ios::binary);f<<body;}outrun::desktop::Ini i;i.load(path);return i;};
+    std::string notes;
+    auto s=outrun::desktop::ffb_settings(load(""),notes);
+    const auto o=owner_accepted();
+    check(s.spring==o.spring&&s.road_texture==o.road_texture&&s.tire_slip==o.tire_slip&&notes.empty(),"no [FFB]: the owner's accepted values");
+    check(o.spring==0.3f&&o.damper==0.2f&&o.steering_weight==1.0f&&o.road_texture==0.2f&&o.tire_slip==0.8f&&o.rumble_strip==0.6f,
+          "owner_accepted = his live ini (Spring 0.3, Damper 0.2, SteeringWeight 1.0, RoadTexture 0.2, TireSlip 0.8, RumbleStrip 0.6)");
+    s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.45\r\nFFBDamperStrength = abc\r\nFFBInvertForce = true\r\n"),notes);
+    check(s.spring==0.45f&&s.damper==o.damper&&s.invert&&notes.find("FFBDamperStrength")!=std::string::npos,"a key overrides; a non-number keeps the default, noted");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.5x\r\n"),notes);
+    check(s.spring==o.spring&&!notes.empty(),"trailing garbage is not a number");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBGlobalStrength = nan\r\n"),notes);
+    check(!validate(s).empty(),"a parsed NaN reaches validate, which refuses it");
+    std::remove(path.c_str());
+}
+
 int main(int argc,char** argv){
     try{
         if(argc!=2)throw std::runtime_error("usage: test_ffb_outrun <tests/data/ffb>");
-        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();
+        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();test_settings_parse();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun force model: "<<checks<<" checks passed\n";
     return 0;

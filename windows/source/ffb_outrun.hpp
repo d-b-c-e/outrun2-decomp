@@ -35,6 +35,11 @@ struct LegacySettings {
     bool invert=false;              // FFBInvertForce
 };
 
+// The owner's accepted values (his OutRun2006Tweaks.ini [FFB] on the Stream Deck route, read 2026-10-12, file dated
+// 2026-10-08): the decomp's defaults, so the decomp feels as the mod does for him. The mod's compiled defaults
+// (LegacySettings{}) stay the parity reference for the goldens.
+LegacySettings owner_accepted();
+
 // The car fields the calculation reads (the PC's EVWORK_CAR, the decomp's car_select.car_799d18).
 struct CarSignals {
     float speed_1c4{},steer_1d0{},steer_rate_1d4{},lateral_264{},lateral_268{};

@@ -6,7 +6,7 @@
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp
-    source/telemetry_forza.cpp source/telemetry_live.cpp)
+    source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry)
 target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt ws2_32)
 # A PDB with the public symbols, to name the function of a crash address.
@@ -29,8 +29,9 @@ add_test(NAME telemetry COMMAND test_telemetry)
 
 # OutRun's own force model (source/ffb_outrun, "outrun-legacy@1") against the OutRun 2006 mod's production calculation:
 # its fixture's goldens, byte for byte (tests/data/ffb/README.md). Software values only; no device.
-add_executable(test_ffb_outrun tests/test_ffb_outrun.cpp source/ffb_outrun.cpp)
+add_executable(test_ffb_outrun tests/test_ffb_outrun.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/desktop_settings.cpp)
 target_include_directories(test_ffb_outrun PRIVATE source)
+target_compile_definitions(test_ffb_outrun PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_features(test_ffb_outrun PRIVATE cxx_std_17)
 add_test(NAME ffb_outrun COMMAND test_ffb_outrun ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ffb)
 

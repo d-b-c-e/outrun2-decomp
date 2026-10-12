@@ -946,5 +946,11 @@
   "line": "t.map=CreateFileMappingA(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,DWORD(sizeof(OutRun2006TelemetryData)),t.s.shared_name.c_str());",
   "class": "in-memory",
   "reason": "the telemetry shared-memory block (the OutRun 2006 mod's OutRun2006TelemetryData): a page-file mapping (INVALID_HANDLE_VALUE), no file; telemetry_configure returns before it in a latched process"
+ },
+ {
+  "file": "windows/source/ffb_live.cpp",
+  "line": "f.trace=std::fopen(trace,\"w\");",
+  "class": "env-gated",
+  "reason": "the force trace: only with OR2_FFB_TRACE (a development switch, cleared by the latch), and ffb_configure returns before it in a latched process"
  }
 ]
