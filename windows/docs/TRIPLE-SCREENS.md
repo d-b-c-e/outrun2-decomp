@@ -1,4 +1,4 @@
-# Triple screens for the desktop build (design, for review; no code yet)
+# Triple screens for the desktop build (design and status)
 
 Targets, in order:
 - the portfolio standards: STD-022 (one selector: Off / Surround / Separate monitors), STD-015 (both topologies),
@@ -7,7 +7,9 @@ Targets, in order:
 - the parity floor: the Tweaks fork's `[Triple] Screens`, which is a planar span only (its TOOLKIT-ADOPTION: STD-007 /
   015 / 022 partial, STD-019 unchecked).
 
-Status 2026-10-12: design only.
+Status 2026-10-12:
+- steps 1 and 2 (the selector, the unstretched 16:9 frame, the planar span) are in integration and checked at the rig;
+- step 4 is a default-off spike, not yet run in the game (see "The spike as built" below).
 
 ## What the mod does (the parity floor)
 
@@ -184,6 +186,37 @@ Open points for review:
 - (b) the spike's culling-off versus doing the union first;
 - (c) whether the clip_fix half-pixel offset should move after the correction (it is in NDC per viewport, and
   every viewport is the same size).
+
+### The spike as built (`2a5ebbf`, review fixes `bb91f82`; default off, not yet run in the game)
+
+Review (romi 30680 / 30784, nene 30684 / 30802): (a) GPU replication, (b) culling off for the spike, (c) the fix is
+undone before the correction and re-applied after it, with the new w.
+- **Switch**: `OR2_TRIPLE_VIEWS=1` with a planar span (`[Triple] Screens = Separate monitors` over three equal
+  monitors). OR2_ variables are cleared in test processes. Without it nothing changes.
+- **Corrections**: `triple_views` composes C[i] in double on the CPU, per projection (cached), for the toolkit's
+  fixture rig with a matched FOV. A projection it cannot take (not a centred perspective) is refused, and the draw
+  stays single on the centre third.
+- **Geometry shader**: triangles only (lists and strips). Those are the only draws the device makes: draw_native takes
+  lists and strips, flush draws a list, and points and lines are already not drawn. Any other topology would stay
+  single, counted as "not triangles". Its Varying is taken from the generated vertex source, not copied.
+- **Which draws replicate**: back-buffer draws whose clip position is the standard one, meaning FFP draws (the CPU's
+  world x view x projection) and vertex programs whose constants hold the current world x view x projection. The
+  latter is a heuristic: a program that holds that matrix but projects otherwise would be replicated wrongly.
+  Pretransformed draws and custom projections stay single on the centre.
+- **Tests**:
+  - `test_triple_screens`: corrections against a direct per-panel projection to 1e-9, through the fix;
+  - `test_d3d11_vertex_path`: the replication on WARP through both vertex paths, each third against the single view;
+    one geometry-shader mutation survives, see `bb91f82`.
+- **Exit line** (runtime.log): draws replicated over frames, and the single ones by reason.
+
+Known limits, judged at the rig, before any default (nene 30684):
+- fog and billboard axes stay the centre's (vertex fog from the centre's view z, sprites facing the centre camera);
+- the side panels miss the screen-space (rhw) particles, which land on the centre only;
+- objects behind the eye plane stay culled: `g_pc_view_half_width` passes everything in front, not the union of the
+  three frusta (needed beyond 180 degrees);
+- the eye distance is the matched-FOV one; a physical eye distance is a later option, under the F6 selector.
+
+The `three-projections` status needs counted passes plus a WGC check of the seams, not counts alone.
 
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
