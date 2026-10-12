@@ -1,4 +1,6 @@
 #include "d3d11_display.hpp"
+#include "display_fit.hpp"
+#include "platform/pc_screen.hpp"
 #include "d3d11_d3d9.hpp"
 #include <memory>
 #include <stdexcept>
@@ -330,6 +332,8 @@ bool xbox_renderer_initialize(XboxRenderer& renderer,const char* frontend_path,s
 }
 void xbox_renderer_set_video(XboxRenderer& renderer,unsigned width,unsigned height,bool widescreen,unsigned msaa,bool fxaa){
     auto* r=static_cast<RendererImpl*>(renderer.impl);if(!r)return;
+    // A planar span (pc_screen.hpp g_pc_wide_aspect): the scene at the chosen height and the window's aspect.
+    if(platform::g_pc_wide_aspect>0.f)width=planar_width(height,platform::g_pc_wide_aspect);
     g_widescreen=widescreen;r->video_width=width;r->video_height=height;r->video_msaa=msaa;r->video_fxaa=fxaa;r->video_pending=true;
 }
 void xbox_renderer_scene_to_frame(XboxRenderer& renderer){

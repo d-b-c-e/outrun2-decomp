@@ -6,6 +6,11 @@
 #include <string>
 namespace outrun::platform {
 inline float g_pc_view_half_width=320.0f;
+// The planar span (windows/docs/TRIPLE-SCREENS.md step 2): the window's aspect (width / height) when [Triple] Screens is
+// not Off and the window is wider than 16:9, else 0. Then the PC screen the camera sees is 480 x this wide (Hor+, one
+// wide frustum: not three views), the PC frame fills the window, and its 2D keeps the centred 4:3. Set once by the
+// desktop window; 0 on every other platform.
+inline float g_pc_wide_aspect=0.0f;
 // [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
 // (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
 // objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).

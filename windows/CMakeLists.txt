@@ -55,7 +55,8 @@ add_test(NAME outrun_replay COMMAND test_outrun_replay)
 # The test fence (source/test_fence), slice 2b: a temporary game tree, the real game-free writers (options, profiles,
 # the EXE setup, the log), success and fault paths, the complete game-tree inventory compared before and after.
 add_executable(test_triple_screens tests/test_triple_screens.cpp)
-target_include_directories(test_triple_screens PRIVATE source ${PROJECT_SOURCE_DIR}/xbox/source)
+target_include_directories(test_triple_screens PRIVATE source ${PROJECT_SOURCE_DIR}/xbox/source ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_triple_screens PRIVATE outrun_native_runtime)
 target_compile_features(test_triple_screens PRIVATE cxx_std_17)
 target_compile_options(test_triple_screens PRIVATE /W4 /WX)
 add_test(NAME triple_screens COMMAND test_triple_screens)

@@ -28,6 +28,7 @@ public:
     void quad(const std::array<platform::MeshPreviewVertex,4>&,ID3D11ShaderResourceView* texture,unsigned,unsigned);
     void rgba(const void* key,const std::uint8_t* bytes,unsigned,unsigned,int,int,int,int);
     void pc_frame(ID3D11ShaderResourceView* texture,int x,int y,int width,int height);
+    void pc_frame_window(ID3D11ShaderResourceView* texture);   // the whole swap chain (planar span), then the fitted frame again
     bool present(std::string& error);
     ID3D11Device* device()const;
     ID3D11DeviceContext* context()const;

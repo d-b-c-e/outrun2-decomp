@@ -173,6 +173,15 @@ void D3D11Display::pc_frame(ID3D11ShaderResourceView* texture,int x,int y,int w,
     context()->OMSetBlendState(opaque_.Get(),nullptr,0xffffffffu);rectangle(texture,x,y,w,h);
     context()->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);
 }
+// The planar span (pc_screen.hpp g_pc_wide_aspect): the PC frame over the whole swap chain, then the fitted viewport
+// back for the frame's other layers (title movie, frontend and loading quads), which stay on the centre 16:9.
+void D3D11Display::pc_frame_window(ID3D11ShaderResourceView* texture){
+    auto& g=graphics();
+    const D3D11_VIEWPORT whole{0,0,float(g.width),float(g.height),0,1};g.context->RSSetViewports(1,&whole);
+    pc_frame(texture,0,0,int(width_),int(height_));
+    const auto fit=display_fit(g.width,g.height,width_,height_);
+    const D3D11_VIEWPORT vp{float(fit.x),float(fit.y),float(fit.width),float(fit.height),0,1};g.context->RSSetViewports(1,&vp);
+}
 // Development: OR2_XBOX_SCREENSHOT_DIR=<folder> writes every 60th presented frame as frame-NNNN.ppm.
 void screenshot(Graphics& g){
     static const char* dir=std::getenv("OR2_XBOX_SCREENSHOT_DIR");static unsigned frame=0;
