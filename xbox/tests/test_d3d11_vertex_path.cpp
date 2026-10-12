@@ -168,7 +168,8 @@ int main(){
         const std::string cold[2]{base+"-sync",base+"-background"};
         Gpu g[2];
         for(auto& x:g)if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&x.device,nullptr,&x.context))){std::printf("FAIL no WARP device\n");return 1;}
-        const std::uint32_t pixel_programs[]{0x623cf0,0x623d40,0x623da8,0x623bb0,0x623c88,0x623830};
+        // ps.1.1 (the fixed pixel shaders, 40AC60, and 95AF9C) and ps.1.4 (from the 61EDE8.. table).
+        const std::uint32_t pixel_programs[]{0x623cf0,0x623d40,0x623da8,0x623bb0,0x623c88,0x623830,0x61ee0c,0x61ee4c,0x61f218};
         constexpr unsigned PixelCount=sizeof pixel_programs/sizeof pixel_programs[0];
         std::vector<std::uint8_t> sync_images[2+PixelCount];
         for(unsigned which=0;which<2;++which){
@@ -200,7 +201,8 @@ int main(){
             auto draw_frame=[&]{d.begin_frame();d.clear(7,0xff000000,1,0);check(d.draw_indexed_primitive(4,1,0,4,2,2)==0,"background-compile draw succeeds");return image(g[which],d);};
             if(which==0){
                 sync_images[0]=draw_frame();
-                for(unsigned k=0;k<PixelCount;++k){const auto pt=pc_shader_tokens(pixel_programs[k]);d.set_pixel_shader(d.create_pixel_shader(pt.data()));sync_images[2+k]=draw_frame();}
+                for(unsigned k=0;k<PixelCount;++k){const auto pt=pc_shader_tokens(pixel_programs[k]);const auto ps=d.create_pixel_shader(pt.data());
+                    check(ps!=0,"recovered pixel program created");d.set_pixel_shader(ps);sync_images[2+k]=draw_frame();}
                 continue;
             }
             const auto before=d.native_draws();
