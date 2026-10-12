@@ -1,6 +1,7 @@
 // [Triple] Screens (triple_screens.hpp) and the display's unstretched fit (xbox/source/display_fit.hpp): the STD-022
 // names, the Separate-monitors span rule (the Tweaks fork's TripleSpanFromMonitors) and the centred 16:9 frame.
 #include "triple_screens.hpp"
+#include "triple_rig.hpp"
 #include "display_fit.hpp"
 #include "driving/pc_camera.hpp"
 #include <cmath>
@@ -87,6 +88,56 @@ int main(){
         const double h=2.0*std::atan(std::tan(double(fov)*0.5)*0.75);
         const double hz=2.0*std::atan(std::tan(double(fov)*0.5)*(double(width)/480.0)*0.75);
         CHECK(std::fabs(double(c.f32(0xa0))-h)<1e-6&&std::fabs(double(c.f32(0xa4))-hz)<1e-6);
+    }
+    // The rig geometry (triple_rig.hpp) against values the toolkit produced at e63bd4b (Dbce.TripleScreen.Core:
+    // TripleRigBuilder.Build, ProjectionCalculator.Calculate at near 1, EyeDistanceForVerticalFov; dumped with "R"
+    // round-trip formatting by a scratch console app). 1e-9 absolute on millimetres and on the bounds.
+    {
+        struct Ref { RigVec ll,lr,ul; double l,r,b,t; };
+        const auto near_v=[](RigVec a,RigVec b){return length(a-b)<1e-9;};
+        const auto check_rig=[&](const TripleRig& rig,const Ref (&ref)[3]){
+            CHECK(rig_check(rig)==RigError::none);
+            const auto panels=rig_panels(rig);
+            for(unsigned i=0;i<3;++i){
+                CHECK(near_v(panels[i].lower_left,ref[i].ll)&&near_v(panels[i].lower_right,ref[i].lr)&&near_v(panels[i].upper_left,ref[i].ul));
+                PanelBounds b{};CHECK(panel_bounds(panels[i],{},b)==RigError::none);
+                CHECK(std::fabs(b.left-ref[i].l)<1e-9&&std::fabs(b.right-ref[i].r)<1e-9&&std::fabs(b.bottom-ref[i].b)<1e-9&&std::fabs(b.top-ref[i].t)<1e-9);
+                // 404310's form gives the same bounds back: top = t (1 + sy), bottom = t (sy - 1), right = u (1 + sx),
+                // left = u (sx - 1), t = tan(fov / 2), u = aspect t.
+                const auto v=panel_view(panels[i],b);const double tt=std::tan(v.fov_y/2.),uu=v.aspect*tt;
+                CHECK(std::fabs(tt*(1.+v.shift_y)-b.top)<1e-12&&std::fabs(tt*(v.shift_y-1.)-b.bottom)<1e-12);
+                CHECK(std::fabs(uu*(1.+v.shift_x)-b.right)<1e-12&&std::fabs(uu*(v.shift_x-1.)-b.left)<1e-12);
+            }
+        };
+        const Ref gap0[3]{
+            {{-596.501044182224,-199.24216778667196,5.693848243638968},{-354.2082982874168,-199.24216778667196,-660},{-596.501044182224,199.24216778667196,5.693848243638968},-0.3748178556779519,0.893427192817133,-0.35669391988924265,0.35669391988924265},
+            {{-354.2082982874168,-199.24216778667196,-660},{354.2082982874168,-199.24216778667196,-660},{-354.2082982874168,199.24216778667196,-660},-0.5366792398294195,0.5366792398294195,-0.3018820724040484,0.3018820724040484},
+            {{354.2082982874168,-199.24216778667196,-660},{596.501044182224,-199.24216778667196,5.693848243638968},{354.2082982874168,199.24216778667196,-660},-0.8934271928171329,0.3748178556779518,-0.3566939198892426,0.3566939198892426}};
+        const Ref gap8[3]{
+            {{-599.2372053288293,-199.24216778667196,13.21138920992621},{-356.9444594340222,-199.24216778667196,-652.4824590337128},{-599.2372053288293,199.24216778667196,13.21138920992621},-0.3891398809340173,0.8791051675610677,-0.35669391988924265,0.35669391988924265},
+            {{-354.2082982874168,-199.24216778667196,-660},{354.2082982874168,-199.24216778667196,-660},{-354.2082982874168,199.24216778667196,-660},-0.5366792398294195,0.5366792398294195,-0.3018820724040484,0.3018820724040484},
+            {{356.9444594340222,-199.24216778667196,-652.4824590337128},{599.2372053288293,-199.24216778667196,13.21138920992621},{356.9444594340222,199.24216778667196,-652.4824590337128},-0.8791051675610675,0.38913988093401725,-0.3566939198892426,0.3566939198892426}};
+        const Ref asym[3]{
+            {{-656.979035014061,-239.24216778667196,-10.706059761934114},{-357.5892443813424,-239.24216778667196,-652.7495377037069},{-656.979035014061,159.24216778667196,-10.706059761934114},-0.4466179606112264,0.7341751763347288,-0.39877031559738935,0.26542582393471026},
+            {{-354.2082982874168,-239.24216778667196,-660},{354.2082982874168,-239.24216778667196,-660},{-354.2082982874168,159.24216778667196,-660},-0.5366792398294195,0.5366792398294195,-0.362488133010109,0.2412760117979878},
+            {{356.9444594340222,-239.24216778667196,-652.4824590337128},{599.2372053288293,-239.24216778667196,13.21138920992621},{356.9444594340222,159.24216778667196,-652.4824590337128},-0.8791051675610675,0.38913988093401725,-0.42830404616956974,0.28508379360891545}};
+        check_rig(fixture_rig(0.),gap0);
+        check_rig(fixture_rig(8.),gap8);
+        TripleRig a=fixture_rig(8.);a.left_angle_deg=65.;a.eye_height_mm=40.;
+        check_rig(a,asym);
+        CHECK(std::fabs(fixture_rig().panel_width_mm-708.4165965748336)<1e-9&&std::fabs(fixture_rig().panel_height_mm-398.4843355733439)<1e-9);
+        CHECK(std::fabs(eye_distance_for_vertical_fov(fixture_rig().panel_height_mm,75.)-259.65744839947564)<1e-9);
+        // The fixture's views: the centre straight ahead and symmetric, the sides yawed 70 degrees each way.
+        const auto p=rig_panels(fixture_rig());PanelBounds b{};
+        panel_bounds(p[1],{},b);const auto c=panel_view(p[1],b);
+        CHECK(std::fabs(c.yaw)<1e-12&&std::fabs(c.shift_x)<1e-12&&std::fabs(c.shift_y)<1e-12&&std::fabs(c.aspect-16./9.)<1e-9);
+        panel_bounds(p[0],{},b);CHECK(std::fabs(panel_view(p[0],b).yaw+70.*3.14159265358979323846/180.)<1e-12);
+        panel_bounds(p[2],{},b);CHECK(std::fabs(panel_view(p[2],b).yaw-70.*3.14159265358979323846/180.)<1e-12);
+        // Refusals, as the toolkit's argument checks.
+        TripleRig bad=fixture_rig();bad.right_angle_deg=90.;CHECK(rig_check(bad)==RigError::angle);
+        bad=fixture_rig();bad.bezel_gap_mm=-1.;CHECK(rig_check(bad)==RigError::gap);
+        bad=fixture_rig();bad.eye_distance_mm=0.;CHECK(rig_check(bad)==RigError::eye_distance);
+        CHECK(panel_bounds(p[1],{0.,0.,-1000.},b)==RigError::eye_behind);
     }
     std::printf("triple screens: %u checks\n",checks);
     return 0;
