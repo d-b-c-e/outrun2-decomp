@@ -167,6 +167,22 @@ const char* display_text(){
     else std::snprintf(text,sizeof text,"%s span, one wide view %.2f:1",triple_screens_name(st.mode),double(st.aspect));
     return text;
 }
+// The REC badge (Play with Recording): top right of the centre 16:9 view (the middle screen of a span), above the
+// game and the panel. Red while recording or failed, amber while saving or verifying, green once saved.
+void draw_badge(const std::string& text,int w,int h){
+    auto* list=ImGui::GetForegroundDrawList();
+    const float s=dbce::panel::Scale(),pad=8.0f*s;
+    const float wide=float(h)*16.0f/9.0f,view=float(w)<wide?float(w):wide,right=(float(w)+view)*0.5f;
+    const bool failed=text.rfind("REC failed",0)==0,saved=text=="REC saved",recording=!failed&&!saved&&text.rfind("REC saving",0)!=0&&
+        text.rfind("REC complete",0)!=0;
+    const ImU32 tone=failed||recording?IM_COL32(235,64,52,255):saved?IM_COL32(80,200,120,255):IM_COL32(240,180,60,255);
+    const ImVec2 size=ImGui::CalcTextSize(text.c_str());
+    const float dot=recording?size.y*0.6f:0.0f;
+    const ImVec2 at(right-size.x-dot-pad*4.0f,pad*3.0f);
+    list->AddRectFilled(ImVec2(at.x-pad,at.y-pad*0.5f),ImVec2(at.x+dot+size.x+pad,at.y+size.y+pad*0.5f),IM_COL32(0,0,0,170),4.0f*s);
+    if(recording)list->AddCircleFilled(ImVec2(at.x+dot*0.4f,at.y+size.y*0.5f),dot*0.35f,tone);
+    list->AddText(ImVec2(at.x+dot,at.y),tone,text.c_str());
+}
 void release_backend(){
     if(p.backend){ImGui_ImplDX11_Shutdown();p.backend=false;}
     p.device=nullptr;
@@ -181,7 +197,10 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
             log_line(p.input?"F6 input attached to the game window":"F6 input hook FAILED; the dev channel still opens it");
         }
     }
-    if(!dbce::panel::IsOpen()||!device||!context||!view||!width||!height)return;
+    // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
+    const bool open=dbce::panel::IsOpen();
+    const auto badge=shim_input_recording_badge();
+    if((!open&&badge.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
         release_backend();
@@ -206,9 +225,11 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     io.DeltaTime=p.last.QuadPart?float(double(now.QuadPart-p.last.QuadPart)/double(p.freq.QuadPart)):1.0f/60.0f;
     if(io.DeltaTime<=0.0f||io.DeltaTime>1.0f)io.DeltaTime=1.0f/60.0f;
     p.last=now;
-    dbce::panel::DrainInput(w,h);
+    io.MouseDrawCursor=open;   // the panel's own cursor only while it is open (a badge frame draws none)
+    dbce::panel::DrainInput(w,h);   // closed: nothing queued; it keeps the panel's open / close transitions
     ImGui::NewFrame();
-    dbce::panel::Draw(w,h);
+    if(open)dbce::panel::Draw(w,h);
+    if(!badge.empty())draw_badge(badge,w,h);
     ImGui::Render();
     // On the back buffer, then the renderer's targets back (the DX11 backend restores the rest of its state itself).
     ID3D11RenderTargetView* saved[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};ID3D11DepthStencilView* depth=nullptr;

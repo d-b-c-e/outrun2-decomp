@@ -47,6 +47,7 @@ class FrameRecorder {
     bool started_{}, refused_{}, finished_{};
     std::uint64_t pushed_{}, rejected_{};
     std::string refusal_;
+    std::optional<Report> drained_;   // the worker report the drain saw (an ordinary recording's completion proof)
 
     static std::string bits(const std::bitset<128>& b) { std::string s; for (int i = 127; i >= 0; --i) s += b[std::size_t(i)] ? '1' : '0'; return s; }
     std::string devices_json() const {
@@ -122,6 +123,7 @@ public:
         if (!controller_) return {O::Cancelled, true};   // never started (or refused before the worker): no capture exists
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - dbce::shim::hosting::Clock::now());
         const auto r = controller_->drain(left.count() > 0 ? left : std::chrono::milliseconds(0));
+        drained_ = r;
         const bool joined = controller_->join_until(deadline);
         const bool eligible = r.may_seal() && r.capture_counts_final && !r.first_rejected && r.wrong_producer == 0 && !refused_ && !rejected_;
         if (eligible && joined) {
@@ -131,6 +133,9 @@ public:
     }
     const std::string& refusal() const { return refusal_; }
     std::uint64_t pushed() const { return pushed_; }
+    std::uint64_t rejected() const { return rejected_; }   // pushes the producer refused (a full queue, ...)
+    std::uint64_t last() const { return last_; }           // the last frame pushed
+    const std::optional<Report>& drained_report() const { return drained_; }
     bool started() const { return started_; }
 };
 }

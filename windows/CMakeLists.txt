@@ -6,6 +6,7 @@
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
+    source/session_request.cpp source/ordinary_recording.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
@@ -136,6 +137,16 @@ target_compile_features(test_outrun_capture2 PRIVATE cxx_std_17)
 target_compile_options(test_outrun_capture2 PRIVATE /W4 /WX)
 target_link_libraries(test_outrun_capture2 PRIVATE bcrypt)
 add_test(NAME outrun_capture2 COMMAND test_outrun_capture2)
+# Play with Recording: the ordinary recorder over the real frame recorder and writer (one drain, the six-member
+# admission, recorder-complete.json, the receipt reader) and the start's intake of a request file.
+add_executable(test_ordinary_recording tests/test_ordinary_recording.cpp source/ordinary_recording.cpp source/session_request.cpp
+    source/outrun_adapter.cpp shim/parse.cpp shim/core.cpp ${PROJECT_SOURCE_DIR}/src/input/dual_sense.cpp)
+target_include_directories(test_ordinary_recording PRIVATE shim host host/recorder source vendor/controls vendor/session ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_ordinary_recording PRIVATE cxx_std_17)
+target_compile_options(test_ordinary_recording PRIVATE /W4 /WX)
+target_compile_definitions(test_ordinary_recording PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(test_ordinary_recording PRIVATE bcrypt)
+add_test(NAME ordinary_recording COMMAND test_ordinary_recording)
 
 # The shared input shim as a DLL for managed game adapters (shim_dll/dbce_shim.h, experimental ABI 1; Astra 16982/17050):
 # the reviewed Core, DInputProvider and ProviderHost, unchanged, behind a C ABI.

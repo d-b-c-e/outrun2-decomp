@@ -32,6 +32,8 @@
 #include <shellapi.h>
 #include <winrt/base.h>
 #include <cstdio>
+#include <ctime>
+#include <filesystem>
 #include <string>
 #include <vector>
 namespace outrun::xbox_runtime {
@@ -181,6 +183,26 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     if(wchar_t** argv=CommandLineToArgvW(GetCommandLineW(),&count)){
         for(int i=0;i<count;++i)args.push_back(outrun::xbox_runtime::utf8(argv[i]));LocalFree(argv);}
     const auto settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);   // a latched process creates nothing
+    // Play with Recording (session_request.hpp): an ordinary process takes the one-shot session request before the game.
+    // A playback or unreadable request never becomes ordinary play: exit 4 here, before the frontend.
+    if(!plan.latched){
+        namespace session=outrun::desktop::session;
+        const auto intake=session::take(session::request_path(),std::filesystem::u8path(folder),
+            outrun::desktop::shim_backend_selected(settings),std::uint64_t(std::time(nullptr)));
+        switch(intake.kind){
+        case session::Intake::Kind::None:break;
+        case session::Intake::Kind::Record:
+            std::printf("session: record request %s admitted\n",intake.request.request_id.c_str());
+            outrun::desktop::shim_input_arm_recording(intake.request,intake.exe_sha256);
+            break;
+        case session::Intake::Kind::Refused:
+            std::printf("session: record request refused (%s); ordinary play without a capture\n",intake.why.c_str());break;
+        case session::Intake::Kind::Exit:
+            std::printf("session: request refused (%s); not ordinary play, the game does not start\n",intake.why.c_str());
+            std::fflush(stdout);
+            return 4;
+        }
+    }
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);

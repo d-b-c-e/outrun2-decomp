@@ -4,8 +4,9 @@
 //   ProviderHost: real DirectInput through DInputProvider and Core, on the game's input thread.
 //   Control worker: FileIo over the fence's inject.on / inject.txt, journal in the run folder.
 //   OutRun adapter: at xbox_runtime::input_filter, after the pad adapter and before 453BB0 consumes the input.
-// No recorder yet (NoCapture): capture and replay are the next slice.
+// A latched run captures @1 (ShimRecorder); ordinary play captures @2 only with a record request (OrdinaryRecorder).
 #include "desktop_settings.hpp"
+#include "session_request.hpp"
 #include "test_fence.hpp"
 #include <cstdint>
 #include <string>
@@ -29,6 +30,12 @@ void shim_input_shutdown();
 inline bool shim_backend_selected(const Ini& settings){return _stricmp(settings.text("Input","Backend","Native").c_str(),"Shim")==0;}
 // Before the game starts: the exact [Controls] bytes, and the folder for the host's shutdown report (the game folder).
 void shim_input_configure_ordinary(const Ini& settings,const std::string& folder);
+// Play with Recording (ordinary_recording.hpp), before shim_input_configure_ordinary: the record request the start
+// admitted (session::take) and the running exe's SHA-256. configure arms the recorder with the [Controls] bytes it reads;
+// the capture follows the input the game consumed after 453BB0 (platform::native_input_consumed_hook).
+void shim_input_arm_recording(const session::Request& request,const std::string& exe_sha256);
+// The REC badge for the present thread: empty unless this session records.
+std::string shim_input_recording_badge();
 // The input thread: opens at the first sample, then one Core frame per tick, applied with the desktop keyboard.
 void shim_input_filter_ordinary(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 // The input thread, after the game loop: the final neutral tick and the host stop. Never parks: an ordinary process exits.

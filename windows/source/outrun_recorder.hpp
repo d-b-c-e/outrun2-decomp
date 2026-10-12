@@ -53,5 +53,9 @@ public:
     Drained drain(dbce::shim::hosting::Clock::time_point deadline){return recorder_.drain(deadline);}
     const std::string& refusal()const{return recorder_.refusal();}
     std::uint64_t pushed()const{return recorder_.pushed();}
+    std::uint64_t rejected()const{return recorder_.rejected();}
+    std::uint64_t last()const{return recorder_.last();}
+    bool started()const{return recorder_.started();}
+    const std::optional<rec::Report>& drained_report()const{return recorder_.drained_report();}
 };
 }

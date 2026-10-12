@@ -36,7 +36,8 @@ SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
             "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home",
             "ImFileOpen",   # Dear ImGui's file helper (vendor/native): its call sites are audited, not only its fopen
-            "write_key"]    # one settings key (desktop_settings.cpp, the F6 panel's saves)
+            "write_key",    # one settings key (desktop_settings.cpp, the F6 panel's saves)
+            "write_new_file", "replace_file_atomically", "write_session_status"]   # Play with Recording (ordinary_recording.cpp)
 
 OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|fopen_s|_wfopen_s|freopen|_wfreopen|freopen_s|_wfreopen_s|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
 # CRT descriptor opens (2b audit review): flagged unless the flags are visibly read only (O_RDONLY, no write flag).
@@ -377,6 +378,8 @@ GUARDS = [
     ("windows/source/window_desktop.cpp", "cleared=fence::clear_development_switches();", "std::freopen(log.c_str(),\"w\",stdout)"),
     ("windows/source/window_desktop.cpp", "load_desktop_settings(folder,!plan.latched)", None),
     ("windows/source/window_desktop.cpp", "if(!plan.latched){", "outrun::desktop::wheel_input_configure(settings);"),
+    # Play with Recording: the request is taken, and the recorder armed, only in an unlatched process.
+    ("windows/source/window_desktop.cpp", "if(!plan.latched){", "const auto intake=session::take(session::request_path(),std::filesystem::u8path(folder),"),
     ("windows/source/desktop_settings.cpp", "if(!create_if_missing){", "std::fopen(own.c_str(),\"wb\")"),
 ]
 

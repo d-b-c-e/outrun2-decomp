@@ -24,7 +24,7 @@ std::filesystem::path absolute_path(const std::string& value,std::string& why,co
 }
 // a is b, or inside it (case-insensitive, as the file system is).
 bool within(const std::filesystem::path& a,const std::filesystem::path& b){
-    auto x=lower(a.lexically_normal().generic_u8string()),y=lower(b.lexically_normal().generic_u8string());
+    auto x=lower(utf8(a.lexically_normal().generic_string<wchar_t>())),y=lower(utf8(b.lexically_normal().generic_string<wchar_t>()));
     while(x.size()>1&&x.back()=='/')x.pop_back();
     while(y.size()>1&&y.back()=='/')y.pop_back();
     return x==y||x.rfind(y+"/",0)==0;

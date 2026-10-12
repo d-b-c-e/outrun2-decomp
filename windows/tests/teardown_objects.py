@@ -27,9 +27,13 @@
 import json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 SCOPES = ["windows/shim", "windows/host"]
+# As teardown_audit.py: the standalone command publisher's main (control_publish.exe, b173a48) is its own process, never
+# a shim worker (its iostream error path was the only finding outside the entries since cc6f0c6).
+OUT_OF_SCOPE = ["windows/host/control_publish.cpp"]
 SCOPE = ", ".join(SCOPES)   # for the summary line
 EXTRA_UNITS = ["windows/tests/teardown_units/provider_host_instance.cpp", "windows/tests/teardown_units/recorder_instance.cpp"]   # instantiations of in-scope templates
-INCLUDES = ["windows/shim", "windows/host", "windows/host/recorder", "windows/vendor/controls", "windows/vendor/session"]
+INCLUDES = ["windows/shim", "windows/host", "windows/host/recorder", "windows/vendor/controls", "windows/vendor/session",
+            "windows/vendor/wheelffb"]   # the WheelFfb bridge (windows/shim/wheelffb_bridge.hpp) includes wheelffb.h
 DEFINES = ["NOMINMAX", "WIN32_LEAN_AND_MEAN", "_CRT_SECURE_NO_WARNINGS", "UNICODE", "_UNICODE"]
 FLAGS = ["/nologo", "/std:c++17", "/EHsc", "/c", "-Wno-everything", "-Werror=exit-time-destructors"]
 EXIT_TIME = re.compile(r"^(.*?)\((\d+),\d+\):\s+error: declaration requires an exit-time destructor")
@@ -77,6 +81,7 @@ def units(tree):
     instantiation units that make in-scope templates emit their code."""
     for scope in SCOPES:
         for path in sorted((tree / scope).rglob("*")):
+            if path.relative_to(tree).as_posix() in OUT_OF_SCOPE: continue
             if path.suffix == ".cpp": yield path, path
             elif path.suffix in (".hpp", ".h"): yield path, None
     for rel in EXTRA_UNITS:

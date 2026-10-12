@@ -1066,5 +1066,143 @@
   "line": "return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;",
   "class": "definition",
   "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the one-step publish of the temp file over the original"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);",
+  "class": "not-a-file",
+  "reason": "file_sha256: GENERIC_READ, OPEN_EXISTING: the streamed SHA-256 of a capture member, the managed seal or the running exe; writes nothing"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "void write_new_file(const std::filesystem::path& p,const std::string& bytes){",
+  "class": "definition",
+  "reason": "write_new_file: a new file (CREATE_NEW, never over one), written and flushed; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(p.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "definition",
+  "reason": "write_new_file's body: CREATE_NEW, callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "DWORD n=0;const bool ok=WriteFile(f,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size()&&FlushFileBuffers(f);",
+  "class": "definition",
+  "reason": "write_new_file's / replace_file_atomically's body: the write of the file each just created; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "write_new_file(capture/L\"recorder-complete.json\",j);",
+  "class": "latched-skip",
+  "reason": "recorder-complete.json inside the request's capture folder, after the six-member admission; ordinary play only: OrdinaryRecorder is armed only by shim_input_arm_recording from session::take, which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never records here"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "observe_receipt: GENERIC_READ, OPEN_EXISTING: the bounded read of the managed receipt (recording-verified.json); writes nothing"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(write_session_status(s_->arm.request,name,why,by,s_->started_utc)){",
+  "class": "latched-skip",
+  "reason": "publish_status: status.json in the request's result folder; ordinary play only: OrdinaryRecorder is armed only by shim_input_arm_recording from session::take, which window_desktop.cpp calls inside if(!plan.latched){ before the game; a latched process never records here"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "bool write_session_status(const session::Request& q,const char* state,const std::string& why,const std::string& stopped_by, const std::string& started_utc){",
+  "class": "definition",
+  "reason": "write_session_status: status.json in a request's result folder; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "return replace_file_atomically(q.result/L\"status.json\",j);",
+  "class": "definition",
+  "reason": "write_session_status's body: status.json through replace_file_atomically; write_session_status's callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "bool replace_file_atomically(const std::filesystem::path& path,const std::string& bytes){",
+  "class": "definition",
+  "reason": "replace_file_atomically: a temp file then MoveFileEx REPLACE_EXISTING; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(tmp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "definition",
+  "reason": "replace_file_atomically's body: the temp file beside the target; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "DWORD n=0;const bool ok=WriteFile(f,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size()&&FlushFileBuffers(f);",
+  "class": "definition",
+  "reason": "write_new_file's / replace_file_atomically's body: the write of the file each just created; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(MoveFileExW(tmp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return true;",
+  "class": "definition",
+  "reason": "replace_file_atomically's body: the one-step publish of the temp file"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "DeleteFileW(tmp.c_str());",
+  "class": "definition",
+  "reason": "replace_file_atomically's body: the temp file removed after a refused publish"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(CreateDirectoryW(p.c_str(),nullptr))return true;",
+  "class": "latched-skip",
+  "reason": "take's folder(): the request's result and recording folders; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "HANDLE f=CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "session::take: GENERIC_READ, OPEN_EXISTING: the bounded read of the session request; writes nothing"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!MoveFileExW(file.c_str(),aside.c_str(),MOVEFILE_WRITE_THROUGH))DeleteFileW(file.c_str()); // never read twice",
+  "class": "latched-skip",
+  "reason": "the refused request set aside (.refused-<pid>), never read twice; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "(void)write_session_status(r.request,\"failed\",why,\"\",\"\");",
+  "class": "latched-skip",
+  "reason": "a refused request's status.json in its result folder; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!MoveFileExW(file.c_str(),(r.request.result/L\"session-request.txt\").c_str(),MOVEFILE_WRITE_THROUGH)){",
+  "class": "latched-skip",
+  "reason": "the request consumed into its result folder (never over one there); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/ordinary_recording.hpp",
+  "line": "bool write_session_status(const session::Request&,const char* state,const std::string& why,const std::string& stopped_by, const std::string& started_utc);",
+  "class": "definition",
+  "reason": "write_session_status's declaration; callers audited"
+ },
+ {
+  "file": "windows/source/ordinary_recording.hpp",
+  "line": "bool replace_file_atomically(const std::filesystem::path& path,const std::string& bytes);",
+  "class": "definition",
+  "reason": "replace_file_atomically's declaration; callers audited"
+ },
+ {
+  "file": "windows/source/shim_input.cpp",
+  "line": "HANDLE f=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "not-a-file",
+  "reason": "stop_requested: GENERIC_READ, OPEN_EXISTING: the bounded read of the request-bound stop.request; writes nothing"
+ },
+ {
+  "file": "windows/source/ordinary_recording.cpp",
+  "line": "if(!ok){DeleteFileW(tmp.c_str());return false;}",
+  "class": "definition",
+  "reason": "replace_file_atomically's body: the temp file removed after a failed write"
  }
 ]

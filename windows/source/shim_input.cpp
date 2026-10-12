@@ -5,6 +5,7 @@
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "outrun_adapter.hpp"
+#include "ordinary_recording.hpp"
 #include "outrun_recorder.hpp"
 #include "outrun_replay.hpp"
 #include "provider_host.hpp"
@@ -47,12 +48,6 @@ struct State {
 };
 State g;
 
-// Ordinary play: no capture. The host's recorder contract (lazy; drain and finish at stop), with nothing to write.
-struct NoCapture {
-    void finish(){}
-    struct Drained{h::RecOutcome outcome;bool joined;};
-    Drained drain(h::Clock::time_point){return {h::RecOutcome::Complete,true};}
-};
 // The F4 delivery's hand-over of the wheel to and from WheelFfb (ffbdev::Owner over the bridge), on the game thread.
 struct BridgeOwner final:ffbdev::Owner {
     sh::WheelFfbBridge* b{};
@@ -67,7 +62,13 @@ struct BridgeOwner final:ffbdev::Owner {
 struct Ordinary {
     std::string profile,transmission,folder;
     bool configured{},started{},stopped{};
-    std::unique_ptr<h::ProviderHost<NoCapture>> host;
+    std::unique_ptr<h::ProviderHost<OrdinaryRecorder>> host;
+    // Play with Recording: the request (shim_input_arm_recording), then the recorder handle (unarmed without one; the
+    // host holds a copy). `pending` is this tick's row from the filter, completed and pushed at the consumed-input seam.
+    std::optional<session::Request> record;std::string record_exe;
+    OrdinaryRecorder rec;
+    std::optional<Snapshot> pending;
+    std::uint64_t ticks{};bool f11{};
     std::unique_ptr<Adapter> adapter;
     bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
     Steering steering;                         // [Wheel], as the native wheel path reads it
@@ -170,6 +171,46 @@ GameView view(const platform::NativeRuntimeContext* runtime){
     v.consumed_steer=a[0];v.consumed_accel=a[1];v.consumed_brake=a[2];
     return v;
 }
+
+// Play with Recording, on the input thread (the producer): the stop, with the final device table for the members.
+void stop_recording(const char* by){
+    if(!o.rec.recording())return;
+    if(o.host)o.rec.set_devices(o.host->device_reports());
+    o.rec.stop(by);
+    std::printf("input shim: recording stopped (%s) after %llu rows; saving\n",by,(unsigned long long)o.rec.pushed());std::fflush(stdout);
+    o.rec.publish_status();
+}
+// The request-bound stop: <result>\stop.request holding this request's id (anything else is ignored, once logged).
+bool stop_requested(){
+    const auto* q=o.rec.request();
+    if(!q)return false;
+    const auto path=q->result/L"stop.request";
+    HANDLE f=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(f==INVALID_HANDLE_VALUE)return false;
+    char b[129]{};DWORD n=0;
+    const bool read=ReadFile(f,b,128,&n,nullptr)!=0;
+    CloseHandle(f);
+    std::string id(b,read?n:0);
+    while(!id.empty()&&(id.back()=='\r'||id.back()=='\n'||id.back()==' '))id.pop_back();
+    if(id==q->request_id)return true;
+    static bool logged=false;
+    if(!logged){logged=true;std::printf("input shim: stop.request ignored: it does not name this request\n");std::fflush(stdout);}
+    return false;
+}
+// The consumed-input seam (platform::native_input_consumed_hook, after 453BB0's arbitration and race update): what
+// the game consumed completes this tick's row, which is pushed now (romi 33134: the final effective input).
+void on_consumed(const platform::NativeInputState& in,const platform::NativeRuntimeContext&){
+    if(!o.pending)return;
+    o.pending->consumed=in;o.pending->has_consumed=true;
+    o.rec.push(*o.pending);
+    o.pending.reset();
+    if(!o.rec.recording()){   // the recorder refused this row or its start: stopped by the recorder itself
+        std::printf("input shim: recording refused after %llu rows; saving the failure\n",(unsigned long long)o.rec.pushed());std::fflush(stdout);
+        o.rec.publish_status();
+        return;
+    }
+    if(o.rec.at_limit())stop_recording("limit");
+}
 }
 
 void shim_input_configure(const fence::Plan& plan,const Ini& settings){
@@ -246,8 +287,23 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     const auto steering=wheel_steering(settings);   // as wheel_input reads it; non-finite values are the defaults
     o.steering.sensitivity=steering.sensitivity;o.steering.dead_zone=steering.dead_zone;
     o.debug=std::getenv("OR2_INPUT_DEBUG")!=nullptr;
+    o.rec=OrdinaryRecorder{};
+    if(o.record){
+        OrdinaryRecorder::Arm a;
+        a.request=*o.record;a.profile=o.profile;a.exe_sha256=o.record_exe;a.adapter_version=AdapterVersion;
+        o.rec=OrdinaryRecorder(std::move(a));
+        platform::native_input_consumed_hook()=on_consumed;
+        o.rec.publish_status(true);
+        std::printf("input shim: Play with Recording: request %s, capture %s (contract @2, at most 5 minutes); F11 stops\n",
+            o.record->request_id.c_str(),session::utf8(o.record->recording/L"capture").c_str());
+        std::fflush(stdout);
+    }
     o.configured=true;
 }
+
+void shim_input_arm_recording(const session::Request& request,const std::string& exe_sha256){o.record=request;o.record_exe=exe_sha256;}
+
+std::string shim_input_recording_badge(){return o.rec.badge();}
 
 void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::NativeRuntimeContext* runtime){
     if(!o.configured||o.stopped)return;
@@ -256,7 +312,8 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         o.adapter=std::make_unique<Adapter>(o.transmission,HPattern::Config{},o.steering);   // before the host: the keyboard fallback needs it (romi 25245)
         IDirectInput8W* input=nullptr;
         if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&input),nullptr))||!input){
-            std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);return;}
+            std::printf("input shim: DirectInput8Create failed; ordinary play has no shim input\n");std::fflush(stdout);
+            o.rec.fail("DirectInput8Create failed: the shared input shim did not start");o.rec.publish_status();return;}
         // The wheel output waits with Input = Shim: the steering wheel is read through the WheelFfb bridge, which hands
         // it to WheelFfb for the force and back (INPUT-SHIM.md section 6, one owner at a time).
         const WheelFfbApi* ffb=o.steer?ffb_shim_wheel_api():nullptr;
@@ -268,9 +325,11 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
                 o.bridge=std::make_shared<sh::WheelFfbBridge>(inner,ffb,dev);return o.bridge;};
         }
         try{
-            o.host=std::make_unique<h::ProviderHost<NoCapture>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
-                std::make_unique<NoCapture>(),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd),100'000,front);
-        }catch(const std::exception& e){o.bridge.reset();std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);return;}
+            o.host=std::make_unique<h::ProviderHost<OrdinaryRecorder>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
+                std::make_unique<OrdinaryRecorder>(o.rec),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd),100'000,front);
+        }catch(const std::exception& e){
+            o.bridge.reset();std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);
+            o.rec.fail(std::string("the shared input shim did not start: ")+e.what());o.rec.publish_status();return;}
         if(o.bridge){
             o.owner.b=o.bridge.get();
             ffb_set_shim_owner(&o.owner);
@@ -278,6 +337,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
                 o.steer->dev.c_str());
         }
         (void)o.host->tick();
+        if(o.rec.armed())o.rec.set_devices(o.host->device_reports());   // before the first row (the capture's device slots)
         initial_report(*o.host,o.reports);
         std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths; "
             "steering sensitivity %g, dead zone %g ([Wheel])\n",double(o.steering.sensitivity),double(o.steering.dead_zone));
@@ -289,10 +349,29 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     // No host (DirectInput or the host refused): the keyboard keeps its path anyway. An empty frame (every action
     // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
     static const sh::Frame no_shim{};
+    // The previous tick's row never reached the consumed-input seam: not a row, and the capture cannot complete.
+    if(o.pending){o.rec.count_missed_final();o.pending.reset();}
     if(o.host)resolved_report(*o.host,o.reports);
     const sh::Frame& frame=o.host?o.host->tick():no_shim;
     o.frame=o.host?&frame:nullptr;
-    o.adapter->apply(frame,view(runtime),out,&kb);
+    const auto v=view(runtime);
+    o.adapter->apply(frame,v,out,&kb);
+    if(o.rec.armed()&&o.host){
+        ++o.ticks;
+        // The stops before this tick's row: F11 (its press), the request-bound stop file (every 30 ticks).
+        const bool f11=desktop_key(0x57);
+        if(f11&&!o.f11)stop_recording("f11");
+        o.f11=f11;
+        if(o.ticks%30==0&&o.rec.recording()&&stop_requested())stop_recording("stop-request");
+        if(o.rec.recording()){
+            Snapshot s{frame,o.adapter->signals(),out,v,NotReplay};
+            s.keyboard={kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right,kb.any,out.pc_overlay_yield};
+            o.pending=std::move(s);
+        }
+        if(o.ticks%30==0&&o.rec.state()==OrdinaryRecorder::State::Complete&&!o.rec.saved()&&o.rec.observe_receipt()){
+            std::printf("input shim: recording saved (the managed receipt names this request, process and artifact)\n");std::fflush(stdout);}
+        o.rec.publish_status();
+    }
     // The record is the wheel's (the adapter's); with "keyboard 1" the race reads the PC layer's (the keyboard's) instead.
     if(o.debug)log_signals(o.adapter->signals(),"ordinary",o.log,std::string(" keyboard ")+(out.pc_overlay_yield?"1":"0")+" layer "+(out.pc_input_layer?"1":"0")+
         " overlay "+(out.pc_overlay?"1":"0")+(o.host?"":" no-host"));
@@ -301,11 +380,26 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
 void shim_input_shutdown_ordinary(){
     if(!o.host||o.stopped)return;
     o.stopped=true;
+    // The game loop ended: a row still waiting for the seam is not one (and the capture cannot complete).
+    if(o.pending){o.rec.count_missed_final();o.pending.reset();}
     (void)o.host->tick();                      // a final poll before the stop (host order); Core is still ordinary live here
     o.frame=nullptr;
+    if(o.rec.armed()){
+        // Recording: the stop and its one drain (the saver), waited for here so the host's stop reads the cached result.
+        stop_recording("exit");
+        const bool done=o.rec.wait_saved(h::Clock::now()+std::chrono::seconds(65));
+        if(done&&o.rec.state()==OrdinaryRecorder::State::Complete&&!o.rec.saved())(void)o.rec.observe_receipt();
+        o.rec.publish_status();
+        const auto why=o.rec.why();
+        std::printf("input shim: recording %s after %llu rows%s%s\n",!done?"still saving at the exit":o.rec.saved()?"saved":
+            o.rec.state()==OrdinaryRecorder::State::Complete?"complete (not verified)":"FAILED",(unsigned long long)o.rec.pushed(),
+            why.empty()?"":": ",why.c_str());
+        std::fflush(stdout);
+    }
     if(o.bridge)o.bridge->shutdown();          // after the last tick: no read slot left, nothing opened through WheelFfb again
     const auto report=o.host->stop();
     std::printf("input shim: ordinary host stop %s\n",report.resolved?"resolved":"UNRESOLVED");std::fflush(stdout);
+    platform::native_input_consumed_hook()=nullptr;
 }
 
 void shim_input_shutdown(){
