@@ -7,6 +7,7 @@
 #include "d3d11_display.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
+#include "platform/race_particles.hpp"
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -177,6 +178,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::telemetry_shutdown();
     outrun::desktop::ffb_shutdown();
+    if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
+        // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).
+        const auto r=smoke.longest_record;const bool player=r<0x9345b8u;
+        const unsigned car=player?0u:(r-0x9345b8u)/0x170u+1u,tire=player?(r-0x934448u)/0x5cu:((r-0x9345b8u)%0x170u)/0x5cu;
+        std::printf("particles: tire smoke emit loops %llu, longest %u iterations (%s, car %u tire %u, travel %.1f, frame %u), "
+            "%llu ended early on a full source (%llu iterations)\n",static_cast<unsigned long long>(smoke.loops),smoke.longest,
+            smoke.longest_function==0x41cb30u?"41CB30 player":"41CED0 rivals",car,tire,double(smoke.longest_moved),smoke.longest_frame,
+            static_cast<unsigned long long>(smoke.full_tails),static_cast<unsigned long long>(smoke.skipped));}
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks

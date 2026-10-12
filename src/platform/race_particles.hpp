@@ -116,4 +116,13 @@ std::uint32_t particles_colour_scale_41ff70(PcParticleContext&,std::uint32_t col
 // Dispatch of a PC function pointer stored in particle/source memory
 // (unported pointers are reported through the service).
 void particles_call(PcParticleContext&,std::uint32_t pc,std::uint32_t a0,std::uint32_t a1);
+// The tire smoke emit loops 41CB30 / 41CED0 (race_particles_cars.cpp): loops run, the longest iteration count (the
+// tire's travel / 0.35), and the tails finished at once because source 4 was full (an exact shortcut, see there).
+// The longest loop's cause (nene 29268): the function (41CB30 player / 41CED0 rivals), its tire record (car and
+// tire from it), the travel it was given (the record's +0) and the frame counter 95AF0C.
+struct SmokeEmitStats {
+    std::uint64_t loops{},full_tails{},skipped{};
+    std::uint32_t longest{},longest_function{},longest_record{},longest_frame{};float longest_moved{};
+};
+const SmokeEmitStats& tire_smoke_emit_stats();
 }

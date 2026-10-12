@@ -156,6 +156,21 @@ template<class F> void smoke_colours(P& p,std::uint32_t rec,F factor){
     }
 }
 }
+// The emit loops of 41CB30 / 41CED0 run moved / 0.35 times (moved: the tire's travel this frame), each one
+// get_work(4) + born. A tire whose previous position is stale (a car slot reopened elsewhere) makes one frame with
+// tens of thousands of iterations, and once source 4 is full each get_work scans all its records: 0.95 to 2.65 s
+// in one 41BC60 call (perf 2026-10-12, nene 29233). Once get_work returns 0 the rest of the loop is fixed: no
+// record can be freed inside it (no particle function runs) and born(0) returns before the generator, so every
+// remaining iteration only rewrites source 4's base position with the advanced value. The loops below finish such a
+// tail by advancing the position alone and writing it once: the same memory and generator state as the full loop.
+SmokeEmitStats& smoke_stats(){static SmokeEmitStats s;return s;}
+bool& tire_smoke_shortcut(){static bool on=true;return on;}
+namespace {
+void count_loop(P& p,std::uint32_t function,std::uint32_t record,std::uint32_t n){
+    auto& s=smoke_stats();++s.loops;
+    if(n>s.longest){s.longest=n;s.longest_function=function;s.longest_record=record;s.longest_moved=p.f(record);s.longest_frame=p.u(0x95af0cu);}
+}
+}
 // 41CB30(EAX = tire record, a): the player's tire smoke.
 void tire_smoke_41cb30(P& p,std::uint32_t edi,float a){
     const X s=(X(1.0f)-X(a))*X(0.5f)+X(a);
@@ -195,6 +210,7 @@ void tire_smoke_41cb30(P& p,std::uint32_t edi,float a){
     p.putf(0x8a8f48u,l24);p.putf(0x8a8f4cu,l28);p.putf(0x8a8f50u,l2c);
     p.put(0x8a8f60u,p.u(0x74feb8u));p.put(0x8a8f64u,p.u(0x74febcu));p.put(0x8a8f68u,p.u(0x74fec0u));
     if(std::int32_t(ebp)<=0)return;
+    count_loop(p,0x41cb30u,edi,ebp);
     for(std::uint32_t n=ebp;n;--n){
         p.putf(0x8a8f3cu,l30);p.putf(0x8a8f44u,l38);p.putf(0x8a8f40u,l34);
         p.putf(0x8a8f54u,l3c);p.putf(0x8a8f58u,l40);p.putf(0x8a8f5cu,l44);
@@ -204,6 +220,12 @@ void tire_smoke_41cb30(P& p,std::uint32_t edi,float a){
         l30=st(X(l30)+X(l48));
         l34=st(X(l4c)+X(l34));
         l38=st(X(l38)+X(l50));
+        if(!w&&n>1&&tire_smoke_shortcut()){   // source 4 full: the remaining n-1 iterations as one (see above)
+            for(std::uint32_t m=n-1;m>1;--m){l30=st(X(l30)+X(l48));l34=st(X(l4c)+X(l34));l38=st(X(l38)+X(l50));}
+            p.putf(0x8a8f3cu,l30);p.putf(0x8a8f44u,l38);p.putf(0x8a8f40u,l34);
+            ++smoke_stats().full_tails;smoke_stats().skipped+=n-1u;
+            break;
+        }
     }
 }
 // 41CED0(EAX = tire record, a): the rival cars' tire smoke.
@@ -224,6 +246,7 @@ void tire_smoke_41ced0(P& p,std::uint32_t edi,float a){
     smoke_colours(p,edi,[&]{return X(s);});
     for(std::uint32_t a_:{0x8a8f48u,0x8a8f4cu,0x8a8f50u,0x8a8f60u,0x8a8f64u,0x8a8f68u})p.put(a_,0);
     if(std::int32_t(ebx)<=0)return;
+    count_loop(p,0x41ced0u,edi,ebx);
     for(std::uint32_t n=ebx;n;--n){
         p.putf(0x8a8f3cu,l20);p.putf(0x8a8f44u,l28);p.putf(0x8a8f40u,l24);
         p.put(0x8a8f54u,0);p.put(0x8a8f58u,0);p.put(0x8a8f5cu,0);
@@ -233,6 +256,12 @@ void tire_smoke_41ced0(P& p,std::uint32_t edi,float a){
         l20=st(X(l20)+X(l2c));
         l24=st(X(l30)+X(l24));
         l28=st(X(l28)+X(l34));
+        if(!w&&n>1&&tire_smoke_shortcut()){   // source 4 full: the remaining n-1 iterations as one (see 41CB30)
+            for(std::uint32_t m=n-1;m>1;--m){l20=st(X(l20)+X(l2c));l24=st(X(l30)+X(l24));l28=st(X(l28)+X(l34));}
+            p.putf(0x8a8f3cu,l20);p.putf(0x8a8f44u,l28);p.putf(0x8a8f40u,l24);
+            ++smoke_stats().full_tails;smoke_stats().skipped+=n-1u;
+            break;
+        }
     }
 }
 // 41C570 PcTireSmokeReq.
@@ -433,4 +462,7 @@ void smoke_ctrl_41d5c0(P& p,std::uint32_t at){
     if(!c0c3(hyp(dz,dx,dy),X(400.0f))){kill(q);return;}
     set_alpha(q,ftol(a*X(255.0f))<<24);
 }
+}
+namespace outrun::platform {
+const SmokeEmitStats& tire_smoke_emit_stats(){return particles_detail::smoke_stats();}
 }
