@@ -14,7 +14,7 @@ import json, math, sys
 
 GAME = ("gameInput.mode", "gameInput.gear", "gameInput.speed", "gameInput.consumedSteer", "gameInput.consumedAccel", "gameInput.consumedBrake")
 TOL = {"gameInput.speed": 0.01}
-COUNTS_ZERO = ("droppedSamples", "droppedMarkers", "queueFullCount", "invalidCount", "limitCount", "errorCount", "rejectedAfterStop")
+COUNTS_ZERO = ("droppedSamples", "droppedMarkers", "queueFullCount", "contentionCount", "invalidCount", "limitCount", "errorCount", "rejectedAfterStop")
 
 def stream(path, problems, name):
     rows, footer = [], None
@@ -32,6 +32,7 @@ def stream(path, problems, name):
         bad = {k: counts.get(k) for k in COUNTS_ZERO if counts.get(k) != 0}
         if bad: problems.append("%s: footer counts not zero: %s" % (name, json.dumps(bad)))
         if counts.get("writtenSamples") != len(rows): problems.append("%s: %s samples written, %d read" % (name, counts.get("writtenSamples"), len(rows)))
+        if counts.get("acceptedSamples") != counts.get("writtenSamples"): problems.append("%s: %s samples accepted, %s written" % (name, counts.get("acceptedSamples"), counts.get("writtenSamples")))
     return rows
 
 def number(c, k):

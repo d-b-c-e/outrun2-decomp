@@ -18,11 +18,12 @@ def row(i, played=None):
     if played is not None: c["replay.tapeRow"] = played
     return c
 
-def write(path, rows, completed=True, dropped=0):
+def write(path, rows, completed=True, dropped=0, accepted_extra=0, contention=0):
     with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps({"kind": "metadata"}) + "\n")
         for c in rows: f.write(json.dumps({"kind": "sample", "sample": {"channels": c}}) + "\n")
         counts = {k: 0 for k in cc.COUNTS_ZERO}; counts["droppedSamples"] = dropped; counts["writtenSamples"] = len(rows)
+        counts["acceptedSamples"] = len(rows) + accepted_extra; counts["contentionCount"] = contention
         f.write(json.dumps({"kind": "footer", "footer": {"completed": completed, "counts": counts}}) + "\n")
 
 def run(ref, rep, **kw):
@@ -57,6 +58,8 @@ invalid("an empty reference", [], REP)
 invalid("empty streams", [], [])
 invalid("an incomplete replay footer", REF, REP, rep_footer={"completed": False})
 invalid("a dropped reference sample", REF, REP, ref_footer={"dropped": 1})
+invalid("a footer contention count", REF, REP, rep_footer={"contention": 1})
+invalid("accepted samples not all written", REF, REP, ref_footer={"accepted_extra": 1})
 ref = [{k: v for k, v in c.items() if k != "final.pcDrive"} for c in REF]; rep = [{k: v for k, v in c.items() if k != "final.pcDrive"} for c in REP]
 invalid("a reference recorded before the replay seam", ref, rep)
 
