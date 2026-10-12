@@ -285,6 +285,11 @@ t56.
 - Applied Angled views therefore union the lists of **64 sections ahead and 64 behind**, where `[Graphics]`
   DrawDistanceIncrease / DrawDistanceBehind leave a key at 0 (`triple_default_union`). A set key is kept.
   OR2_TRIPLE_AHEAD (0..1024) / OR2_TRIPLE_BEHIND (0..256) replace only a default; 0 turns one off for comparisons.
+- **With a lods.ini present** (OutRunDesktop.lods.ini, else OutRun2006Tweaks.lods.ini), Tweaks' rule for an increase
+  above 0 now applies under Angled by default. The car's own section (offset 0) is exempt from the exclusions, and
+  only the other sections' nodes are excluded (`draw_distance_merge`).
+  - Before +64 ahead, the behind-only union skipped excluded nodes at offset 0 as well.
+  - None of the measurements below had a lods.ini (log: "0 excluded nodes").
 - Measured in the perf copy at 2560x1440 x 3, 60 Hz, muted:
 
   | Union (ahead / behind) | Draws driving (median) | Steps up / down | Side pop-in | Timing |
