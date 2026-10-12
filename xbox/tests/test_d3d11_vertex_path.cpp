@@ -1,8 +1,10 @@
 // The D3D11 device's GPU vertex path against its CPU path (OR2_D3D11_CPU_VERTEX), headless on WARP, after
 // ps5/tests/test_vulkan.cpp indexed_cases: recovered and linked vertex programs, two streams with offsets,
 // D3DCOLOR / UBYTE4 / FLOAT2 inputs, a base vertex, lists and strips, depth clipping, a partly locked stream
-// (the GPU copy takes only that range), changed constants and a stream rewritten between two draws.
+// (the GPU copy takes only that range), changed constants and a stream rewritten between two draws. Then the three-view
+// spike's replication into the back buffer's thirds through both paths (TRIPLE-SCREENS.md step 4).
 #include "d3d11_d3d9.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/pc_vertex_shader_setup.hpp"
 #include "system/exe_image.hpp"
 #include <cmath>
@@ -49,6 +51,30 @@ static void compare(D3D11D3D9Device& gpu,D3D11D3D9Device& cpu,const char* what,b
     check(bad==0,what);check(stable>500,"the comparison covers enough stable pixels");
     if(expect_drawn)check(drawn>100,"the draw produced visible pixels");
 }
+// One third of a three-view image (192x48) against the single-view reference of the same vertex path (64x48), moved
+// right by shift pixels: the reference's stable pixels within one level, and its coverage exactly, edges included (a
+// half-pixel error, such as a pixel-centre fix not re-applied, moves an edge); or, blank, nothing drawn in that third.
+static int g_triple_mode=0;   // the test's corrections: 0 identities, 1 panel 0 moved, 2 refused
+static void compare_third(const std::vector<std::uint8_t>& image,unsigned panel,const std::vector<std::uint8_t>& ref,int shift,bool blank,const char* what){
+    check(image.size()==192u*48u*4u&&ref.size()==64u*48u*4u,"read back the three-view image and its reference");
+    if(image.size()!=192u*48u*4u||ref.size()!=64u*48u*4u)return;
+    unsigned stable=0,bad=0,drawn=0,coverage=0;
+    for(unsigned y=0;y<48;++y)for(unsigned x=0;x<64;++x){const int rx=int(x)-shift;if(rx<0||rx>63)continue;
+        const auto at=(y*192+panel*64+x)*4,r=(y*64+unsigned(rx))*4;
+        if(bool(image[at]|image[at+1]|image[at+2])!=bool(ref[r]|ref[r+1]|ref[r+2]))++coverage;}
+    for(unsigned y=1;y<47;++y)for(unsigned x=1;x<63;++x){
+        const auto at=(y*192+panel*64+x)*4;
+        if(image[at]|image[at+1]|image[at+2])++drawn;
+        const int rx=int(x)-shift;if(rx<1||rx>62)continue;
+        const auto r=(y*64+unsigned(rx))*4;bool interior=true;
+        for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx)if(std::memcmp(ref.data()+r,ref.data()+((int(y)+dy)*64+rx+dx)*4,4))interior=false;
+        if(!interior)continue;++stable;
+        for(unsigned c=0;c<4;++c)if(std::abs(int(image[at+c])-int(ref[r+c]))>1){++bad;break;}
+    }
+    if(blank){if(drawn)std::printf("  %s: panel %u has %u drawn pixels\n",what,panel,drawn);check(drawn==0,what);return;}
+    if(bad||coverage)std::printf("  %s: panel %u, %u of %u stable pixels differ, coverage differs at %u pixels\n",what,panel,bad,stable,coverage);
+    check(bad==0&&coverage==0,what);check(stable>300,"the three-view comparison covers enough stable pixels");check(drawn>100,"the three-view draw produced visible pixels");
+}
 
 int main(){
     std::setvbuf(stdout,nullptr,_IONBF,0);
@@ -76,20 +102,21 @@ int main(){
     const std::uint16_t indices[]{123,456,0,1,2,2,1,3,0,1,2,3,0,1,65535};
     unsigned vb[2]{},colour[2]{},ib[2]{};
     const PcVertexElement elements[]{{0,0,3,0,0,0},{1,0,4,0,10,0},{0,16,5,0,2,0},{0,20,1,0,5,0},{PcDeclEndStream,0,17,0,0,0}};
-    for(unsigned i=0;i<2;++i){auto& d=*devices[i];d.reset_state();d.set_fvf(0);
+    const auto prepare=[&](D3D11D3D9Device& d,unsigned& vbh,unsigned& colourh,unsigned& ibh){d.reset_state();d.set_fvf(0);
         d.set_render_state(RS_CULLMODE,CULL_NONE);d.set_texture_stage_state(0,1,2);d.set_texture_stage_state(0,2,0);
         d.set_texture_stage_state(0,4,2);d.set_texture_stage_state(0,5,0);
         d.set_render_state(RS_TEXTUREFACTOR,0xff336699);d.set_texture_stage_state(0,2,3);d.set_texture_stage_state(0,5,3);
-        vb[i]=d.create_vertex_buffer(unsigned(positions.size()*sizeof(Position)+8),0,0,0);
-        std::memcpy(d.lock(vb[i],8,unsigned(positions.size()*sizeof(Position)),0),positions.data(),positions.size()*sizeof(Position));d.unlock(vb[i]);
-        colour[i]=d.create_vertex_buffer(unsigned(colours.size()*4+4),0,0,0);
-        std::memcpy(d.lock(colour[i],4,unsigned(colours.size()*4),0),colours.data(),colours.size()*4);d.unlock(colour[i]);
-        ib[i]=d.create_index_buffer(sizeof indices,0,0,0);std::memcpy(d.lock(ib[i],0,sizeof indices,0),indices,sizeof indices);d.unlock(ib[i]);
-        d.set_stream_source(0,vb[i],8,sizeof(Position));d.set_stream_source(1,colour[i],4,4);d.set_indices(ib[i]);
+        vbh=d.create_vertex_buffer(unsigned(positions.size()*sizeof(Position)+8),0,0,0);
+        std::memcpy(d.lock(vbh,8,unsigned(positions.size()*sizeof(Position)),0),positions.data(),positions.size()*sizeof(Position));d.unlock(vbh);
+        colourh=d.create_vertex_buffer(unsigned(colours.size()*4+4),0,0,0);
+        std::memcpy(d.lock(colourh,4,unsigned(colours.size()*4),0),colours.data(),colours.size()*4);d.unlock(colourh);
+        ibh=d.create_index_buffer(sizeof indices,0,0,0);std::memcpy(d.lock(ibh,0,sizeof indices,0),indices,sizeof indices);d.unlock(ibh);
+        d.set_stream_source(0,vbh,8,sizeof(Position));d.set_stream_source(1,colourh,4,4);d.set_indices(ibh);
         d.set_vertex_declaration(d.create_vertex_declaration(elements));
         for(unsigned row=0;row<4;++row){float c[4]{};c[row]=1;d.set_vertex_shader_constant_f(64+row,c,1);}
         const float one[]{1,1,1,1};d.set_vertex_shader_constant_f(0,one,1);
-    }
+    };
+    for(unsigned i=0;i<2;++i)prepare(*devices[i],vb[i],colour[i],ib[i]);
     auto draw=[&](unsigned type,int base,unsigned start,unsigned count,const char* what,bool expect_drawn=true){
         for(auto* d:devices){d->begin_frame();d->clear(7,0xff000000,1,0);check(d->draw_indexed_primitive(type,base,0,4,start,count)==0,"indexed draw succeeds");}
         compare(gpu,cpu,what,expect_drawn);
@@ -137,6 +164,53 @@ int main(){
     for(auto* d:devices){d->set_viewport(0,0,64,48,0,1);d->set_render_state(RS_ALPHABLENDENABLE,0);const float reset[]{1,0,0,0};d->set_vertex_shader_constant_f(64,reset,1);}
     check(gpu.native_draws()>native_before+20,"the GPU device drew through the GPU vertex path");
     check(cpu.native_draws()==0,"OR2_D3D11_CPU_VERTEX keeps every draw on the CPU path");
+    // Three views (TRIPLE-SCREENS.md step 4, nene 30802): a back buffer three logical screens wide, each draw replicated
+    // by the geometry shader into the thirds with its panel's clip correction (pc_screen.hpp g_pc_triple_corrections).
+    // Through both vertex paths, so the geometry shader's input matches the FFP and the generated native vertex outputs
+    // and its output feeds the pixel program: a mismatch raises no error, the draw just disappears (a black third).
+    // - identity corrections: every third is the single-view image (a list, then a strip);
+    // - panel 0 moved by +0.5 in NDC x: its third is the image 16 pixels to the right, the others unchanged;
+    // - corrections refused (a projection the rig cannot take): the centre third only, the sides black.
+    // The device caches the corrections per projection, so each case sets its own, with the view its inverse: world x
+    // view x projection stays the identity the program's constants hold, which the GPU path checks before replicating.
+    {
+        struct Case {unsigned type,start,count;int mode;float scale;const char* what;};
+        const Case cases[]{{4,2,2,0,1.f,"three views, identity corrections, list"},{5,8,2,0,2.f,"three views, identity corrections, strip"},
+                           {4,2,2,1,4.f,"three views, panel 0 moved +0.5 NDC"},{4,2,2,2,8.f,"three views, corrections refused"}};
+        std::vector<std::uint8_t> refs[4][2];   // the single-view images, before any corrections are set
+        for(unsigned k=0;k<4;++k){const auto& c=cases[k];
+            for(auto* d:devices){d->begin_frame();d->clear(7,0xff000000,1,0);check(d->draw_indexed_primitive(c.type,1,0,4,c.start,c.count)==0,"reference draw succeeds");}
+            refs[k][0]=readback(g_gpu.device.Get(),g_gpu.context.Get(),gpu.back_texture());refs[k][1]=readback(g_cpu.device.Get(),g_cpu.context.Get(),cpu.back_texture());}
+        Gpu tg,tc;
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&tg.device,nullptr,&tg.context))||
+           FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,levels,1,D3D11_SDK_VERSION,&tc.device,nullptr,&tc.context))){
+            std::printf("FAIL no WARP D3D11 device for the three views\n");return 1;}
+        _putenv("OR2_D3D11_CPU_VERTEX=");D3D11D3D9Device tgpu(tg.device.Get(),tg.context.Get(),64,48);
+        _putenv("OR2_D3D11_CPU_VERTEX=1");D3D11D3D9Device tcpu(tc.device.Get(),tc.context.Get(),64,48);
+        _putenv("OR2_D3D11_CPU_VERTEX=");
+        D3D11D3D9Device* triples[]{&tgpu,&tcpu};const Gpu* contexts[]{&tg,&tc};unsigned tvb[2]{},tcolour[2]{},tib[2]{};
+        for(unsigned i=0;i<2;++i){auto& d=*triples[i];d.resize_back_buffer(192,48);prepare(d,tvb[i],tcolour[i],tib[i]);   // as the devices are now
+            d.set_texture_stage_state(0,2,0);d.set_texture_stage_state(0,5,0);const float one[]{1,1,1,1};d.set_vertex_shader_constant_f(8,one,1);
+            const auto shader=d.create_vertex_shader(pc_shader_tokens(0x621e10).data());check(shader!=0,"three-view vertex program created");d.set_vertex_shader(shader);}
+        g_pc_triple_corrections=[](const float*,float* c){
+            if(g_triple_mode==2)return false;
+            for(unsigned i=0;i<52;++i)c[i]=i<48&&i%16%5==0?1.f:0.f;   // three identities
+            if(g_triple_mode==1)c[12]=.5f;                               // panel 0: x' = x + 0.5 w (row vectors)
+            return true;};
+        for(unsigned k=0;k<4;++k){const auto& c=cases[k];g_triple_mode=c.mode;
+            const float projection[16]{c.scale,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1},view[16]{1.f/c.scale,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+            for(unsigned i=0;i<2;++i){auto& d=*triples[i];d.set_transform(2,view);d.set_transform(3,projection);
+                d.begin_frame();d.clear(7,0xff000000,1,0);check(d.draw_indexed_primitive(c.type,1,0,4,c.start,c.count)==0,"three-view draw succeeds");d.end_frame();
+                const auto image=readback(contexts[i]->device.Get(),contexts[i]->context.Get(),d.back_texture());
+                for(unsigned panel=0;panel<3;++panel)compare_third(image,panel,refs[k][i],c.mode==1&&panel==0?16:0,c.mode==2&&panel!=1,c.what);}
+        }
+        g_pc_triple_corrections=nullptr;
+        check(tgpu.native_draws()>=4,"the three-view GPU device drew through the GPU vertex path");
+        check(tgpu.triple_draws==3&&tcpu.triple_draws==3,"three draws replicated on each vertex path");
+        check(tgpu.triple_single_custom==1&&tcpu.triple_single_custom==1,"refused corrections keep the draw single");
+        check(tgpu.triple_single_topology==0&&tcpu.triple_single_topology==0&&tgpu.triple_frames==3&&tcpu.triple_frames==3,"three-view counts");
+        std::printf("three views: GPU path %llu replicated, CPU path %llu replicated\n",(unsigned long long)tgpu.triple_draws,(unsigned long long)tcpu.triple_draws);
+    }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
     return failures?1:0;
 }

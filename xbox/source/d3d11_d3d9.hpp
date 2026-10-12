@@ -68,13 +68,16 @@ private:
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
     std::map<const void*,int> triple_wvp_base_;   // vertex program -> the constant register of its world-view-projection (-1: none)
+    // The world x view x projection those registers are compared with, and its tolerance: computed again only when a
+    // transform changes (world, view, projection as last seen).
+    std::array<float,48> triple_xf_{};std::array<float,16> triple_wvp_{};double triple_wvp_tolerance_{};bool triple_xf_valid_{};
     unsigned triple_frame_draws_{};
     bool triple_bind(bool rhw,bool standard);void triple_unbind();bool triple_native_standard(const void* program);
 public:
     // Three-view counts (runtime.log at exit): draws into three viewports; draws kept single on the centre panel because
-    // pretransformed (rhw: HUD, menus, screen-space particles), custom projection, or not drawn into the back buffer;
-    // frames with at least one three-viewport draw.
-    std::uint64_t triple_draws{},triple_single_rhw{},triple_single_custom{},triple_single_target{},triple_frames{};
+    // pretransformed (rhw: HUD, menus, screen-space particles), custom projection, not triangles (the geometry shader
+    // takes only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
+    std::uint64_t triple_draws{},triple_single_rhw{},triple_single_custom{},triple_single_topology{},triple_single_target{},triple_frames{};
 private:
     bool native_enabled_{true};
     struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};

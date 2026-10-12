@@ -23,26 +23,29 @@ void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(s
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
 // The three-view geometry shader (TRIPLE-SCREENS.md step 4): each triangle three times, panel i in viewport i with its
 // clip correction C[i], applied before the D3D9 pixel-centre fix (undone, then re-applied: every viewport is the same
-// size). The Varying is the pipeline's own (generated pc_hlsl_shaders.hpp); windows/source/triple_rig.hpp triple_apply
-// is the same arithmetic, unit-tested.
-constexpr const char* TripleGs=R"HLSL(
-struct Varying{float4 p:SV_Position;float4 d0:COLOR0;float4 d1:COLOR1;
- float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;
- float4 t4:TEXCOORD4;float4 t5:TEXCOORD5;float4 t6:TEXCOORD6;float4 t7:TEXCOORD7;float fog:TEXCOORD8;};
-struct Panel{float4 p:SV_Position;float4 d0:COLOR0;float4 d1:COLOR1;
- float4 t0:TEXCOORD0;float4 t1:TEXCOORD1;float4 t2:TEXCOORD2;float4 t3:TEXCOORD3;
- float4 t4:TEXCOORD4;float4 t5:TEXCOORD5;float4 t6:TEXCOORD6;float4 t7:TEXCOORD7;float fog:TEXCOORD8;uint vp:SV_ViewportArrayIndex;};
+// size). windows/source/triple_rig.hpp triple_apply is the same arithmetic, unit-tested. Its Varying is not a copy: it
+// is taken from the generated vertex source (pc_hlsl_shaders.hpp native_vs) when the shader is built, so its input is
+// the vertex programs' output and its output the pixel programs' input plus the viewport index, last (nene 30802: a
+// copy could drift, and a mismatched stage drops or garbles the draw without an error).
+constexpr const char* TripleGsMain=R"HLSL(
+struct Panel{Varying v;uint vp:SV_ViewportArrayIndex;};
 cbuffer Triple:register(b0){row_major float4x4 C[3];float4 fix;};
 [maxvertexcount(9)]
 void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
  [unroll] for(uint i=0;i<3;++i){
   [unroll] for(uint k=0;k<3;++k){
    float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*q.w;q.y-=fix.y*q.w;
-   Panel o;o.p=q;o.d0=v[k].d0;o.d1=v[k].d1;o.t0=v[k].t0;o.t1=v[k].t1;o.t2=v[k].t2;o.t3=v[k].t3;
-   o.t4=v[k].t4;o.t5=v[k].t5;o.t6=v[k].t6;o.t7=v[k].t7;o.fog=v[k].fog;o.vp=i;s.Append(o);}
+   Panel o;o.v=v[k];o.v.p=q;o.vp=i;s.Append(o);}
   s.RestartStrip();}
 }
 )HLSL";
+std::string triple_gs_source(){   // the FFP vertex stage (the CPU path's draws) has its own copy: they must agree
+    const auto varying=[](const std::string& s){const auto at=s.find("struct Varying{"),end=at==std::string::npos?at:s.find("};",at);
+        return end==std::string::npos?std::string{}:s.substr(at,end+2-at);};
+    const auto native=varying(hlsl::native_vs),ffp=varying(hlsl::ffp);
+    if(native.empty()||native!=ffp)throw std::runtime_error("three views: the generated vertex stages disagree on their Varying");
+    return native+TripleGsMain;
+}
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
     ComPtr<ID3DBlob> code,errors;
     const HRESULT hr=D3DCompile(source.data(),source.size(),"pc_shader",nullptr,nullptr,entry,target,CompileFlags,0,&code,&errors);
@@ -146,8 +149,9 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     if(platform::g_pc_triple_corrections)
         std::printf("triple views: %llu draws into three viewports over %llu frames; single on the centre: %llu pretransformed, %llu custom "
-                    "projection, %llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
-                    (unsigned long long)triple_single_rhw,(unsigned long long)triple_single_custom,(unsigned long long)triple_single_target);
+                    "projection, %llu not triangles, %llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,
+                    (unsigned long long)triple_frames,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_custom,
+                    (unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
@@ -602,12 +606,15 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard){
     const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
         LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
     bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
-    if(!standard||!triple_ok_){   // a custom projection: the centre third only
-        ++triple_single_custom;triple_unbind();
+    // The geometry shader takes triangles (nene 30802): a list or a strip, which is every draw that reaches here today
+    // (draw_native takes only those, flush draws a list). Anything else would not be drawn with it bound.
+    const bool triangles=bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST||bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    if(!triangles||!standard||!triple_ok_){   // a custom projection (or not triangles): the centre third only
+        ++(triangles?triple_single_custom:triple_single_topology);triple_unbind();
         const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
         return false;
     }
-    if(!triple_gs_){const auto code=compile(TripleGs,"gs_main","gs_4_1");
+    if(!triple_gs_){const auto code=compile(triple_gs_source(),"gs_main","gs_4_1");
         check(device_->CreateGeometryShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&triple_gs_),"CreateGeometryShader(three views)");}
     if(!triple_gs_bound_){context_->GSSetShader(triple_gs_.Get(),nullptr,0);ID3D11Buffer* b=triple_cb_.Get();context_->GSSetConstantBuffers(0,1,&b);
         triple_gs_bound_=true;}
@@ -622,11 +629,20 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard){
 void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}}
 // A vertex program's clip position is the standard one when its constants hold the current world x view x projection
 // (as m4x4 reads it: four registers, the matrix transposed). The register is found once per program, then checked.
+// Per draw that is one comparison of the transforms and, for a program without the matrix, a scan that stops at each
+// register's first element (nene 30802); the product and its tolerance are computed again only when a transform changes.
 bool D3D11D3D9Device::triple_native_standard(const void* program){
-    const auto wvp=transform_wvp();
-    const auto at=[&](int base){
-        double scale=0.;for(const float v:wvp)scale=std::max(scale,double(std::fabs(v)));if(!(scale>0.))return false;
-        for(int i=0;i<4;++i)for(int j=0;j<4;++j)if(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))>1e-4*scale)return false;
+    if(!triple_xf_valid_||std::memcmp(triple_xf_.data(),transform_world.data(),64)!=0||std::memcmp(triple_xf_.data()+16,transform_view.data(),64)!=0||
+       std::memcmp(triple_xf_.data()+32,transform_proj.data(),64)!=0){
+        std::memcpy(triple_xf_.data(),transform_world.data(),64);std::memcpy(triple_xf_.data()+16,transform_view.data(),64);
+        std::memcpy(triple_xf_.data()+32,transform_proj.data(),64);triple_xf_valid_=true;
+        triple_wvp_=transform_wvp();double scale=0.;for(const float v:triple_wvp_)scale=std::max(scale,double(std::fabs(v)));
+        triple_wvp_tolerance_=scale>0.&&std::isfinite(scale)?1e-4*scale:-1.;}
+    if(!(triple_wvp_tolerance_>0.))return false;
+    const auto& wvp=triple_wvp_;const double tolerance=triple_wvp_tolerance_;
+    const auto at=[&](int base){   // !(<=): a NaN register is not a match
+        for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+            if(!(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))<=tolerance))return false;
         return true;};
     auto it=triple_wvp_base_.find(program);
     if(it!=triple_wvp_base_.end()&&it->second>=0&&at(it->second))return true;
