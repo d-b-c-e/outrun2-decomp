@@ -112,6 +112,12 @@ OR2_PC_RECORD ParticleGenerator {
     std::uint32_t mask;          // +08
     float scale,offset;          // +0C
 };
+// The tire smoke emitters (race_particles_cars.cpp) and the switch of their exact full-source shortcut (on; tests
+// turn it off to run the loop in full as the reference).
+void tire_smoke_41cb30(P&,std::uint32_t record,float a);
+void tire_smoke_41ced0(P&,std::uint32_t record,float a);
+bool& tire_smoke_shortcut();
+SmokeEmitStats& smoke_stats();
 inline constexpr std::uint32_t ParticleGeneratorTable=0x74e980u;
 inline constexpr std::uint32_t ParticleGeneratorValue=0x8a8ce8u;  // last generator step
 inline constexpr std::uint32_t ParticleCurrentSource=0x95af50u;   // 418420: source of the next born

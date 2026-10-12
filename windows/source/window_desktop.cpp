@@ -13,6 +13,7 @@
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/race_draw_distance.hpp"
+#include "platform/race_particles.hpp"
 #include <fstream>
 #include <iterator>
 #include <algorithm>
@@ -247,6 +248,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }
         if(uncovered)std::printf("texture replacement: %u banks without a pack folder: %s%s\n",uncovered,others.c_str(),others.size()>=400?", ...":"");
     }
+    if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
+        // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).
+        const auto r=smoke.longest_record;const bool player=r<0x9345b8u;
+        const unsigned car=player?0u:(r-0x9345b8u)/0x170u+1u,tire=player?(r-0x934448u)/0x5cu:((r-0x9345b8u)%0x170u)/0x5cu;
+        std::printf("particles: tire smoke emit loops %llu, longest %u iterations (%s, car %u tire %u, travel %.1f, frame %u), "
+            "%llu ended early on a full source (%llu iterations)\n",static_cast<unsigned long long>(smoke.loops),smoke.longest,
+            smoke.longest_function==0x41cb30u?"41CB30 player":"41CED0 rivals",car,tire,double(smoke.longest_moved),smoke.longest_frame,
+            static_cast<unsigned long long>(smoke.full_tails),static_cast<unsigned long long>(smoke.skipped));}
     if(const auto dropped=outrun::platform::render_queue_dropped())
         std::printf("render queues: %llu draws dropped (queue full)\n",static_cast<unsigned long long>(dropped));
     outrun::desktop::wheel_input_shutdown();
