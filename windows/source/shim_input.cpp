@@ -14,6 +14,7 @@
 #include "wheelffb_bridge.hpp"
 #include "ffb_live.hpp"
 #include "journal_identity.hpp"
+#include "key_echo.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include <algorithm>
@@ -76,6 +77,7 @@ struct Ordinary {
     OrdinaryRecorder rec;
     std::optional<Snapshot> pending;
     std::uint64_t ticks{};bool f11{};
+    KeyEcho echo;                              // <result>\keys-seen.tsv while recording (key_echo.hpp; diagnostic only)
     std::unique_ptr<Adapter> adapter;
     bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
     Steering steering;                         // [Wheel], as the native wheel path reads it
@@ -353,6 +355,8 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
         o.rec.publish_status(true);
         std::printf("input shim: Play with Recording: request %s, capture %s (contract @2, at most 4:59 or 18,000 rows); F11 stops\n",
             o.record->request_id.c_str(),session::utf8(o.record->recording/L"capture").c_str());
+        if(!o.echo.open(o.record->result/L"keys-seen.tsv"))
+            std::printf("input shim: key echo not opened (Win32 %lu): no keys-seen.tsv; an observed-delivery runner will time out\n",o.echo.error());
         std::fflush(stdout);
     }
     o.configured=true;
@@ -424,7 +428,11 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
             Snapshot s{frame,o.adapter->signals(),out,v,NotReplay};s.pose=car_pose(runtime);
             s.keyboard={kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right,kb.any,out.pc_overlay_yield};
             o.pending=std::move(s);
-        }
+            // The edges this tick sampled, at the row it becomes (the rows pushed so far); a failed write is logged once.
+            if(o.echo.is_open()&&!o.echo.tick(o.rec.pushed(),{kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right})){
+                std::printf("input shim: key echo failed (Win32 %lu) after %llu lines: no more echoes; an observed-delivery runner will time out\n",
+                    o.echo.error(),(unsigned long long)o.echo.lines());std::fflush(stdout);}
+        }else if(o.echo.is_open())o.echo.close();   // the recording stopped: no echo outside it
         if(o.ticks%30==0&&o.rec.state()==OrdinaryRecorder::State::Complete&&!o.rec.saved()&&o.rec.observe_receipt()){
             std::printf("input shim: recording saved (the managed receipt names this request, process and artifact)\n");std::fflush(stdout);}
         o.rec.publish_status();
@@ -444,6 +452,7 @@ void shim_input_shutdown_ordinary(){
     if(o.rec.armed()){
         // Recording: the stop and its one drain (the saver), waited for here so the host's stop reads the cached result.
         stop_recording("exit");
+        o.echo.close();
         const bool done=o.rec.wait_saved(h::Clock::now()+std::chrono::seconds(65));
         if(done&&o.rec.state()==OrdinaryRecorder::State::Complete&&!o.rec.saved())(void)o.rec.observe_receipt();
         o.rec.publish_status();

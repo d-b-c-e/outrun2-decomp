@@ -78,6 +78,23 @@ root = ET.parse(wprp).getroot()
 check([p.get("Id") for p in root.iter("Profile")] == ["Cadence.Verbose.File"], "cadence.wprp: one file-mode profile")
 check(sorted(p.get("Name") for p in root.iter("EventProvider")) == ["Microsoft-Windows-DXGI", "Microsoft-Windows-DxgKrnl"], "cadence.wprp: DxgKrnl and DXGI only")
 
+# --observed-keys (sana 36438): preflight refuses a key without an echo and an echo file that already exists.
+def plan_keys(keys_json, *extra, existing=False):
+    with tempfile.TemporaryDirectory() as t:
+        keys = pathlib.Path(t) / "k.json"; keys.write_text(keys_json, encoding="utf-8")
+        echo = pathlib.Path(t) / "keys-seen.tsv"
+        if existing: echo.write_text("", encoding="utf-8")
+        q = subprocess.run([sys.executable, "-B", str(here / "run_perf.py"), "--game", str(pathlib.Path(t) / "none"), "--keys", str(keys),
+                            "--lease-owner", "test", "--result", str(pathlib.Path(t) / "out"), "--check-only", "--observed-keys", str(echo), *extra],
+                           capture_output=True, text=True)
+        return json.loads(q.stdout)
+ok_plan = plan_keys('[{"key": "enter", "at": 1}, {"key": "up", "at": 2, "hold": 3}]')
+check(not any("observed-keys" in p for p in ok_plan["problems"]) and ok_plan["observedKeys"].endswith("keys-seen.tsv") and ok_plan["echoTimeout"] == 3.0,
+      "observed keys accepted for echoed keys (%s)" % ok_plan["problems"])
+check(any("no echo" in p for p in plan_keys('[{"key": "space", "at": 1}]')["problems"]), "a key without an echo is refused")
+check(any("exists before the launch" in p for p in plan_keys('[{"key": "enter", "at": 1}]', existing=True)["problems"]), "an existing echo file is refused")
+check(any("echo-timeout" in p for p in plan_keys('[{"key": "enter", "at": 1}]', "--echo-timeout", "0")["problems"]), "a zero echo timeout is refused")
+
 print("run_perf: %d failure(s)" % len(failures))
 for f in failures: print("  " + f)
 sys.exit(1 if failures else 0)

@@ -21,8 +21,14 @@ test copy whose SaveGame folder is not empty (it is checked, never cleared).
 Names: enter, esc, up, down, left, right, space, or a one-letter key a-z. "measure_from" (seconds, optional, top level
 when keys.json is an object {"steps": [...], "measure_from": s}) marks where the race is expected to be running; the
 measured window is --seconds from there.
+
+--observed-keys <result>\\keys-seen.tsv (a recording session's key echo, windows/source/key_echo.hpp; sana 36438): each
+key edge is posted, then held until the game echoes it, instead of at fixed times (observed_keys.py: an echo-less
+key, a missing echo within --echo-timeout, or an echo nobody posted fails the run, every held key released).
 """
 import argparse, ctypes, ctypes.wintypes as wt, datetime, hashlib, json, os, pathlib, re, shutil, subprocess, sys, time
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import observed_keys
 
 user32 = ctypes.WinDLL("user32", use_last_error=True); kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
@@ -138,6 +144,10 @@ def main():
     a.add_argument("--startup-seconds", type=float, default=90.0, help="bound for the window to appear")
     a.add_argument("--close-seconds", type=float, default=30.0,
                    help="bound for the exit after WM_CLOSE before the game is killed (a recording session saves at exit: up to 65 s)")
+    a.add_argument("--observed-keys", type=pathlib.Path,
+                   help="the game's key echo (a recording session's <result>\\keys-seen.tsv): each edge is held until echoed")
+    a.add_argument("--echo-timeout", type=float, default=3.0, help="with --observed-keys: seconds for each echo")
+    a.add_argument("--echo-gap", type=float, default=0.25, help="with --observed-keys: seconds from an echo to the next press")
     a.add_argument("--check-only", action="store_true")
     o = a.parse_args()
     game = o.game.resolve(); out = o.result.resolve(); problems = []
@@ -152,6 +162,12 @@ def main():
     # A script that starts from "create new license" needs an empty SaveGame; the harness checks, it never deletes.
     if empty_savegame and (not (game / "SaveGame").is_dir() or any((game / "SaveGame").iterdir())):
         problems.append("the key script needs an empty SaveGame folder in the test copy")
+    events = []
+    if o.observed_keys:
+        try: events = observed_keys.events_of(steps)
+        except observed_keys.EchoError as e: problems.append("--observed-keys: %s" % e)
+        if o.observed_keys.exists(): problems.append("--observed-keys: %s exists before the launch (the game creates it)" % o.observed_keys)
+        if not (0 < o.echo_timeout <= 30) or not (0 <= o.echo_gap <= 5): problems.append("--echo-timeout or --echo-gap out of range")
     if not (0 < o.seconds <= 1800): problems.append("--seconds out of range")
     if not (0 < o.close_seconds <= 300): problems.append("--close-seconds out of range")
     if o.etw_profile and (not o.etw or o.etw_profile.suffix.lower() != ".wprp" or not o.etw_profile.is_file()):
@@ -167,7 +183,8 @@ def main():
     lp = lease_problem(o.lease_owner)
     if lp: problems.append(lp)
     plan = dict(game=str(game), exeSha256=sha(exe) if exe.exists() else None, keys=str(o.keys), keysSha256=sha(o.keys) if o.keys.exists() else None,
-                steps=len(steps), measureFrom=measure_from, seconds=o.seconds, closeSeconds=o.close_seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
+                steps=len(steps), measureFrom=measure_from, seconds=o.seconds,
+                observedKeys=str(o.observed_keys) if o.observed_keys else None, echoTimeout=o.echo_timeout, echoGap=o.echo_gap, closeSeconds=o.close_seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
                 etwProfile=str(o.etw_profile.resolve()) if o.etw_profile else None,
                 etwProfileSha256=sha(o.etw_profile) if o.etw_profile and o.etw_profile.is_file() else None)
     if o.check_only or problems:
@@ -194,6 +211,15 @@ def main():
         pending = [(s["at"], s["key"], False) for s in steps] + [(s["at"] + s["hold"], s["key"], True) for s in steps]
         pending.sort(key=lambda e: (e[0], e[2]))
         end = t0 + measure_from + o.seconds
+        if o.observed_keys:   # each edge held until the game echoes it (observed_keys.py)
+            recs, err = observed_keys.deliver(events, lambda name, up: post_key(hwnd, name, up), lambda: time.time() - t0, time.sleep,
+                                              observed_keys.EchoReader(o.observed_keys), timeout=o.echo_timeout, gap=o.echo_gap,
+                                              alive=lambda: proc.poll() is None)
+            receipt["keysSent"] = recs; pending = []
+            late = [r["posted"] - r["at"] for r in recs]
+            receipt["observed"] = dict(events=len(events), echoed=sum(1 for r in recs if r["echo"] is not None), error=err,
+                                       maxLateSeconds=round(max(late), 3) if late else None)
+            if err: receipt["errors"].append("observed delivery: %s" % err)
         while time.time() < end and proc.poll() is None:
             now = time.time() - t0
             while pending and pending[0][0] <= now:

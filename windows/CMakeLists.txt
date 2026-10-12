@@ -137,6 +137,14 @@ target_compile_features(test_outrun_capture2 PRIVATE cxx_std_17)
 target_compile_options(test_outrun_capture2 PRIVATE /W4 /WX)
 target_link_libraries(test_outrun_capture2 PRIVATE bcrypt)
 add_test(NAME outrun_capture2 COMMAND test_outrun_capture2)
+# The diagnostic key echo (sana 36438): edges only, followed by a reader while written, an existing file refused, a
+# failed write sticky.
+add_executable(test_key_echo tests/test_key_echo.cpp)
+target_include_directories(test_key_echo PRIVATE source)
+target_compile_features(test_key_echo PRIVATE cxx_std_17)
+target_compile_options(test_key_echo PRIVATE /W4 /WX)
+target_compile_definitions(test_key_echo PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_test(NAME key_echo COMMAND test_key_echo)
 # Play with Recording: the ordinary recorder over the real frame recorder and writer (one drain, the six-member
 # admission, recorder-complete.json, the receipt reader) and the start's intake of a request file.
 add_executable(test_ordinary_recording tests/test_ordinary_recording.cpp source/ordinary_recording.cpp source/session_request.cpp
@@ -219,6 +227,7 @@ set_tests_properties(shim_first_loop_publish PROPERTIES FIXTURES_REQUIRED publis
 add_test(NAME shim_first_loop_publish_reader COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_publish_reader.py
     $<TARGET_FILE:control_publish>)
 add_test(NAME perf_harness COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_run_perf.py)
+add_test(NAME perf_observed_keys COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_observed_keys.py)
     # P21g: the teardown audit of the worker-reachable shim code, and its mutations.
     add_test(NAME teardown_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME teardown_audit_mutations COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR} --mutations)
