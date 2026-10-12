@@ -333,7 +333,11 @@ t56.
      - `OR2_TRIPLE_KEEP_BEHIND=1` (diagnostic; three views, a normal process) relaxes (b): 4F0E40 and 4F02D0 keep
        spheres behind the near plane. The visibility bits also feed game logic (the nearest visible car), so it is
        for a diagnostic run only.
-     - Wedges that fill with it point to (b); wedges still uncovered point to (a).
+     - Interpretation (sana 38970):
+       - Wedges that fill with it implicate this near-plane rejection.
+       - Wedges still uncovered only rule out this bypass as sufficient. They do not establish absent geometry: the
+         far and screen bounds, other culling and submission remain, and a projection behind the centre camera can
+         still fail those bounds.
   3. If (a), the geometry is absent from the stage data. The normal-framing options are then:
      - a presentation fill for the side panels' empty pixels (sky or ground colour instead of black);
      - new start-line ground (content);
