@@ -259,6 +259,18 @@ void D3D11D3D9Device::collect_queries(bool wait_all){
 }
 void D3D11D3D9Device::end_frame(){
     triple_unbind();if(triple_frame_draws_){++triple_frames;triple_frame_draws_=0;}
+    // Development: OR2_TRIPLE_TRACE=1 logs each frame's three-view counts (its time, draws replicated, kept single by
+    // reason, into other targets), to line up with a clip of the window (sana 35918 / 35955: localization only, equal
+    // counts can hide different object sets).
+    static const bool trace=std::getenv("OR2_TRIPLE_TRACE")!=nullptr;
+    if(trace&&platform::g_pc_triple_corrections){
+        static std::uint64_t frame=0,last[6]{};static const auto t0=std::chrono::steady_clock::now();
+        const std::uint64_t now[6]{triple_draws,triple_single_rhw,triple_single_unmatched,triple_single_refused,triple_single_topology,triple_single_target};
+        std::printf("triple frame %llu t=%.1f rep=%llu rhw=%llu unm=%llu ref=%llu top=%llu tgt=%llu\n",(unsigned long long)frame,
+                    std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count(),
+                    (unsigned long long)(now[0]-last[0]),(unsigned long long)(now[1]-last[1]),(unsigned long long)(now[2]-last[2]),
+                    (unsigned long long)(now[3]-last[3]),(unsigned long long)(now[4]-last[4]),(unsigned long long)(now[5]-last[5]));
+        for(int k=0;k<6;++k)last[k]=now[k];++frame;}
     if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
