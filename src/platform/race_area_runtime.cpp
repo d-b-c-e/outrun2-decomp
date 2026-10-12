@@ -541,6 +541,25 @@ struct Service {
         if(bytes){pmt=*bytes;return true;}
         return false;
     }
+    // START's model banks (its 448AD0 requests: the other cars, the course objects) are resident from the race start,
+    // and the PC loads them behind the loading screen. The port loaded each one at its first draw instead (ensure_bank),
+    // which put a whole bank inside a race frame: obj_othcar, the traffic cars, 15 ms of a 34 ms frame at the first
+    // traffic car (perf P3). They load here, at 44CB00 (race start), with the course load. Model banks only (_pmt.sz). A
+    // bank that does not load stays for the draw-time load and its accounting.
+    void preload_start_banks(){
+        if(!r)return;
+        const auto& s=c.start_mode;
+        auto one=[&](std::uint32_t id){
+            if(id>=0x223u||o.released.count(id)||r->bank_loaded(id))return;
+            const auto path=resource_path(id);
+            if(path.size()<7||path.compare(path.size()-7,7,"_pmt.sz")!=0)return;
+            std::vector<std::uint8_t> pmt;std::string error;
+            if(!(r->bank_queued(id)||bank_bytes(id,pmt,error)))return;
+            if(r->load_bank(id,std::move(pmt),error)){o.banks_loaded.insert(id);++o.start_banks_preloaded;}
+        };
+        for(std::uint32_t k=0;k<s.scene_owner_resource_count&&k<s.scene_owner_resource_ids.size();++k)one(s.scene_owner_resource_ids[k]);
+        for(auto v:s.scene_owner_list_836850)one(v);
+    }
     // A 448AD0 request starts loading its bank onto the device a little each
     // frame (PcSceneRenderer::step_banks), as the PC loads it in the background.
     void queue_bank(std::uint32_t id){
@@ -917,7 +936,8 @@ bool native_race_area_event_invoke(NativeRuntimeContext& c,std::uint32_t callbac
             if(!o.table)throw std::runtime_error("course record table not identified (7D33BC)");
             Bytes(o.area.block.data(),o.area.block.size()).put32(0x7d33bcu-PcRaceAreaState::BlockBase,
                 RaceAreaTableBase+std::uint32_t(c.game_mode.course_runtime.selected_index)*0x78u);
-            race_area_init_44cb00(ctx);o.initialized=true;o.init_failed=false;++o.inits;break;
+            race_area_init_44cb00(ctx);o.initialized=true;o.init_failed=false;++o.inits;
+            sv.preload_start_banks();break;
         case 0x44f7c0u:
             if(o.init_failed||!o.initialized){++o.aborts["44F7C0 without a completed 44CB00"];++o.control_aborts;break;}
             // 44E590 state 0 uses the callback's ECX (never an entry state).
@@ -1092,7 +1112,7 @@ std::string native_race_area_status(const NativeRuntimeContext& c){
      <<" ctl="<<o.controls<<"/abort "<<o.control_aborts<<" disp="<<o.displays<<"/abort "<<o.display_aborts
      <<" draws="<<o.last_area_draws<<" | sky init="<<o.sky_inits<<(o.sky_init_failed?"(failed)":"")<<" ctl="<<o.sky_controls
      <<"/abort "<<o.sky_control_aborts<<" disp="<<o.sky_displays<<"/abort "<<o.sky_display_aborts<<" draws="<<o.last_sky_draws
-     <<" banks="<<o.banks_loaded.size()<<" skipped="<<o.skipped_objects;
+     <<" banks="<<o.banks_loaded.size()<<" start_preloaded="<<o.start_banks_preloaded<<" skipped="<<o.skipped_objects;
     if(!o.skipped_ids.empty()){s<<" (not resident:"<<std::hex;for(const auto& [id,n]:o.skipped_ids)s<<" "<<id<<"x"<<std::dec<<n<<std::hex;s<<std::dec<<")";}
     if(!o.last_error.empty())s<<" last="<<o.last_error;
     return s.str();
