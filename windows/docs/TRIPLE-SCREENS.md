@@ -381,6 +381,26 @@ t56.
   - Runtime.log now reports `render queue: N node draws dropped (queue full)`. The 404D10 walk drops nodes when a
     queue is full, which would also look like missing geometry, so a run with drops is read with that in mind.
 
+### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
+
+- **Report timing:** the owner's report (14:23 CT) followed F10 to F12, which still had the side-sky projection
+  mismatch (the affine test at 1e-4). F13 (14:01) fixed it, and no three-view run took place between F13 and the
+  report.
+- **Runs:** the same scripted 60 s drive and window clip for both:
+  - Q1: the pre-fix exe (triple11);
+  - Q2: the frozen owner build 063a6e3.
+- **Results:**
+  - Q1 leaves 11,933 sky draws on the centre only. The scans find 803 side-flicker candidates (side change well above
+    its own median and the centre's) and 679 blinks. In consecutive frames the side sky goes black on both side panels.
+  - Q2 has 0 such draws and 16 candidates. Of those, 15 are in the intro and loading phase, which Q1 shares, and one
+    is a palm trunk passing the camera. Its blinks are a camera shake on sand, in all three panels. At the same course
+    point the sky is drawn in every frame.
+- **Reading:** the scans detect the pre-fix dropout, and the owner build shows none on this route.
+  - Not established: the exe the owner actually watched, rare events, and oblique-angle texture shimmer.
+  - Open until the owner looks at the current build.
+- **Pedestrians past the lateral line:** in Q2 they stay drawn to about 84 % across the right panel. No pop-out behind
+  the eye was seen in this sample.
+
 ### Rig settings and the physical eye (proposed in sana 37643; accepted with option (b), 37757; source slice built)
 
 **Why.**
