@@ -1,7 +1,7 @@
 #pragma once
 // OutRun force feedback, F2: the force model (ffb_outrun.hpp, "outrun-legacy@1") computed in the game as a software
-// force stream, with NO device output. There is no device code here at all: nothing is opened, acquired or sent. A
-// later layer adds the device (the toolkit's WheelFfb) with its own gates and an attended test.
+// force stream; F4: its delivery to the steering wheel (ffb_device.hpp), OFF unless [FFB] Output = wheel, never in a
+// latched process or under DBCE_FFB_MUTE, and with WheelFfb.dll not even loaded then.
 //   - Settings: [FFB] in OutRunDesktop.ini with the OutRun 2006 mod's key names (FFBSpringStrength, ...), over the
 //     mod's compiled defaults. [FFB] FFBPreset = owner-2026-10-08 starts from the owner's accepted values instead (an
 //     explicit, labelled comparison preset; never applied silently). Parsed strictly and validated once.
@@ -16,6 +16,7 @@
 //     (stage unknown), sent and the held command (the deadband holds the last one), FFBGlobalStrength and the delivery
 //     intent (held x global), which a device layer would send.
 #include "desktop_settings.hpp"
+#include "ffb_device.hpp"
 #include "ffb_outrun.hpp"
 #include <cstdint>
 #include <string>
@@ -30,6 +31,11 @@ struct RaceEpochs {
     bool reset_now{};
     bool step(std::uint32_t mode);
 };
+
+// The wheel output's configuration (pure): [FFB] Output = wheel | none (default none; anything else is noted and is
+// none), the mute (`mute_env`, DBCE_FFB_MUTE: any value but empty or 0 mutes), the process kind, and the device instance
+// [Controls] steer reads (the force goes to the wheel the player steers with, never one chosen by name or index).
+ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mute_env,std::string& notes);
 
 // latched_run_folder: the fence's run folder in a latched process (empty otherwise).
 void ffb_configure(const Ini& settings,bool latched,const std::string& latched_run_folder);

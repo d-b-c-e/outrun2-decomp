@@ -266,6 +266,11 @@ std::uint32_t gear_pulses(const platform::NativeRuntimeContext* runtime,bool rac
 }
 }
 
+std::string wheel_input_steer_device(){
+    const Bound* b=g.open.empty()?nullptr:find("steer");
+    return b?b->device->dev:std::string();
+}
+
 void wheel_input_configure(const Ini& ini){
     g.settings_path=ini.path();
     const auto slash=g.settings_path.find_last_of("\\/");g.folder=slash==std::string::npos?".":g.settings_path.substr(0,slash);

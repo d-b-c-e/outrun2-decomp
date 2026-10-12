@@ -225,10 +225,46 @@ void test_epochs(){
     check(!e.step(18)&&!e.step(32)&&!e.step(13)&&e.step(16)&&e.reset_now&&e.epoch==3,"quit from the pause to the menus, then a new race: reset");
 }
 
+// F4: the wheel output's configuration. Off unless [FFB] Output = wheel; the mute and a latched process refuse before
+// anything loads; the device is the one [Controls] steer reads, by instance.
+void test_output_config(){
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_ffb_output_test_"+std::to_string(GetCurrentProcessId())+".ini";
+    auto load=[&](const std::string& body){{std::ofstream f(path,std::ios::binary);f<<body;}outrun::desktop::Ini i;i.load(path);return i;};
+    const std::string wheel="{d71b8350-61b7-11f1-8001-444553540000}",prod="{0006346e-0000-0000-0000-504944564944}";
+    const std::string controls="[Controls]\r\nSchema = 1\r\nProfile = Rig\r\nRevision = abc\r\n"
+        "steer = axis 0 dev="+wheel+" prod="+prod+" range=0..65535 rest=33265 travel=-1 name=\"MOZA R12 Base\"\r\n";
+    std::string notes;
+    auto c=outrun::desktop::ffb_output_config(load(controls),false,nullptr,notes);
+    check(!c.output&&c.steer_dev==wheel&&notes.empty()&&!outrun::desktop::ffbdev::load_refusal(c).empty(),"no Output key: no wheel output (the default)");
+    c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = Wheel\r\n"),false,nullptr,notes);
+    check(c.output&&!c.muted&&!c.latched&&c.steer_dev==wheel&&outrun::desktop::ffbdev::load_refusal(c).empty(),"Output = wheel (any case), the steer device");
+    c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = none\r\n"),false,nullptr,notes);
+    check(!c.output&&notes.empty(),"Output = none");
+    c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = on\r\n"),false,nullptr,notes);
+    check(!c.output&&notes.find("neither wheel nor none")!=std::string::npos,"an unknown Output value is noted and is none");
+    notes.clear();
+    for(const char* m:{"1","yes","true"}){
+        c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = wheel\r\n"),false,m,notes);
+        check(c.output&&c.muted&&outrun::desktop::ffbdev::load_refusal(c)=="DBCE_FFB_MUTE=1","DBCE_FFB_MUTE (any value but 0) refuses the load");
+    }
+    for(const char* m:{"","0"}){
+        c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = wheel\r\n"),false,m,notes);
+        check(!c.muted,"DBCE_FFB_MUTE empty or 0 does not mute");
+    }
+    c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = wheel\r\n"),true,nullptr,notes);
+    check(c.latched&&outrun::desktop::ffbdev::load_refusal(c)=="a latched (test) process","a latched process refuses the load");
+    c=outrun::desktop::ffb_output_config(load("[FFB]\r\nOutput = wheel\r\n"),false,nullptr,notes);
+    check(c.steer_dev.empty()&&outrun::desktop::ffbdev::load_refusal(c)=="[Controls] steer names no device","no [Controls]: no device, no load");
+    c=outrun::desktop::ffb_output_config(load("[Controls]\r\nSchema = 1\r\nsteer = button 1\r\n[FFB]\r\nOutput = wheel\r\n"),false,nullptr,notes);
+    check(c.steer_dev.empty()&&!outrun::desktop::ffbdev::load_refusal(c).empty(),"steer without a device instance: no load");
+    std::remove(path.c_str());
+}
+
 int main(int argc,char** argv){
     try{
         if(argc!=2)throw std::runtime_error("usage: test_ffb_outrun <tests/data/ffb>");
-        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();test_settings_parse();test_epochs();
+        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();test_settings_parse();test_epochs();test_output_config();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun force model: "<<checks<<" checks passed\n";
     return 0;

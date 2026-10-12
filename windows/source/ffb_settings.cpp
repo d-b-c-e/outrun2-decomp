@@ -1,5 +1,7 @@
 // The [FFB] settings and the computation's lifecycle (ffb_live.hpp): pure, so test_ffb_outrun checks them.
 #include "ffb_live.hpp"
+#include "dbce_controls.hpp"
+#include <cctype>
 #include <cstdlib>
 namespace outrun::desktop {
 namespace {
@@ -35,6 +37,19 @@ ffb::LegacySettings ffb_settings(const Ini& settings,std::string& notes,std::str
     s.invert=settings.flag("FFB","FFBInvertForce",s.invert);
     if(overrides)source+=", "+std::to_string(overrides)+" [FFB] key(s)";
     return s;
+}
+
+ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mute_env,std::string& notes){
+    ffbdev::Config c;
+    std::string v=settings.text("FFB","Output");
+    for(auto& ch:v)ch=char(std::tolower(static_cast<unsigned char>(ch)));
+    if(v=="wheel")c.output=true;
+    else if(!v.empty()&&v!="none")notes+="[FFB] Output = "+v.substr(0,24)+" is neither wheel nor none; no force output. ";
+    c.muted=mute_env&&*mute_env&&std::string(mute_env)!="0";
+    c.latched=latched;
+    const auto section=dbce::controls::parseSection(settings.section_lines("Controls"));
+    for(const auto& e:section.bound)if(e.action=="steer"){c.steer_dev=e.binding.dev;break;}
+    return c;
 }
 
 bool RaceEpochs::step(std::uint32_t mode){

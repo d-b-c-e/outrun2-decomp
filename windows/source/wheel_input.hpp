@@ -6,6 +6,7 @@
 // the race the device record of 453BB0 carries the full-range steering word and
 // the 0..255 pedals directly; in the menus the bound buttons drive the
 // frontend. Development test injection and its observer: test_injection.hpp.
+#include <string>
 namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::desktop {
 class Ini;
@@ -15,4 +16,7 @@ class Ini;
 void wheel_input_configure(const Ini&);
 void wheel_input_filter(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 void wheel_input_shutdown();
+// The instance GUID ("{...}", lower case) of the device the steer binding reads, while it is connected; "" otherwise
+// (no binding, the device absent or lost, or this backend not in use). The force output's device identity (ffb_device.hpp).
+std::string wheel_input_steer_device();
 }
