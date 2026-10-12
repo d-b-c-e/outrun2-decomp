@@ -2,11 +2,15 @@
 // One control-worker pass. All file operations stay behind Io, off the input
 // thread. Core owns admission/order/TTL and terminal neutrality. No game APIs.
 #include "shim.hpp"
+#include <chrono>
 #include <stdexcept>
 #include <thread>
 
 namespace dbce::shim::control {
-enum class ReadState { Missing, Bytes, Error };
+// Busy: the open met a sharing or lock conflict (another handle holds the file incompatibly, e.g. a publisher in the
+// middle of replacing it). The pump retries it on later passes while it has been Busy for at most BusyBoundMs in a
+// row (exactly BusyBoundMs is still within the bound); more than that fails (Pump::pass).
+enum class ReadState { Missing, Bytes, Busy, Error };
 struct Read { ReadState state{ReadState::Missing}; std::string bytes, reason; };
 struct Journal {
     std::vector<Event> events;
@@ -21,6 +25,9 @@ struct Io {
     virtual Read read_session()=0;  // <=512 bytes
     virtual Read read_batch()=0;    // <=MaxBatchBytes
     virtual std::uint64_t unix_seconds()=0;
+    // A monotonic millisecond clock for the Busy bound (never the wall clock). Fakes override it.
+    virtual std::uint64_t monotonic_ms(){return std::uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());}
     // The concrete sink adds immutable process/nonce/build/profile identity.
     // An accepted write means these entire records were accepted, never partial.
     virtual bool append(const Journal&)=0;
@@ -29,11 +36,17 @@ struct Io {
 struct Options { bool latched{},fences_verified{},force_absent{}; std::string expected_nonce; };
 enum class State { New, Polling, Failed, Closed };
 class Pump {
+public:
+    // A Busy inject.txt is retried while it has been Busy for at most this long in a row (exactly this long is still
+    // within); after more than this the session fails, as an I/O failure would.
+    static constexpr std::uint64_t BusyBoundMs=2000;
+private:
     Core& core_; Io& io_; const Options options_;
     std::thread::id worker_{};
     State state_{State::New}; std::string reason_;
     bool have_bytes_{}; std::string last_bytes_;
     std::uint64_t batches_offered_{},identical_skipped_{},journal_writes_{};
+    bool busy_{}; std::uint64_t busy_since_{},busy_passes_{};
     bool finished_{},complete_{},journal_failed_{};
     void fail(const std::string& why){
         if(state_==State::Failed||state_==State::Closed)return;
@@ -73,6 +86,17 @@ public:
             if(options_.latched&&(run==Run::Waiting||run==Run::Running)){
                 const auto read=io_.read_batch();
                 if(closed())return;
+                // Busy: nothing is offered, so Core's own deadlines keep running. A held batch expires neutral on its
+                // original deadline; a Busy pass never renews a batch, a heartbeat or output authority. The bound
+                // restarts only after a successful snapshot or a missing file (a Bytes or Missing read).
+                if(read.state==ReadState::Busy){
+                    const auto now=io_.monotonic_ms();
+                    if(!busy_){busy_=true;busy_since_=now;}
+                    ++busy_passes_;
+                    if(now>=busy_since_&&now-busy_since_>BusyBoundMs){
+                        fail("inject.txt busy for more than "+std::to_string(BusyBoundMs)+" ms: "+read.reason);return;}
+                }
+                else busy_=false;
                 if(read.state==ReadState::Error){fail("inject.txt unreadable: "+read.reason);return;}
                 if(read.state==ReadState::Bytes){
                     if(read.bytes.size()>MaxBatchBytes){fail("inject.txt exceeds its byte bound");return;}
@@ -118,5 +142,6 @@ public:
     std::uint64_t batches_offered()const{return batches_offered_;}
     std::uint64_t identical_skipped()const{return identical_skipped_;}
     std::uint64_t journal_writes()const{return journal_writes_;}
+    std::uint64_t busy_passes()const{return busy_passes_;}
 };
 }
