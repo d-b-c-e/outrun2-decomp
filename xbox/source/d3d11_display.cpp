@@ -1,9 +1,10 @@
 #include "d3d11_display.hpp"
+#include "frame_profile.hpp"
 #include "native_window.hpp"
 #include "platform_api.hpp"
 #include "platform/pc_dds.hpp"
 #include <d3dcompiler.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +12,14 @@
 #include <stdexcept>
 namespace outrun::xbox_runtime {
 namespace {
+// OR2_FRAME_LATENCY=1..3 (opt-in, a measured experiment): the swap chain's frame latency waitable object with that
+// many frames queued at most, waited at the top of the frame before the input sample (wait_for_frame_latency).
+// Unset: the default chain, as before (up to 3 frames queued, Present blocks).
+HANDLE g_latency_wait=nullptr;
+unsigned frame_latency_request(){
+    const char* v=std::getenv("OR2_FRAME_LATENCY");if(!v)return 0u;
+    const unsigned n=unsigned(std::strtoul(v,nullptr,10));return n>=1u&&n<=3u?n:0u;
+}
 constexpr const char* Shader=R"HLSL(
 struct VsIn{float2 p:POSITION;float4 c:COLOR0;float2 uv:TEXCOORD0;};
 struct Varying{float4 p:SV_Position;float4 c:COLOR0;float2 uv:TEXCOORD0;};
@@ -39,12 +48,21 @@ Graphics& graphics(){
     auto& w=native_window();
     DXGI_SWAP_CHAIN_DESC1 d{};d.Width=w.width;d.Height=w.height;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;d.SampleDesc.Count=1;
     d.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;d.BufferCount=2;d.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;d.Scaling=DXGI_SCALING_STRETCH;
+    const unsigned latency=frame_latency_request();
+    if(latency)d.Flags|=DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     if(w.core_window)check(factory->CreateSwapChainForCoreWindow(g.device.Get(),static_cast<IUnknown*>(w.core_window),&d,nullptr,&g.swap_chain),"CreateSwapChainForCoreWindow");
     else check(factory->CreateSwapChainForHwnd(g.device.Get(),static_cast<HWND>(w.hwnd),&d,nullptr,nullptr,&g.swap_chain),"CreateSwapChainForHwnd");
     ComPtr<ID3D11Texture2D> back;check(g.swap_chain->GetBuffer(0,IID_PPV_ARGS(&back)),"GetBuffer");
     check(g.device->CreateRenderTargetView(back.Get(),nullptr,&g.target),"CreateRenderTargetView(swap chain)");
     g.width=w.width;g.height=w.height;
     std::fprintf(stdout,"Xbox display: Direct3D 11 feature level %x, swap chain %ux%u\n",unsigned(g.device->GetFeatureLevel()),g.width,g.height);
+    if(latency){
+        ComPtr<IDXGISwapChain2> chain2;
+        if(SUCCEEDED(g.swap_chain.As(&chain2))&&SUCCEEDED(chain2->SetMaximumFrameLatency(latency))){
+            g_latency_wait=chain2->GetFrameLatencyWaitableObject();
+            std::fprintf(stdout,"Xbox display: frame latency %u (waitable object, waited before the input sample; OR2_FRAME_LATENCY)\n",latency);
+        }else std::fprintf(stdout,"Xbox display: OR2_FRAME_LATENCY=%u not applied (no IDXGISwapChain2); default latency\n",latency);
+    }
     return g;
 }
 ComPtr<ID3DBlob> compile(const char* entry,const char* target){
@@ -175,6 +193,14 @@ void sample_cadence(IDXGISwapChain1* swap_chain){
     if(refreshes>presents*g_interval)++g_cadence.late;   // at least one of them was shown a refresh or more late
     g_cadence.max_gap=std::max(g_cadence.max_gap,unsigned((refreshes+presents-1)/presents));
 }
+}
+// The top of a frame with OR2_FRAME_LATENCY: wait until the swap chain takes another frame, so the input sampled
+// next is as recent as the queue allows. Timed as the frame profile's acquire bucket (the vsync wait moves here from
+// Present). No effect without the variable.
+void wait_for_frame_latency(){
+    if(!g_latency_wait)return;
+    ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
+    WaitForSingleObjectEx(g_latency_wait,1000,TRUE);
 }
 unsigned output_refresh(){
     if(!g_refresh){
