@@ -30,7 +30,16 @@ PROFILE = "\n".join([
     "throttle = axis 2 %s range=0..65535 rest=0 travel=+1" % WHEEL,
     "brake = axis 5 %s range=0..65535 rest=0 travel=+1" % WHEEL,
     "confirm = button 20 %s" % WHEEL, "start = button 21 %s" % WHEEL, "back = button 22 %s" % WHEEL,
-    "navUp = button 23 %s" % WHEEL, "navDown = button 24 %s" % WHEEL, ""])
+    "navUp = button 23 %s" % WHEEL, "navDown = button 24 %s" % WHEEL,
+    "navLeft = button 25 %s" % WHEEL, "navRight = button 26 %s" % WHEEL, ""])
+# The menus from launch to a race (zero's mapped path, perf runs 1-3, hcom 24236), in seconds after the game window
+# appears. A latched process keeps its saves in the fresh run folder, so every run starts at "create new license":
+# title, CREATE NEW LICENSE, three downs to DONE, SINGLE PLAYER, OUTRUN mode, the OUTRUN2 course, the first car,
+# automatic, the first music. After the script, the former confirm/start presses continue until the race (cap 40).
+MENU_SCRIPT = [(6.0, "confirm"), (9.0, "confirm"), (11.0, "navDown"), (11.5, "navDown"), (12.0, "navDown"), (12.8, "confirm"),
+               (15.5, "confirm"), (18.0, "navRight"), (18.8, "confirm"), (21.5, "confirm"), (24.0, "confirm"), (26.0, "confirm"),
+               (28.5, "confirm")]
+MENU_FALLBACK_AFTER = 12.0     # seconds after the script's last step with no race before the confirm/start presses resume
 REPLAY_END = re.compile(r"input shim: replay end at live frame (\d+): (\d+) of (\d+) tape rows played \(([^)]*)\)")
 SIGNAL = re.compile(r"input shim: frame (\d+) run (\w+) mode (\d+)( race)? record steer (-?\d+) accel (\d+) brake (\d+) "
                     r"buttons ([0-9a-f]+) consumed steer (-?\d+) accel (-?\d+) brake (-?\d+)")
@@ -74,6 +83,15 @@ def loop_deadline(start, startup_seconds, race_at, budget):
 def inject_expiry(start, startup_seconds, budget):
     """inject.on's expiry: after the latest possible loop bound (a race entered at the end of the startup budget)."""
     return int(math.ceil(start + startup_seconds + budget)) + INJECT_MARGIN
+
+
+def next_menu_action(script, since_window, sent, last_press_age, presses):
+    """The menu press due now, or None: the next script step once its time has come (one per poll, in order), then,
+    MENU_FALLBACK_AFTER seconds past the script's end, the former start/confirm presses 1.5 s apart, 40 presses in all."""
+    if since_window is None or presses >= 40: return None
+    if sent < len(script): return script[sent][1] if since_window >= script[sent][0] else None
+    if since_window < script[-1][0] + MENU_FALLBACK_AFTER or last_press_age <= 1.5: return None
+    return "start" if (presses - len(script)) % 3 == 0 else "confirm"
 
 
 def replay_due(now, phase_at, replay_timeout, playback_end):
@@ -279,7 +297,7 @@ def main():
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
             publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
-        phase = "menus"; phase_at = 0; race_at = None
+        phase = "menus"; phase_at = 0; race_at = None; window_at = None; scripted = 0
         while time.time() < loop_deadline(start, o.seconds, race_at, budget) and proc.poll() is None:
             time.sleep(0.2)
             if log.exists():
@@ -295,9 +313,13 @@ def main():
                 if race: race_at = time.time()
                 if race and tape: phase, phase_at = "replay", time.time(); continue   # the shim plays the tape from the race entry
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
-                if time.time() - last_press > 1.5 and len(receipt["presses"]) < 40:
-                    action = "start" if len(receipt["presses"]) % 3 == 0 else "confirm"
-                    batch(["inject action %s 1 ms=200" % action]); receipt["presses"].append(dict(action=action, mode=mode)); last_press = time.time()
+                if window_at is None and windows_of(proc.pid): window_at = time.time(); receipt["windowSeconds"] = round(window_at - start, 3)
+                action = next_menu_action(MENU_SCRIPT, None if window_at is None else time.time() - window_at, scripted,
+                                          time.time() - last_press, len(receipt["presses"]))
+                if action:
+                    batch(["inject action %s 1 ms=200" % action]); last_press = time.time()
+                    receipt["presses"].append(dict(action=action, mode=mode, at=round(last_press - window_at, 3), scripted=scripted < len(MENU_SCRIPT)))
+                    if scripted < len(MENU_SCRIPT): scripted += 1
             elif phase == "steer-right" and time.time() - phase_at > 3.5:
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:

@@ -23,7 +23,16 @@ py -3 -B run.py ... --result <fresh dir> --replay-of <passing R1 result>        
 ```
 
 The test profile in the test copy binds the R12's real axes (steer 0, throttle 2, brake 5, as in
-readonly-provider-live-03). Menu actions go to otherwise unused R12 buttons (20-24), injected only.
+readonly-provider-live-03). Menu actions go to otherwise unused R12 buttons (20-26), injected only.
+
+Menus: a latched process keeps its saves in the fresh run folder, so every run starts at "create new license". R1 and
+R3 play `MENU_SCRIPT`, zero's mapped path from perf runs 1-3, in seconds after the game window appears:
+- title;
+- CREATE NEW LICENSE, three navDowns to DONE;
+- SINGLE PLAYER, navRight to OUTRUN;
+- the OUTRUN2 course, the first car, automatic, the first music.
+Twelve seconds after the script ends, if the race has not started, the former start/confirm presses resume (40 in
+all). Each press is recorded with its time and whether it was scripted.
 
 Receipt: the run folder (`runtime.log`, `controls-journal.jsonl` with the strict reader's verdict,
 `host-shutdown.json`), the modes seen, the largest record and consumed steer and accelerator values, and

@@ -69,6 +69,21 @@ import json
 check(not run.valid_race_seconds(json.loads('{"raceSeconds": NaN}')["raceSeconds"]), "JSON NaN accepted")
 check(not run.valid_race_seconds(json.loads('{"raceSeconds": Infinity}')["raceSeconds"]), "JSON Infinity accepted")
 
+# The menu script: in order, one step per poll, only once due; then the former presses after the fallback delay.
+script = run.MENU_SCRIPT
+check(run.next_menu_action(script, None, 0, 99, 0) is None, "no press before the game window appears")
+check(run.next_menu_action(script, 5.9, 0, 99, 0) is None and run.next_menu_action(script, 6.0, 0, 99, 0) == "confirm", "the first step at its time")
+check(run.next_menu_action(script, 30.0, 2, 0.1, 2) == "navDown", "a late poll sends the next unsent step, not a later one")
+check(run.next_menu_action(script, 18.0, 7, 0.1, 7) == "navRight", "OUTRUN mode is a navRight")
+check([a for _, a in script].count("navDown") == 3 and script[-1] == (28.5, "confirm"), "zero's mapped path: three downs, music confirm last")
+done = len(script)
+check(run.next_menu_action(script, script[-1][0] + run.MENU_FALLBACK_AFTER - 0.1, done, 99, done) is None, "no fallback press before its delay")
+check(run.next_menu_action(script, script[-1][0] + run.MENU_FALLBACK_AFTER, done, 99, done) == "start", "the fallback starts with start")
+check(run.next_menu_action(script, 60, done, 1.0, done + 1) is None, "fallback presses stay 1.5 s apart")
+check(run.next_menu_action(script, 60, done, 2.0, done + 1) == "confirm", "then confirm, as before")
+check(run.next_menu_action(script, 60, done, 99, 40) is None, "40 presses in all")
+check(all("%s = button" % a in run.PROFILE for a in ("navLeft", "navRight")), "the test profile binds navLeft/navRight")
+
 print("run timing: %d failure(s)" % len(failures))
 for f in failures: print("  " + f)
 sys.exit(1 if failures else 0)
