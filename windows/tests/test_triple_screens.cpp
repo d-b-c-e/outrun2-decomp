@@ -108,6 +108,15 @@ int main(){
         CHECK(notes[0].rfind("PanelWidthMm = 99 refused (100 to 3000)",0)==0&&notes[3].rfind("SideAngle = 90 refused (0 to below 90); 70 applies",0)==0&&
               notes[5]=="MatchGameFov = 0 refused (true or false); true applies");
         notes.clear();CHECK(parse({{"EyeDistanceMm","nan"},{"SideAngle","-1"}},notes).eye_distance_mm==660.&&notes.size()==2);
+        // PanelHeightMm is named as not used only when saved (nene 40406): Wheelkit's Apply writes a width and no height.
+        notes.clear();
+        CHECK(!d.panel_height_set&&o.panel_height_set&&!bad.panel_height_set);
+        CHECK(!triple_height_unused(d)&&!triple_height_unused(o));   // the default; 700 x 393.75 is exactly 16:9
+        const auto width_only=parse({{"PanelWidthMm","600"}},notes);
+        CHECK(notes.empty()&&!width_only.panel_height_set&&!triple_height_unused(width_only));
+        const auto both=parse({{"PanelWidthMm","600"},{"PanelHeightMm","400"}},notes);
+        CHECK(notes.empty()&&both.panel_height_set&&triple_height_unused(both));
+        CHECK(!triple_height_unused(parse({{"PanelWidthMm","600"},{"PanelHeightMm","337.75"}},notes)));   // within 0.5 mm of 337.5
         // MatchGameFov = true with the defaults: the corrections are bit for bit the fixture's (the views as before), for
         // the game's own race projection (F11: P[0] 0.893815, P[5] 1.589).
         {   const Mat4 p_game=perspective_off_center_rh(-0.1/0.893815,0.1/0.893815,-0.1/1.589,0.1/1.589,0.1,5000.);

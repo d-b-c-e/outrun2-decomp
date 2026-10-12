@@ -138,9 +138,10 @@ NativeWindow& native_window(){
             char eye[160];
             // The views take each panel's height from its width and the 16:9 render (triple_views); a saved PanelHeightMm
             // that differs is named as not used, so arbitrary settings are not reported as exact geometry (sana 38280).
+            // An absent one is not named (triple_height_unused; nene 40406).
             const double used_h=triple_rig.panel_width_mm*9./16.;
             char height[120]="";
-            if(std::fabs(triple_rig.panel_height_mm-used_h)>0.5)
+            if(td::triple_height_unused(triple_rig))
                 std::snprintf(height,sizeof height," (PanelHeightMm %.1f not used: the height follows the width and the 16:9 render)",
                               triple_rig.panel_height_mm);
             if(triple_rig.match_game_fov)std::snprintf(eye,sizeof eye,"eye matched to the game's FOV");

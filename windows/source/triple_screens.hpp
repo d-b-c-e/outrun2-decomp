@@ -102,7 +102,14 @@ struct TripleRigSettings {
     double panel_width_mm{fixture_rig(8.).panel_width_mm},panel_height_mm{fixture_rig(8.).panel_height_mm};
     double eye_distance_mm{660.},side_angle_deg{70.},bezel_mm{8.};
     bool match_game_fov{true};
+    bool panel_height_set{false};   // PanelHeightMm was in the INI and admitted (not the fixture default)
 };
+// The views take each panel's height from its width and the 16:9 render (triple_views). A saved PanelHeightMm that
+// differs from that by more than 0.5 mm is named as not used; an absent one is not (Wheelkit's Apply writes the width
+// only, so the fixture's default height would otherwise be reported for every other width; nene 40406).
+inline bool triple_height_unused(const TripleRigSettings& s){
+    return s.panel_height_set&&std::fabs(s.panel_height_mm-s.panel_width_mm*9./16.)>0.5;
+}
 // Reads them through text(key) (the INI's [Triple] value, "" when absent). A value that is not a finite number in its
 // range (SideAngle: 0 to below 90), or a MatchGameFov other than true / false (any case, blanks around ignored), is
 // refused: one note each in `notes`, and that key's default applies.
@@ -119,7 +126,8 @@ template<class Text> TripleRigSettings parse_triple_rig(Text text,std::vector<st
     for(const Key& k:keys){
         const std::string t=trimmed(std::string(text(k.name)));if(t.empty())continue;
         char* end=nullptr;const double v=std::strtod(t.c_str(),&end);
-        if(end!=t.c_str()&&*end=='\0'&&std::isfinite(v)&&v>=k.min&&(k.below_max?v<k.max:v<=k.max)){s.*k.field=v;continue;}
+        if(end!=t.c_str()&&*end=='\0'&&std::isfinite(v)&&v>=k.min&&(k.below_max?v<k.max:v<=k.max)){
+            s.*k.field=v;if(k.field==&TripleRigSettings::panel_height_mm)s.panel_height_set=true;continue;}
         char note[160];std::snprintf(note,sizeof note,"%s = %.32s refused (%g to %s%g); %g applies",k.name,t.c_str(),k.min,
                                      k.below_max?"below ":"",k.max,s.*k.field);
         notes.push_back(note);
