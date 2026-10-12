@@ -11,6 +11,13 @@ target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxg
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 
+# Standalone command publisher. No Core/game/device execution and no shim DLL ABI change.
+add_executable(control_publish host/control_publish.cpp)
+target_include_directories(control_publish PRIVATE host shim vendor/controls)
+target_compile_features(control_publish PRIVATE cxx_std_17)
+target_compile_definitions(control_publish PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000002)
+target_compile_options(control_publish PRIVATE /W4 /WX /EHsc)
+
 # The bindings store, the legacy import, the settings writer and test injection, without a game or devices.
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)

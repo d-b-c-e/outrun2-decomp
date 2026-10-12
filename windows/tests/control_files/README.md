@@ -13,17 +13,17 @@ path must already be an entry-fence-verified directory; this helper alone does
 not protect against hostile replacement of a parent directory.
 
 An existing writer refuses the open, and a held snapshot refuses a new writer.
-Delete sharing permits `ReplaceFileW`: a held snapshot still reads the complete
-old object while a new open reads the complete replacement. The fixture checks
-that exact race, not a stat-then-reopen approximation. A polling producer should
-publish by same-volume `ReplaceFileW` (or retry a failed atomic rename later),
-never truncate the active command file in place. On this machine `MoveFileExW`
-with replacement returned access denied while the destination was open despite
-delete sharing; `ReplaceFileW` passed. No fallback deletes the active name.
+Publishers now use the shared `control_publish.hpp` helper: FileRenameInfoEx with
+REPLACE_IF_EXISTS and POSIX_SEMANTICS, after closing the sibling's write handle.
+The original held-reader ReplaceFileW test missed its incompatible target write
+access during concurrent opens. Two actual SnapshotFile readers now race 2000
+whole-file replacements; a separately held snapshot survives 400 replacements.
+No reader sharing is relaxed and no fallback deletes the active name. See
+[publisher requirements and failure behavior](../../docs/CONTROL-PUBLISHER.md).
 
 Microsoft documents the relevant [CreateFile sharing rules](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
 and [ReplaceFile access requirements](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew).
-The source uses no unsupported `REPLACEFILE_WRITE_THROUGH` flag.
+The publisher uses neither ReplaceFileW nor its unsupported WRITE_THROUGH flag.
 
 Byte bounds do **not** bound filesystem latency. Calls run on the control worker
 and that worker still needs the reviewed shared-lifetime/OS-thread-deadline host.
