@@ -41,7 +41,7 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 
 ## Proposal (small reviewed steps; default as Tweaks only after an in-game A/B)
 
-1. `[Graphics] UIScalingMode` read, with 2 (the decomp's current look) as the default until step 3 is seen in game.
+1. **Built (sana GO 38509):** `[Graphics] UIScalingMode` read, with 2 (the decomp's current look) as the default until step 3 is seen in game; `display_fit.hpp` `parse_ui_scaling_mode` / `ui_scaling_rect`, the device's ui rect taking an aspect. 1 and invalid values log a line and apply 2.
    Mode 0 drops the UI rectangle (stretched).
 2. Mode 1's spacing:
    - a scope state (off / detect / left / right) that the reconstructed HUD functions set and clear where Tweaks'

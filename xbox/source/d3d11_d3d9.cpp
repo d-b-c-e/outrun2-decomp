@@ -519,10 +519,13 @@ void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;
 void set_transparency_supersampling(bool on){g_transparency_supersampling=on;}
 void D3D11D3D9Device::apply_state(){
     // The logical PC target stretched to the back buffer's pixels; with the UI
-    // rectangle, pretransformed (2D) draws keep a centred 4:3 area.
+    // rectangle, pretransformed (2D) draws keep a centred area of its aspect (4:3, or
+    // a span's centre panel with UIScalingMode 0; the 4:3 keeps its original arithmetic).
     const bool back=colour_target_==BackBuffer;
     double sx=back?double(back_w_)/back_width_:1,sy=back?double(back_h_)/back_height_:1,ox=0;
-    if(back&&ui_rect_&&batch_rhw_){const double w=double(back_h_)*4/3;ox=std::floor((back_w_-w)/2);sx=w/back_width_;}
+    if(back&&ui_rect_&&batch_rhw_){
+        const double w=ui_aspect_==4./3.?double(back_h_)*4/3:double(back_h_)*ui_aspect_;
+        ox=std::floor((back_w_-w)/2);sx=w/back_width_;}
     const float vx=float(ox+soft_viewport_.x*sx),vy=float(soft_viewport_.y*sy),vw=float(soft_viewport_.w*sx),vh=float(soft_viewport_.h*sy);
     const D3D11_VIEWPORT vp{vx,vy,vw,vh,soft_viewport_.min_z,soft_viewport_.max_z};
     if(!bound_.viewport_set||std::memcmp(&vp,&bound_.viewport,sizeof vp)!=0){context_->RSSetViewports(1,&vp);bound_.viewport=vp;bound_.viewport_set=true;}

@@ -38,7 +38,8 @@ public:
     // starts) or FXAA over it then (finish_scene, PC 42D710; end_frame when no
     // 2D layer came). The setters apply between frames.
     void resize_back_buffer(unsigned width,unsigned height);
-    void set_ui_rect(bool on){ui_rect_=on;}
+    // aspect: the rectangle's width per unit of height (4:3 by default; UIScalingMode 0 on a span: its centre panel's).
+    void set_ui_rect(bool on,double aspect=4./3.){ui_rect_=on;ui_aspect_=aspect>0.?aspect:4./3.;}
     void set_fxaa(bool on){fxaa_=on;}
     void set_msaa(unsigned samples){msaa_=samples==2||samples==4?samples:1;}
     void finish_scene();
@@ -149,5 +150,6 @@ private:
     ComPtr<ID3D11VertexShader> fxaa_vertex_;ComPtr<ID3D11PixelShader> fxaa_pixel_;ComPtr<ID3D11SamplerState> fxaa_sampler_;
     ComPtr<ID3D11RasterizerState> fxaa_rasterizer_;ComPtr<ID3D11DepthStencilState> fxaa_depth_;ComPtr<ID3D11BlendState> fxaa_blend_;
     bool msaa_live_{},ui_rect_{},fxaa_{},scene_finished_{},batch_rhw_{};
+    double ui_aspect_{4./3.};
 };
 }

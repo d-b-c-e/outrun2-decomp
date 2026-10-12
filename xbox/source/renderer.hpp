@@ -15,6 +15,9 @@ namespace outrun::xbox_runtime {
 // The PC's 640x480 raster, presented centred 4:3 unless 16:9 is chosen
 // (Options > Settings): the 3D scene full width, the 2D layer 4:3.
 inline bool g_widescreen=false;
+// [Graphics] UIScalingMode as parsed (display_fit.hpp parse_ui_scaling_mode / ui_scaling_rect): 2, keep centred, unless
+// the desktop host reads 0.
+inline unsigned g_ui_scaling_mode=2u;
 
 
 struct XboxRendererStats {

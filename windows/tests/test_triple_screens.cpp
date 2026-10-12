@@ -32,6 +32,23 @@ int main(){
     CHECK(!parse_triple_screens("Surround2"));
     CHECK(std::string(triple_screens_name(TripleScreens::separate))=="Separate monitors");
     CHECK(std::string(triple_screens_name(TripleScreens::off))=="Off");
+    // [Graphics] UIScalingMode (display_fit.hpp): "0" / "2" (blanks around; empty = 2); "1" and anything else give 2 with
+    // a note. The 2D rectangle: 2 = the centred 4:3 on 16:9 and on a span, as before (none on a 4:3 frame); 0 = none
+    // (stretched) on 16:9, the centre panel on a span (a third of its aspect), so the HUD stays on the centre monitor.
+    {   using outrun::xbox_runtime::parse_ui_scaling_mode;using outrun::xbox_runtime::ui_scaling_rect;
+        std::string note;
+        CHECK(parse_ui_scaling_mode("",note)==2u&&note.empty());
+        CHECK(parse_ui_scaling_mode(" 2 ",note)==2u&&note.empty());
+        CHECK(parse_ui_scaling_mode("0\r",note)==0u&&note.empty());
+        CHECK(parse_ui_scaling_mode("1",note)==2u&&note.find("not built yet; 2 (keep centred) applies")!=std::string::npos);
+        CHECK(parse_ui_scaling_mode("3",note)==2u&&note=="UIScalingMode = 3 refused (0, 1 or 2); 2 (keep centred) applies");
+        CHECK(parse_ui_scaling_mode("02",note)==2u&&note.find("refused")!=std::string::npos);
+        auto rect=[](unsigned mode,bool wide,float span,bool on,double aspect){
+            const auto r=ui_scaling_rect(mode,wide,span);return r.on==on&&(!on||std::fabs(r.aspect-aspect)<1e-12);};
+        CHECK(rect(2,true,0.f,true,4./3.)&&rect(2,false,0.f,false,0.)&&rect(2,false,48.f/9.f,true,4./3.)&&rect(2,true,48.f/9.f,true,4./3.));
+        CHECK(rect(0,true,0.f,false,0.)&&rect(0,false,0.f,false,0.));
+        CHECK(rect(0,true,48.f/9.f,true,double(48.f/9.f)/3.)&&std::fabs(ui_scaling_rect(0,true,48.f/9.f).aspect-16./9.)<1e-6);
+    }
     // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
     // only in a normal process with the borderless window over a span, each refusal named.
     CHECK(parse_triple_projection("Planar")==TripleProjection::planar);
