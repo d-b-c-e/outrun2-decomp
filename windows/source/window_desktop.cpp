@@ -139,6 +139,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const auto text=settings.text("Window","FrameLatency");unsigned frames=2u;
         if(text.size()==1u&&text[0]>='0'&&text[0]<='3')frames=unsigned(text[0]-'0');
         else if(!text.empty())std::printf("settings: [Window] FrameLatency = %.32s refused (0, 1, 2 or 3); 2 applies\n",text.c_str());
+        // A latched (test) process keeps the plain chain: its tapes were recorded on it, and a display preference must not
+        // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
+        if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
