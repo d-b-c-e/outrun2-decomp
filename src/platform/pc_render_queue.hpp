@@ -82,6 +82,9 @@ bool& render_disable_culling();
 bool& render_queues_extended();
 // Draws a full queue dropped (the PC drops them silently too), counted for the exit log.
 std::uint64_t& render_queue_dropped();
+// OR2_TRIPLE_NODE_DUMP (diagnostic; windows/docs/TRIPLE-SCREENS.md "Start wedges"): while set, 405360 first walks each
+// object whole without queuing and logs every node's view-space bounding sphere (race_area.cpp sets it for one frame).
+bool& render_node_dump();
 bool render_node_visible_404b00(PcRenderContext&,driving::Bytes node,driving::CourseProbe& view_centre,
     std::int32_t& lod);
 }

@@ -3,6 +3,7 @@
 #include "system/perf.hpp"
 #include "platform/pc_pmt_records.hpp"
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -107,7 +108,7 @@ u32 matrix_slot_404a80(PcRenderQueue& q,Descriptor& d,PcMatrixStack& s){
 // 404B00: view-space centre, frustum test (near, the four planes, far) and
 // LOD from the projected size (exponent of the screen radius against the
 // threshold; nodes with flag 0x10 pick mesh e - bias - 1 in 0..3).
-bool node_visible(PcRenderContext& c,const PmtNode& node,CourseProbe& v,std::int32_t& lod_out){
+bool node_visible(PcRenderContext& c,const PmtNode& node,CourseProbe& v,std::int32_t& lod_out,float* radius_out=nullptr){
     OR2_PERF_ZONE("404B00 node visible");
     auto& s=c.matrices;
     v=driving::pc_transform_point(s.current(),{node.centre[0],node.centre[1],node.centre[2]});
@@ -119,6 +120,7 @@ bool node_visible(PcRenderContext& c,const PmtNode& node,CourseProbe& v,std::int
     }
     const auto u=driving::pc_matrix_vector(s,{0.577350259f,0.577350259f,0.577350259f});
     const float r=float(driving::x87_sqrt((X(u.z)*u.z+X(u.y)*u.y)+X(u.x)*u.x)*node.radius);
+    if(radius_out)*radius_out=r;                    // OR2_TRIPLE_NODE_DUMP only
     std::int32_t lod=0;bool visible=false;
     const auto& f=c.view.frustum_95bf40;const auto& p=c.view.planes_95bf58;
     const X near_limit=-X(f[4]);
@@ -198,6 +200,32 @@ void walk_descriptor(PcRenderContext& c,const PcModelBank& bank,const PmtObject&
     if(!c.flush_4052c0)throw std::runtime_error("immediate mode without a 4052C0 owner");
     c.flush_4052c0();
 }
+// OR2_TRIPLE_NODE_DUMP: the tree as 404D10 walks it (node matrices pushed, flag 0x800 facing the camera), every node
+// logged with node_visible's view-space centre and radius, its flags, LOD meshes and verdict. Nothing is queued.
+void dump_walk(PcRenderContext& c,const PcModelBank& bank,const PmtObject& obj,std::uint32_t id,std::int32_t first){
+    const Bytes sys=bank.system;
+    for(std::int32_t index=first;;){
+        const u32 node_at=obj.nodes+u32(index)*0x38u;
+        const auto node=pmt<PmtNode>(sys,node_at);
+        bool pushed=false;
+        if(node.matrix>=0){
+            const Bytes m=sys.sub(obj.matrices+u32(node.matrix)*0x40u,0x40);
+            if(node.flags&0x800u)face_camera(c,m);
+            else push_multiply(c.matrices,m);
+            pushed=true;
+        }
+        CourseProbe v{};std::int32_t lod=0;float r=0.f;
+        const bool visible=node_visible(c,node,v,lod,&r);
+        std::printf("node dump: %08x %d flags %x mesh %d %d %d %d centre %.4f %.4f %.4f r %.4f visible %d\n",unsigned(id),index,
+                    unsigned(node.flags),node.mesh[0],node.mesh[1],node.mesh[2],node.mesh[3],double(v.x),double(v.y),double(v.z),
+                    double(r),visible?1:0);
+        if(node.child>=0&&node.child!=first)dump_walk(c,bank,obj,id,node.child);
+        const std::int32_t sibling=pmt<PmtNode>(sys,node_at).sibling;
+        if(pushed)driving::pc_matrix_pop(c.matrices);
+        if(sibling<0)return;
+        index=sibling;
+    }
+}
 const PcModelBank& bank_of(PcRenderContext& c,u32 id,const char* what){
     const auto* bank=c.bank(id>>16);
     if(!bank)throw std::runtime_error(std::string(what)+" object bank not loaded");
@@ -213,6 +241,7 @@ void render_queues_reset_405160(PcRenderQueue& o,PcRenderQueue& a){
     a.capacity=k;a.matrix_capacity=k;a.entries.resize(k);a.matrices.resize(k);
 }
 bool& render_disable_culling(){static bool off=false;return off;}
+bool& render_node_dump(){static bool on=false;return on;}
 bool render_node_visible_404b00(PcRenderContext& c,Bytes node,CourseProbe& v,std::int32_t& lod_out){
     return node_visible(c,pmt<PmtNode>(node,0),v,lod_out);
 }
@@ -231,6 +260,7 @@ void render_object_405360(PcRenderContext& c,std::uint32_t id,std::int32_t opaqu
     const auto obj=pmt<PmtObject>(bank.system,object);
     auto d=descriptor(id,id>>16,object,opaque,colour,colour_byte);
     d.flags=flag!=0?1u:0u;
+    if(render_node_dump())dump_walk(c,bank,obj,id,0);   // OR2_TRIPLE_NODE_DUMP (diagnostic): the whole object, logged only
     auto build=[&]{
         OR2_PERF_ZONE("4050F0 walk");
         if(node_list.size()==0){walk_404d10(c,bank,obj,d,0);return;}

@@ -1,5 +1,6 @@
 #include "platform/race_area.hpp"
 #include "platform/race_draw_distance.hpp"
+#include "platform/pc_render_queue.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/pc_address_view.hpp"
 #include "system/perf.hpp"
@@ -946,8 +947,19 @@ bool triple_whole_stage(){
     static const bool on=[]{const char* v=std::getenv("OR2_TRIPLE_WHOLE_STAGE");return v&&std::string(v)=="1";}();
     return on&&g_pc_triple_corrections!=nullptr;
 }
+// OR2_TRIPLE_NODE_DUMP=<n> (diagnostic; three views only, a normal process; windows/docs/TRIPLE-SCREENS.md "Start
+// wedges"): the n-th stage display of the process sets render_node_dump until the next one, so the objects 405360
+// walks in that frame are logged whole first (pc_render_queue.cpp). Log only: nothing drawn changes.
+void triple_node_dump_tick(){
+    static const long at=[]{const char* v=std::getenv("OR2_TRIPLE_NODE_DUMP");return v?std::strtol(v,nullptr,10):0L;}();
+    if(at<=0||g_pc_triple_corrections==nullptr)return;
+    static long n=0;
+    ++n;render_node_dump()=n==at;
+    if(n==at)std::printf("node dump: stage display %ld\n",n);
+}
 }
 void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t desc){
+    triple_node_dump_tick();
     Port p(c);auto& m=c.m;
     p.draw(0x4052b0u,{});
     auto done=[&]{p.draw(0x4052c0u,{});};
