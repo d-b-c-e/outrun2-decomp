@@ -232,10 +232,11 @@ public:
         auto* t=state==0x100u?&transform_world:state==2u?&transform_view:state==3u?&transform_proj:nullptr;
         if(t)for(unsigned k=0;k<16;++k)(*t)[k]=m[k];}
     // world * view * projection (row vectors), the fixed-function vertex transform.
-    std::array<float,16> transform_wvp()const{
-        auto mul=[](const std::array<float,16>& a,const std::array<float,16>& b){std::array<float,16> r{};
-            for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j){float s=0;for(unsigned k=0;k<4;++k)s+=a[i*4+k]*b[k*4+j];r[i*4+j]=s;}return r;};
-        return mul(mul(transform_world,transform_view),transform_proj);}
+    static std::array<float,16> transform_mul(const std::array<float,16>& a,const std::array<float,16>& b){std::array<float,16> r{};
+        for(unsigned i=0;i<4;++i)for(unsigned j=0;j<4;++j){float s=0;for(unsigned k=0;k<4;++k)s+=a[i*4+k]*b[k*4+j];r[i*4+j]=s;}return r;}
+    std::array<float,16> transform_wvp()const{return transform_mul(transform_mul(transform_world,transform_view),transform_proj);}
+    // world * view: eye space (point sprite sizes).
+    std::array<float,16> transform_wv()const{return transform_mul(transform_world,transform_view);}
     std::array<std::uint32_t,16> textures{};
     std::array<Stream,4> streams{};
     std::uint32_t indices{},declaration{},vertex_shader{},pixel_shader{};

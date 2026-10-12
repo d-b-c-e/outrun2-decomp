@@ -141,8 +141,10 @@ public:
     bool hash_draws{false};
     // DrawPrimitiveUP calls with a point (1), line list (2) or line strip (3) primitive, which this device does not
     // draw: counted and logged (first time per primitive and FVF), not a failure. A compatibility fallback, not
-    // equivalent rendering.
+    // equivalent rendering. Points with D3DRS_POINTSPRITEENABLE and the fixed-function XYZ transform are drawn
+    // (pc_point_sprite.hpp: the particle sparks and effects); other points still are not.
     std::uint64_t skipped_up[4]{};
+    std::uint64_t point_sprites_drawn{},point_sprites_rejected{};   // squares drawn / not drawn by D3D9's rules
     std::uint64_t draw_hash{0xcbf29ce484222325ull};
     std::uint64_t draws_hashed{};
     std::uint32_t dump_frame{};

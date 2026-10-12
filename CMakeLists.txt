@@ -160,7 +160,7 @@ target_sources(outrun_native_runtime PRIVATE src/platform/vehicle_preview_event.
 target_sources(outrun_native_runtime PRIVATE src/platform/vehicle_preview_init.cpp)
 target_sources(outrun_native_runtime PRIVATE src/platform/embedded_camera_data.cpp)
 target_sources(outrun_native_runtime PRIVATE src/platform/camera_render_binding.cpp)
-target_sources(outrun_native_runtime PRIVATE src/platform/vehicle_model_draw.cpp src/platform/embedded_vehicle_draw_data.cpp src/platform/pc_render_queue.cpp src/platform/pc_vertex_shader_setup.cpp src/platform/pc_pmt_loader.cpp src/platform/embedded_shader_data.cpp src/platform/pc_render_flush.cpp src/platform/pc_scene_display.cpp src/platform/pc_vehicle_display.cpp src/platform/pc_frame_render.cpp src/platform/pc_car_reflection.cpp src/platform/pc_scene_environment.cpp src/platform/pc_scene_renderer.cpp src/platform/pc_scene_select_car.cpp src/platform/pc_headlight_pool.cpp src/platform/pc_shader_programs.cpp src/platform/pc_shader_programs_generated.cpp src/platform/pc_dds.cpp src/platform/pc_soft_d3d9.cpp)
+target_sources(outrun_native_runtime PRIVATE src/platform/vehicle_model_draw.cpp src/platform/embedded_vehicle_draw_data.cpp src/platform/pc_render_queue.cpp src/platform/pc_vertex_shader_setup.cpp src/platform/pc_pmt_loader.cpp src/platform/embedded_shader_data.cpp src/platform/pc_render_flush.cpp src/platform/pc_scene_display.cpp src/platform/pc_vehicle_display.cpp src/platform/pc_frame_render.cpp src/platform/pc_car_reflection.cpp src/platform/pc_scene_environment.cpp src/platform/pc_scene_renderer.cpp src/platform/pc_scene_select_car.cpp src/platform/pc_headlight_pool.cpp src/platform/pc_shader_programs.cpp src/platform/pc_shader_programs_generated.cpp src/platform/pc_dds.cpp src/platform/pc_soft_d3d9.cpp src/platform/pc_point_sprite.cpp)
 add_executable(test_vehicle_constructor tests/test_vehicle_constructor.cpp)
 target_link_libraries(test_vehicle_constructor PRIVATE outrun_native_runtime)
 add_test(NAME vehicle_constructor COMMAND test_vehicle_constructor)
@@ -177,6 +177,9 @@ add_test(NAME camera_render_binding COMMAND test_camera_render_binding)
 # (OR2_RACE_MANAGER_REPLAY=<file>); run manually / under qemu on other hosts.
 add_executable(test_race_manager_replay tests/test_race_manager_replay.cpp src/platform/race_manager.cpp)
 target_link_libraries(test_race_manager_replay PRIVATE outrun_driving)
+add_executable(test_point_sprite tests/test_point_sprite.cpp)
+target_link_libraries(test_point_sprite PRIVATE outrun_native_runtime)
+add_test(NAME point_sprite COMMAND test_point_sprite)
 add_executable(test_tire_smoke_tail tests/test_tire_smoke_tail.cpp)
 target_link_libraries(test_tire_smoke_tail PRIVATE outrun_native_runtime)
 add_test(NAME tire_smoke_tail COMMAND test_tire_smoke_tail)
@@ -392,6 +395,7 @@ add_executable(test_switch_entry_link
   src/platform/pc_shader_programs_generated.cpp
   src/platform/pc_dds.cpp
   src/platform/pc_soft_d3d9.cpp
+  src/platform/pc_point_sprite.cpp
   src/platform/frontend_fixed_choice.cpp
   src/platform/frontend_network_menus.cpp
   src/platform/frontend_record_manager.cpp
@@ -515,7 +519,7 @@ if(OR2_BUILD_PC_ORACLE)
   target_sources(compare_pc PRIVATE src/platform/vehicle_preview_event.cpp)
   target_sources(compare_pc PRIVATE src/platform/vehicle_preview_init.cpp)
   target_sources(compare_pc PRIVATE src/platform/embedded_camera_data.cpp)
-  target_sources(compare_pc PRIVATE src/platform/vehicle_model_draw.cpp src/platform/embedded_vehicle_draw_data.cpp src/platform/pc_render_queue.cpp src/platform/pc_vertex_shader_setup.cpp src/platform/pc_pmt_loader.cpp src/platform/embedded_shader_data.cpp src/platform/pc_render_flush.cpp src/platform/pc_scene_display.cpp src/platform/pc_vehicle_display.cpp src/platform/pc_frame_render.cpp src/platform/pc_car_reflection.cpp src/platform/pc_scene_environment.cpp src/platform/pc_scene_renderer.cpp src/platform/pc_scene_select_car.cpp src/platform/pc_headlight_pool.cpp src/platform/pc_shader_programs.cpp src/platform/pc_shader_programs_generated.cpp src/platform/pc_dds.cpp src/platform/pc_soft_d3d9.cpp)
+  target_sources(compare_pc PRIVATE src/platform/vehicle_model_draw.cpp src/platform/embedded_vehicle_draw_data.cpp src/platform/pc_render_queue.cpp src/platform/pc_vertex_shader_setup.cpp src/platform/pc_pmt_loader.cpp src/platform/embedded_shader_data.cpp src/platform/pc_render_flush.cpp src/platform/pc_scene_display.cpp src/platform/pc_vehicle_display.cpp src/platform/pc_frame_render.cpp src/platform/pc_car_reflection.cpp src/platform/pc_scene_environment.cpp src/platform/pc_scene_renderer.cpp src/platform/pc_scene_select_car.cpp src/platform/pc_headlight_pool.cpp src/platform/pc_shader_programs.cpp src/platform/pc_shader_programs_generated.cpp src/platform/pc_dds.cpp src/platform/pc_soft_d3d9.cpp src/platform/pc_point_sprite.cpp)
   target_link_libraries(compare_pc PRIVATE ZLIB::ZLIB)
   target_sources(compare_pc PRIVATE src/platform/race_asset_pack.cpp)
   target_sources(compare_pc PRIVATE src/platform/frontend_title_widgets.cpp)

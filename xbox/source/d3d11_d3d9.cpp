@@ -119,6 +119,8 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
+    std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
+                (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);

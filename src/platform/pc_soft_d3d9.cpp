@@ -1,4 +1,5 @@
 #include <cstring>
+#include "platform/pc_point_sprite.hpp"
 #include "platform/pc_soft_d3d9.hpp"
 #include <algorithm>
 #include <cmath>
@@ -507,9 +508,13 @@ void PcSoftD3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,
     if(!targets_consistent()){errors.push_back("draw with the depth surface smaller than the render target");return;}
     const bool rhw=(fvf&0x400eu)==0x004u,xyz=(fvf&0x400eu)==0x002u;
     if(!rhw&&!xyz){errors.push_back("draw_primitive_up: only XYZRHW / XYZ FVFs are supported");return;}
+    // Point sprites (pc_point_sprite.hpp): a POINTLIST with D3DRS_POINTSPRITEENABLE through the fixed-function XYZ
+    // transform, each point drawn as a square of two triangles below. Other points are skipped as before.
+    const bool sprites=type==1u&&render[156]!=0u&&xyz&&vertex_shader==0u;
     std::size_t total=0;
     switch(type){case 4:total=std::size_t(count)*3;break;case 5:case 6:total=std::size_t(count)+2;break;
-        case 1:case 2:case 3:
+        case 1:if(sprites){total=count;break;}[[fallthrough]];
+        case 2:case 3:
             if(skipped_up[type]++==0u||(skipped_up[type]&(skipped_up[type]-1u))==0u)   // the 1st, 2nd, 4th, 8th... of each primitive
                 std::printf("renderer: DrawPrimitiveUP primitive %u (%s) fvf %x count %u stride %u not drawn (%llu so far)\n",type,
                             type==1?"points":type==2?"line list":"line strip",fvf,count,stride,(unsigned long long)skipped_up[type]);
@@ -567,6 +572,34 @@ void PcSoftD3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,
     if(dbg_up&&fvf==0x44u){std::fprintf(stderr,"[up44] ps=%u vs=%u type=%u count=%u rs:",pixel_shader,vertex_shader,type,count);
         for(std::uint32_t r:{7u,14u,15u,19u,20u,22u,24u,25u,27u,52u,53u,54u,55u,56u,57u,58u,59u,168u})std::fprintf(stderr," %u=%x",r,render[r]);
         std::fprintf(stderr," tss0:");for(std::uint32_t k:{1u,2u,3u,4u,5u,6u})std::fprintf(stderr," %x",stage[0][k]);std::fprintf(stderr," tex0=%u\n",textures[0]);}
+    if(sprites){
+        auto fbits=[](std::uint32_t u){float f;std::memcpy(&f,&u,4);return f;};
+        PcPointSpriteParams sp;
+        sp.size=fbits(render[154]);sp.min=fbits(render[155]);sp.max=fbits(render[166]);
+        sp.a=fbits(render[158]);sp.b=fbits(render[159]);sp.c=fbits(render[160]);sp.scale=render[157]!=0u;
+        const auto wv=transform_wv();
+        // D3D9 does not cull points: each square is wound so that the current cull mode keeps it (clockwise on screen,
+        // y down, for D3DCULL_CCW and NONE; counter-clockwise for D3DCULL_CW).
+        const bool ccw=render[d3d9::RS_CULLMODE]==2u;
+        for(std::uint32_t i=0;i<count;++i){
+            const auto* p=bytes+std::size_t(i)*stride;
+            const float x=rdf(p),y=rdf(p+4),z=rdf(p+8);
+            float eye[3];for(unsigned k=0;k<3;++k)eye[k]=x*wv[k]+y*wv[4+k]+z*wv[8+k]+wv[12+k];
+            float size=0.f,corner[4][4];
+            if(!pc_point_sprite_size(sp,eye,soft_viewport_.h,size)||
+               !pc_point_sprite_corners(up_vertices_[i].pos,size,soft_viewport_.w,soft_viewport_.h,corner)){++point_sprites_rejected;continue;}
+            Vertex q[4];
+            for(unsigned k=0;k<4;++k){
+                q[k]=up_vertices_[i];std::memcpy(q[k].pos,corner[k],sizeof corner[k]);
+                for(auto& t:q[k].t)t={PcPointSpriteUv[k][0],PcPointSpriteUv[k][1],0.f,1.f};
+            }
+            if(ccw){triangle(q[0],q[2],q[1]);triangle(q[1],q[2],q[3]);}
+            else{triangle(q[0],q[1],q[2]);triangle(q[1],q[3],q[2]);}
+            ++point_sprites_drawn;
+        }
+        pretransformed_=false;
+        return;
+    }
     Vertex tri[3];
     for(std::uint32_t p=0;p<count;++p){
         std::size_t a,b,c;
