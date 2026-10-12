@@ -11,6 +11,7 @@
 #include "platform/race_ghosts.hpp"
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_scene_renderer.hpp"
+#include "platform/pc_screen.hpp"
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
@@ -180,6 +181,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(lods)std::printf("settings: vehicle LODs disabled (other cars at full detail)\n");
         if(cull)std::printf("settings: stage culling disabled (every node drawn)\n");
         outrun::platform::other_car_lods_disabled()=lods;outrun::platform::render_disable_culling()=cull;}
+    // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
+    // widescreen edge rather than the 4:3 one.
+    outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
+    if(!outrun::platform::g_pc_screen_edge_cull_fix)std::printf("settings: screen edge cull fix off (objects culled at the 4:3 edge)\n");
     // [Graphics] FixZBufferPrecision, the Tweaks key: the race camera's near plane raised from 0.1 (1.0 in the chase and
     // bumper views) so far geometry stops z-fighting; the lens flare keeps 0.05. Off when absent.
     if(settings.flag("Graphics","FixZBufferPrecision",false)){

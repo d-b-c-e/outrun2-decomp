@@ -6,6 +6,10 @@
 #include <string>
 namespace outrun::platform {
 inline float g_pc_view_half_width=320.0f;
+// [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
+// (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
+// objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).
+inline bool g_pc_screen_edge_cull_fix=true;
 // Port performance overlay (Minus): lines separated by '\n', drawn by the 2D
 // flush 42D710 on top of the frame with the game's font 9. Empty = hidden.
 inline std::string g_pc_overlay_text;
