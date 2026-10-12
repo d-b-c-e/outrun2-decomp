@@ -15,6 +15,14 @@ Run it only when a live launch is coordinated (Astra, owner). It uses the existi
 
 It never touches the owner's game folder; it runs from a dedicated test copy.
 
+Command publication uses the shared native `control_publish.exe`, with its path
+and SHA256 pinned in the receipt plan. Build that target alongside the candidate,
+or use `--publisher-tool <path>`. Known sibling/build locations are checked in a
+fixed order; missing tool means preflight refusal before lease or launch. There
+is no ReplaceFileW fallback. See [control publisher](../../docs/CONTROL-PUBLISHER.md)
+for the Windows 10 1607/Server 2016 API minimum, filesystem requirements and the
+offline concurrent SnapshotFile regression.
+
 ```
 py -3 -B run.py --candidate <OutRunDesktop.exe> --prepare-from <a game folder with OR2006C2C.exe> --game <new test folder>   # once per candidate
 py -3 -B run.py --candidate <OutRunDesktop.exe> --finalizer <P21Finalizer.dll> --replay-tool <capture_replay.exe>     --result <fresh dir> --check-only                                                       # preflight, no launch

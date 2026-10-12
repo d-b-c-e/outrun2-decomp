@@ -25,8 +25,12 @@ import bisect, json, pathlib, re, sys
 ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host", "windows/vendor/session", "windows/shim_dll"]
 # Not linked into OutRunDesktop.exe: the offline tools, and the Xbox build's own UWP / Win32 entry points (the desktop
 # build has its own, windows/source/window_desktop.cpp). ps5/source is not scanned: its library (outrun_ps5_platform)
-# compiles only src/input, which is scanned under src.
-EXCLUDE = ["src/tools/", "xbox/source/window_uwp.cpp", "xbox/source/window_win32.cpp"]
+# compiles only src/input, which is scanned under src. The standalone command publisher (control_publish.exe, b173a48:
+# run by the first-loop runner as its own process) is not linked either; no audited file may include its header, so a
+# later link into the game is refused here rather than left unscanned.
+EXCLUDE = ["src/tools/", "xbox/source/window_uwp.cpp", "xbox/source/window_win32.cpp",
+           "windows/host/control_publish.cpp", "windows/host/control_publish.hpp"]
+STANDALONE_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?control_publish\.hpp[>"]', re.M)
 SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
             "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home"]
@@ -300,7 +304,11 @@ def scan_tree(repo):
             rel = p.relative_to(repo).as_posix()
             if p.suffix not in SUFFIXES or any(rel.startswith(e) for e in EXCLUDE):
                 continue
-            out += scan_text(rel, p.read_bytes().decode("utf-8", errors="replace"))
+            text = p.read_bytes().decode("utf-8", errors="replace")
+            for m in STANDALONE_INCLUDE.finditer(text):   # never classified: always an UNCLASSIFIED finding
+                out.append(dict(file=rel, number=text.count("\n", 0, m.start()) + 1, kinds=["standalone include"],
+                                line=m.group(0).strip()))
+            out += scan_text(rel, text)
     return out
 
 def audit(findings, entries):

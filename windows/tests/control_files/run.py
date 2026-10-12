@@ -6,7 +6,7 @@ if out.exists():raise SystemExit('Use a fresh result directory')
 def git(*a):return subprocess.check_output(['git','-C',str(repo),*a],text=True).strip()
 def pin():
     if git('status','--porcelain'):raise RuntimeError('Commit candidate first')
-    files=git('ls-files','--','windows/shim','windows/host/control_snapshot.hpp','windows/vendor/controls','windows/tests/shim_fake_provider.hpp','windows/tests/control_files').splitlines()
+    files=git('ls-files','--','windows/shim','windows/host/control_snapshot.hpp','windows/host/control_publish.hpp','windows/host/control_publish.cpp','windows/vendor/controls','windows/tests/shim_fake_provider.hpp','windows/tests/control_files','windows/tests/shim_first_loop','windows/tests/control_journal/read_journal.py').splitlines()
     return dict(commit=git('rev-parse','HEAD'),files={f:hashlib.sha256((repo/f).read_bytes()).hexdigest() for f in files})
 before=pin();out.mkdir(parents=True);commands=[]
 def run(name,cmd,expected=0):
@@ -18,6 +18,7 @@ def build(name,src,dest):
     run(name+'-configure',['cmake','-S',src,'-B',dest,'-G','Visual Studio 17 2022','-A','x64','-T','ClangCL'])
     run(name+'-build',['cmake','--build',dest,'--config','Release']);return dest/'Release/control_files.exe'
 exe=build('original',here,out/'build');proof=run('original',[exe,out/'files']);mutations=[]
+python_proof=run('python-publisher',['py','-3','-B',repo/'windows/tests/shim_first_loop/test_publish.py',exe.with_name('control_publish.exe'),out/'python-files'])
 plans=[
     ('bounds','info.nFileSizeHigh||info.nFileSizeLow>bound','false','oversize session refused before read'),
     ('sharing','FILE_SHARE_READ|FILE_SHARE_DELETE','FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE','existing writer refuses snapshot'),
@@ -33,5 +34,5 @@ for name,old,new,why in plans:
     if bad.returncode==0 or why not in bad.stderr:raise RuntimeError(name+' not caught at its named assertion: '+bad.stderr)
     mutations.append(dict(name=name,caught=True,reason=bad.stderr.strip()))
 if pin()!=before:raise RuntimeError('Source changed during proof')
-(out/'receipt.json').write_text(json.dumps(dict(source=before,passed=True,proof=proof.stdout.strip(),mutations=mutations,commands=commands),indent=2))
+(out/'receipt.json').write_text(json.dumps(dict(source=before,passed=True,proof=proof.stdout.strip(),pythonProof=python_proof.stdout.strip(),publisherSha256=hashlib.sha256(exe.with_name('control_publish.exe').read_bytes()).hexdigest(),mutations=mutations,commands=commands),indent=2))
 print(proof.stdout.strip());print('PASS three defect controls; '+str(out/'receipt.json'))

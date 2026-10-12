@@ -15,6 +15,8 @@
 import json, pathlib, re, shutil, subprocess, sys, tempfile
 
 SCOPE = ["windows/shim", "windows/host"]
+# The standalone command publisher's main (control_publish.exe, b173a48): its own process, never a shim worker.
+OUT_OF_SCOPE = ["windows/host/control_publish.cpp"]
 SUFFIXES = {".cpp", ".hpp", ".h"}
 # R1: the console and every FILE-stream call (std:: or not). String formatting (snprintf, sscanf) touches no stream.
 STDIO = re.compile(r"(?<![\w.>])(?:std::)?(printf|fprintf|vprintf|vfprintf|wprintf|fwprintf|vwprintf|vfwprintf|scanf|fscanf|wscanf|fwscanf|"
@@ -67,6 +69,7 @@ def scan(root):
         for path in sorted((root / scope).rglob("*")):
             if path.suffix not in SUFFIXES: continue
             rel = path.relative_to(root).as_posix()
+            if rel in OUT_OF_SCOPE: continue
             raws = path.read_text(encoding="utf-8", errors="replace").splitlines()
             stack, head, macro = [], "", False   # scope kinds ('ns' or 'other'); text before the next brace; in a #define
             for n, code in enumerate(code_lines("\n".join(raws)), 1):

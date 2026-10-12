@@ -128,21 +128,22 @@ def replay_due(now, phase_at, replay_timeout, playback_end):
     return bool(playback_end) or now - phase_at > replay_timeout
 
 
-def replace_file(path, data):
-    """Atomic publish of inject files: a sibling temp, then a rename over the target (MoveFileExW REPLACE_EXISTING, as
-    DRIVE's StageShimSession publishes), retried briefly on a sharing conflict.
+def publisher_tool(explicit=None, candidate=None):
+    """Deterministic known locations only; no PATH search or unsafe publication fallback."""
+    if explicit is not None:
+        return pathlib.Path(explicit).resolve()
+    choices = ([pathlib.Path(candidate).resolve().parent / "control_publish.exe"] if candidate else []) + [
+        HERE / "control_publish.exe", HERE.parents[2] / "build-xbox-pc/windows/Release/control_publish.exe",
+        HERE.parents[2] / "build-control-files/Release/control_publish.exe"]
+    return next((p for p in choices if p.is_file()), choices[0])
 
-    Not ReplaceFileW: first live R1 (2026-10-11 22:26, r1-01) showed it briefly holding inject.txt in a way the control
-    worker's snapshot open (FILE_SHARE_READ | FILE_SHARE_DELETE, no FILE_SHARE_WRITE: control_snapshot.hpp) refuses with
-    Win32 32. The worker then failed for the rest of the run after batch 1. A rename never opens the target for writing,
-    and the worker's own handle allows it (FILE_SHARE_DELETE); test_publish.py holds such a handle across a publish."""
-    path = pathlib.Path(path); tmp = path.with_name(path.name + ".tmp-" + "".join(random.choices(string.ascii_lowercase, k=8)))
-    tmp.write_bytes(data)
-    last = None
-    for _ in range(40):
-        try: os.replace(tmp, path); return
-        except PermissionError as e: last = e; time.sleep(0.025)   # a reader mid-open: retry, never touch its handle
-    tmp.unlink(missing_ok=True); raise OSError("publish of %s failed: %r" % (path.name, last))
+
+def replace_file(path, data, publisher):
+    """The shared native whole-file publisher: no target write handle, no ReplaceFileW retry."""
+    q = subprocess.run([str(publisher), str(pathlib.Path(path).resolve())], input=data,
+                       capture_output=True, timeout=30)
+    if q.returncode:
+        raise OSError("control publisher refused: " + q.stderr.decode("utf-8", errors="replace").strip())
 
 
 def windows_of(pid):
@@ -239,6 +240,7 @@ def main():
     a = argparse.ArgumentParser(description=__doc__)
     a.add_argument("--game", type=pathlib.Path, default=pathlib.Path(r"E:\Games\OutRunShimTest"))
     a.add_argument("--candidate", type=pathlib.Path, required=True)
+    a.add_argument("--publisher-tool", type=pathlib.Path, help="control_publish.exe (default: candidate sibling, runner sibling, standard build paths)")
     a.add_argument("--prepare-from", type=pathlib.Path, help="build --game as a copy of this game folder first")
     a.add_argument("--result", type=pathlib.Path, help="a fresh result folder (runs and preflight)")
     a.add_argument("--finalizer", type=pathlib.Path, help="the reviewed P21Finalizer.dll (p21_recorder_integration/managed)")
@@ -251,6 +253,8 @@ def main():
     if not o.result: a.error("--result is required for a run or a preflight")
     out = o.result.resolve()
     problems = []
+    publisher = publisher_tool(o.publisher_tool, o.candidate)
+    if not publisher.is_file(): problems.append("no control publisher at %s (build control_publish or supply --publisher-tool)" % publisher)
     if out.exists(): problems.append("result folder exists")
     if not (o.game / "OR2006C2C.exe").exists(): problems.append("no game data in %s (use --prepare-from)" % o.game)
     if not (o.game / "OutRunDesktop.exe").exists() or sha(o.game / "OutRunDesktop.exe") != sha(o.candidate):
@@ -296,6 +300,7 @@ def main():
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
     if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
     plan = dict(game=str(o.game), candidate=str(o.candidate), candidateSha256=sha(o.candidate) if o.candidate.exists() else None,
+                publisherTool=str(publisher), publisherSha256=sha(publisher) if publisher.is_file() else None,
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
@@ -318,7 +323,8 @@ def main():
     proc = None; run_root = None; leased = False; created = 0; wrote_ini = False
     published = {}                               # only files this invocation wrote, with their last bytes
     def publish(name, data):
-        replace_file(DBCE / name, data); published[name] = data
+        if sha(publisher) != plan["publisherSha256"]: raise RuntimeError("control publisher changed after preflight")
+        replace_file(DBCE / name, data, publisher); published[name] = data
     try:
         lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
         if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it

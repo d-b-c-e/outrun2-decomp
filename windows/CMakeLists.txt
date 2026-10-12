@@ -13,6 +13,13 @@ target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxg
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 
+# Standalone command publisher. No Core/game/device execution and no shim DLL ABI change.
+add_executable(control_publish host/control_publish.cpp)
+target_include_directories(control_publish PRIVATE host shim vendor/controls)
+target_compile_features(control_publish PRIVATE cxx_std_17)
+target_compile_definitions(control_publish PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000002)
+target_compile_options(control_publish PRIVATE /W4 /WX /EHsc)
+
 # The bindings store, the legacy import, the settings writer and test injection, without a game or devices.
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)
@@ -109,7 +116,15 @@ if(Python3_FOUND)
     add_test(NAME write_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 add_test(NAME shim_first_loop_timing COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_run_timing.py)
-add_test(NAME shim_first_loop_publish COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_publish.py)
+# The first loop's publish through the shared native publisher (b173a48): its own fixture (a fresh folder, removed
+# first), and the control worker's snapshot open reading throughout (live r1-01's failure; ReplaceFileW the control).
+add_test(NAME shim_first_loop_publish_clean COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_CURRENT_BINARY_DIR}/publish-fixture)
+set_tests_properties(shim_first_loop_publish_clean PROPERTIES FIXTURES_SETUP publish_fixture)
+add_test(NAME shim_first_loop_publish COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_publish.py
+    $<TARGET_FILE:control_publish> ${CMAKE_CURRENT_BINARY_DIR}/publish-fixture)
+set_tests_properties(shim_first_loop_publish PROPERTIES FIXTURES_REQUIRED publish_fixture)
+add_test(NAME shim_first_loop_publish_reader COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_publish_reader.py
+    $<TARGET_FILE:control_publish>)
 add_test(NAME perf_harness COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_run_perf.py)
     # P21g: the teardown audit of the worker-reachable shim code, and its mutations.
     add_test(NAME teardown_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR})
