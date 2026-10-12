@@ -1,5 +1,6 @@
 // Included inside the compare_pc dispatcher; uses its private x86 harness.
 if(only=="particles_probe"){
+    outrun::platform::g_pc_fix_particle_rendering=false;  // the PC's own particle mapping (FixParticleRendering off)
     // Original event 397 PART_EFC (41BBF0 init, 41BC60 control over several
     // frames, the effect requests and every particle function reached by
     // injected particles) against race_particles. The module code runs

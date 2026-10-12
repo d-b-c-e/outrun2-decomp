@@ -1,4 +1,5 @@
 if(only=="race_model_draw_probe"){
+    outrun::platform::g_pc_car_base_shadow_opacity=0.f;   // the PC's own 469600: no restored base shadow (CarBaseShadowOpacity)
     // Original 469600 (race car draw list) with its protected bridges live.
     // The render leaves are capture stubs: each records its PC, arguments and
     // the current matrix; the native draw list must match it exactly.

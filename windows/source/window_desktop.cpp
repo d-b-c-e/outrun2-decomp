@@ -14,6 +14,7 @@
 #include "platform/pc_screen.hpp"
 #include "platform/race_draw_distance.hpp"
 #include "platform/race_particles.hpp"
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <algorithm>
@@ -205,6 +206,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
                 from?from:"no lods.ini");
         }}
+    // [Graphics] CarBaseShadowOpacity, the Tweaks key (1.0 unless set; 0 = the PC's own, no base shadow; up to 1):
+    // the car's flat base shadow of O2SP / C2C Xbox restored (pc_screen.hpp).
+    {   const float o=settings.number("Graphics","CarBaseShadowOpacity",1.0f);
+        if(std::isfinite(o)&&o>=0.f&&o<=1.f)outrun::platform::g_pc_car_base_shadow_opacity=o;
+        else std::printf("settings: [Graphics] CarBaseShadowOpacity refused (0..1); 1 applies\n");
+        if(outrun::platform::g_pc_car_base_shadow_opacity<1.f)std::printf("settings: car base shadow opacity %.2f\n",double(outrun::platform::g_pc_car_base_shadow_opacity));}
     // [Bugfixes] FixParticleRendering, the Tweaks key (on unless set false, as there): the half-resolution particle
     // mapping of 418CF0 and the Metropolis fireworks object (pc_screen.hpp).
     outrun::platform::g_pc_fix_particle_rendering=settings.flag("Bugfixes","FixParticleRendering",true);

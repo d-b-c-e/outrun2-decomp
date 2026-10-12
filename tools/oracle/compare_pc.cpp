@@ -1,6 +1,7 @@
 // Diagnostic only, Linux x86-64. Input is verified by run_pc_oracle.py.
 // Never boot the game. Only invoke the explicitly listed leaf/closed routines.
 #include "driving/pc_driving.hpp"
+#include "platform/pc_screen.hpp"   // the port options the probes pin to the PC's behaviour
 #include "driving/pc_wheel_dynamics.hpp"
 #include "driving/pc_steering.hpp"
 #include "driving/pc_tire_geometry.hpp"

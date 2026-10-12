@@ -2,6 +2,8 @@
 #include "driving/pc_x87.hpp"
 #include "driving/pc_car_services_ghost.hpp"
 #include "platform/embedded_vehicle_draw_data.hpp"
+#include "platform/pc_screen.hpp"
+#include <cstring>
 #include <cmath>
 #include <stdexcept>
 namespace outrun::platform {
@@ -490,7 +492,9 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
     if(vm!=1)return;                                                              // bridge 469CDB
     if(layout.u32(0xc)!=None){
         // Flat shadow: 49A650 is a bare RET; the matrix work and the 449640
-        // row normalisation of +B0 still happen.
+        // row normalisation of +B0 still happen. Its alpha argument ([ESP+14] at 469EA5): 1, or with +2C8 > 0
+        // max((0.5 - +2DC) * 2, 2^-23) in single precision (469E32..469E60); CarBaseShadowOpacity draws with it.
+        float alpha=1.f;
         driving::pc_matrix_push_unit(s);
         if(car.u32(4)&0x800000u){
             translate(get3(car,0x14));
@@ -503,7 +507,17 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
         }else{
             translate(get3(car,0xe0));
             driving::pc_matrix_rotate_y(s,word_angle(car.i16(0x2e)));
-            if(car.f32(0x2c8)>0.f)driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
+            if(car.f32(0x2c8)>0.f){
+                driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
+                const float a=(0.5f-car.f32(0x2dc))*2.0f;alpha=1.1920929e-07f>=a?1.1920929e-07f:a;
+            }
+        }
+        // CarBaseShadowOpacity (pc_screen.hpp): Tweaks' CalcPeraShadow in place of the RET at 469EB4.
+        if(g_pc_car_base_shadow_opacity>0.f){
+            driving::pc_matrix_push_load(s,car.sub(0xb0,64));translate({0.f,0.05f,0.f});
+            const float a=alpha*g_pc_car_base_shadow_opacity;std::uint32_t bits;std::memcpy(&bits,&a,4);
+            record(0x4056d0,{layout.u32(0xc),bits,0,None});
+            driving::pc_matrix_pop(s);
         }
         driving::pc_matrix_pop(s);
     }
