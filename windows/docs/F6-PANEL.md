@@ -1,4 +1,11 @@
-# F6 panel for the desktop build (plan, for review; no code yet)
+# F6 panel for the desktop build
+
+Status 2026-10-12:
+- Step 1 in code (c18a8d0) and seen in game, muted: hub `artifacts/outrun-f6-help-20261012`, the Help page at the
+  title and in the race, no closed-panel cost visible.
+- Step 3 in code: a neutral input sample while open, held keys cleared on open and close, the FFB gates zeroing in
+  the same tick, and test_panel_input.
+- Step 2 (the pages) next.
 
 Targets: STD-030 (the panel comes first), STD-004 (the standard shape: Simple / Advanced, the page names and order,
 F8 stops FFB), STD-017 (empty pages hidden), STD-022 (the triple selector), STD-023 (frame-rate readout), and the

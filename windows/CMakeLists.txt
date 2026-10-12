@@ -54,6 +54,16 @@ target_compile_definitions(test_ffb_delivery PRIVATE NOMINMAX WIN32_LEAN_AND_MEA
 target_compile_features(test_ffb_delivery PRIVATE cxx_std_17)
 add_test(NAME ffb_delivery COMMAND test_ffb_delivery)
 
+# The F6 panel's input hook (vendor/native/panel/dbce_panel_input) on a real window: posted keys pass while closed
+# (except F6, and F8 when Stop FFB is offered), go to the panel while open, Esc closes, Alt+Tab always passes.
+add_executable(test_panel_input tests/test_panel_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
+    vendor/native/third_party/imgui/imgui_widgets.cpp)
+target_include_directories(test_panel_input PRIVATE vendor/native/panel vendor/native/third_party/imgui)
+target_compile_definitions(test_panel_input PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_features(test_panel_input PRIVATE cxx_std_17)
+add_test(NAME panel_input COMMAND test_panel_input)
+
 # F4b's load gates with the real ffb_live.cpp (romi 30155): a fake WheelFfb.dll (tests/fake_wheelffb.cpp) beside the test
 # in their own folder, never beside OutRunDesktop.exe. Muted, latched, default or unbound: it must never attach.
 add_library(fake_wheelffb SHARED tests/fake_wheelffb.cpp)

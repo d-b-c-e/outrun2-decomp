@@ -9,8 +9,16 @@
 //     run: in its run folder) whose text is "open <Page> [simple|advanced]" or "close"; one written before the process
 //     started is ignored (the toolkit's rule).
 #include <string>
+namespace outrun::platform { struct NativeInputState; }
 namespace outrun::desktop {
 class Ini;
+// While the panel is open the game gets a neutral input sample (UX-03): no buttons, centred axes, pedals released, the
+// pad and wheel records at rest; only the presence flags (connected, the PC layer) stay as the backend set them. The
+// keyboard's held keys are cleared whenever the panel opens or closes (its hook takes the key-ups meanwhile, which
+// would otherwise leave a key held after the close).
+void desktop_panel_neutral_input(platform::NativeInputState&);
+// The panel's input filter after the current one (call after the backend, telemetry and FFB wrappers).
+void desktop_panel_wrap_input_filter();
 // Once, before the game runs (installs the present overlay). run_folder: the latched run's folder (empty otherwise).
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder);
 // True while the panel is open (the input filter neutralises the game's input then).

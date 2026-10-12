@@ -18,6 +18,7 @@ NativeWindow& native_window(){static NativeWindow w;return w;}
 namespace outrun::desktop {
 std::string g_steer;   // what the wheel input layer reports as the connected steering device
 std::string wheel_input_steer_device(){return g_steer;}
+bool desktop_panel_open(){return false;}   // the F6 panel is not part of this test
 }
 namespace {
 int checks=0;

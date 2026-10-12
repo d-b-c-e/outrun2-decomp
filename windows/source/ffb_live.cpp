@@ -3,6 +3,7 @@
 #include "ffb_live.hpp"
 #include "native_window.hpp"
 #include "wheel_input.hpp"
+#include "desktop_panel.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include "platform/race_area_runtime.hpp"
@@ -58,7 +59,9 @@ bool own_front(void* hwnd){
 // One sample to the wheel (outside the race too: the delivery zeroes there).
 void deliver(bool race,std::int32_t intent){
     ffbdev::Sample s;
-    s.race=race;s.hwnd=xbox_runtime::native_window().hwnd;s.front=own_front(s.hwnd);
+    // An open F6 panel counts as outside the race: the gates zero the wheel this sample (the panel's own filter runs
+    // after this one in the same tick, and the open state changes only in the message pump between ticks).
+    s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=own_front(s.hwnd);
     s.steer_dev=wheel_input_steer_device();s.ms=GetTickCount64();
     const auto before=f.delivery.phase();
     f.delivery.frame(s,intent);
