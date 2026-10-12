@@ -30,7 +30,8 @@ struct Live {
     xbox_runtime::InputFilter inner{};
     RaceEpochs epochs;
     bool output{};              // F4: the delivery started (WheelFfb.dll loaded, gates set)
-    std::string off;            // why there is no wheel output (the F6 panel's status)
+    std::string off;            // why there is no wheel output (the log line)
+    bool stopped{};             // Stop FFB / F8 ended it this session
     WheelFfbApi api{};
     ffbdev::Delivery delivery;
     std::uint32_t race_ticks{},sent{},invalid_rows{};
@@ -207,9 +208,14 @@ void ffb_shutdown(){
 }
 
 std::string ffb_status_text(){
-    if(!f.output)return "off: "+(f.off.empty()?std::string("no wheel output"):f.off);
-    const auto& why=f.delivery.why();
-    return std::string("wheel ")+ffbdev::phase_name(f.delivery.phase())+(why.empty()?"":": "+why);
+    // The player's words; runtime.log keeps the gates' full reasons.
+    if(!f.output)return f.stopped?"off (stopped)":"off";
+    switch(f.delivery.phase()){
+    case ffbdev::Phase::Waiting:return "on: waits for the race, the game in front and the steering wheel";
+    case ffbdev::Phase::Open:return "on";
+    case ffbdev::Phase::Released:return "off for this session: "+f.delivery.why();
+    default:return "off";
+    }
 }
 
 bool ffb_output_running(){return f.output;}
@@ -218,7 +224,7 @@ void ffb_stop_output(){
     if(!f.output)return;
     f.delivery.shutdown();   // PanicStop, FreeDirectInput: quiesced before the unload
     WheelFfb_Unload(&f.api);
-    f.output=false;f.off="stopped (Stop FFB / F8) for this session";
+    f.output=false;f.stopped=true;f.off="stopped by Stop FFB / F8";
     std::printf("ffb: wheel output stopped by Stop FFB (F8); the software force stream continues\n");std::fflush(stdout);
 }
 }

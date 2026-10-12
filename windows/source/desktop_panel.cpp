@@ -36,6 +36,7 @@ struct Values {
     bool telemetry{true};int layout{};
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int sensitivity{100},dead_zone{};
+    bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
 int pct(float f){return int(std::lround(double(f)*100.0));}
@@ -63,8 +64,9 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    dbce::panel::Text("The wheel output stays off unless the settings file says [FFB] Output = wheel (an owner check at the rig); "
-                      "Stop FFB and F8 stop it for this session.");
+    dbce::panel::Status("At the next start",v.output_next?"on":"off");
+    dbce::panel::Text("Turning the wheel output on is not offered in this panel yet. Stop FFB and F8 turn it off now and at "
+                      "the next start.");
     const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
     percent_key("Strength",&v.global,100,pct(d.global_strength),"FFBGlobalStrength");
     if(!advanced)return;
@@ -121,7 +123,7 @@ void draw_page(dbce::panel::Page page,bool advanced){
 // Stop FFB (the header command and F8, STD-004): the wheel released for this session and [FFB] Output = none saved.
 void stop_ffb(){
     ffb_stop_output();
-    if(!p.latched)save("FFB","Output","none");
+    if(!p.latched){save("FFB","Output","none");v.output_next=false;}
 }
 bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
 void release_backend(){
@@ -197,6 +199,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
      v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
      v.idle=pct(s.engine_idle);v.invert=s.invert;}
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
+    {std::string notes;v.output_next=ffb_output_config(settings,false,nullptr,notes).output;}
     dbce::panel::Config c;
     c.modName=p.name.c_str();
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing
