@@ -4,6 +4,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/retail_asset_store.hpp"
+#include "platform/frontend_vehicle_data.hpp"
 #include "platform/race_hud.hpp"
 #include "platform/race_end_runtime.hpp"
 #include "platform/pc_screen.hpp"
@@ -138,6 +139,21 @@ void ensure_bank(NativeRuntimeContext& c,NativeSprite2d& o,PcD3D9Device& device,
 const char* native_sprite2d_ani_path(std::uint32_t bank){return bank>=0x20u&&bank<PcSpriteBankCount?AniPath755860[bank-0x20u]:nullptr;}
 const char* native_sprite2d_xst_path(std::uint32_t bank){return bank<PcSpriteBankCount?XstPath639cb8[bank]:nullptr;}
 void native_sprite2d_ensure_bank(NativeRuntimeContext& c,PcD3D9Device& device,std::uint32_t bank){ensure_bank(c,native_sprite2d(c),device,bank);}
+void native_sprite2d_warm_start_banks(NativeRuntimeContext& c,PcD3D9Device& device){
+    auto& o=native_sprite2d(c);const auto& s=c.start_mode;
+    if(o.warm_start_inits!=s.init_calls){o.warm_start_inits=s.init_calls;o.warm_cursor=0;}   // a new START: its own list
+    const std::size_t count=std::min<std::size_t>(s.scene_owner_resource_count,s.scene_owner_resource_ids.size());
+    for(;o.warm_cursor<count;++o.warm_cursor){
+        const auto id=s.scene_owner_resource_ids[o.warm_cursor],mode=s.scene_owner_resource_modes[o.warm_cursor];
+        if((mode!=8u&&mode!=9u)||id>=PcSpriteBankCount)continue;
+        // Mode 8 also requests car models: a VehicleResourceIds id resolves to its PMT first (retail_asset_lookup).
+        if(mode==8u&&std::find(VehicleResourceIds.begin(),VehicleResourceIds.end(),id)!=VehicleResourceIds.end())continue;
+        if(!native_sprite2d_xst_path(id)&&!native_sprite2d_ani_path(id))continue;
+        if(o.bank_status.count(id)){++o.start_warm_already;continue;}
+        ensure_bank(c,o,device,id);
+        if(o.state.banks[id].state==2u)++o.start_warmed;else ++o.start_warm_failed;
+    }
+}
 namespace {
 // 42C860 / 42C720's 42CFE0 record: token, rectangle, scale, position, colour.
 void glyph_record(NativeSprite2d& o,const FrontendGlyph& g){
@@ -257,7 +273,8 @@ std::string native_sprite2d_status(const NativeRuntimeContext& c){
     if(!c.sprite2d){s<<"2D renderer: not used";return s.str();}
     const auto& o=*c.sprite2d;const auto& st=o.state;
     s<<"2D renderer event398 inits="<<o.inits_398<<" (last in mode "<<o.last_init_mode<<")"<<" controls="<<o.controls_398<<" displays="<<o.displays<<" ui_displays="<<o.ui_displays<<" glyphs="<<o.ui_glyphs<<" images="<<o.ui_images<<" icons="<<o.ui_icons<<" flushes="<<o.flushes<<" frames_drawn="<<o.frames_drawn<<" last_draws="<<o.last_flush_draws
-     <<" pool_draws="<<st.pool_draws<<" missing_roots="<<st.pool_missing_roots<<" sprite_nodes="<<st.sprite_nodes<<" strips="<<st.sprite_draws;
+     <<" pool_draws="<<st.pool_draws<<" missing_roots="<<st.pool_missing_roots<<" sprite_nodes="<<st.sprite_nodes<<" strips="<<st.sprite_draws
+     <<" start_warmed="<<o.start_warmed<<" start_warm_failed="<<o.start_warm_failed<<" start_warm_already="<<o.start_warm_already;
     s<<std::hex<<" missing:";for(const auto& [pc,n]:st.missing_counts)s<<' '<<pc<<'x'<<std::dec<<n<<std::hex;
     s<<std::dec<<" banks:";for(const auto& [b,t]:o.bank_status)s<<" ["<<std::hex<<b<<std::dec<<": "<<t<<"]";
     return s.str();
