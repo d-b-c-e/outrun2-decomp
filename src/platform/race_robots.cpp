@@ -1,4 +1,5 @@
 #include "platform/race_robots.hpp"
+#include "platform/pc_screen.hpp"
 #include "enhancements/frame_rate.hpp"
 #include "platform/race_translated.hpp"
 #include "driving/pc_matrix_stack.hpp"
@@ -197,15 +198,24 @@ std::uint32_t race_robot_set_chara_487c30(PcRaceContext& c,std::uint32_t work,st
     p.call(0x440d70u,{});
     return 1;
 }
+std::uint32_t race_robot_hidef_driver(bool table,std::uint32_t index,std::uint32_t chrset){
+    if(!g_pc_use_hidef_characters)return chrset;
+    return table?(index==0u?12u:chrset):(chrset==11u?12u:chrset);
+}
+std::uint32_t race_robot_hidef_passenger(bool table,std::uint32_t index,std::uint32_t chrset){
+    if(!g_pc_use_hidef_characters)return chrset;
+    if(table)return index==3u?10u:index==4u?7u:chrset;
+    return chrset==9u?10u:chrset==6u?8u:chrset;
+}
 std::uint32_t race_robot_driver_chara_487ee0(PcRaceContext& c){
     Port p(c);auto& m=p.m;
     if(m.u32(0x78026cu)==3u)return 0xc;
-    if((p.call(0x43f860u,{})&0xffu)==0u)return 0xb;
+    if((p.call(0x43f860u,{})&0xffu)==0u)return race_robot_hidef_driver(false,0,0xb);
     // [esp + [7C2400]*4] over the stack list {0,1,2,4,3,5}.
     const std::uint32_t i=m.u32(0x7c2400u);
     static constexpr std::uint32_t list[6]={0,1,2,4,3,5};
     if(i>=6u)throw std::out_of_range("race robots: 487EE0 index [7C2400] outside its 6-entry stack list");
-    return m.u32(list[i]*4u+0x6549b0u);
+    return race_robot_hidef_driver(true,list[i],m.u32(list[i]*4u+0x6549b0u));
 }
 bool race_robot_hand_motion_487940(const PcRaceMemory& m,std::uint32_t id){
     std::int32_t lo=-1,hi=0x22,mid;
@@ -843,11 +853,11 @@ struct Passenger : Port {
             case 5:switch(q(0x46c520u)){case 0:pick=3;break;case 1:pick=4;break;case 2:pick=5;break;default:pick=6;break;}break;
             default:pick=q(0x505340u,{who,0});break;
             }
-            return m.u32(0x6549c8u+pick*4u);
+            return race_robot_hidef_passenger(true,pick,m.u32(0x6549c8u+pick*4u));
         }
         if(m.u32(0x78026cu)==3u)return 8;
         const std::uint32_t v=m.u32(0x780258u);
-        return v==1u||v==3u||v==4u||v==5u?9u:6u;
+        return race_robot_hidef_passenger(false,0,v==1u||v==3u||v==4u||v==5u?9u:6u);
     }
     void init_4885a0(std::uint32_t work){
         const std::uint32_t car=this->car();

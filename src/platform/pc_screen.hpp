@@ -40,6 +40,11 @@ inline bool g_pc_fix_incorrect_shading=true;
 // but the game ships it in Media\, so the sun offsets stay zero. With the fix the Media\ copy is read when it exists
 // (as Tweaks, which repoints the path only then), else the common\ one (race_course_passes.cpp).
 inline bool g_pc_fix_lens_flare_path=true;
+// [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
+// and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),
+// and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;
+// rob_disp.cpp 488B80).
+inline bool g_pc_use_hidef_characters=true;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'
