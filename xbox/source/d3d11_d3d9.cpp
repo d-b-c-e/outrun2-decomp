@@ -4,6 +4,7 @@
 #include <cmath>
 #include <d3dcompiler.h>
 #include "runtime/game_host.hpp"
+#include "platform/pc_screen.hpp"
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -20,6 +21,48 @@ namespace {
 constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
+// The three-view geometry shader (TRIPLE-SCREENS.md step 4): each triangle three times, panel i in viewport i with its
+// clip correction C[i], applied before the D3D9 pixel-centre fix (undone, then re-applied: every viewport is the same
+// size). windows/source/triple_rig.hpp triple_apply is the same arithmetic, unit-tested. Its Varying is not a copy: it
+// is taken from the generated vertex source (pc_hlsl_shaders.hpp native_vs) when the shader is built, so its input is
+// the vertex programs' output and its output the pixel programs' input plus the viewport index, last (nene 30802: a
+// copy could drift, and a mismatched stage drops or garbles the draw without an error).
+constexpr const char* TripleGsMain=R"HLSL(
+struct Panel{Varying v;uint vp:SV_ViewportArrayIndex;};
+cbuffer Triple:register(b0){row_major float4x4 C[3];float4 fix;};
+[maxvertexcount(9)]
+void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
+ [unroll] for(uint i=0;i<3;++i){
+  [unroll] for(uint k=0;k<3;++k){
+   float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*q.w;q.y-=fix.y*q.w;
+   Panel o;o.v=v[k];o.v.p=q;o.vp=i;s.Append(o);}
+  s.RestartStrip();}
+}
+)HLSL";
+// The generated sources each declare their own Varying: the FFP one (vertex and pixel stage of the CPU path's draws) and
+// the ps11 / ps14 pixel programs must agree with the vertex programs' (nene 33931), else a loud error.
+// Column 3 of a projection's inverse, by Gauss-Jordan elimination in double with partial pivoting (the affine test of
+// triple_native_standard). False for a singular matrix.
+bool inverse_column3(const std::array<float,16>& m,std::array<double,4>& out){
+    double a[4][8]{};for(int r=0;r<4;++r){for(int k=0;k<4;++k)a[r][k]=double(m[std::size_t(r*4+k)]);a[r][4+r]=1.;}
+    for(int col=0;col<4;++col){
+        int pivot=col;for(int r=col+1;r<4;++r)if(std::fabs(a[r][col])>std::fabs(a[pivot][col]))pivot=r;
+        if(!(std::fabs(a[pivot][col])>1e-12))return false;
+        if(pivot!=col)for(int k=0;k<8;++k)std::swap(a[col][k],a[pivot][k]);
+        const double d=a[col][col];for(int k=0;k<8;++k)a[col][k]/=d;
+        for(int r=0;r<4;++r)if(r!=col){const double f=a[r][col];for(int k=0;k<8;++k)a[r][k]-=f*a[col][k];}
+    }
+    for(int r=0;r<4;++r)out[std::size_t(r)]=a[r][7];
+    return true;
+}
+std::string triple_gs_source(){
+    const auto varying=[](const std::string& s){const auto at=s.find("struct Varying{"),end=at==std::string::npos?at:s.find("};",at);
+        return end==std::string::npos?std::string{}:s.substr(at,end+2-at);};
+    const auto native=varying(hlsl::native_vs);
+    if(native.empty()||native!=varying(hlsl::ffp)||native!=varying(hlsl::ps11)||native!=varying(hlsl::ps14))
+        throw std::runtime_error("three views: the generated shader stages disagree on their Varying");
+    return native+TripleGsMain;
+}
 ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* target){
     ComPtr<ID3DBlob> code,errors;
     const HRESULT hr=D3DCompile(source.data(),source.size(),"pc_shader",nullptr,nullptr,entry,target,CompileFlags,0,&code,&errors);
@@ -121,6 +164,16 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
+    if(platform::g_pc_triple_corrections)
+        std::printf("triple views: %llu draws into three viewports over %llu frames (%llu through an affine matrix); single on the centre: "
+                    "%llu pretransformed, %llu vertex programs without the projection, %llu projections refused, %llu not triangles, "
+                    "%llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
+                    (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
+                    (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
+    if(platform::g_pc_triple_corrections){std::size_t unmatched=0;std::uint64_t changes=0;
+        for(const auto& p:triple_programs_){unmatched+=p.second.base<0?1u:0u;changes+=p.second.changes;}
+        std::printf("triple views: %zu vertex programs classified, %zu without a match at their last draw, %llu changes of outcome\n",
+                    triple_programs_.size(),unmatched,(unsigned long long)changes);}
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
@@ -172,6 +225,7 @@ void D3D11D3D9Device::finish_scene(){
         check(device_->CreateTexture2D(&t,nullptr,&fxaa_copy_tex_),"CreateTexture2D(FXAA)");
         check(device_->CreateShaderResourceView(fxaa_copy_tex_.Get(),nullptr,&fxaa_copy_srv_),"CreateShaderResourceView(FXAA)");
     }
+    triple_unbind();
     ID3D11ShaderResourceView* none[12]{};context_->PSSetShaderResources(0,12,none);
     context_->CopyResource(fxaa_copy_tex_.Get(),back_colour_tex_.Get());
     ID3D11RenderTargetView* rtv=back_rtv_.Get();context_->OMSetRenderTargets(1,&rtv,nullptr);
@@ -188,6 +242,7 @@ void D3D11D3D9Device::begin_frame(){
     scene_finished_=false;msaa_live_=msaa_>1&&!count_only;
     if(msaa_live_)ensure_msaa();
     bound_=Bound{};
+    if(platform::g_pc_triple_corrections){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
     if(!count_only){
         // A slot three frames old that the GPU has not answered yet: its sample (diagnostics only) is dropped and the
         // query reissued, never waited for; OR2_XBOX_DRAW_STATS waits, for its per-frame log.
@@ -203,6 +258,7 @@ void D3D11D3D9Device::collect_queries(bool wait_all){
     }
 }
 void D3D11D3D9Device::end_frame(){
+    triple_unbind();if(triple_frame_draws_){++triple_frames;triple_frame_draws_=0;}
     if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
@@ -412,7 +468,8 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     constants[1024]=1.f/soft_viewport_.w;constants[1025]=1.f/soft_viewport_.h;constants[1026]=0.f;constants[1027]=0.f;
     if(std::memcmp(constants,vs_shadow_.data(),sizeof constants)!=0){
         D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vs_constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertex constants)");
-        std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);}
+        std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);
+        ++triple_constants_generation_;}
     for(unsigned s=0;s<streams.size()&&s<16;++s)if(slots&(1u<<s)){
         ID3D11Buffer* b=gpu_buffer(streams[s].buffer);const UINT stride=streams[s].stride,offset=streams[s].offset;
         if(bound_.vb[s]!=b||bound_.vb_stride[s]!=stride||bound_.vb_offset[s]!=offset){
@@ -423,6 +480,7 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     if(bound_.topology!=topology){context_->IASetPrimitiveTopology(topology);bound_.topology=topology;}
     if(!bound_.vs_constants){ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);bound_.vs_constants=true;}
     if(bound_.vs!=program->shader.Get()){context_->VSSetShader(program->shader.Get(),nullptr,0);bound_.vs=program->shader.Get();}
+    if(platform::g_pc_triple_corrections){const int match=colour_target_!=BackBuffer?1:triple_native_standard(program,key);triple_bind(false,match!=0,match==2);}
     context_->DrawIndexed(UINT(total),start,base);
     ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
     return true;
@@ -546,6 +604,131 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
     std::printf("shader: program %zu %s in %.0f ms\n",shader_programs_.size()+1,loaded?"loaded":"compiled",ms);
     return (shader_programs_[pixel_shader]=shader).Get();
 }
+// The three-view spike: just before a draw (after pixel_pipeline's single viewport). A back-buffer draw that is not
+// pretransformed and whose projection is a standard perspective goes to three viewports (the back buffer's thirds)
+// through the geometry shader; any other back-buffer draw stays single on the centre third, where the game's 16:9
+// camera put it. Nothing changes without g_pc_triple_corrections.
+bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
+    const auto corrections=platform::g_pc_triple_corrections;
+    if(!corrections)return false;
+    if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
+    if(rhw){++triple_single_rhw;triple_unbind();return false;}   // apply_state's ui_rect already keeps it in the centre
+    const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
+    const auto& proj=transform_proj;
+    if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
+        TripleCorrections* e=nullptr;
+        for(auto& k:triple_corrections_)if(k.used&&k.fix[0]==fx&&k.fix[1]==fy&&std::memcmp(k.p.data(),proj.data(),64)==0){e=&k;break;}
+        if(!e){e=&triple_corrections_[triple_corrections_next_];triple_corrections_next_=(triple_corrections_next_+1u)%unsigned(triple_corrections_.size());
+            *e=TripleCorrections{};e->p=proj;e->fix[0]=fx;e->fix[1]=fy;e->used=true;e->ok=corrections(proj.data(),e->c);
+            if(e->ok){e->c[48]=fx;e->c[49]=fy;}}
+        triple_ok_=e->ok;
+        if(triple_ok_){
+            if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof e->c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+                b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
+            D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
+            std::memcpy(m.pData,e->c,sizeof e->c);context_->Unmap(triple_cb_.Get(),0);}
+    }
+    const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
+    const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
+        float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
+    const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
+        LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
+    bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
+    // The geometry shader takes triangles (nene 30802): a list or a strip, which is every draw that reaches here today
+    // (draw_native takes only those, flush draws a list). Anything else would not be drawn with it bound.
+    const bool triangles=bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST||bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+    if(!triangles||!standard||!triple_ok_){   // a custom projection (or not triangles): the centre third only
+        ++(!triangles?triple_single_topology:!standard?triple_single_unmatched:triple_single_refused);triple_unbind();
+        if(triangles&&standard&&triple_refused_logged_.size()<4&&std::none_of(triple_refused_logged_.begin(),triple_refused_logged_.end(),
+               [&](const std::array<float,16>& p){return std::memcmp(p.data(),proj.data(),64)==0;})){
+            triple_refused_logged_.push_back(proj);std::string row;
+            for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,k%4==3&&k<15?"%g / ":"%g ",double(proj[k]));row+=t;}
+            std::printf("triple views: projection refused (single on the centre): %s\n",row.c_str());}
+        const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+        return false;
+    }
+    if(!triple_gs_){const auto code=compile(triple_gs_source(),"gs_main","gs_4_1");
+        check(device_->CreateGeometryShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&triple_gs_),"CreateGeometryShader(three views)");}
+    if(!triple_gs_bound_){context_->GSSetShader(triple_gs_.Get(),nullptr,0);ID3D11Buffer* b=triple_cb_.Get();context_->GSSetConstantBuffers(0,1,&b);
+        triple_gs_bound_=true;}
+    const D3D11_VIEWPORT v[3]{viewport(0),viewport(1),viewport(2)};const D3D11_RECT r[3]{scissor(v[0]),scissor(v[1]),scissor(v[2])};
+    context_->RSSetViewports(3,v);context_->RSSetScissorRects(3,r);
+    if(!triple_logged_){triple_logged_=true;
+        std::printf("triple views: back buffer %ux%u, viewports x %.0f / %.0f / %.0f, width %.0f each, height %.0f\n",back_w_,back_h_,
+                    double(v[0].TopLeftX),double(v[1].TopLeftX),double(v[2].TopLeftX),double(v[0].Width),double(v[0].Height));}
+    ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;
+    return true;
+}
+void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}}
+// A vertex program's clip position is the standard one when its constants (as m4x4 reads them: four registers, the
+// matrix transposed) hold K = M x P with P the current projection and M affine (its column 3 is 0, 0, 0, 1): the
+// position is then some view-space point times P, which is all the correction needs (nene 30684). The current world x
+// view x projection is tried first (exactly that form); then any affine M, which takes a sky drawn with the camera's
+// rotation but not its translation (the side sky was black at the first rig picture, 2026-10-12). The register is
+// found once per program, then checked per draw; a program without one rescans only when the constants or a transform
+// changed since its last failed scan, each register stopping at its first mismatch (nene 30802 / 34449). Each distinct
+// outcome of a program is logged once.
+int D3D11D3D9Device::triple_native_standard(const void* program,const std::string& key){
+    if(!triple_xf_valid_||std::memcmp(triple_xf_.data(),transform_world.data(),64)!=0||std::memcmp(triple_xf_.data()+16,transform_view.data(),64)!=0||
+       std::memcmp(triple_xf_.data()+32,transform_proj.data(),64)!=0){
+        std::memcpy(triple_xf_.data(),transform_world.data(),64);std::memcpy(triple_xf_.data()+16,transform_view.data(),64);
+        std::memcpy(triple_xf_.data()+32,transform_proj.data(),64);triple_xf_valid_=true;++triple_xf_generation_;
+        triple_wvp_=transform_wvp();double scale=0.;for(const float v:triple_wvp_)scale=std::max(scale,double(std::fabs(v)));
+        triple_wvp_tolerance_=scale>0.&&std::isfinite(scale)?1e-4*scale:-1.;
+        triple_pinv_ok_=inverse_column3(transform_proj,triple_pinv_col3_);}
+    const auto& wvp=triple_wvp_;const double tolerance=triple_wvp_tolerance_;
+    const auto exact=[&](int base){   // !(<=): a NaN register is not a match
+        if(!(tolerance>0.))return false;
+        for(int i=0;i<4;++i)for(int j=0;j<4;++j)
+            if(!(std::fabs(double(vs_constants[std::size_t(base+i)][std::size_t(j)])-double(wvp[std::size_t(j*4+i)]))<=tolerance))return false;
+        return true;};
+    // (K x P^-1)[r][3] = sum_k K[r][k] Pinv[k][3], with K[r][k] in register base+k, component r. That column of M meets
+    // only P's depth row, so it bears only on clip z: clip x, y and w are exact for any M (TRIPLE-SCREENS.md). Rows 0..2,
+    // its projective terms, must be 0 within 1e-3 relative. Row 3, the w scale, only needs to be finite and between 0.5
+    // and 2: the race sky's constants (F11 / F12 dumps, 2026-10-12) are the camera's P x the view rotation with that scale
+    // at 0.9989 .. 0.99989 (its depth row scaled), and the side panels then get the sky's own depth row.
+    const auto affine=[&](int base){
+        if(!triple_pinv_ok_)return false;
+        for(int r=0;r<4;++r){double s=0.,size=0.;
+            for(int k=0;k<4;++k){const double t=double(vs_constants[std::size_t(base+k)][std::size_t(r)])*triple_pinv_col3_[std::size_t(k)];s+=t;size+=std::fabs(t);}
+            if(!std::isfinite(size))return false;   // inf <= inf would pass a tolerance (sana 34429); a finite size bounds s
+            if(r<3?!(std::fabs(s)<=1e-3*std::max(1.,size)):!(s>0.5&&s<2.))return false;}
+        return true;};
+    auto& p=triple_programs_[program];
+    const int registers=int(vs_constants.size());
+    bool ok=false;
+    if(p.base>=0){
+        const bool was_affine=p.affine;
+        if(exact(p.base)){p.affine=false;ok=true;}
+        else if(affine(p.base)){p.affine=true;ok=true;}
+        if(ok&&p.affine!=was_affine)++p.changes;
+    }
+    if(!ok&&(p.base>=0||p.failed_constants!=triple_constants_generation_||p.failed_xf!=triple_xf_generation_)){
+        const int was=p.base;const bool was_affine=p.affine;p.base=-1;
+        for(int base=0;base+4<=registers&&p.base<0;++base)if(exact(base)){p.base=base;p.affine=false;}
+        for(int base=0;base+4<=registers&&p.base<0;++base)if(affine(base)){p.base=base;p.affine=true;}
+        ok=p.base>=0;
+        if(!ok){p.failed_constants=triple_constants_generation_;p.failed_xf=triple_xf_generation_;}
+        if(p.base!=was||p.affine!=was_affine)++p.changes;
+    }
+    // Diagnostics (F10 / F11, the side-sky flicker): the first six unmatched draws log the registers c64..c67 (where
+    // every match so far was) and the current transforms.
+    static unsigned unmatched_dumps=0;
+    if(!ok&&unmatched_dumps<6&&registers>=68){++unmatched_dumps;
+        std::string k,t;
+        for(int r=64;r<68;++r)for(int j=0;j<4;++j){char b[24];std::snprintf(b,sizeof b,"%g ",double(vs_constants[std::size_t(r)][std::size_t(j)]));k+=b;}
+        for(const auto* m:{&transform_world,&transform_view,&transform_proj}){t+="| ";
+            for(unsigned j=0;j<16;++j){char b[24];std::snprintf(b,sizeof b,"%g ",double((*m)[j]));t+=b;}}
+        std::printf("triple views: unmatched %.60s: c64..c67 %s; world, view, projection %s\n",key.c_str(),k.c_str(),t.c_str());}
+    // Each distinct outcome of a program is logged once (at most four per program; nene 34449: a program whose
+    // constants alternate would otherwise log every flip); the changes are counted for the exit line.
+    const int outcome=p.base<0?-1:p.base*2+(p.affine?1:0);
+    if(p.logged_n<4&&std::find(p.logged,p.logged+p.logged_n,outcome)==p.logged+p.logged_n){p.logged[p.logged_n++]=outcome;
+        if(p.base<0)std::printf("triple views: vertex program %.120s: no matrix of the current projection in its constants (single on the centre)\n",key.c_str());
+        else std::printf("triple views: vertex program %.120s: %s at c%d\n",key.c_str(),p.affine?"an affine matrix x the projection":"world x view x projection",p.base);}
+    return !ok?0:p.affine?2:1;
+}
 void D3D11D3D9Device::flush(){
     if(batch_.empty()||count_only)return;
     pixel_pipeline();
@@ -560,6 +743,7 @@ void D3D11D3D9Device::flush(){
     if(bound_.layout!=layout_.Get()){context_->IASetInputLayout(layout_.Get());bound_.layout=layout_.Get();}
     if(bound_.topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST){context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);bound_.topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;}
     if(bound_.vs!=vertex_.Get()){context_->VSSetShader(vertex_.Get(),nullptr,0);bound_.vs=vertex_.Get();}
+    triple_bind(batch_rhw_,true);   // the CPU's clip positions: world x view x projection, the standard form
     context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.

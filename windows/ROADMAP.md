@@ -24,11 +24,12 @@ go upstream as small pull requests (first: `tweaks-exe`).
    rig, the closed-loop qualification (STD-034), hot-plug.
 2a. ⬜ **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
    our own D3D11 renderer, standard pages, each later feature adds its controls.
-3. ⬜ **Triple screens**: true per-screen projection (triple toolkit math, STD-007/015/019/022). Per panel a yaw offset in
-   `camera_view_482f20` and a matching off-centre frustum in
-   `camera_perspective_404310` (it already builds `D3DXMatrixPerspectiveOffCenterRH`
-   and the culling planes); the scene closure of `Presenter::set_pc_scene` drawn
-   three times into three viewports; the HUD on the centre panel.
+3. 🟡 **Triple screens** (`windows/docs/TRIPLE-SCREENS.md`): `[Triple] Screens` Off / Surround / Separate monitors
+   with the planar span (the Tweaks parity floor) is done and seen at the rig. True per-screen projection
+   (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
+   into three viewports, each with its clip correction from the toolkit rig math. First rig pictures 2026-10-12: three
+   projections with the side sky. Open: culling for the union of the three frusta, the F6 selector, the owner's
+   physical check.
 4. ⬜ **Force feedback**: the force model of the Tweaks fork
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
@@ -72,7 +73,7 @@ needed in a native build.
 | | (renderer) D3D9 point sprites | 🟡 | not a Tweaks key: the port drew no POINTLIST at all, so sparks (source 3) and effect sources 8-10 were invisible; drawn per the D3D9 docs since b978928; unit-tested, visual check pending |
 | | FixZBufferPrecision | 🟡 | off by default; Tweaks' near-plane rule on the main race camera (1.0 chase/bumper, 0.25 in-car, 0.2 360SP, 0.1 switching/outside GAME) and 0.05 for the 40BE70 passes (projection only: 484BD0's view part is stateful); unit-tested, not yet seen in game |
 | | CarBaseShadowOpacity | 🟡 | 1.0 by default as in Tweaks: the race car's flat base shadow (CalcPeraShadow, nulled on the PC) restored at Tweaks' three sites (469EB4 race, 46AC76 / 46B766 car select) with the PC's own alpha; unit-tested |
-| | UseHiDefCharacters | ⬜ | driver/heroine chrset tables 6549B0 / 6549C8 + three O2SP immediates + CHR_DR_GH00 from Media |
+| | UseHiDefCharacters | 🟡 | on by default as in Tweaks: 487EE0 / 487F50 (and the native 488090 reader) return MH00 for the 6549B0 entry 0 and the O2SP constant, LH00 / GH00 for the 6549C8 entries 3 / 4, and LH00 / GH00_USA for the O2SP constants; CHR_DR_GH00(_USA).bin from Media (it has the hair animations) when present, else Chr; runtime.log names it. Unit-tested (test_car_base_shadow); not yet seen in game. RestoreJPClarissa (which picks GH00 over GH00_USA) is not implemented |
 | | SceneTextureReplacement, TextureBaseFolder | ✅ | off by default; the Tweaks pack layout and names (`<bank>/<index>_<XXH32>_<w>x<h>.dds`), the game's own create request; files the device's DDS reader would refuse are never offered (stock kept). A create the device still refuses falls back to stock in the loader, but the device's error latch ends the run at present, so a genuine allocation failure can remain terminal. In game (2026-10-12, owner pack copied, muted): 344 of 834 replaced at 60 fps, 0 device errors; runtime.log lists per bank what was replaced and which banks the pack has no folder for (that race's stage, `cs_CS_PALM_pmt`, is one: the pack has `cs_CS_PALM_T_pmt`). Cube maps with 2D pack dumps stay stock |
 | | UI texture replacement, extract, cache | ⬜ | the pack's `spr_*_xst` folders |
 | | UseNewTextureAllocator | ➖ | |
@@ -80,8 +81,9 @@ needed in a native build.
 | CDSwitcher, CDTracks | in-race track switching, track list | ⬜ | |
 | Window | WindowedBorderless, hidden cursor, DPI | ✅ | borderless over the primary monitor |
 | | WindowPositionX/Y, AutoDetectResolution | ⬜ | |
-| Triple | Screens | ⬜ | step 3 |
+| Triple | Screens | ✅ | the planar span, as Tweaks: one wide Hor+ view over three equal monitors, HUD and menus centred; Off keeps an unstretched 16:9. Projected views (beyond Tweaks): a default-off spike, see step 3 |
 | Misc | SkipIntroLogos, DisableCountdownTimer, EnableLevelSelect, EnableHollyCourse2, RestoreJPClarissa, ShowOutRunMilesOnMenu, AllowCharacterSelection, RandomHighwayAnimSets | ⬜ | |
 | | DemonwareServerOverride, ProtectLoginData | ⬜ | online play; upstream has the LAN layer |
 | Overlay, WheelSettings | in-game overlay, F6 wheel page | ⬜ | |
-| Bugfixes | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, FixLensFlarePath, FixIncorrectShading, FixParticleRendering, FixFullPedalChecks, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting. FixParticleRendering (Tweaks default on) = two parts: draw_418cf0's screen mapping uses the full width/height where the Xbox code had half (grass off screen; Tweaks halves sx, sy and the size at 419009), and the Metropolis fireworks (44DE10 object 0x630001 without a node list; Tweaks draws 0x1A000A with a fixed list) |
+| Bugfixes | FixLensFlarePath, FixIncorrectShading | 🟡 | on by default as in Tweaks. FixLensFlarePath: 44A630's offsets read from `Media\lens_flare_offset.bin` (where the game ships it) when present, else `common\`; runtime.log names the source. FixIncorrectShading: 40E140's TWOSIDE lighting entries (73F04C / 73F050) link the DOUBLE fragments (61FB48 / 61FC88), unit-tested in test_pc_shader_programs. Neither yet seen in game |
+| | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, FixParticleRendering, FixFullPedalChecks, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting. FixParticleRendering (Tweaks default on) = two parts: draw_418cf0's screen mapping uses the full width/height where the Xbox code had half (grass off screen; Tweaks halves sx, sy and the size at 419009), and the Metropolis fireworks (44DE10 object 0x630001 without a node list; Tweaks draws 0x1A000A with a fixed list) |

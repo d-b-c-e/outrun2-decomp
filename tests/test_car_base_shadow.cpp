@@ -1,9 +1,11 @@
 // CarBaseShadowOpacity (pc_screen.hpp): the race model draw 469600 records Tweaks' CalcPeraShadow (4056D0 with the
 // layout's shadow object, alpha = the PC's argument x the factor, colour 0, byte -1) under the car's +B0 matrix raised
-// 0.05, in place of the bare RET at 469EB4; at 0 the draw list is the PC's.
+// 0.05, in place of the bare RET at 469EB4; at 0 the draw list is the PC's. Also UseHiDefCharacters, the car's
+// occupants (race_robots.hpp): Tweaks' three table entries and three constants, nothing else.
 #include "platform/vehicle_model_draw.hpp"
 #include "platform/embedded_vehicle_draw_data.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/race_robots.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -76,6 +78,18 @@ int main(){
             else CHECK(!sh);
         }
     }
+    // UseHiDefCharacters (on by default): 6549B0[0] and 487F41 M00 11 -> MH00 12; 6549C8[3] -> LH00 10, [4] -> GH00 7;
+    // 48803A L00 9 -> LH00, 488044 G00_USA 6 -> GH00_USA 8. Other entries and values kept; off keeps all.
+    CHECK(g_pc_use_hidef_characters);
+    CHECK(race_robot_hidef_driver(true,0,11)==12&&race_robot_hidef_driver(false,0,11)==12);
+    CHECK(race_robot_hidef_driver(true,1,17)==17&&race_robot_hidef_driver(true,5,19)==19&&race_robot_hidef_driver(false,0,12)==12);
+    CHECK(race_robot_hidef_passenger(true,3,9)==10&&race_robot_hidef_passenger(true,4,5)==7);
+    CHECK(race_robot_hidef_passenger(false,0,9)==10&&race_robot_hidef_passenger(false,0,6)==8);
+    CHECK(race_robot_hidef_passenger(true,0,14)==14&&race_robot_hidef_passenger(true,6,9)==9&&race_robot_hidef_passenger(false,0,8)==8);
+    g_pc_use_hidef_characters=false;
+    CHECK(race_robot_hidef_driver(true,0,11)==11&&race_robot_hidef_driver(false,0,11)==11);
+    CHECK(race_robot_hidef_passenger(true,4,5)==5&&race_robot_hidef_passenger(false,0,6)==6&&race_robot_hidef_passenger(true,3,9)==9);
+    g_pc_use_hidef_characters=true;
     std::printf("car base shadow: %u checks\n",checks);
     return 0;
 }

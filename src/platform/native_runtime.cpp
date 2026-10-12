@@ -8,6 +8,7 @@
 #include "platform/race_ghosts_runtime.hpp"
 #include "platform/race_area_runtime.hpp"   // race AREA/SKY owner (road tables)
 #include "platform/race_hud_runtime.hpp"    // 45C470 quest objects (NAVI memory)
+#include "platform/race_robots.hpp"         // UseHiDefCharacters (488090)
 #include "platform/scene_owner_49ba80.hpp"
 #include "platform/pc_address_view.hpp"
 #include "platform/frontend_welcome.hpp"
@@ -3733,13 +3734,14 @@ std::uint32_t native_scene_owner_service(NativeRuntimeContext& context,std::uint
         const std::uint32_t pick=le32(license.data()+0x20u);                          // [7C2400]
         static constexpr std::uint32_t list[6]{0u,1u,2u,4u,3u,5u};
         std::uint32_t index;
+        // UseHiDefCharacters: race_robot_hidef_driver / _passenger (race_robots.hpp), as 487EE0 / 487F50 there.
         if(a[0]==0u){
             if(context.mode_state.current==3u)index=12u;
-            else if(!console)index=11u;
-            else{if(pick>=6u||!exe_view().u32(0x6549b0u+list[pick]*4u,index))return fault(pc);}
+            else if(!console)index=race_robot_hidef_driver(false,0u,11u);
+            else{if(pick>=6u||!exe_view().u32(0x6549b0u+list[pick]*4u,index))return fault(pc);index=race_robot_hidef_driver(true,list[pick],index);}
         }else if(!console){
             index=context.mode_state.current==3u?8u:
-                (variant==1u||variant==3u||variant==4u||variant==5u)?9u:6u;
+                race_robot_hidef_passenger(false,0u,(variant==1u||variant==3u||variant==4u||variant==5u)?9u:6u);
         }else{
             if(pick>=6u)return fault(pc);
             const std::uint32_t k=list[pick];
@@ -3751,6 +3753,7 @@ std::uint32_t native_scene_owner_service(NativeRuntimeContext& context,std::uint
                 if(!exe_view().u32(0x6af268u+(k*3u+n)*4u,slot))return fault(0x505340u);
             }
             if(!exe_view().u32(0x6549c8u+slot*4u,index))return fault(pc);
+            index=race_robot_hidef_passenger(true,slot,index);
         }
         std::uint32_t id;if(!exe_view().u32(0x654868u+index*16u,id))return fault(pc);
         return id;

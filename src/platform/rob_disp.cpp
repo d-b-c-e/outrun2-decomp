@@ -1,7 +1,9 @@
 #include "platform/rob_disp.hpp"
 #include "platform/rob_motion_tables.hpp"
+#include "platform/pc_screen.hpp"
 #include "driving/pc_matrix_stack.hpp"
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 namespace outrun::platform {
@@ -55,7 +57,19 @@ void rob_chr_relocate_487e10(PcRaceMemory& m,std::uint32_t d,std::uint32_t resou
 void rob_chr_load_488b80(PcRaceMemory& m,const PcRaceService& s){
     if(m.u32(0x654860u)==0u)return;
     for(std::uint32_t rec=0x654860u,i=0;;rec+=0x10u,i+=4u){
-        if(rob_motion_load_file_4f1f90(m,s,m.u32(rec),0x82f488u+i)){
+        // UseHiDefCharacters (pc_screen.hpp): records 7 / 8 (CHR_DR_GH00 / _USA) from Media\ when the file is there, as
+        // Tweaks (the Chr\ copies lack the hair animations); else the record's own path. The names sit in a synthetic
+        // PC range beside FixParticleRendering's 0xB1100000, for 4239C0 to open like the game's own.
+        bool media=false;
+        if(g_pc_use_hidef_characters&&(i==7u*4u||i==8u*4u)){
+            static const char gh00[]="\\Media\\CHR_DR_GH00.bin",gh00_usa[]="\\Media\\CHR_DR_GH00_USA.bin";
+            const char* name=i==7u*4u?gh00:gh00_usa;const std::uint32_t at=i==7u*4u?0xb1200000u:0xb1200040u;
+            const auto bytes=std::uint32_t(std::strlen(name)+1u);
+            if(!m.mapped(at,bytes))m.map_const(at,reinterpret_cast<const std::uint8_t*>(name),bytes);
+            media=rob_motion_load_file_4f1f90(m,s,at,0x82f488u+i)!=0u;
+            if(media)std::printf("characters: %s (UseHiDefCharacters)\n",name+1);
+        }
+        if(media||rob_motion_load_file_4f1f90(m,s,m.u32(rec),0x82f488u+i)){
             const auto data=m.u32(m.u32(0x82f488u+i));
             m.put32(0x82f388u+i,data);
             rob_chr_relocate_487e10(m,data,m.u32(rec+8));

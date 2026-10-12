@@ -11,6 +11,14 @@ inline float g_pc_view_half_width=320.0f;
 // wide frustum: not three views), the PC frame fills the window, and its 2D keeps the centred 4:3. Set once by the
 // desktop window; 0 on every other platform.
 inline float g_pc_wide_aspect=0.0f;
+// The three-view spike (TRIPLE-SCREENS.md step 4; development only: OR2_TRIPLE_VIEWS=1 with a planar span window). Given
+// the projection a back-buffer draw uses (D3D row-vector layout, 16 floats), writes the clip corrections of the left,
+// centre and right panels (3 x 16 floats, row-major, row vectors; applied before the D3D9 pixel-centre fix) and returns
+// true; false for a projection that is not a centred perspective (the draw then stays single, on the centre panel).
+// Null: one view. While set, the game's camera is the centre panel's (16:9) and the PC device replicates its
+// back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
+using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
+inline PcTripleCorrections g_pc_triple_corrections=nullptr;
 // [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
 // (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
 // objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).
@@ -22,6 +30,21 @@ inline bool g_pc_screen_edge_cull_fix=true;
 // - Metropolis fireworks: 44DE10 draws object 0x630001 with no node list (node 0: road barriers instead); Tweaks draws
 //   0x1A000A with the node list of DrawDistanceBehind = 2 in its place (race_area.cpp).
 inline bool g_pc_fix_particle_rendering=true;
+// [Bugfixes] FixIncorrectShading (the Tweaks key, on by default there and here; hooks_bugfixes.cpp): materials with
+// double-sided lighting (cutscene characters, some stage models) link the TWOSIDE lighting fragment, which only flips
+// the light direction. Tweaks points the TWOSIDE_LAMBERT / TWOSIDE_SPECULAR entries of 40E140's lighting table
+// (73F04C, 73F050) at the DOUBLE_LAMBERT / DOUBLE_SPECULAR fragments (61FB48, 61FC88); pc_vertex_shader_setup.cpp
+// links those in their place. Only one side is then shaded correctly, as in Tweaks.
+inline bool g_pc_fix_incorrect_shading=true;
+// [Bugfixes] FixLensFlarePath (the Tweaks key, on by default there and here): 44A630 reads \common\lens_flare_offset.bin,
+// but the game ships it in Media\, so the sun offsets stay zero. With the fix the Media\ copy is read when it exists
+// (as Tweaks, which repoints the path only then), else the common\ one (race_course_passes.cpp).
+inline bool g_pc_fix_lens_flare_path=true;
+// [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
+// and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),
+// and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;
+// rob_disp.cpp 488B80).
+inline bool g_pc_use_hidef_characters=true;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'

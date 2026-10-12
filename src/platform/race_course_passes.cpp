@@ -19,6 +19,7 @@
 #include "driving/pc_matrix_stack.hpp"
 #include "driving/pc_x87.hpp"
 #include "platform/retail_asset_store.hpp"
+#include "platform/pc_screen.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -363,9 +364,14 @@ void load_flare_table(NativeRuntimeContext& c){
     if(st_.flare_loaded)return;
     st_.flare_loaded=true;
     if(auto* store=c.event_function36.retail_assets){
-        std::string error;
-        if(const auto* f=retail_asset_guest_path(*store,"\\common\\lens_flare_offset.bin",false,&error))
-            std::memcpy(st_.flare_7d2938.data(),f->data(),std::min<std::size_t>(f->size(),0x420u));
+        // [Bugfixes] FixLensFlarePath (pc_screen.hpp): the Media\ copy the game ships, when it exists; else the
+        // original path, as Tweaks.
+        std::string error;const std::vector<std::uint8_t>* f=nullptr;const char* from="common\\lens_flare_offset.bin";
+        if(g_pc_fix_lens_flare_path&&(f=retail_asset_guest_path(*store,"\\media\\lens_flare_offset.bin",false,&error)))
+            from="Media\\lens_flare_offset.bin (FixLensFlarePath)";
+        if(!f)f=retail_asset_guest_path(*store,"\\common\\lens_flare_offset.bin",false,&error);
+        if(f)std::memcpy(st_.flare_7d2938.data(),f->data(),std::min<std::size_t>(f->size(),0x420u));
+        std::printf("lens flare: %s%s\n",f?"sun offsets from ":"no lens_flare_offset.bin: sun offsets zero",f?from:"");
     }
     std::memmove(st_.flare_7d2938.data()+(0x7d2b18u-0x7d2938u),st_.flare_7d2938.data(),0xf0);
 }

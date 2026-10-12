@@ -23,6 +23,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "triple_rig.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "test_fence.hpp"
@@ -40,7 +41,21 @@ namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true;
 outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
+// [Triple] Views = Angled asked for (set_triple_projection), or the development switch OR2_TRIPLE_VIEWS=1 (cleared in
+// test processes like every OR2_ switch). Both the lods.ini read and the window use this one request.
+bool triple_angled_requested=false;
+bool triple_latched=false;   // a latched (test) process: no [Triple] keys applied
 outrun::desktop::TripleStatus triple_status;                                    // triple_screens_status()
+// The three-view spike's corrections (pc_screen.hpp g_pc_triple_corrections): the toolkit's fixture rig (32-inch 16:9,
+// eye 660 mm, sides 70 degrees, 8 mm gap; the owner's rig is 1500R curved, approximated flat) matched to the game's
+// own projection each time it changes (triple_rig.hpp triple_views).
+bool triple_fixture_corrections(const float* projection,float* out){
+    outrun::desktop::Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
+    outrun::desktop::TripleViews v{};
+    if(!outrun::desktop::triple_views(p,outrun::desktop::fixture_rig(8.),v))return false;
+    for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+    return true;
+}
 BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
     MONITORINFO i{};i.cbSize=sizeof i;
     if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
@@ -93,7 +108,32 @@ NativeWindow& native_window(){
         // The planar span (step 2): wider than 16:9 and not Off gives one wide frustum over the whole window.
         outrun::platform::g_pc_wide_aspect=td::planar_aspect(triple,w.width,w.height);
         triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
-        if(outrun::platform::g_pc_wide_aspect>0.f)
+        // [Triple] Views = Angled (or OR2_TRIPLE_VIEWS=1) turns a planar span into three projected views (TRIPLE-SCREENS.md
+        // step 4, experimental): stage culling off while it is on.
+        const char* refused=triple_angled_requested?td::triple_projection_refusal(triple_latched,true,outrun::platform::g_pc_wide_aspect):nullptr;
+        triple_status.requested=triple_angled_requested?td::TripleProjection::angled:td::TripleProjection::planar;
+        triple_status.applied=triple_angled_requested&&!refused?td::TripleProjection::angled:td::TripleProjection::planar;
+        triple_status.projection_note=refused?refused:"";
+        if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
+        if(triple_status.applied==td::TripleProjection::angled){
+            outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;outrun::platform::render_disable_culling()=true;
+            // The side panels look past 90 degrees, behind the car, where the stage's section lists (the game's own
+            // forward visibility, 44DE10) draw nothing (the second rig picture: the beach ending in a hard line). Unless
+            // [Graphics] DrawDistanceBehind is set, the spike unions the lists of 64 sections behind (OR2_TRIPLE_BEHIND,
+            // 0..256, overrides). Tweaks' caution for that key applies: some models show their back faces from behind.
+            auto& dd=outrun::platform::draw_distance();
+            if(dd.behind==0){
+                int behind=64;
+                if(const char* b=std::getenv("OR2_TRIPLE_BEHIND")){char* end=nullptr;const long n=std::strtol(b,&end,10);
+                    if(end!=b&&!*end&&n>=0&&n<=256)behind=int(n);}
+                dd.behind=behind;if(dd.active())outrun::platform::render_queues_extended()=true;
+            }
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the toolkit fixture rig "
+                        "(32 in 16:9, eye matched to the game's FOV, sides 70 deg, gap 8 mm), one game render replicated into three "
+                        "viewports; stage culling off; %d stage sections behind the car drawn; objects behind the eye still culled; the "
+                        "HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),w.width,w.height,
+                        r.left,r.top,span_note.c_str(),dd.behind);
+        }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
                         "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
                         r.left,r.top,span_note.c_str(),double(outrun::platform::g_pc_wide_aspect));
@@ -107,6 +147,9 @@ NativeWindow& native_window(){
                              r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
         w.width=1280;w.height=720;
         triple_status={triple,{},"a 1280x720 window (not borderless)",0.f};
+        if(triple_angled_requested){triple_status.requested=outrun::desktop::TripleProjection::angled;
+            triple_status.projection_note=outrun::desktop::triple_projection_refusal(triple_latched,false,0.f);
+            std::printf("triple screens: Angled views not applied: %s\n",triple_status.projection_note.c_str());}
     }
     SetForegroundWindow(static_cast<HWND>(w.hwnd));
     return w;
@@ -130,6 +173,7 @@ unsigned select_refresh_rate(unsigned){
 }
 void set_borderless(bool on){borderless=on;}
 void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
+void set_triple_projection(bool angled,bool latched){triple_angled_requested=angled;triple_latched=latched;}
 }
 const outrun::desktop::TripleStatus& outrun::desktop::triple_screens_status(){return outrun::xbox_runtime::triple_status;}
 // A crash writes its address and the return addresses on the stack (as
@@ -215,6 +259,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         else if(mode&&*mode!=outrun::desktop::TripleScreens::off)std::printf("settings: [Triple] Screens = %s not applied in a test process; Off\n",
                                                                        outrun::desktop::triple_screens_name(*mode));
         else if(!mode&&!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
+    // [Triple] Views (below the selector): Planar (the default, also when the key is absent) or Angled, three projected
+    // views (experimental; the window applies it only over a span). Anything else is logged and Planar applies. The
+    // development switch OR2_TRIPLE_VIEWS=1 asks for Angled too. One request for both its users (the lods.ini read below
+    // and the window); a latched process records it but applies nothing (the status says why).
+    {   const auto text=settings.text("Triple","Views");
+        const auto projection=outrun::desktop::parse_triple_projection(text);
+        if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
+        const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
+        outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),plan.latched);}
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
@@ -265,13 +318,18 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
             return int(v);};
         dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
-        if(dd.active()){
-            outrun::platform::render_queues_extended()=true;
-            const char* from=nullptr;std::size_t excluded=0;
+        // Angled views may set sections behind later (native_window): their exclusions are read here too.
+        const bool spike=outrun::xbox_runtime::triple_angled_requested&&!outrun::xbox_runtime::triple_latched;
+        const char* from=nullptr;std::size_t excluded=0;
+        if(dd.active()||spike)
             for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
                 std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
                 const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
                 excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
+        if(spike&&!dd.active())std::printf("settings: three-view spike: %zu excluded nodes for its sections behind (%s)\n",excluded,
+            from?from:"no lods.ini");
+        if(dd.active()){
+            outrun::platform::render_queues_extended()=true;
             std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
                 from?from:"no lods.ini");
         }}
@@ -286,6 +344,16 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // mapping of 418CF0 and the Metropolis fireworks object (pc_screen.hpp).
     outrun::platform::g_pc_fix_particle_rendering=settings.flag("Bugfixes","FixParticleRendering",true);
     if(!outrun::platform::g_pc_fix_particle_rendering)std::printf("settings: particle rendering fix off (the PC's own particle mapping)\n");
+    // [Bugfixes] FixIncorrectShading and FixLensFlarePath, the Tweaks keys (on unless set false, as there): double-sided
+    // lighting linked as the DOUBLE fragments, and the lens flare offsets read from Media\ (pc_screen.hpp).
+    outrun::platform::g_pc_fix_incorrect_shading=settings.flag("Bugfixes","FixIncorrectShading",true);
+    if(!outrun::platform::g_pc_fix_incorrect_shading)std::printf("settings: incorrect shading fix off (the TWOSIDE lighting fragments)\n");
+    outrun::platform::g_pc_fix_lens_flare_path=settings.flag("Bugfixes","FixLensFlarePath",true);
+    if(!outrun::platform::g_pc_fix_lens_flare_path)std::printf("settings: lens flare path fix off (common\\lens_flare_offset.bin only)\n");
+    // [Graphics] UseHiDefCharacters, the Tweaks key (on unless set false, as there): the hi-def driver and heroine
+    // character sets in gameplay (pc_screen.hpp).
+    outrun::platform::g_pc_use_hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
+    if(!outrun::platform::g_pc_use_hidef_characters)std::printf("settings: hi-def characters off (the standard character sets)\n");
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);

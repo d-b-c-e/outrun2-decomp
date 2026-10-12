@@ -3,10 +3,13 @@
 // definitions, for every blob of the EXE and random register states; checks
 // that every blob and every shader linked by 40E140 splits back into blobs.
 #include "platform/pc_shader_programs.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/pc_vertex_shader_setup.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <vector>
 using namespace outrun::platform;
 using namespace outrun::platform::pc_shader;
 static unsigned checks;
@@ -187,6 +190,27 @@ int main(){
             CHECK(!p.inputs.empty());
         }
     }
+    // [Bugfixes] FixIncorrectShading (pc_screen.hpp): 40E140's lighting entries 73F04C / 73F050 (TWOSIDE_LAMBERT /
+    // TWOSIDE_SPECULAR, index 2 and 3) link the DOUBLE fragments 61FB48 / 61FC88 with the fix and their own without it;
+    // the other entries link the same either way.
+    unsigned twoside=0;
+    for(std::uint32_t light=0;light<8;++light){
+        const std::uint32_t c=light<<5,entry=0x73f044u+light*4u;
+        g_pc_fix_incorrect_shading=false;const auto off=link_vertex_shader_40e140(c);
+        g_pc_fix_incorrect_shading=true;const auto on=link_vertex_shader_40e140(c);
+        const auto body=[](std::uint32_t fragment){std::vector<std::uint32_t> b;
+            for(std::uint32_t k=1;;++k){const auto t=pc_shader_data_u32(fragment+k*4u);if(t==0xffffu)return b;b.push_back(t);}};
+        const auto contains=[](const std::vector<std::uint32_t>& all,const std::vector<std::uint32_t>& part){
+            return !part.empty()&&std::search(all.begin(),all.end(),part.begin(),part.end())!=all.end();};
+        if(entry==0x73f04cu||entry==0x73f050u){++twoside;
+            CHECK(pc_shader_data_u32(entry)!=(entry==0x73f04cu?0x61fb48u:0x61fc88u));   // the table really points elsewhere
+            CHECK(on!=off);
+            CHECK(contains(on,body(entry==0x73f04cu?0x61fb48u:0x61fc88u)));
+            CHECK(contains(off,body(pc_shader_data_u32(entry))));
+            PcShaderProgram p;CHECK(pc_shader_split(on.data(),p));
+        }else CHECK(on==off);
+    }
+    CHECK(twoside==2);
     std::printf("pc shader programs: %u blobs, %u linked vertex shaders, %u checks\n",blobs_checked,linked,checks);
     return 0;
 }
