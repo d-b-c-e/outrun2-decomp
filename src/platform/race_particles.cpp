@@ -1,6 +1,25 @@
 // PART_EFC core: nlParticle source/particle management, init and the
 // function-pointer dispatch. See race_particles.hpp.
 #include "platform/race_particles_port.hpp"
+#include <chrono>
+#include <cstdio>
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+namespace {
+// The calling thread's CPU time in ms (user + kernel): a stall with little CPU was a wait or a preemption, not work.
+double thread_cpu_ms(){
+#if defined(_WIN32)
+    FILETIME c,e,k,u;if(!GetThreadTimes(GetCurrentThread(),&c,&e,&k,&u))return -1.0;
+    const auto v=[](const FILETIME& f){return (double(f.dwHighDateTime)*4294967296.0+double(f.dwLowDateTime))/10000.0;};
+    return v(k)+v(u);
+#else
+    return -1.0;
+#endif
+}
+}
 namespace outrun::platform {
 using namespace particles_detail;
 namespace particles_detail {
@@ -159,10 +178,15 @@ void particles_init_41bbf0(PcParticleContext& pc){
 // in a network race, while the player car is out), glow colours, then every
 // active source's particles.
 void particles_control_41bc60(PcParticleContext& pc){
+    // Stall tracer (perf P5-lat2: one 962.7 ms call, romi 26654): each phase is timed and a call over 50 ms logs its
+    // breakdown, so the next occurrence names its phase and source. A few clock reads per frame otherwise.
+    using Clock=std::chrono::steady_clock;
+    const auto t0=Clock::now();const double cpu0=thread_cpu_ms();auto mark=t0;double ms[6]{};unsigned slowest_id=0;double slowest_src=0.0,sources=0.0;unsigned active=0;
+    auto lap=[&](unsigned k){const auto t=Clock::now();ms[k]+=std::chrono::duration<double,std::milli>(t-mark).count();mark=t;};
     P p(pc);
     const std::uint32_t car=p.u(PlayerCar);
-    make_plcar_param_41bd50(p);
-    make_occar_param_41c190(p);
+    make_plcar_param_41bd50(p);lap(0);
+    make_occar_param_41c190(p);lap(1);
     const std::uint32_t mode=p.u(RootMode);
     bool requests=false,spark=false;
     auto suspended=[&]{return (p.u8(EventFlags+8u)&0x10u)!=0u;};   // 440A50(8)
@@ -179,10 +203,21 @@ void particles_control_41bc60(PcParticleContext& pc){
         gravel_req_41df00(p);grass_req_41e440(p);water_req_41e9f0(p);misc_req_41ef00(p);backfire_req_41f5f0(p);
         pc_tire_smoke_req_41c570(p);oc_tire_smoke_req_41c940(p);tire_mark_req_41fb50(p);
     }
-    glow_colour_4160f0(p);
+    lap(2);
+    glow_colour_4160f0(p);lap(3);
     for(std::uint32_t id=0;id<ParticleSourceCount;++id){
         const auto& src=source(p,id);
-        if(src.state<0)particles_source_ctrl_418540(pc,src.buffer,source_address(id));
+        if(src.state<0){
+            const auto s0=Clock::now();
+            particles_source_ctrl_418540(pc,src.buffer,source_address(id));++active;
+            const double d=std::chrono::duration<double,std::milli>(Clock::now()-s0).count();sources+=d;
+            if(d>slowest_src){slowest_src=d;slowest_id=id;}
+        }
     }
+    lap(4);
+    const double total=std::chrono::duration<double,std::milli>(Clock::now()-t0).count();
+    if(total>50.0)std::printf("particle stall: 41BC60 %.1f ms (thread CPU %.1f ms) | plcar %.1f occar %.1f requests %.1f (mode %x spark %d) "
+        "glow %.1f sources %.1f (%u active, slowest id %u %.1f ms)\n",total,thread_cpu_ms()-cpu0,ms[0],ms[1],ms[2],mode,int(spark),ms[3],sources,
+        active,slowest_id,slowest_src);
 }
 }
