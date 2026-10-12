@@ -35,6 +35,14 @@ target_compile_definitions(test_ffb_outrun PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN 
 target_compile_features(test_ffb_outrun PRIVATE cxx_std_17)
 add_test(NAME ffb_outrun COMMAND test_ffb_outrun ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ffb)
 
+# F4, the delivery gates (source/ffb_device) against a fake WheelFfb library: identity, the accepted zero, recovery,
+# release and shutdown order, and silence whenever a gate is closed. No device and no DLL.
+add_executable(test_ffb_delivery tests/test_ffb_delivery.cpp source/ffb_device.cpp)
+target_include_directories(test_ffb_delivery PRIVATE source vendor/wheelffb)
+target_compile_definitions(test_ffb_delivery PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_features(test_ffb_delivery PRIVATE cxx_std_17)
+add_test(NAME ffb_delivery COMMAND test_ffb_delivery)
+
 # The input shim's core (windows/shim, docs/INPUT-SHIM.md), slice 1: pure C++17 against a scripted device provider.
 add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)
 target_include_directories(test_shim PRIVATE shim tests vendor/controls)
