@@ -77,6 +77,11 @@ void render_rotate_axis_40a580(driving::PcMatrixStack&,const driving::CourseProb
 // Tweaks DisableStageCulling (the host's [Graphics] key; off by default): 404D10 queues every node whose LOD mesh exists,
 // visible or not, as the Tweaks patch of the JE at 40501F does (a culled node keeps LOD 0, so nothing pops in).
 bool& render_disable_culling();
+// Tweaks' DrawBufferExtension (on with DrawDistanceIncrease / Behind): 405160 sizes the opaque queue 0x1000 and the
+// alpha queue 0xC00 instead of 0x100 / 0x600. Set before the queues are reset.
+bool& render_queues_extended();
+// Draws a full queue dropped (the PC drops them silently too), counted for the exit log.
+std::uint64_t& render_queue_dropped();
 bool render_node_visible_404b00(PcRenderContext&,driving::Bytes node,driving::CourseProbe& view_centre,
     std::int32_t& lod);
 }

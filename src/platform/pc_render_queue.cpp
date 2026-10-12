@@ -176,7 +176,7 @@ void walk_404d10(PcRenderContext& c,const PcModelBank& bank,const PmtObject& obj
                 const auto slot=q.count;++q.count;
                 d.matrix=matrix_slot_404a80(q,d,c.matrices);
                 std::memcpy(q.entries[slot].data(),static_cast<const DrawEntry*>(&d),sizeof(DrawEntry));
-            }
+            }else ++render_queue_dropped();
         }
         if(node.child>=0&&node.child!=first)walk_404d10(c,bank,obj,d,node.child);
         const std::int32_t sibling=pmt<PmtNode>(sys,node_at).sibling;
@@ -204,10 +204,13 @@ const PcModelBank& bank_of(PcRenderContext& c,u32 id,const char* what){
     return *bank;
 }
 }
+bool& render_queues_extended(){static bool on=false;return on;}
+std::uint64_t& render_queue_dropped(){static std::uint64_t n=0;return n;}
 void render_queues_reset_405160(PcRenderQueue& o,PcRenderQueue& a){
     o=PcRenderQueue{};a=PcRenderQueue{};
-    o.capacity=0x100;o.matrix_capacity=0x100;o.entries.resize(0x100);o.matrices.resize(0x100);
-    a.capacity=0x600;a.matrix_capacity=0x600;a.entries.resize(0x600);a.matrices.resize(0x600);
+    const std::uint32_t n=render_queues_extended()?0x1000u:0x100u,k=render_queues_extended()?0xc00u:0x600u;
+    o.capacity=n;o.matrix_capacity=n;o.entries.resize(n);o.matrices.resize(n);
+    a.capacity=k;a.matrix_capacity=k;a.entries.resize(k);a.matrices.resize(k);
 }
 bool& render_disable_culling(){static bool off=false;return off;}
 bool render_node_visible_404b00(PcRenderContext& c,Bytes node,CourseProbe& v,std::int32_t& lod_out){

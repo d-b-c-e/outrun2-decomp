@@ -12,6 +12,9 @@
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/race_draw_distance.hpp"
+#include <fstream>
+#include <iterator>
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
@@ -181,6 +184,26 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(lods)std::printf("settings: vehicle LODs disabled (other cars at full detail)\n");
         if(cull)std::printf("settings: stage culling disabled (every node drawn)\n");
         outrun::platform::other_car_lods_disabled()=lods;outrun::platform::render_disable_culling()=cull;}
+    // [Graphics] DrawDistanceIncrease / DrawDistanceBehind, the Tweaks keys (sections of track, 0 = the game's own, the
+    // default; at most 1024 / 256): more of the stage drawn ahead of / behind the car, less the exclusions of a lods.ini
+    // in the game folder (OutRunDesktop.lods.ini, else OutRun2006Tweaks.lods.ini; read only). The render queues grow.
+    {   auto& dd=outrun::platform::draw_distance();
+        auto sections=[&](const char* key,int max){
+            const auto t=settings.text("Graphics",key);if(t.empty())return 0;
+            char* end=nullptr;const long v=std::strtol(t.c_str(),&end,10);
+            if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
+            return int(v);};
+        dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
+        if(dd.active()){
+            outrun::platform::render_queues_extended()=true;
+            const char* from=nullptr;std::size_t excluded=0;
+            for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
+                std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
+                const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
+                excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
+            std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
+                from?from:"no lods.ini");
+        }}
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
@@ -224,6 +247,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }
         if(uncovered)std::printf("texture replacement: %u banks without a pack folder: %s%s\n",uncovered,others.c_str(),others.size()>=400?", ...":"");
     }
+    if(const auto dropped=outrun::platform::render_queue_dropped())
+        std::printf("render queues: %llu draws dropped (queue full)\n",static_cast<unsigned long long>(dropped));
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     return result;

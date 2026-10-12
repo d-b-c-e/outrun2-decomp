@@ -120,6 +120,7 @@ struct PcRaceContext {
     driving::PcMatrixStack& matrices;
     PcRaceService service;
     std::vector<PcVehicleDrawCall>* draws{}; // render leaves (display only)
+    std::size_t draw_distance_lists{};       // DrawDistanceIncrease: merged node lists handed out this display
 };
 // Area module state: .bss block 7D2D80..7D34C8 and the module's .data words
 // 635F2C..636BC4 (EXE initial image: 635F2C lookup cache, 636048 matrices,
