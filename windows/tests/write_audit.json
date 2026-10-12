@@ -949,8 +949,8 @@
  },
  {
   "file": "windows/source/ffb_live.cpp",
-  "line": "f.trace=std::fopen(trace,\"w\");",
-  "class": "env-gated",
-  "reason": "the force trace: only with OR2_FFB_TRACE (a development switch, cleared by the latch), and ffb_configure returns before it in a latched process"
+  "line": "f.trace=std::fopen(path.c_str(),\"w\");",
+  "class": "entry-redirected",
+  "reason": "the software force trace: latched, the run folder the latched entry passes (fence plan.run_root\\ffb-trace.csv); ordinary, only with OR2_FFB_TRACE (cleared by the latch)"
  }
 ]

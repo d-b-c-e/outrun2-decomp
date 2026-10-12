@@ -169,8 +169,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // Off in a latched process; OR2_TELEMETRY=0 turns it off for unattended runs.
     outrun::desktop::telemetry_configure(settings,plan.latched);
     outrun::desktop::telemetry_wrap_input_filter();
-    // Force feedback F2 (ffb_live.hpp): the model computed for an OR2_FFB_TRACE trace only; no device output at all.
-    outrun::desktop::ffb_configure(settings,plan.latched);
+    // Force feedback F2 (ffb_live.hpp): the software force stream (always in a latched run, into its run folder; with
+    // OR2_FFB_TRACE in ordinary play); no device output at all.
+    outrun::desktop::ffb_configure(settings,plan.latched,plan.latched?fence::utf8(plan.run_root):std::string());
     outrun::desktop::ffb_wrap_input_filter();
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());

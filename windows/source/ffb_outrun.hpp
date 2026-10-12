@@ -2,7 +2,7 @@
 // OutRun's own force model, model identity "outrun-legacy@1": the OutRun 2006 mod's production calculation
 // (dbce-mods-outrun-2006 src/ffb_calculation.inl, CalculateSignals with FFBProfile = legacy), transliterated term for
 // term so its own offline fixture's golden output reproduces exactly (tests/test_ffb_outrun.cpp). It is the model the
-// owner drives with (his OutRun2006Tweaks.ini: FFBProfile = legacy). OutRun is a pure arcade racer, so STD-025's
+// owner drives with (the owner's OutRun2006Tweaks.ini: FFBProfile = legacy). OutRun is a pure arcade racer, so STD-025's
 // exemption applies: a documented model of its own rather than the toolkit's tyre model.
 //
 // Pure: the car's signals in, the force calls out through a Sink. No device, no window, no clock of its own. The
@@ -35,7 +35,7 @@ struct LegacySettings {
     bool invert=false;              // FFBInvertForce
 };
 
-// The owner's accepted values (his OutRun2006Tweaks.ini [FFB] on the Stream Deck route, read 2026-10-12, file dated
+// The owner's accepted values (the owner's OutRun2006Tweaks.ini [FFB] on the Stream Deck route, read 2026-10-12, file dated
 // 2026-10-08): the decomp's defaults, so the decomp feels as the mod does for him. The mod's compiled defaults
 // (LegacySettings{}) stay the parity reference for the goldens.
 LegacySettings owner_accepted();

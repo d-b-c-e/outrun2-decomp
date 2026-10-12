@@ -191,25 +191,44 @@ void test_settings_parse(){
     char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
     const std::string path=std::string(dir)+"or2_ffb_settings_test.ini";
     auto load=[&](const char* body){{std::ofstream f(path,std::ios::binary);f<<body;}outrun::desktop::Ini i;i.load(path);return i;};
-    std::string notes;
-    auto s=outrun::desktop::ffb_settings(load(""),notes);
-    const auto o=owner_accepted();
-    check(s.spring==o.spring&&s.road_texture==o.road_texture&&s.tire_slip==o.tire_slip&&notes.empty(),"no [FFB]: the owner's accepted values");
+    std::string notes,source;
+    auto s=outrun::desktop::ffb_settings(load(""),notes,source);
+    const LegacySettings mod;const auto o=owner_accepted();
+    check(s.spring==mod.spring&&s.road_texture==mod.road_texture&&source=="mod-defaults"&&notes.empty(),
+          "no [FFB]: the mod's compiled defaults, never the owner's values silently (romi 28558)");
+    s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBPreset = owner-2026-10-08\r\n"),notes,source);
+    check(s.spring==o.spring&&s.tire_slip==o.tire_slip&&source=="preset owner-2026-10-08","the explicit owner preset, named");
     check(o.spring==0.3f&&o.damper==0.2f&&o.steering_weight==1.0f&&o.road_texture==0.2f&&o.tire_slip==0.8f&&o.rumble_strip==0.6f,
-          "owner_accepted = his live ini (Spring 0.3, Damper 0.2, SteeringWeight 1.0, RoadTexture 0.2, TireSlip 0.8, RumbleStrip 0.6)");
-    s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.45\r\nFFBDamperStrength = abc\r\nFFBInvertForce = true\r\n"),notes);
-    check(s.spring==0.45f&&s.damper==o.damper&&s.invert&&notes.find("FFBDamperStrength")!=std::string::npos,"a key overrides; a non-number keeps the default, noted");
-    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.5x\r\n"),notes);
-    check(s.spring==o.spring&&!notes.empty(),"trailing garbage is not a number");
-    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBGlobalStrength = nan\r\n"),notes);
+          "the preset = the owner's live ini (Spring 0.3, Damper 0.2, SteeringWeight 1.0, RoadTexture 0.2, TireSlip 0.8, RumbleStrip 0.6)");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBPreset = mine\r\n"),notes,source);
+    check(source=="mod-defaults"&&notes.find("FFBPreset")!=std::string::npos,"an unknown preset keeps the mod's defaults, noted");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.3\r\nFFBDamperStrength = abc\r\nFFBInvertForce = true\r\n"),notes,source);
+    check(s.spring==0.3f&&s.damper==mod.damper&&s.invert&&notes.find("FFBDamperStrength")!=std::string::npos&&source=="mod-defaults, 1 [FFB] key(s)",
+          "a key overrides and is counted; a non-number keeps the default, noted");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBSpringStrength = 0.5x\r\n"),notes,source);
+    check(s.spring==mod.spring&&!notes.empty(),"trailing garbage is not a number");
+    notes.clear();s=outrun::desktop::ffb_settings(load("[FFB]\r\nFFBGlobalStrength = nan\r\n"),notes,source);
     check(!validate(s).empty(),"a parsed NaN reaches validate, which refuses it");
     std::remove(path.c_str());
+}
+
+void test_epochs(){
+    // GAME computes; a race start (GAME from anything but the pause menu) resets and opens an epoch; a pause keeps state.
+    outrun::desktop::RaceEpochs e;
+    check(!e.step(32)&&!e.step(13),"menus and START compute nothing");
+    check(e.step(16)&&e.reset_now&&e.epoch==1,"the race start resets: epoch 1");
+    check(e.step(16)&&!e.reset_now,"the race continues");
+    check(!e.step(18)&&!e.step(18),"the pause computes nothing");
+    check(e.step(16)&&!e.reset_now&&e.epoch==1,"after the pause: no reset, the same epoch (zero 28550)");
+    check(!e.step(19)&&!e.step(32)&&!e.step(13),"GOAL, then the menus and the next START");
+    check(e.step(16)&&e.reset_now&&e.epoch==2,"the next race resets: epoch 2");
+    check(!e.step(18)&&!e.step(32)&&!e.step(13)&&e.step(16)&&e.reset_now&&e.epoch==3,"quit from the pause to the menus, then a new race: reset");
 }
 
 int main(int argc,char** argv){
     try{
         if(argc!=2)throw std::runtime_error("usage: test_ffb_outrun <tests/data/ffb>");
-        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();test_settings_parse();
+        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();test_settings_parse();test_epochs();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun force model: "<<checks<<" checks passed\n";
     return 0;
