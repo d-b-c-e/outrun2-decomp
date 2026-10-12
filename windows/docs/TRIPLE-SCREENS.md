@@ -262,6 +262,9 @@ The `three-projections` status needs counted passes plus a WGC check of the seam
 - The recent-projection fallback never matched in F10, F11 or F12, so it is removed (sana 35380/35428, nene 35423).
 - F12's timing is not qualified: a peer's build and ctest overlapped the run.
 
+**F13 (14:01, `53ae4cc`):** 0 unmatched vertex-program draws, and the side sky draws in all nine frames from t40 to
+t56.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
