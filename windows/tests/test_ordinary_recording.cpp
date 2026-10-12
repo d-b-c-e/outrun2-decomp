@@ -128,7 +128,7 @@ int main(int argc,char** argv){
      r.set_devices(devices());
      for(std::uint64_t i=0;i<120;++i)r.push(row(1000+i,std::int64_t(i)*16667));
      check(r.pushed()==120&&!r.at_limit(),"120 rows pushed, under the limit");
-     check(has(r.badge(),"REC 0:01")&&has(r.badge(),"max 5:00")&&has(r.badge(),"F11"),"the badge counts the rows' span: "+r.badge());
+     check(has(r.badge(),"REC 0:01")&&has(r.badge(),"max 4:59")&&has(r.badge(),"F11"),"the badge counts the rows' span: "+r.badge());
      r.stop("f11");
      check(!r.recording(),"stopped");
      r.push(row(1120,120*16667));
@@ -264,6 +264,8 @@ int main(int argc,char** argv){
                "\nresult="+session::utf8(dir/("result-"+id))+"\nrecording="+session::utf8(dir/("recording-"+id))+"\n"+extra;
      };
      check(session::take(file,game,true,now).kind==session::Intake::Kind::None,"no request: ordinary play");
+     const auto refusals=[&](const fs::path& d){int n=0;const auto p="session-request.txt.refused-"+std::to_string(GetCurrentProcessId())+"-";
+        for(const auto& e:fs::directory_iterator(d))if(session::utf8(e.path().filename()).rfind(p,0)==0)++n;return n;};
      const auto claims=[&](const fs::path& d){int n=0;for(const auto& e:fs::directory_iterator(d))if(session::utf8(e.path().filename()).rfind("session-request.txt.taken-",0)==0)++n;return n;};
      const std::string id1(32,'1');spit(file,request("record",id1));
      auto t=session::take(file,game,true,now);
@@ -281,7 +283,7 @@ int main(int argc,char** argv){
      spit(file,"garbage");
      t=session::take(file,game,true,now);
      check(t.kind==session::Intake::Kind::Exit&&!fs::exists(file)&&
-           fs::exists(file.wstring()+L".refused-"+std::to_wstring(GetCurrentProcessId())),"an unreadable request: exit, set aside");
+           refusals(dir)==1,"an unreadable request: exit, kept as .refused-<pid>-<n>");
      const std::string id4(32,'4');spit(file,request("record",id4));
      t=session::take(file,game,true,now+1000);
      check(t.kind==session::Intake::Kind::Refused&&!fs::exists(file)&&!fs::exists(dir/("result-"+id4)),"an expired record request: refused, set aside, no folder made");
@@ -295,7 +297,8 @@ int main(int argc,char** argv){
      check(t.kind==session::Intake::Kind::Refused&&has(t.why,"another session")&&slurp(dir/("result-"+id6)/"session-request.txt")=="earlier"&&!fs::exists(file),
            "an earlier request in the result folder is never replaced: "+t.why);
      check(slurp(dir/("result-"+id6)/"status.json")=="another session's status","and that session's status.json is never written over");
-     check(claims(dir)==0,"a refused claim is kept as .refused, never left under the claim name");}
+     check(claims(dir)==0,"a refused claim is kept as .refused, never left under the claim name");
+     check(refusals(dir)==3,"every refusal kept under its own name (unreadable, expired, another session's folder)");}
 
     // The request on one volume (%TEMP%) and its result and recording folders on another (the 12:56 pilot: C: to E:).
     if(!cross.empty()){

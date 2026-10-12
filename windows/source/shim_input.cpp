@@ -294,7 +294,7 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
         o.rec=OrdinaryRecorder(std::move(a));
         platform::native_input_consumed_hook()=on_consumed;
         o.rec.publish_status(true);
-        std::printf("input shim: Play with Recording: request %s, capture %s (contract @2, at most 5 minutes); F11 stops\n",
+        std::printf("input shim: Play with Recording: request %s, capture %s (contract @2, at most 4:59 or 18,000 rows); F11 stops\n",
             o.record->request_id.c_str(),session::utf8(o.record->recording/L"capture").c_str());
         std::fflush(stdout);
     }

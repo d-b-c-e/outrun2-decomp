@@ -1201,9 +1201,9 @@
  },
  {
   "file": "windows/source/ordinary_recording.cpp",
-  "line": "if(!MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH))(void)DeleteFileW(claimed.c_str());",
+  "line": "(void)MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH);",
   "class": "latched-skip",
-  "reason": "a refused request kept beside the claim as .refused-<pid> (never taken again); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+  "reason": "a refused request kept beside the claim as .refused-<pid>-<n> (never taken again; on a failed rename the inert claim stays); session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
  },
  {
   "file": "windows/source/ordinary_recording.cpp",

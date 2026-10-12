@@ -299,7 +299,7 @@ std::string OrdinaryRecorder::badge()const{
     case State::Recording:{
         const auto rows=s_->rows.load();
         const double span=rows?double(s_->last_us.load()-s_->first_us.load())/1e6:0.0;
-        return "REC "+clock(span)+" (max "+clock(s_->arm.seconds)+")  F11 stops";
+        return "REC "+clock(span)+" (max "+clock(s_->arm.seconds-1.0)+")  F11 stops";   // the span limit (at_limit), sana 34555
     }
     case State::Saving:return "REC saving...";
     case State::Complete:return saved()?"REC saved":"REC complete, verifying";
@@ -452,7 +452,9 @@ std::wstring running_exe(){
 Intake take(const std::filesystem::path& file,const std::filesystem::path& game_folder,bool shim_backend,std::uint64_t now_unix){
     Intake r;
     if(file.empty())return r;
-    const auto pid=std::to_wstring(GetCurrentProcessId());
+    // <pid>-<n>: the game takes once per process (n = 1); unique per take, so a refused claim is never lost to a name in use.
+    static std::atomic<unsigned> takes{0};
+    const auto pid=std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(++takes);
     const auto win32=[](DWORD e){return " (Win32 "+std::to_string(e)+")";};
     // Claimed first, by a rename in its own folder (one step on one volume): the request's name is gone at once, so no
     // later launch can take it, whatever happens to its copy below (sana 34298; the 12:56 pilot's result folder was on
@@ -472,10 +474,11 @@ Intake take(const std::filesystem::path& file,const std::filesystem::path& game_
         CloseHandle(f);
         bytes.resize(read?n:0);
     }else read_error=GetLastError();
-    // A refused request is kept beside the claim as .refused-<pid>: never taken again, never deleted unread.
+    // A refused request is kept beside the claim as .refused-<pid>-<n>: never taken again, never deleted. If that rename
+    // fails the claim itself stays, already inert (sana 34430: evidence is kept, not removed).
     const auto aside=[&]{
         const std::wstring refused=file.wstring()+L".refused-"+pid;
-        if(!MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH))(void)DeleteFileW(claimed.c_str());
+        (void)MoveFileExW(claimed.c_str(),refused.c_str(),MOVEFILE_WRITE_THROUGH);
     };
     const auto parsed=read?parse(bytes,now_unix,game_folder):Parsed{false,{},"the session request cannot be read"+win32(read_error),Action::Playback};
     if(!parsed.ok){
