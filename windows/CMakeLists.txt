@@ -69,6 +69,7 @@ add_test(NAME panel_input COMMAND test_panel_input)
 add_library(fake_wheelffb SHARED tests/fake_wheelffb.cpp)
 set_target_properties(fake_wheelffb PROPERTIES OUTPUT_NAME WheelFfb RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ffb_wiring/$<CONFIG>)
 target_compile_definitions(fake_wheelffb PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(fake_wheelffb PRIVATE ole32)
 add_executable(test_ffb_wiring tests/test_ffb_wiring.cpp source/ffb_live.cpp source/ffb_settings.cpp source/ffb_outrun.cpp
     source/ffb_device.cpp source/desktop_settings.cpp)
 target_include_directories(test_ffb_wiring PRIVATE source vendor/controls vendor/wheelffb ${PROJECT_SOURCE_DIR}/xbox/source)

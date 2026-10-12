@@ -6,7 +6,11 @@
 #include "ffb_live.hpp"
 #include "native_window.hpp"
 #include "platform/runtime_input.hpp"
+#include "platform/native_runtime.hpp"
 #include <windows.h>
+#include <cstring>
+#include <memory>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -18,7 +22,8 @@ NativeWindow& native_window(){static NativeWindow w;return w;}
 namespace outrun::desktop {
 std::string g_steer;   // what the wheel input layer reports as the connected steering device
 std::string wheel_input_steer_device(){return g_steer;}
-bool desktop_panel_open(){return false;}   // the F6 panel is not part of this test
+bool g_panel_open=false;
+bool desktop_panel_open(){return g_panel_open;}   // the F6 panel's open state, as the test sets it
 }
 namespace {
 int checks=0;
@@ -83,6 +88,52 @@ int main(){
     check(r.attached==1,"Output = wheel, unmuted, ordinary: WheelFfb.dll attached once");
     check(r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;","only the version asked (start, start line); no device call outside the race");
     check(!r.loaded_after,"unloaded at ffb_shutdown");
+
+    // romi 31299: the wheel output on (the fake accepts the steering device: a fake sink, no force), race ticks through
+    // the real filter with a car state that makes a force, then the F6 panel opens: that same tick sends the zero, and
+    // nothing more goes out while it is open; closed again, an accepted zero before the force resumes.
+    {
+        _putenv_s("DBCE_FFB_MUTE","");_putenv_s("OR2_FFB_TRACE","");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
+        outrun::desktop::ffb_front_check()=[](void*){return true;};   // "in front" without taking the focus
+        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
+        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_wrap_input_filter();
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        auto& car=rt->event_function36.car_select.car_799d18;
+        const auto putf=[&](std::size_t at,float v){std::memcpy(car.data()+at,&v,4);};
+        // Speed, steering, its rate and the lateral load (CarSignals: 1C4 / 1D0 / 1D4 / 264 / 268), in a long corner.
+        putf(0x1c4,40.f);putf(0x1d0,0.4f);putf(0x1d4,0.02f);putf(0x264,6.f);putf(0x268,6.f);
+        const auto filter=outrun::xbox_runtime::input_filter();
+        check(filter!=nullptr,"the FFB filter is installed");
+        const auto tick=[&]{outrun::platform::NativeInputState in{};filter(in,rt.get());};
+        // The force commands the fake received so far, in order.
+        const auto forces=[]{std::vector<long> v;const auto c=env(L"FAKE_WHEELFFB_CALLS");const std::wstring k=L"SetDeviceForcesXY ";
+            for(std::size_t at=c.find(k);at!=std::wstring::npos;at=c.find(k,at+1))v.push_back(std::wcstol(c.c_str()+at+k.size(),nullptr,10));return v;};
+        for(int i=0;i<90;++i)tick();
+        auto sent=forces();
+        bool force=false;for(const auto x:sent)if(x!=0)force=true;
+        check(outrun::desktop::ffb_output_running()&&force,"the wheel output opened and a nonzero force went out");
+        check(sent.back()!=0,"the last command before the panel opens is a force");
+        outrun::desktop::g_panel_open=true;
+        const auto before=sent.size();
+        tick();
+        sent=forces();
+        check(sent.size()==before+1&&sent.back()==0,"opening the panel: that very tick sends exactly one command, a zero");
+        for(int i=0;i<30;++i)tick();
+        check(forces().size()==before+1,"while the panel is open nothing more is sent");
+        outrun::desktop::g_panel_open=false;
+        tick();
+        sent=forces();
+        check(sent.size()==before+3&&sent[before+1]==0&&sent[before+2]!=0,"closed again: an accepted zero, then the force");
+        outrun::desktop::ffb_shutdown();
+        check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"unloaded after shutdown");
+        const auto calls=env(L"FAKE_WHEELFFB_CALLS");
+        check(calls.find(L"PanicStop;FreeDirectInput;")!=std::wstring::npos,"shutdown: PanicStop then FreeDirectInput");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+    }
 
     _putenv_s("DBCE_FFB_MUTE","");
     DeleteFileA((folder()+"\\settings.ini").c_str());DeleteFileA((folder()+"\\ffb-trace.csv").c_str());RemoveDirectoryA(folder().c_str());

@@ -47,4 +47,8 @@ void ffb_shutdown();
 std::string ffb_status_text();
 bool ffb_output_running();
 void ffb_stop_output();
+// "The game window is this process's and the foreground window" (default: GetForegroundWindow). A test seam, so a test
+// never has to take the focus on the desktop.
+using FfbFrontCheck=bool(*)(void* hwnd);
+FfbFrontCheck& ffb_front_check();
 }

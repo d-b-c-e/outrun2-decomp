@@ -63,7 +63,7 @@ void deliver(bool race,std::int32_t intent){
     ffbdev::Sample s;
     // An open F6 panel counts as outside the race: the gates zero the wheel this sample (the panel's own filter runs
     // after this one in the same tick, and the open state changes only in the message pump between ticks).
-    s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=own_front(s.hwnd);
+    s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=ffb_front_check()(s.hwnd);
     s.steer_dev=wheel_input_steer_device();s.ms=GetTickCount64();
     const auto before=f.delivery.phase();
     f.delivery.frame(s,intent);
@@ -206,6 +206,8 @@ void ffb_shutdown(){
     std::fflush(stdout);
     f.on=false;
 }
+
+FfbFrontCheck& ffb_front_check(){static FfbFrontCheck check=own_front;return check;}
 
 std::string ffb_status_text(){
     // The player's words; runtime.log keeps the gates' full reasons.
