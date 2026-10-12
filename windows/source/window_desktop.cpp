@@ -153,6 +153,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             level=unsigned(std::stoul(text));ok=level<=16u;if(!ok)level=0u;}
         if(!ok)std::printf("settings: [Graphics] AnisotropicFiltering = %.32s refused (0..16); 0 applies\n",text.c_str());
         if(level>1u)std::printf("settings: anisotropic filtering %ux\n",level);
+        else if(level==1u)std::printf("settings: [Graphics] AnisotropicFiltering = 1 is the game's own filtering (1x)\n");
         outrun::xbox_runtime::set_anisotropic_filtering(level);}
     // [Graphics] ReflectionResolution, the Tweaks key: the car reflection cube's edge. Absent: the game's 128. A power of
     // two from 64 to 4096; anything else is logged and 128 applies.

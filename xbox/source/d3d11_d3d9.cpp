@@ -489,7 +489,9 @@ void D3D11D3D9Device::bind_textures(){
         const auto& p=sampler[s];const bool linear=p[SAMP_MINFILTER]!=1,mag=p[SAMP_MAGFILTER]!=1;const auto mip=p[SAMP_MIPFILTER];
         D3D11_SAMPLER_DESC d{};
         d.Filter=D3D11_FILTER((linear?D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT:0)|(mag?D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT:0)|(mip==2?D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR:0));
-        if(g_anisotropy>1u&&linear){d.Filter=D3D11_FILTER_ANISOTROPIC;d.MaxAnisotropy=g_anisotropy;}
+        // D3D11's anisotropic filter covers min, mag and mip together; D3D9 (Tweaks) sets only MINFILTER. So only
+        // samplers already linear in both min and mag take it: a point-magnified texture (HUD, 2D) stays sharp (nene 27514).
+        if(g_anisotropy>1u&&linear&&mag){d.Filter=D3D11_FILTER_ANISOTROPIC;d.MaxAnisotropy=g_anisotropy;}
         d.AddressU=address(p[SAMP_ADDRESSU]);d.AddressV=address(p[SAMP_ADDRESSV]);d.AddressW=address(p[SAMP_ADDRESSW]);
         // D3D9 takes any LOD bias; D3D11 refuses one outside -16..15.99 (or NaN) with E_INVALIDARG.
         const float bias=f(p[SAMP_MIPMAPLODBIAS]);
