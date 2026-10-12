@@ -21,7 +21,8 @@ inline bool g_pc_fix_particle_rendering=true;
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'
 // RestoreCarBaseShadow puts it back: the flat shadow object drawn with DrawObjectAlpha (4056D0) under the car's
 // own matrix (+B0) raised 0.05, its alpha the call's argument times this factor (C2C Xbox halved it, too faint on
-// the PC). vehicle_model_draw.cpp, the race model draw 469600 (its 49A650 call at 469EB4).
+// the PC). vehicle_model_draw.cpp: the race model draw 469600 (its 49A650 call at 469EB4) and the car-select draws
+// 46A560 (46AC76) and 46AE70 (46B766), Tweaks' three sites.
 inline float g_pc_car_base_shadow_opacity=1.0f;
 // Port performance overlay (Minus): lines separated by '\n', drawn by the 2D
 // flush 42D710 on top of the frame with the game's font 9. Empty = hidden.

@@ -57,6 +57,25 @@ int main(){
     // Off: the PC's own list (no 4056D0 of the shadow object), otherwise identical.
     {const auto on=draw(index,vm1,1.f,0.2f,1.f),off=draw(index,vm1,1.f,0.2f,0.f);
      CHECK(!shadow(off,object)&&on.calls.size()==off.calls.size()+1);}
+    // The car-select draws 46A560 and 46AE70 (Tweaks' other two sites): the same call and alpha rule.
+    for(int which=0;which<2;++which){
+        std::vector<std::uint8_t> car(0xb6c),body(0x600),arena(16*64);
+        Bytes c(car.data(),car.size());
+        c.put32(4,vm1);c.put8(0x11,0);c.putf(0x2c8,1.f);c.putf(0x2dc,0.2f);
+        for(unsigned k=0;k<16;++k)c.putf(0xb0+k*4,(k%5u)==0u?1.f:0.f);
+        c.putf(0xb0+12*4,10.f);c.putf(0xb0+14*4,5.f);
+        for(const float opacity:{1.f,0.f}){
+            driving::PcMatrixStack s{Bytes(arena.data(),arena.size()),0,0,16};driving::pc_matrix_identity(s);
+            PcVehicleModelDraw in{c,index,0,Bytes(body.data(),body.size()),-1,0x20,0};
+            g_pc_car_base_shadow_opacity=opacity;
+            Run r;
+            if(which==0)vehicle_select_model_draw_46a560(in,s,r.calls);else vehicle_model_draw_46ae70(in,s,r.calls);
+            g_pc_car_base_shadow_opacity=1.f;
+            const auto* sh=shadow(r,object);
+            if(opacity>0.f)CHECK(sh&&f(sh->args[1])==(0.5f-0.2f)*2.0f&&mat(*sh,12)==10.f&&mat(*sh,13)==0.05f&&mat(*sh,14)==5.f);
+            else CHECK(!sh);
+        }
+    }
     std::printf("car base shadow: %u checks\n",checks);
     return 0;
 }

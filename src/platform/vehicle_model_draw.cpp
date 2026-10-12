@@ -31,6 +31,24 @@ void roof_angle(Bytes car){
 }
 }
 std::array<float,3> matrix_angles_449640(Bytes m){return driving::pc_matrix_angles_449640(m);}
+// CalcPeraShadow's alpha argument at the three bare-RET sites (469EB4 in 469600, 46AC76 in 46A560, 46B766 in 46AE70;
+// REA/Ghidra listings): 1 with +4 bit 0x800000; with +2C8 > 0, max((0.5 - +2DC) * 2, 2^-23) in single precision
+// (subss / mulss / comiss against 6281F0); otherwise 1.
+float base_shadow_alpha(Bytes car){
+    if(car.u32(4)&0x800000u)return 1.f;
+    if(!(car.f32(0x2c8)>0.f))return 1.f;
+    const float a=(0.5f-car.f32(0x2dc))*2.0f;
+    return 1.1920929e-07f>=a?1.1920929e-07f:a;
+}
+// CarBaseShadowOpacity (pc_screen.hpp): Tweaks' CalcPeraShadow in place of the RET: DrawObjectAlpha (4056D0) of the
+// shadow object, alpha x the factor, colour 0, byte -1, under the car's +B0 matrix raised 0.05.
+template<class Record> void base_shadow(PcMatrixStack& s,Bytes car,std::uint32_t object,Record& record){
+    if(!(g_pc_car_base_shadow_opacity>0.f))return;
+    driving::pc_matrix_push_load(s,car.sub(0xb0,64));driving::pc_matrix_translate_vector(s,{0.f,0.05f,0.f});
+    const float a=base_shadow_alpha(car)*g_pc_car_base_shadow_opacity;std::uint32_t bits;std::memcpy(&bits,&a,4);
+    record(0x4056d0,{object,bits,0,None});
+    driving::pc_matrix_pop(s);
+}
 void vehicle_model_draw_46ae70(const PcVehicleModelDraw& in,PcMatrixStack& s,std::vector<PcVehicleDrawCall>& calls){
     Bytes car=in.car;car.check(0,0xb6c);in.body_82e7f0.check(0x288,0x564-0x288+4);
     const std::int32_t index=in.model+in.variant;
@@ -152,6 +170,7 @@ void vehicle_model_draw_46ae70(const PcVehicleModelDraw& in,PcMatrixStack& s,std
         }else if(car.f32(0x2c8)>0.f){
             driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
         }
+        base_shadow(s,car,layout.u32(0xc),record);   // CarBaseShadowOpacity at the RET (46B766 / 46AC76)
         driving::pc_matrix_pop(s);
     }
     states();
@@ -282,6 +301,7 @@ void vehicle_select_model_draw_46a560(const PcVehicleModelDraw& in,PcMatrixStack
         }else if(car.f32(0x2c8)>0.f){
             driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
         }
+        base_shadow(s,car,layout.u32(0xc),record);   // CarBaseShadowOpacity at the RET (46B766 / 46AC76)
         driving::pc_matrix_pop(s);
     }
     states();
@@ -492,9 +512,7 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
     if(vm!=1)return;                                                              // bridge 469CDB
     if(layout.u32(0xc)!=None){
         // Flat shadow: 49A650 is a bare RET; the matrix work and the 449640
-        // row normalisation of +B0 still happen. Its alpha argument ([ESP+14] at 469EA5): 1, or with +2C8 > 0
-        // max((0.5 - +2DC) * 2, 2^-23) in single precision (469E32..469E60); CarBaseShadowOpacity draws with it.
-        float alpha=1.f;
+        // row normalisation of +B0 still happen (CarBaseShadowOpacity draws there: base_shadow).
         driving::pc_matrix_push_unit(s);
         if(car.u32(4)&0x800000u){
             translate(get3(car,0x14));
@@ -507,18 +525,9 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
         }else{
             translate(get3(car,0xe0));
             driving::pc_matrix_rotate_y(s,word_angle(car.i16(0x2e)));
-            if(car.f32(0x2c8)>0.f){
-                driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
-                const float a=(0.5f-car.f32(0x2dc))*2.0f;alpha=1.1920929e-07f>=a?1.1920929e-07f:a;
-            }
+            if(car.f32(0x2c8)>0.f)driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
         }
-        // CarBaseShadowOpacity (pc_screen.hpp): Tweaks' CalcPeraShadow in place of the RET at 469EB4.
-        if(g_pc_car_base_shadow_opacity>0.f){
-            driving::pc_matrix_push_load(s,car.sub(0xb0,64));translate({0.f,0.05f,0.f});
-            const float a=alpha*g_pc_car_base_shadow_opacity;std::uint32_t bits;std::memcpy(&bits,&a,4);
-            record(0x4056d0,{layout.u32(0xc),bits,0,None});
-            driving::pc_matrix_pop(s);
-        }
+        base_shadow(s,car,layout.u32(0xc),record);   // CarBaseShadowOpacity at the RET (469EB4)
         driving::pc_matrix_pop(s);
     }
     record(0x4052b0,{});
