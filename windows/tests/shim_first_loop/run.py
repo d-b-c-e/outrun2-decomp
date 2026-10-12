@@ -13,7 +13,7 @@ controls-journal.jsonl (the strict reader) and host-shutdown.json. The capture (
 evidence copy by the reviewed P21 finalizer (--finalizer): the final host report is copied into it and this runner writes
 exit.json only for an exit it observed, with the process identity it held from the spawn.
 """
-import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
+import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, math, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
@@ -40,6 +40,45 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 
 
 def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+
+
+# Run timing (romi 23861). --seconds is the startup budget, from launch to race entry. From race entry the race has its
+# own budget, so a late race entry never truncates the race phase: R1's two 3.5 s steer holds, or R3's replay bound.
+# The whole run is bounded by startup + race budget, and inject.on expires a cleanup margin after that.
+R1_RACE_SECONDS = 7.0          # steer-right then steer-left, 3.5 s each (the R1 workload in main)
+RACE_MARGIN = 15.0             # the end batch, log polling and a cold shader cache at race entry
+INJECT_MARGIN = 120            # inject.on outlives the run's own bound by this much
+
+
+def valid_race_seconds(v):
+    """A first run's raceSeconds as an R3 bound: a finite positive number. JSON in Python admits NaN and Infinity, and a
+    bool is an int."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0
+
+
+def replay_bound(race_seconds, tape_rows):
+    """R3's wall-clock bound from race entry: twice the first run's race plus 30 s, never below the former rows / 30 + 15."""
+    return max(tape_rows / 30 + 15, 2 * race_seconds + 30)
+
+
+def race_budget(replay_timeout):
+    """Seconds the race phase may use after race entry: R3 its replay bound, R1 its steer holds; plus the margin."""
+    return (replay_timeout if replay_timeout is not None else R1_RACE_SECONDS) + RACE_MARGIN
+
+
+def loop_deadline(start, startup_seconds, race_at, budget):
+    """The run loop's bound: the startup budget until race entry, then race entry plus the race budget."""
+    return start + startup_seconds if race_at is None else race_at + budget
+
+
+def inject_expiry(start, startup_seconds, budget):
+    """inject.on's expiry: after the latest possible loop bound (a race entered at the end of the startup budget)."""
+    return int(math.ceil(start + startup_seconds + budget)) + INJECT_MARGIN
+
+
+def replay_due(now, phase_at, replay_timeout, playback_end):
+    """R3's own end decision: the shim reported the end of the tape, or the replay bound passed."""
+    return bool(playback_end) or now - phase_at > replay_timeout
 
 
 def replace_file(path, data):
@@ -189,13 +228,13 @@ def main():
             # Wall-clock bound from the first run's own race (nene audit): a test run's shader cache is always cold, so a
             # fixed frame rate is not assumed. The former floor, tape rows at 30 per second plus 15 s, stays the minimum.
             race_seconds = r1.get("raceSeconds")
-            if not isinstance(race_seconds, (int, float)) or race_seconds <= 0: problems.append("--replay-of has no race duration (raceSeconds)")
+            if not valid_race_seconds(race_seconds): problems.append("--replay-of has no finite positive race duration (raceSeconds %r)" % (race_seconds,))
             else: replay_timeout = race_seconds
             if not o.finalizer or not o.finalizer.exists(): raise ValueError("no finalizer to verify it")
             with tempfile.TemporaryDirectory() as t:   # the preflight writes nothing it keeps
                 read_export(o.finalizer, tape_source, pathlib.Path(t) / "tape.tsv"); tape_rows = len(compare_replay.tape(str(pathlib.Path(t) / "tape.tsv")))
             if not tape_rows: problems.append("--replay-of has no race rows with the run Running")
-            if replay_timeout is not None: replay_timeout = max(tape_rows / 30 + 15, 2 * replay_timeout + 30)
+            if replay_timeout is not None: replay_timeout = replay_bound(replay_timeout, tape_rows)
         except (OSError, ValueError, SystemExit) as e: problems.append("--replay-of unusable: %s" % e)
     for f in ("inject.on", "inject.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
@@ -205,7 +244,7 @@ def main():
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
-                replayTimeoutSeconds=replay_timeout,
+                replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout) if not o.replay_of or replay_timeout is not None else None,
                 dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
@@ -230,17 +269,18 @@ def main():
         if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it
             wrote_ini = True; ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n" % tape).encode("utf-8"))
         DBCE.mkdir(parents=True, exist_ok=True)
-        publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, int(time.time()) + o.seconds + 120)).encode())
+        start = time.time(); budget = race_budget(replay_timeout)
+        publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
         receipt["pid"] = proc.pid; created = creation_time(int(proc._handle)); receipt["creationTime"] = created
         run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
-        deadline = time.time() + o.seconds; seen = 0; mode = None; race = False; n = 0; last_press = 0; lines = []
+        seen = 0; mode = None; race = False; n = 0; last_press = 0; lines = []
         def batch(commands):
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
             publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
         phase = "menus"; phase_at = 0; race_at = None
-        while time.time() < deadline and proc.poll() is None:
+        while time.time() < loop_deadline(start, o.seconds, race_at, budget) and proc.poll() is None:
             time.sleep(0.2)
             if log.exists():
                 text = log.read_text(encoding="utf-8", errors="replace"); new = text.splitlines()[seen:]; seen += len(new); lines += new
@@ -262,7 +302,7 @@ def main():
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:
                 phase = "end"; batch(["end"]); break
-            elif phase == "replay" and (receipt["r3"]["playbackEnd"] or time.time() - phase_at > replay_timeout):
+            elif phase == "replay" and replay_due(time.time(), phase_at, replay_timeout, receipt["r3"]["playbackEnd"]):
                 phase = "end"; batch(["end"]); break
         receipt["phase"] = phase; receipt["race"] = race
         # Wall-clock seconds from race entry to the end batch: an R3 of this run derives its timeout from it.

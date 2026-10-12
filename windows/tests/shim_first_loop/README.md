@@ -42,6 +42,12 @@ Capture and replay (Astra 16553/16754):
 - R3 plays only a tape recorded by the same candidate: the first run's `plan.candidateSha256` must equal this run's.
   Its wall-clock bound comes from the first run's own race, not an assumed frame rate. R1 records `raceSeconds`, from
   race entry to the end batch, and R3 ends at the later of `2 x raceSeconds + 30` and the former `tape rows / 30 + 15`.
+  `raceSeconds` must be finite and positive.
+- Timing: `--seconds` bounds startup, from launch to race entry. From race entry the race has its own budget: R1's two
+  3.5 s steer holds, or R3's bound, plus 15 s. A late race entry therefore never cuts the race short. The run's
+  overall bound is the sum, and `inject.on` expires 120 s after it. `test_run_timing.py` (ctest
+  `shim_first_loop_timing`) checks these decisions on a fake clock, with the former single deadline as a mutation
+  control.
   A test run's shader cache (`home()/shadercache`, the run folder) is always cold, so both runs compile their
   programs at the menus and at race entry.
 - `--prepare-from` refuses an existing test folder. For a new candidate, prepare a new folder; the preflight refuses a
