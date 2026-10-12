@@ -471,6 +471,10 @@ void D3D11D3D9Device::apply_state(){
         last_blend_=b;last_blend_state_=bs.Get();}
     if(bound_.blend!=last_blend_state_){context_->OMSetBlendState(last_blend_state_,nullptr,0xffffffffu);bound_.blend=last_blend_state_;}
 }
+// [Graphics] AnisotropicFiltering (the Tweaks key, 1..16; 0 = the game's own filtering, the default): the samplers the
+// game filters linearly when minifying take anisotropic filtering at that level; point-filtered ones are left alone.
+namespace { unsigned g_anisotropy=0; }
+void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;}
 void D3D11D3D9Device::bind_textures(){
     ID3D11ShaderResourceView* views[12];ID3D11SamplerState* samplers[6];
     for(unsigned s=0;s<6;++s){auto* o=object(textures[s]);auto* t=texture(textures[s]);
@@ -478,6 +482,7 @@ void D3D11D3D9Device::bind_textures(){
         const auto& p=sampler[s];const bool linear=p[SAMP_MINFILTER]!=1,mag=p[SAMP_MAGFILTER]!=1;const auto mip=p[SAMP_MIPFILTER];
         D3D11_SAMPLER_DESC d{};
         d.Filter=D3D11_FILTER((linear?D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT:0)|(mag?D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT:0)|(mip==2?D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR:0));
+        if(g_anisotropy>1u&&linear){d.Filter=D3D11_FILTER_ANISOTROPIC;d.MaxAnisotropy=g_anisotropy;}
         d.AddressU=address(p[SAMP_ADDRESSU]);d.AddressV=address(p[SAMP_ADDRESSV]);d.AddressW=address(p[SAMP_ADDRESSW]);
         // D3D9 takes any LOD bias; D3D11 refuses one outside -16..15.99 (or NaN) with E_INVALIDARG.
         const float bias=f(p[SAMP_MIPMAPLODBIAS]);

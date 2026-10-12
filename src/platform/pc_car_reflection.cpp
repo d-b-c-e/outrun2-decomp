@@ -53,12 +53,14 @@ void matrix_push_slot_409ea0(PcMatrixStack& s,PcRenderGlobals& g,std::uint32_t s
     auto below=s.storage.sub(std::size_t(before),64);
     for(unsigned k=0;k<16;++k)below.putf(k*4,m[k]);
 }
+std::uint32_t& car_reflection_edge(){static std::uint32_t edge=0x80u;return edge;}
 void car_reflection_init_413b30(PcFlushContext& c,PcMatrixStack& s){
     auto& g=c.g;auto& d=c.device;
     for(std::uint32_t a:{0x8a89f0u,0x8a89f4u,0x8a89f8u,0x8a89fcu,0x8a8a00u})g.w(a)=0;
     g.w(0x8a8bd0)=1;g.w(0x8a8bf8)=0;g.w(0x8a8bf4)=0;
-    g.w(0x8a89f4)=d.create_cube_texture(0x80,1,1,0x15,0);          // D3DUSAGE_RENDERTARGET, A8R8G8B8, D3DPOOL_DEFAULT
-    g.w(0x8a8a00)=d.create_depth_stencil_surface(0x80,0x80,0x4b,0,0,0); // D24S8
+    const std::uint32_t edge=car_reflection_edge();                   // the PC's 0x80 unless the host set another
+    g.w(0x8a89f4)=d.create_cube_texture(edge,1,1,0x15,0);          // D3DUSAGE_RENDERTARGET, A8R8G8B8, D3DPOOL_DEFAULT
+    g.w(0x8a8a00)=d.create_depth_stencil_surface(edge,edge,0x4b,0,0,0); // D24S8
     for(unsigned k=0;k<16;++k)g.w(0x8a8a04u+k*4)=Const6222f0[k];
     {std::array<float,4> c9{};for(unsigned k=0;k<4;++k)c9[k]=g.f(0x8a8a04u+k*4);d.set_vertex_shader_constant_f(9,c9.data(),1);}
     for(unsigned k=0;k<6;++k)g.w(0x8a8bd4u+k*4)=Const6222f0[16+k];

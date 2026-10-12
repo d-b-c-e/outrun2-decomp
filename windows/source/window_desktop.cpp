@@ -5,6 +5,9 @@
 // folder, like the original one; settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
+#include "d3d11_d3d9.hpp"
+#include "platform/pc_car_reflection.hpp"
+#include <algorithm>
 #include "desktop_settings.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -143,6 +146,24 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
         if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
+    // [Graphics] AnisotropicFiltering, the Tweaks key: 0 (absent) keeps the game's own filtering, 2..16 the anisotropy
+    // level of its linearly filtered textures. An integer 0..16; anything else is logged and 0 applies.
+    {   const auto text=settings.text("Graphics","AnisotropicFiltering");unsigned level=0u;bool ok=text.empty();
+        if(!text.empty()&&text.size()<=2u&&std::all_of(text.begin(),text.end(),[](char c){return c>='0'&&c<='9';})){
+            level=unsigned(std::stoul(text));ok=level<=16u;if(!ok)level=0u;}
+        if(!ok)std::printf("settings: [Graphics] AnisotropicFiltering = %.32s refused (0..16); 0 applies\n",text.c_str());
+        if(level>1u)std::printf("settings: anisotropic filtering %ux\n",level);
+        outrun::xbox_runtime::set_anisotropic_filtering(level);}
+    // [Graphics] ReflectionResolution, the Tweaks key: the car reflection cube's edge. Absent: the game's 128. A power of
+    // two from 64 to 4096; anything else is logged and 128 applies.
+    {   const auto text=settings.text("Graphics","ReflectionResolution");unsigned edge=128u;
+        if(!text.empty()){
+            unsigned v=0u;bool ok=text.size()<=4u&&std::all_of(text.begin(),text.end(),[](char c){return c>='0'&&c<='9';});
+            if(ok){v=unsigned(std::stoul(text));ok=v>=64u&&v<=4096u&&(v&(v-1u))==0u;}
+            if(ok)edge=v;else std::printf("settings: [Graphics] ReflectionResolution = %.32s refused (a power of two, 64..4096); 128 applies\n",text.c_str());
+        }
+        if(edge!=128u)std::printf("settings: car reflection %ux%u\n",edge,edge);
+        outrun::platform::car_reflection_edge()=edge;}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
