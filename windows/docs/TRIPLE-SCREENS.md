@@ -358,7 +358,9 @@ t56.
 - The screen tests (4F02D0 and its focal +B4) follow the camera, so culling stays consistent.
 - **Log:** the triple screens line names the rig in use: "the rig (panels 708.4 x 398.5 mm, sides 70.0 deg, gap 8.0 mm,
   eye matched to the game's FOV)", or "eye 660 mm (MatchGameFov = false: the race camera's vertical FOV 33.6 deg)".
-  Each refused key is logged as "settings: [Triple] <key> = <value> refused (<range>); <default> applies".
+  The height shown is the one the views use (the width x 9/16); a saved PanelHeightMm more than 0.5 mm from it is named as
+  "not used" (sana 38280). Each refused key is logged as "settings: [Triple] <key> = <value> refused (<range>);
+  <default> applies".
 
 **F6 (STD-022 order; no new UI kind; not built yet: no presentation changes in this slice, sana 37757).** On the
 Cameras page, below Projection, only when Three projected views is chosen:

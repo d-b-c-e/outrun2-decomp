@@ -132,15 +132,22 @@ NativeWindow& native_window(){
             // MatchGameFov = false: the race camera takes the physical eye's vertical FOV (the views' 16:9 screen) in race and
             // goal modes; the front end keeps the game's. True (the default): the eye follows the game's FOV, as before.
             char eye[160];
+            // The views take each panel's height from its width and the 16:9 render (triple_views); a saved PanelHeightMm
+            // that differs is named as not used, so arbitrary settings are not reported as exact geometry (sana 38280).
+            const double used_h=triple_rig.panel_width_mm*9./16.;
+            char height[120]="";
+            if(std::fabs(triple_rig.panel_height_mm-used_h)>0.5)
+                std::snprintf(height,sizeof height," (PanelHeightMm %.1f not used: the height follows the width and the 16:9 render)",
+                              triple_rig.panel_height_mm);
             if(triple_rig.match_game_fov)std::snprintf(eye,sizeof eye,"eye matched to the game's FOV");
             else{const double fov=td::triple_physical_fov_y(triple_rig,16./9.);outrun::platform::triple_fov_y()=float(fov);
                 std::snprintf(eye,sizeof eye,"eye %.0f mm (MatchGameFov = false: the race camera's vertical FOV %.1f deg)",
                               triple_rig.eye_distance_mm,fov*180./3.14159265358979323846);}
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the rig "
-                        "(panels %.1f x %.1f mm, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
+                        "(panels %.1f x %.1f mm%s, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
                         "viewports; stage culling off; stage sections drawn +%d ahead and %d behind the car; objects behind the eye "
                         "still culled; the HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),
-                        w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,triple_rig.panel_height_mm,
+                        w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,used_h,height,
                         triple_rig.side_angle_deg,triple_rig.bezel_mm,eye,dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
