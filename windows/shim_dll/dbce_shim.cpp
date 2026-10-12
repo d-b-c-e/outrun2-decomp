@@ -314,7 +314,7 @@ int32_t dbce_shim_bridge_open(const dbce_shim_open_args* args,void** out,char* w
     try{return open_impl(nullptr,*args,out,why,why_len,std::make_shared<sh::BridgeProvider>(bridge_clock));}
     catch(...){return fail(DBCE_SHIM_REFUSED,"bridge allocation failed",why,why_len);}
 }
-int32_t dbce_shim_bridge_devices(void* handle,const dbce_shim_bridge_device_v1* devices,int32_t count){
+static int32_t bridge_devices_impl(void* handle,const dbce_shim_bridge_device_v1* devices,int32_t count,const wchar_t* const* paths){
     Shim* s=nullptr;if(const auto r=lookup(handle,s))return r;
     if(!s->bridge || count<0 || count>64 || (count && !devices))return DBCE_SHIM_BAD_ARGUMENT;
     try{
@@ -322,6 +322,15 @@ int32_t dbce_shim_bridge_devices(void* handle,const dbce_shim_bridge_device_v1* 
         for(int i=0;i<count;++i){const auto& d=devices[i];
             if(d.struct_size!=sizeof(d)||d.abi!=1||(d.axis_mask&~255u)||(d.range_mask&~255u)||(d.pov_mask&~15u)||(d.flags&~1u))return DBCE_SHIM_BAD_ARGUMENT;
             sh::BridgeDevice v;v.generation=d.generation;v.identity={bridge_guid(d.instance),bridge_guid(d.product),"external physical input"};
+            if(paths){
+                if(!paths[i])return DBCE_SHIM_BAD_ARGUMENT;
+                int length=0;while(length<260 && paths[i][length])++length;
+                if(length==0 || length==260)return DBCE_SHIM_BAD_ARGUMENT;
+                const int size=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,paths[i],length,nullptr,0,nullptr,nullptr);
+                if(size<=0)return DBCE_SHIM_BAD_ARGUMENT;
+                v.identity.interface_path.resize(size);
+                if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,paths[i],length,v.identity.interface_path.data(),size,nullptr,nullptr)!=size)return DBCE_SHIM_BAD_ARGUMENT;
+            }
             for(int a=0;a<8;++a){v.caps.axis[a]=(d.axis_mask&(1u<<a))!=0;v.caps.range_ok[a]=(d.range_mask&(1u<<a))!=0;v.caps.min[a]=d.minimum[a];v.caps.max[a]=d.maximum[a];}
             for(int b=0;b<128;++b)v.caps.button[b]=(d.button_mask[b/8]&(1u<<(b%8)))!=0;
             for(int p=0;p<4;++p)v.caps.pov[p]=(d.pov_mask&(1u<<p))!=0;
@@ -329,6 +338,13 @@ int32_t dbce_shim_bridge_devices(void* handle,const dbce_shim_bridge_device_v1* 
         }
         std::string why;return s->bridge->devices(copied,why)?DBCE_SHIM_OK:DBCE_SHIM_REFUSED;
     }catch(...){return DBCE_SHIM_REFUSED;}
+}
+int32_t dbce_shim_bridge_devices(void* handle,const dbce_shim_bridge_device_v1* devices,int32_t count){
+    return bridge_devices_impl(handle,devices,count,nullptr);
+}
+int32_t dbce_shim_bridge_devices_with_paths(void* handle,const dbce_shim_bridge_device_v1* devices,int32_t count,const wchar_t* const* paths){
+    if(count && !paths)return DBCE_SHIM_BAD_ARGUMENT;
+    return bridge_devices_impl(handle,devices,count,paths);
 }
 int32_t dbce_shim_bridge_tick(void* handle,const dbce_shim_bridge_sample_v1* samples,int32_t count,dbce_shim_frame* frame){
     Shim* s=nullptr;if(const auto r=lookup(handle,s))return r;

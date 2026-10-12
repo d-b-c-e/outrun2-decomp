@@ -17,7 +17,11 @@ BridgeDevice device(std::uint64_t generation=1){BridgeDevice d;d.identity={W,P,"
 BridgeSample sample(std::uint64_t sequence,std::int64_t end,std::uint64_t generation=1){BridgeSample s;s.source={generation,sequence,end-10,end};s.poll=s.state=Call::Ok;s.raw.axes[0]=32768;return s;}
 void provider(){
     std::int64_t now=1000000;BridgeProvider p([&]{return now;});std::string why;
-    auto d=device();check(p.devices({d},why),"qualified device");auto opened=p.open(d.identity);check(opened.ok,"memory lease");
+    auto d=device();d.identity.interface_path="\\\\?\\hid#owned-slot";
+    check(p.devices({d},why),"qualified device");auto opened=p.open(d.identity);check(opened.ok,"memory lease");
+    check(opened.opened.interface_path==d.identity.interface_path,"copied lease carries exact owned path");
+    auto changed=d;changed.identity.interface_path="\\\\?\\hid#another-slot";
+    check(!p.devices({changed},why),"path immutable within source generation");
     auto s=sample(1,now-20);check(p.samples({s},why),"first physical sample");s.raw.axes[0]=65535;RawState raw;SourceRead source;
     check(p.poll(opened.handle)==Call::Ok && p.state(opened.handle,raw)==Call::Ok && raw.axes[0]==32768,"input buffers copied");
     check(p.source_read(opened.handle,source)&&source.sequence==1&&source.end_us==now-20,"original provenance");
@@ -37,9 +41,11 @@ void provider(){
 }
 void core(){
     std::int64_t now=1000000;BridgeProvider p([&]{return now;});std::string why;Core c(p,{});c.set_profile(read_profile(Profile));
-    check(p.devices({device()},why),"core descriptors");c.service_devices();
+    auto d=device();d.identity.interface_path="\\\\?\\hid#core-owned-slot";
+    check(p.devices({d},why),"core descriptors");c.service_devices();
     check(p.samples({sample(1,now-200000)},why),"old original source accepted as evidence");
     const auto& old=c.tick();check(old.samples.size()==1&&old.samples[0].stale&&old.action[0].status==Status::Stale,"Core uses original age, not copy time");
+    check(c.device_reports()[0].identity.interface_path==d.identity.interface_path,"Core reports copied owned path");
     check(old.samples[0].source_generation==1&&old.samples[0].source_sequence==1&&old.samples[0].read_end_us==now-200000,"Core retains source sequence and epoch");
     check(p.samples({sample(2,now)},why),"fresh physical read");const auto& fresh=c.tick();check(fresh.action[0].status==Status::Live,"fresh centre Live");
     now+=10000;auto right=sample(3,now);right.raw.axes[0]=65535;check(p.samples({right},why)&&c.tick().action[0].value==1.f,"resolver drives endpoint");
@@ -57,11 +63,18 @@ void abi(){
     dbce_shim_bridge_device_v1 d{};d.struct_size=sizeof(d);d.abi=1;d.generation=1;d.axis_mask=d.range_mask=1;d.maximum[0]=65535;
     const GUID wg={0xd71b8350,0x61b7,0x11f1,{0x80,1,0x44,0x45,0x53,0x54,0,0}},pg={0x0006346e,0,0,{0,0,0x50,0x49,0x44,0x56,0x49,0x44}};
     std::memcpy(d.instance,&wg,16);std::memcpy(d.product,&pg,16);
-    check(dbce_shim_bridge_devices(h,&d,1)==DBCE_SHIM_OK,"copied ABI descriptors");
+    check(dbce_shim_bridge_devices_with_paths(h,&d,1,nullptr)==DBCE_SHIM_BAD_ARGUMENT,"path list required");
+    const wchar_t* bad[]={L""};check(dbce_shim_bridge_devices_with_paths(h,&d,1,bad)==DBCE_SHIM_BAD_ARGUMENT,"empty path refused atomically");
+    wchar_t path[]=L"\\\\?\\hid#copied-owned-slot";const wchar_t* paths[]={path};
+    check(dbce_shim_bridge_devices_with_paths(h,&d,1,paths)==DBCE_SHIM_OK,"copied ABI descriptors and paths");
+    path[8]=L'X';check(dbce_shim_bridge_devices_with_paths(h,&d,1,paths)==DBCE_SHIM_REFUSED,"source path immutable");
     dbce_shim_frame f{};f.struct_size=sizeof(f);check(dbce_shim_tick(h,&f)==DBCE_SHIM_BAD_ARGUMENT,"base tick refuses copied handle");
     dbce_shim_bridge_sample_v1 s{};s.struct_size=sizeof(s);s.abi=1;s.generation=1;s.valid=1;s.axes[0]=32768;
     bool live=false;for(int i=0;i<400&&!live;++i){++s.sequence;s.read_start_us=s.read_end_us=clock_us();check(dbce_shim_bridge_tick(h,&s,1,&f)==DBCE_SHIM_OK,"copied ABI tick");live=f.action[0].status==uint8_t(Status::Live);if(!live)Sleep(5);}
-    check(live,"bridge Host reaches Live");check(dbce_shim_bridge_tick(h,&s,1,&f)==DBCE_SHIM_REFUSED,"ABI repeat refused");
+    check(live,"bridge Host reaches Live");
+    char reports[4096]{};int needed=0;check(dbce_shim_device_reports(h,reports,sizeof(reports),&needed)==DBCE_SHIM_OK &&
+        std::string(reports).find("hid#copied-owned-slot")!=std::string::npos,"owned interfacePath JSON retained copied bytes");
+    check(dbce_shim_bridge_tick(h,&s,1,&f)==DBCE_SHIM_REFUSED,"ABI repeat refused");
     int other=0;std::thread([&]{other=dbce_shim_bridge_tick(h,nullptr,0,&f);}).join();check(other==DBCE_SHIM_WRONG_THREAD,"owner thread retained");
     check(dbce_shim_bridge_tick(h,nullptr,0,&f)==DBCE_SHIM_OK&&f.action[0].value==0,"missing next physical read neutral");
     check(dbce_shim_stop(h,why,sizeof(why),nullptr)==DBCE_SHIM_OK,"bridge Host resolved stop");

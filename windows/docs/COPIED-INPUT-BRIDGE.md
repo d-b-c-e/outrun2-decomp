@@ -69,3 +69,29 @@ Art identity-based Rewired isolation and explicit startup/profile Apply.
 Existing Art menu/shifter/shortcut consumers stay legacy; only five driving
 axes have a shared-frame sink. The first rig work must be serialized, backed up,
 muted and exact-restorable; accepted Art v2 force tune and captures stay fixed.
+
+## Exact owned interface paths (additive follow-on)
+
+The direct-provider metadata change `f49cfc5` is included here as `1e88feb`.
+`DeviceInfo.interface_path` flows through the adopted epoch into the additive
+`interfacePath` device-report JSON field. An unadopted/failed epoch reports an
+empty path. The copied provider uses the same Core field and thread ownership.
+
+New optional export `dbce_shim_bridge_devices_with_paths(handle, devices, count,
+paths)` copies the original 144-byte metadata batch and a corresponding array
+of nonempty UTF-16 paths in one atomic submission. Each path is at most 259 code
+units and must convert strictly to UTF-8. Metadata, including path, is immutable
+within a source generation. Bad/missing/changed paths refuse the entire batch;
+no partial metadata is published. The source must obtain each path from the
+same qualified owned handle/generation, not infer it from enumeration labels.
+
+Base ABI 2, extension version 1, both wire structs and all old exports are
+unchanged. Original `dbce_shim_bridge_devices` continues to publish unavailable
+(empty) paths. It is compatible but cannot supply an exact cross-namespace
+DirectInput/RawInput identity proof. No new device/force ownership is added.
+
+Targeted CTest `shim`, `shim_abi`, `shim_bridge` passes 3/3. The copied suite
+passes 46 checks, including atomic path validation, immutable generations,
+copied input buffers, Core path reporting and JSON publication. Art's fake-source
+actual DLL tests pass 431 checks on .NET8 and Unity Mono, exercising both the
+original metadata export and the new path export. No real path/device was opened.

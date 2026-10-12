@@ -5,7 +5,7 @@
 namespace dbce::shim {
 namespace {
 bool same_caps(const ObjectCaps& a,const ObjectCaps& b){return a.axis==b.axis && a.range_ok==b.range_ok && a.min==b.min && a.max==b.max && a.button==b.button && a.pov==b.pov;}
-bool same_device(const BridgeDevice& a,const BridgeDevice& b){return a.identity.dev==b.identity.dev && a.identity.prod==b.identity.prod && a.generation==b.generation && same_caps(a.caps,b.caps);}
+bool same_device(const BridgeDevice& a,const BridgeDevice& b){return a.identity.dev==b.identity.dev && a.identity.prod==b.identity.prod && a.identity.interface_path==b.identity.interface_path && a.generation==b.generation && same_caps(a.caps,b.caps);}
 bool valid_guid(const std::string& s){
     if(s.size()!=38 || s.front()!='{' || s.back()!='}')return false;
     bool nonzero=false;
