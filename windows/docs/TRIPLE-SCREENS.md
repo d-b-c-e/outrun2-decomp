@@ -85,10 +85,54 @@ Status 2026-10-12: design only.
 - Only the rig's real three monitors test Separate monitors (owner-attended, STD-015 "verify both topologies at the
   rig"). A muted unattended run can check passes, counters and screenshots, not the angles.
 
-## Questions for review
+## Review outcome (nene 30120 / 30125, romi 30139, 2026-10-12)
 
-1. Order: the planar span (2) first as the parity floor and fallback, then the three views (4)? Or skip straight to
-   4 and keep planar only as the fallback?
-2. Step 3: a centre viewport for all 2D, or the HUD width variable?
-3. Step 4 math: transcribe the managed calculator here with the toolkit fixtures, or build the native ABI first?
-4. Does STD-030 require the selector in the F6 panel now, or is the INI key enough until the panel lands (ROADMAP 2a)?
+- **Order**: 2 then 4. Keep step 2 minimal; it carries prerequisites (aspect as a value, the span window).
+  - Then an early step-4 spike at the rig, spike-first: the pinned toolkit fixture rig hard-coded, three passes, a
+    pass counter.
+  - The owner's geometry (romi): 32 inch 1500R, visible chord 708.4 x 398.5 mm, eye 660 mm, sides 70 degrees, gap 8
+    mm. Name any difference from the fixture.
+  - No rig UI or per-view polish before the first picture.
+- **2D**: the centre's viewport and the centre's layout extent together.
+  - Before the pass split, classify every reader of [740C8C] / [740C90] as per-pass or centre-only: the 2D flush,
+    418CF0 particles, the flare, and any others.
+- **Math**: one isolated, self-contained translation of the pinned toolkit geometry.
+  - Shape it like the future native ABI's neutral outputs (per-panel bounds from rig + eye).
+  - Test it against the toolkit's fixture values to 1e-9.
+  - No new native ABI first.
+- **Panel**: the INI key complies now (STD-022). The F6 selector and status are needed before full parity is claimed.
+- **Default** Off, INI only, for the spike (performance first). An explicit selection is preserved. No silent owner-INI
+  or default migration. The owner install stays untouched until a visual / perf result.
+- **Off on a wide window** is an unstretched single view: 16:9 centred, black sides.
+- **Window**:
+  - per-monitor-DPI physical pixels (negative x for the left monitor);
+  - no display-mode or topology change;
+  - the swap chain follows the client size.
+  - The first rig spike captures a frame (WGC) in whatever window mode it uses.
+- **Logs**:
+  - actual passes and per-pass CPU from the first spike;
+  - while gated (menus, rig invalid), a periodic line saying why the views are off;
+  - status "planar" for step 2, "three-projections" only from counted passes.
+- **Budget**: "PC scene render_frame" was 5.5 ms per frame (P5-lat2). Three plain replays are about 16.5 ms, so they
+  would miss 60 fps unless side passes cull more, or the replay is shared or parallel. Measure before any default.
+- **STD-019 coverage**: also the title movie and the loading pictures (the START loading picture is a full-screen 2D
+  draw).
+- **Unattended checks**: source angles and rendered seams can be checked unattended. Physical comfort waits for the
+  owner.
+
+## Presentation path today (read 2026-10-12, shapes steps 1 and 2)
+
+- `renderer_present.inc` composes a fixed 1280x720 virtual frame:
+  - the PC frame centred at 16:9 or 4:3;
+  - the title movie at 4:3;
+  - the frontend and loading quads.
+- `D3D11Display::clear` maps that frame over the **whole** swap chain (`d3d11_display.cpp:123`), so any window that
+  is not 16:9 is stretched. Off on a 48:9 window is a 3x stretch today.
+- Step 1 fits the frame into the centred 16:9 rectangle of the swap chain (black elsewhere); for three equal monitors
+  that is exactly the centre one. Step 2 widens only the PC frame to the full window during gameplay.
+- The PC device already draws pretransformed (2D) batches into a centred 4:3 of its back buffer (`ui_rect`,
+  `d3d11_d3d9.cpp:455`). Under a planar span the race HUD therefore stays inside the centre monitor with no change.
+  418CF0's screen-space particles go through the same path, and their placement at the span needs a check.
+- The width the camera sees is re-applied every frame from `game_host.cpp:427`, so it can follow gameplay versus
+  menus. The back buffer size cannot follow cheaply: `resize_back_buffer` is not per-mode. In step 2, menus therefore
+  keep the full-width 3D background until the gating is designed (STD-019 open item).

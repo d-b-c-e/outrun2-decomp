@@ -19,6 +19,7 @@
 #include <iterator>
 #include <algorithm>
 #include "desktop_settings.hpp"
+#include "triple_screens.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "test_fence.hpp"
@@ -33,6 +34,13 @@
 namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true;
+outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
+BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
+    MONITORINFO i{};i.cbSize=sizeof i;
+    if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
+        {i.rcMonitor.left,i.rcMonitor.top,i.rcMonitor.right,i.rcMonitor.bottom});
+    return TRUE;
+}
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
@@ -57,14 +65,30 @@ NativeWindow& native_window(){
     WNDCLASSW c{};c.lpfnWndProc=window_proc;c.hInstance=instance;c.lpszClassName=L"OutRunDesktop";c.hCursor=LoadCursor(nullptr,IDC_ARROW);
     c.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));
     RegisterClassW(&c);
+    namespace td=outrun::desktop;
+    std::string span_note;
     if(borderless){
         MONITORINFO m{};m.cbSize=sizeof m;
         GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m);
-        const RECT r=m.rcMonitor;
+        RECT r=m.rcMonitor;
+        // Separate monitors (STD-015): the window over three equal side-by-side monitors, in physical pixels (the process
+        // is per-monitor DPI aware; the left monitor's x is negative). No display mode or layout is ever changed.
+        if(triple==td::TripleScreens::separate){
+            std::vector<td::ScreenRect> monitors;EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&monitors));
+            td::ScreenRect span{};
+            if(td::triple_span_from_monitors(monitors,span)){r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";}
+            else span_note=std::string("refused: ")+td::triple_span_refusal(monitors)+" ("+std::to_string(monitors.size())+
+                           " found); the primary monitor";
+        }
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
+        if(span_note.empty())span_note="the primary monitor";
+        std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centred%s\n",td::triple_screens_name(triple),
+                    w.width,w.height,r.left,r.top,span_note.c_str(),triple==td::TripleScreens::off?"":" (the wide views are not implemented yet)");
     }else{
+        if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
+                                                      "no --windowed); one 16:9 view\n",td::triple_screens_name(triple));
         RECT r{0,0,1280,720};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,
                              r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
@@ -91,6 +115,7 @@ unsigned select_refresh_rate(unsigned){
     return EnumDisplaySettingsW(info.szDevice,ENUM_CURRENT_SETTINGS,&mode)&&mode.dmDisplayFrequency>1?unsigned(mode.dmDisplayFrequency):60u;
 }
 void set_borderless(bool on){borderless=on;}
+void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
 }
 // A crash writes its address and the return addresses on the stack (as
 // offsets in the executable, for llvm-symbolizer with the PDB) to runtime.log.
@@ -146,6 +171,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
+    // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
+    // start (the window opens once). Anything else is logged and Off applies. A latched (test) process keeps Off: a
+    // display preference must not reach the harness, as with FrameLatency. windows/docs/TRIPLE-SCREENS.md.
+    {   const auto text=settings.text("Triple","Screens");
+        const auto mode=outrun::desktop::parse_triple_screens(text);
+        if(mode&&!plan.latched)outrun::xbox_runtime::set_triple_screens(*mode);
+        else if(mode&&*mode!=outrun::desktop::TripleScreens::off)std::printf("settings: [Triple] Screens = %s not applied in a test process; Off\n",
+                                                                       outrun::desktop::triple_screens_name(*mode));
+        else if(!mode&&!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
