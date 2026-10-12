@@ -1,5 +1,8 @@
 // The F4 delivery gates (source/ffb_device) against a fake WheelFfb library: what reaches the library, in which order,
-// and that nothing reaches it when a gate is closed. No device, no DLL.
+// and that nothing reaches it when a gate is closed. The fake keeps what a real library would hold: the magnitude the
+// wheel last accepted (a refused command or zero leaves it), the hold watchdog's worker, the exit guards' window
+// subclass and its DirectInput state, so every case can check that silence is real and that the end state is safe to
+// unload. No device, no DLL.
 #define DIRECTINPUT_VERSION 0x0800
 #include "ffb_device.hpp"
 #include <dinput.h>
@@ -13,13 +16,16 @@ static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"ffb delivery line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 namespace {
 const std::string Steer="{d71b8350-61b7-11f1-8001-444553540000}";      // the MOZA R12 Base instance of the rig logs
+const std::string SteerUpper="{D71B8350-61B7-11F1-8001-444553540000}";
 const std::string Other="{d9b1d890-6f3f-11f1-8002-444553540000}";
 struct Fake {
     std::vector<std::string> log;
-    int version=1000,init=1;
+    int version=1000,init=1,guards=1;
     std::deque<int> forces;          // results of SetDeviceForcesXY in order (1 when empty)
     long hr=0;                       // what GetLastHResult returns
     std::vector<std::string> devices{Steer};
+    int wheel=0;                     // the magnitude the wheel holds: only an accepted command changes it
+    bool di{},worker{},subclass{};   // library state: DirectInput, the hold watchdog's thread, the window subclass
 };
 Fake F;
 GUID guid_of(const std::string& s){GUID g{};parse_guid(s,g);return g;}
@@ -30,27 +36,28 @@ std::string text(const GUID& g){
 }
 void note(const std::string& s){F.log.push_back(s);}
 int __cdecl Version(){note("GetWheelFfbVersion");return F.version;}
-void __cdecl Hold(int ms){note("SetHoldTimeoutMs "+std::to_string(ms));}
+void __cdecl Hold(int ms){note("SetHoldTimeoutMs "+std::to_string(ms));if(ms>0)F.worker=true;}
 void __cdecl Preferred(const char* n){note(std::string("SetPreferredDevice ")+(n?n:"null"));}
 void __cdecl PreferredIndex(int i){note("SetPreferredDeviceIndex "+std::to_string(i));}
 void __cdecl PreferredGuid(const void* g){note("SetPreferredDeviceGuid "+text(*static_cast<const GUID*>(g)));}
 void __cdecl Strict(int on){note("SetStrictDeviceSelection "+std::to_string(on));}
-int __cdecl Enumerate(){note("EnumerateDevices");return int(F.devices.size());}
+int __cdecl Enumerate(){note("EnumerateDevices");F.di=true;return int(F.devices.size());}
 int __cdecl DeviceGuid(int i,void* g){
     if(i<0||i>=int(F.devices.size()))return 0;
     *static_cast<GUID*>(g)=guid_of(F.devices[std::size_t(i)]);return 1;
 }
-int __cdecl Init(int hwnd){note("InitDirectInput "+std::to_string(hwnd));return F.init;}
-int __cdecl Guards(){note("InstallExitGuards");return 1;}
+int __cdecl Init(int hwnd){note("InitDirectInput "+std::to_string(hwnd));F.di=true;return F.init;}
+int __cdecl Guards(){note("InstallExitGuards");if(F.guards)F.subclass=true;return F.guards;}
 int __cdecl Forces(int x,int y){
     note("SetDeviceForcesXY "+std::to_string(x)+" "+std::to_string(y));
-    if(F.forces.empty())return 1;
-    const int r=F.forces.front();F.forces.pop_front();return r;
+    int r=1;if(!F.forces.empty()){r=F.forces.front();F.forces.pop_front();}
+    if(r==1)F.wheel=x;               // refused: the wheel keeps what it held
+    return r;
 }
 int __cdecl LastHr(){return int(F.hr);}
 void __cdecl Zero(){note("ZeroForces");}
-void __cdecl Panic(){note("PanicStop");}
-void __cdecl Free(){note("FreeDirectInput");}
+void __cdecl Panic(){note("PanicStop");F.wheel=0;}
+void __cdecl Free(){note("FreeDirectInput");F.wheel=0;F.di=F.worker=F.subclass=false;}
 WheelFfbApi api(){
     WheelFfbApi a{};
     a.GetWheelFfbVersion=Version;a.SetHoldTimeoutMs=Hold;a.SetPreferredDevice=Preferred;a.SetPreferredDeviceIndex=PreferredIndex;
@@ -63,27 +70,35 @@ Config on(){Config c;c.output=true;c.steer_dev=Steer;return c;}
 Sample race(std::uint64_t ms,bool front=true,const std::string& dev=Steer){Sample s;s.race=true;s.front=front;s.hwnd=reinterpret_cast<void*>(0x1234);s.steer_dev=dev;s.ms=ms;return s;}
 Sample menu(std::uint64_t ms){Sample s=race(ms);s.race=false;return s;}
 void reset(){F=Fake{};}
-// The log from entry `from` on.
+using Lines=std::vector<std::string>;
 std::vector<std::string> since(std::size_t from){return {F.log.begin()+std::ptrdiff_t(from),F.log.end()};}
-bool device_calls(const std::vector<std::string>& v){
-    for(const auto& s:v)if(s.rfind("InitDirectInput",0)==0||s.rfind("SetDeviceForcesXY",0)==0||s.rfind("ZeroForces",0)==0||
-        s.rfind("PanicStop",0)==0||s.rfind("FreeDirectInput",0)==0||s.rfind("InstallExitGuards",0)==0)return true;
+bool device_calls(const Lines& v){
+    for(const auto& s:v)for(const char* k:{"InitDirectInput","SetDeviceForcesXY","ZeroForces","PanicStop","FreeDirectInput","InstallExitGuards","SetHoldTimeoutMs"})
+        if(s.rfind(k,0)==0)return true;
     return false;
 }
-using Lines=std::vector<std::string>;
+// What the gate believes must hold on the fake wheel; and the library holds nothing once it stopped or released.
+void invariant(const Delivery& d){
+    if(d.silent())CHECK(F.wheel==0);
+    if(d.phase()==Phase::Released||d.phase()==Phase::Stopped)CHECK(!F.di&&!F.worker&&!F.subclass&&F.wheel==0);
+    for(const auto& s:F.log)CHECK(s!="ZeroForces");     // void ZeroForces is never relied on
+}
+void step(Delivery& d,const Sample& s,std::int32_t c){d.frame(s,c);invariant(d);}
 const Lines OpenSequence{"SetPreferredDevice null","SetPreferredDeviceIndex -1","SetPreferredDeviceGuid "+Steer,
-    "SetStrictDeviceSelection 1","EnumerateDevices","InitDirectInput 4660","InstallExitGuards","SetDeviceForcesXY 0 0"};
-// A started delivery opened on the first race sample; the log is cleared after the open.
+    "SetStrictDeviceSelection 1","EnumerateDevices","InitDirectInput 4660","InstallExitGuards","SetHoldTimeoutMs 250",
+    "SetDeviceForcesXY 0 0"};
+// A started delivery opened on the first race sample (at 0 ms, command 0); the log is cleared after the open.
 Delivery opened(){
-    reset();Delivery d;CHECK(d.start(api(),on()));d.frame(race(0),0);
-    CHECK(d.phase()==Phase::Open);F.log.clear();
+    reset();Delivery d;CHECK(d.start(api(),on()));step(d,race(0),0);
+    CHECK(d.phase()==Phase::Open&&d.silent()&&F.worker&&F.subclass);F.log.clear();
     return d;
 }
+void finish(Delivery& d){d.shutdown();invariant(d);CHECK(!F.di&&!F.worker&&!F.subclass&&F.wheel==0);}
 }
 int main(){
     // GUID text: braces, dashes, hex; nothing else.
     {GUID g{};CHECK(parse_guid(Steer,g)&&text(g)==Steer);
-     CHECK(parse_guid("{D71B8350-61B7-11F1-8001-444553540000}",g)&&text(g)==Steer);
+     CHECK(parse_guid(SteerUpper,g)&&text(g)==Steer);
      for(const char* bad:{"","d71b8350-61b7-11f1-8001-444553540000","{d71b8350-61b7-11f1-8001-44455354000}","{d71b8350-61b7-11f1-8001-4445535400000}",
                           "{d71b8350x61b7-11f1-8001-444553540000}","{g71b8350-61b7-11f1-8001-444553540000}"})CHECK(!parse_guid(bad,g));}
 
@@ -94,101 +109,123 @@ int main(){
      c=on();c.latched=true;CHECK(load_refusal(c)=="a latched (test) process");
      c=on();c.steer_dev.clear();CHECK(!load_refusal(c).empty());
      c=on();c.steer_dev="MOZA R12 Base";CHECK(!load_refusal(c).empty());
-     // A start under a refusal calls nothing, and frames stay silent.
      reset();Delivery d;c=on();c.muted=true;CHECK(!d.start(api(),c)&&d.phase()==Phase::Off&&F.log.empty());
-     d.frame(race(0),5000);d.shutdown();CHECK(F.log.empty());}
+     step(d,race(0),5000);d.shutdown();CHECK(F.log.empty());}
 
-    // start: every export used, a 0.9.0 or newer library, then the hold watchdog; no device.
+    // start: every export used and a 0.9.0 or newer library; no library state at all (no watchdog before an open).
     {reset();Delivery d;CHECK(d.start(api(),on())&&d.phase()==Phase::Waiting);
-     CHECK((F.log==Lines{"GetWheelFfbVersion","SetHoldTimeoutMs 250"}));
-     reset();WheelFfbApi a=api();a.ZeroForces=nullptr;CHECK(!d.start(a,on())&&d.phase()==Phase::Released&&d.why()=="WheelFfb.dll has no ZeroForces");
-     CHECK(F.log.empty());
-     reset();F.version=899;CHECK(!d.start(api(),on())&&d.phase()==Phase::Released&&!device_calls(F.log));
-     d.frame(race(0),5000);CHECK(!device_calls(F.log));}
+     CHECK((F.log==Lines{"GetWheelFfbVersion"})&&!F.worker&&!F.di);
+     CHECK(!d.start(api(),on())&&d.why()=="started twice"&&d.phase()==Phase::Waiting);   // a second start is refused
+     finish(d);CHECK((F.log==Lines{"GetWheelFfbVersion"}));                                 // never opened: nothing owed
+     reset();WheelFfbApi a=api();a.FreeDirectInput=nullptr;Delivery e;
+     CHECK(!e.start(a,on())&&e.phase()==Phase::Released&&e.why()=="WheelFfb.dll has no FreeDirectInput"&&F.log.empty());
+     reset();F.version=899;Delivery v;CHECK(!v.start(api(),on())&&v.phase()==Phase::Released&&!device_calls(F.log));
+     step(v,race(0),5000);CHECK(!device_calls(F.log));}
 
-    // open: only in the race, in front, with the input layer reading the configured instance; then the exact order.
+    // open: only in the race, in front, with the input layer reading the configured instance (any case); exact order.
     {reset();Delivery d;CHECK(d.start(api(),on()));const auto base=F.log.size();
-     d.frame(menu(0),0);d.frame(race(1,false),3000);d.frame(race(2,true,""),3000);d.frame(race(3,true,Other),3000);
+     step(d,menu(0),0);step(d,race(1,false),3000);step(d,race(2,true,""),3000);step(d,race(3,true,Other),3000);step(d,race(4,true,"steer"),3000);
      CHECK(d.phase()==Phase::Waiting&&since(base).empty());
-     d.frame(race(4),3000);
+     step(d,race(5,true,SteerUpper),3000);
      Lines want=OpenSequence;want.push_back("SetDeviceForcesXY 3000 0");
-     CHECK(since(base)==want&&d.phase()==Phase::Open);
-     CHECK(d.counts().sent==1&&d.counts().zeroes==1);}
+     CHECK(since(base)==want&&d.phase()==Phase::Open&&F.wheel==3000);
+     CHECK(d.counts().sent==1&&d.counts().zeroes==1);
+     finish(d);CHECK((since(base+want.size())==Lines{"PanicStop","FreeDirectInput"}));}
 
-    // open refusals: not a force-feedback device, a refused open, a refused starting zero: released, never a command.
-    {reset();F.devices={Other};Delivery d;CHECK(d.start(api(),on()));d.frame(race(0),3000);
-     CHECK(d.phase()==Phase::Released&&!device_calls(F.log));
-     d.frame(race(1),3000);CHECK(!device_calls(F.log));}
-    {reset();F.init=0;F.hr=DIERR_NOTEXCLUSIVEACQUIRED;Delivery d;CHECK(d.start(api(),on()));d.frame(race(0),3000);
-     CHECK(d.phase()==Phase::Released);
-     CHECK(F.log.back()=="FreeDirectInput"&&F.log[F.log.size()-2]=="ZeroForces");   // a refused open is freed
-     for(const auto& s:F.log)CHECK(s.rfind("SetDeviceForcesXY",0)!=0);
-     const auto n=F.log.size();d.frame(race(1),3000);d.shutdown();CHECK(F.log.size()==n);}   // released: final
-    {reset();F.forces={0};F.hr=DIERR_INPUTLOST;Delivery d;CHECK(d.start(api(),on()));d.frame(race(0),3000);
+    // open refusals: not a force-feedback device, a refused open, no exit guards, a refused starting zero: released,
+    // never a command, the library emptied.
+    {reset();F.devices={Other};Delivery d;CHECK(d.start(api(),on()));step(d,race(0),3000);
+     CHECK(d.phase()==Phase::Released&&F.log.back()=="FreeDirectInput");
+     for(const auto& s:F.log)CHECK(s.rfind("InitDirectInput",0)!=0&&s.rfind("PanicStop",0)!=0);
+     const auto n=F.log.size();step(d,race(1),3000);finish(d);CHECK(F.log.size()==n);}
+    {reset();F.init=0;F.hr=DIERR_NOTEXCLUSIVEACQUIRED;Delivery d;CHECK(d.start(api(),on()));step(d,race(0),3000);
+     CHECK(d.phase()==Phase::Released&&F.log.back()=="FreeDirectInput");
+     for(const auto& s:F.log)CHECK(s.rfind("SetDeviceForcesXY",0)!=0&&s.rfind("InstallExitGuards",0)!=0);
+     const auto n=F.log.size();step(d,race(1),3000);finish(d);CHECK(F.log.size()==n);}
+    {reset();F.guards=0;Delivery d;CHECK(d.start(api(),on()));step(d,race(0),3000);
+     CHECK(d.phase()==Phase::Released&&(since(F.log.size()-3)==Lines{"InstallExitGuards","PanicStop","FreeDirectInput"}));
+     for(const auto& s:F.log)CHECK(s.rfind("SetDeviceForcesXY",0)!=0&&s.rfind("SetHoldTimeoutMs",0)!=0);}
+    {reset();F.forces={0};F.hr=DIERR_INPUTLOST;Delivery d;CHECK(d.start(api(),on()));step(d,race(0),3000);
      CHECK(d.phase()==Phase::Released);   // even a transient refusal of the starting zero is a failed open
-     int nonzero=0;for(const auto& s:F.log)if(s.rfind("SetDeviceForcesXY",0)==0&&s!="SetDeviceForcesXY 0 0")++nonzero;
-     CHECK(nonzero==0&&F.log.back()=="FreeDirectInput");}
+     CHECK((since(F.log.size()-3)==Lines{"SetDeviceForcesXY 0 0","PanicStop","FreeDirectInput"}));}
 
-    // force: every race sample sends the command (the held value too: the hold watchdog needs the refresh), clamped.
+    // force: a change goes out at once; the held value again every 100 ms (the hold watchdog's refresh); clamped.
     {Delivery d=opened();
-     d.frame(race(10),2500);d.frame(race(20),2500);d.frame(race(30),20000);d.frame(race(40),-20000);
-     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 2500 0","SetDeviceForcesXY 10000 0","SetDeviceForcesXY -10000 0"}));}
+     step(d,race(10),2500);step(d,race(20),2500);step(d,race(109),2500);step(d,race(110),2500);step(d,race(120),2600);
+     step(d,race(130),20000);step(d,race(140),-20000);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 2500 0","SetDeviceForcesXY 2600 0",
+                         "SetDeviceForcesXY 10000 0","SetDeviceForcesXY -10000 0"}));
+     CHECK(d.counts().keepalive==1&&F.wheel==-10000&&!d.silent());
+     finish(d);}
 
-    // out of the race (pause, menus): one zero, then nothing; back in, an accepted zero before the command.
+    // out of the race (pause, menus): an accepted zero, then nothing; back in, an accepted zero before the command.
     {Delivery d=opened();
-     d.frame(race(10),2500);d.frame(menu(20),2500);d.frame(menu(30),2500);d.frame(race(40),2600);
-     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","ZeroForces","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2600 0"}));
-     // already silent: no ZeroForces, but still the accepted zero on return
-     F.log.clear();d.frame(race(50),0);d.frame(menu(60),0);d.frame(race(70),100);
-     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 100 0"}));}
+     step(d,race(10),2500);step(d,menu(20),2500);step(d,menu(30),2500);step(d,race(40),2600);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2600 0"}));
+     // already silent: no zero on the way out, still one on the way back
+     F.log.clear();step(d,race(150),0);step(d,menu(160),0);step(d,menu(170),0);step(d,race(180),100);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 100 0"}));
+     finish(d);}
 
-    // out of front: the same; nothing at all while behind another window.
+    // out of front: the same; a refused zero (the handle lost with the focus) is retried every sample, and the device
+    // is released when none is accepted within 2 s; the wheel never counts as silent before that.
     {Delivery d=opened();
-     d.frame(race(10),2500);d.frame(race(20,false),2500);d.frame(race(30,false),2500);d.frame(race(40),2500);
-     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","ZeroForces","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0"}));}
-
-    // a transient refusal: zero, then accepted zeros only; the recovery clock counts only time in the race and in front.
-    {Delivery d=opened();
-     F.forces={0};F.hr=DIERR_NOTACQUIRED;
-     d.frame(race(10),2500);CHECK(d.phase()==Phase::Recovering&&d.counts().transient==1);
-     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","ZeroForces"}));
-     F.log.clear();F.forces={0,0};
-     d.frame(race(20),2500);d.frame(race(1500),2500);       // two refused zeros, 1.48 s of the 2 s
-     d.frame(race(1600,false),2500);d.frame(race(9000,false),2500);   // out of front: the clock stops and restarts
-     d.frame(race(9010),2500);                               // accepted zero, then this sample's command
-     CHECK((F.log==Lines{"SetDeviceForcesXY 0 0","ZeroForces","SetDeviceForcesXY 0 0","ZeroForces",
+     step(d,race(10),2500);F.forces={0,0};F.hr=DIERR_NOTACQUIRED;
+     step(d,race(20,false),2500);CHECK(!d.silent()&&F.wheel==2500);
+     step(d,race(30,false),2500);CHECK(!d.silent()&&F.wheel==2500);
+     step(d,race(40,false),2500);CHECK(d.silent()&&F.wheel==0&&d.counts().recoveries==1);   // accepted at last
+     step(d,race(50,false),2500);step(d,race(60),2500);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0",
                          "SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0"}));
-     CHECK(d.phase()==Phase::Open&&d.counts().recoveries==1);}
+     finish(d);}
     {Delivery d=opened();
-     F.forces={0,0,0,0};F.hr=DIERR_NOTDOWNLOADED;
-     d.frame(race(10),2500);d.frame(race(20),2500);d.frame(race(1000),2500);d.frame(race(2019),2500);
-     CHECK(d.phase()==Phase::Recovering);
-     F.log.clear();d.frame(race(2020),2500);                 // 2 s of refused zeros: released without another try
-     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"ZeroForces","FreeDirectInput"}));
-     F.log.clear();d.frame(race(2030),2500);d.shutdown();CHECK(F.log.empty());}
+     step(d,race(10),2500);F.forces={0,0,0,0,0,0,0,0};F.hr=DIERR_NOTEXCLUSIVEACQUIRED;
+     for(std::uint64_t t=20;t<2020;t+=500)step(d,race(t,false),2500);
+     CHECK(d.phase()==Phase::Open&&!d.silent()&&F.wheel==2500);
+     step(d,race(2020,false),2500);                                          // 2 s after the first refused zero
+     CHECK(d.phase()==Phase::Released&&(since(F.log.size()-2)==Lines{"PanicStop","FreeDirectInput"})&&F.wheel==0);
+     const auto n=F.log.size();step(d,race(2030),2500);finish(d);CHECK(F.log.size()==n);}
+
+    // a transient refusal of a command in the race: the wheel holds the old force, so an accepted zero comes first.
+    {Delivery d=opened();
+     step(d,race(10),2500);F.forces={0,0};F.hr=DIERR_NOTDOWNLOADED;
+     step(d,race(20),3000);CHECK(F.wheel==2500&&!d.silent()&&d.counts().transient==1);
+     step(d,race(30),3000);CHECK(F.wheel==2500);                              // the zero refused too
+     step(d,race(40),3000);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 3000 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 0 0",
+                         "SetDeviceForcesXY 3000 0"}));
+     CHECK(F.wheel==3000&&d.counts().recoveries==1);
+     finish(d);}
 
     // any other refusal releases at once.
     {Delivery d=opened();
-     F.forces={0};F.hr=DIERR_INCOMPLETEEFFECT;
-     d.frame(race(10),2500);
-     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"SetDeviceForcesXY 2500 0","ZeroForces","FreeDirectInput"}));
-     F.log.clear();d.frame(race(20),2500);CHECK(F.log.empty());}
+     step(d,race(10),2500);F.forces={0};F.hr=DIERR_INCOMPLETEEFFECT;
+     step(d,race(20),3000);
+     CHECK(d.phase()==Phase::Released&&(since(F.log.size()-2)==Lines{"PanicStop","FreeDirectInput"}));
+     const auto n=F.log.size();step(d,race(30),2500);CHECK(F.log.size()==n);}
+
+    // a sampling gap longer than the hold (a stall): the library's watchdog may have stopped the wheel, so an
+    // accepted zero comes before the held value is sent again.
+    {Delivery d=opened();
+     step(d,race(10),2500);step(d,race(261),2500);step(d,race(262),2500);step(d,race(370),2500);
+     CHECK((F.log==Lines{"SetDeviceForcesXY 2500 0","SetDeviceForcesXY 0 0","SetDeviceForcesXY 2500 0","SetDeviceForcesXY 2500 0"}));
+     finish(d);}
 
     // one device epoch: the input layer losing or changing the steering device releases the open device.
     {Delivery d=opened();
-     d.frame(race(10,true,""),2500);
-     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"ZeroForces","FreeDirectInput"}));}
+     step(d,race(10),2500);step(d,race(20,true,""),2500);
+     CHECK(d.phase()==Phase::Released&&(since(F.log.size()-2)==Lines{"PanicStop","FreeDirectInput"}));}
     {Delivery d=opened();
-     d.frame(menu(10),0);F.log.clear();
-     Sample s=menu(20);s.steer_dev=Other;d.frame(s,0);       // also outside the race
-     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"ZeroForces","FreeDirectInput"}));}
+     step(d,menu(10),0);step(d,menu(20),0);F.log.clear();
+     Sample s=menu(30);s.steer_dev=Other;step(d,s,0);                           // also outside the race
+     CHECK(d.phase()==Phase::Released&&(F.log==Lines{"PanicStop","FreeDirectInput"}));}
+    {Delivery d=opened();step(d,race(10,true,SteerUpper),2500);CHECK(d.phase()==Phase::Open);finish(d);}   // same GUID
 
-    // shutdown: PanicStop then FreeDirectInput once for an opened device; nothing for one never opened.
-    {Delivery d=opened();d.frame(race(10),2500);F.log.clear();
-     d.shutdown();CHECK((F.log==Lines{"PanicStop","FreeDirectInput"})&&d.phase()==Phase::Stopped);
-     F.log.clear();d.shutdown();d.frame(race(20),2500);CHECK(F.log.empty());}
-    {reset();Delivery d;CHECK(d.start(api(),on()));F.log.clear();d.frame(menu(0),0);d.shutdown();
-     CHECK(F.log.empty()&&d.phase()==Phase::Stopped);}
+    // shutdown: PanicStop then FreeDirectInput once for an opened device; nothing again afterwards.
+    {Delivery d=opened();step(d,race(10),2500);F.log.clear();
+     d.shutdown();invariant(d);CHECK((F.log==Lines{"PanicStop","FreeDirectInput"})&&d.phase()==Phase::Stopped);
+     F.log.clear();d.shutdown();step(d,race(20),2500);CHECK(F.log.empty());
+     CHECK(!d.start(api(),on()));}                                                // and no restart
 
     std::printf("ffb delivery: %u checks\n",checks);
     return 0;

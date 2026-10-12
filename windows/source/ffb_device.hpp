@@ -4,19 +4,22 @@
 // wheel. The gates, in order; the first that fails keeps the wheel silent:
 //   load    Output = wheel; not DBCE_FFB_MUTE=1 (STD-035 item 8: the library stays unloaded); not a latched (test)
 //           process; [Controls] steer names a device instance (dev=); the DLL is 0.9.0 or newer and has every export
-//           used here.
+//           used here. No library state is created before the open.
 //   open    in the race and in front (an exclusive handle is not acquired behind another window, and the game never
 //           takes the focus), with the input layer reading that same instance as the steering device; the instance is
 //           one of the library's force-feedback devices; strict selection opens exactly it (never a name or an
-//           index); then an accepted zero (SetDeviceForcesXY(0, 0) returns 1) before anything else. One attempt per
-//           process.
-//   force   in the race and in front, every input sample sends the model's command (the held value while its
-//           deadband holds), so the library's hold watchdog (SetHoldTimeoutMs) silences the wheel once the game stops
-//           sampling (a stall, a hang). Outside the race or out of front: one zero, then nothing; back in, an accepted
-//           zero before the next command.
-//   errors  a transient refusal (acquisition lost, effect being recreated) zeroes and waits for an accepted zero, at
-//           most 2 s of tries in the race and in front; any other refusal, a change or loss of the steering device,
-//           or the end of those 2 s releases the device for the rest of the process.
+//           index); the exit guards install; the hold watchdog is set (SetHoldTimeoutMs); then an accepted zero
+//           (SetDeviceForcesXY(0, 0) returns 1) before anything else. One attempt per process.
+//   force   in the race and in front, a command goes out when it changes, and the held value again every 100 ms, so
+//           the library's 250 ms hold watchdog silences the wheel once the game stops sampling (a stall, a hang).
+//   silence only an accepted SetDeviceForcesXY(0, 0) counts (ZeroForces returns nothing, and clears the watchdog's
+//           record even when the stop failed). Out of the race or out of front, after a refused command, and after a
+//           sampling gap longer than the hold: an accepted zero, tried every sample, before the next command; none
+//           within 2 s releases the device. Any refusal other than the mod's transient set, or a change or loss of
+//           the steering device, releases at once. A release is final for the process.
+//   release and shutdown: PanicStop (when opened), then FreeDirectInput whenever the library was given a device
+//           selection: it stops the effects, removes the exit guards' window subclass and joins the watchdog, so the
+//           module may be unloaded afterwards (and only then).
 // Pure decisions over WheelFfbApi's function pointers: tests/test_ffb_delivery.cpp drives them with a fake library.
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -30,8 +33,9 @@
 #include <string>
 namespace outrun::desktop::ffbdev {
 inline constexpr int MinVersion=900;                // WheelFfb 0.9.0
-inline constexpr int HoldMs=250;                    // the library's hold watchdog
-inline constexpr std::uint64_t RecoveryMs=2000;     // tries for an accepted zero after a transient refusal
+inline constexpr int HoldMs=250;                    // the library's hold watchdog (it polls every 50 ms)
+inline constexpr std::uint64_t KeepAliveMs=100;     // the held value is sent again this often
+inline constexpr std::uint64_t SilenceMs=2000;      // an accepted zero is due within this
 struct Config {
     bool output{};             // [FFB] Output = wheel
     bool muted{};              // DBCE_FFB_MUTE=1
@@ -42,7 +46,7 @@ struct Config {
 std::string load_refusal(const Config&);
 // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", any case; nothing else.
 bool parse_guid(const std::string&,GUID&);
-enum class Phase { Off, Waiting, Open, Recovering, Released, Stopped };
+enum class Phase { Off, Waiting, Open, Released, Stopped };
 const char* phase_name(Phase);
 // One input sample of the game.
 struct Sample {
@@ -54,31 +58,38 @@ struct Sample {
 };
 class Delivery {
 public:
-    // After the load: the exports, the version and the hold watchdog; no device is touched. False: why().
+    // Once per process, after the load: the exports and the version; no device and no library state. False: why().
     bool start(const WheelFfbApi&,const Config&);
     // Once per input sample; `command` (DirectInput units, already x FFBGlobalStrength) is used in the race only.
     void frame(const Sample&,std::int32_t command);
-    // PanicStop and FreeDirectInput when a device was opened; the library is not called again.
+    // PanicStop when opened, FreeDirectInput when the library holds any state; the library is not called again.
     void shutdown();
     Phase phase()const{return phase_;}
     const std::string& why()const{return why_;}
-    struct Counts { std::uint32_t sent{},zeroes{},recoveries{},transient{}; };
+    bool silent()const{return silent_;}         // the last command the wheel accepted was zero
+    struct Counts { std::uint32_t sent{},zeroes{},recoveries{},transient{},keepalive{}; };
     const Counts& counts()const{return counts_;}
 private:
-    bool accept(int result);
+    bool same_device(const std::string&)const;
+    void open_device(const Sample&);
+    bool zero(const Sample&);
+    bool refused(const Sample&);
     void release(const std::string& why);
-    void open(const Sample&);
-    void zero_best_effort();
+    void quiesce();
     WheelFfbApi api_{};
     Config cfg_{};
     GUID guid_{};
     Phase phase_{Phase::Off};
     std::string why_;
-    bool opened_{};            // InitDirectInput was called: FreeDirectInput is owed
-    bool need_zero_{};         // the next command follows an accepted zero
-    bool silent_{true};        // the last thing the wheel was told is zero
-    bool recovering_clock_{};  // a focused recovery is timing
-    std::uint64_t recovery_start_{};
+    bool native_{};            // the library was given a device selection: FreeDirectInput is owed
+    bool opened_{};            // InitDirectInput succeeded: PanicStop at the end
+    bool silent_{true};        // the last accepted command was zero
+    bool need_zero_{};         // an accepted zero before the next command
+    bool unacked_{};           // a zero is due and not yet accepted, since unacked_ms_
+    std::uint64_t unacked_ms_{};
+    std::int32_t last_value_{};
+    std::uint64_t last_send_ms_{},last_frame_ms_{};
+    bool have_frame_{};
     Counts counts_{};
 };
 }

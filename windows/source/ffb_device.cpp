@@ -12,8 +12,8 @@ int hex(char c){
     if(c>='A'&&c<='F')return c-'A'+10;
     return -1;
 }
-// The HRESULTs the mod treats as transient (focus or acquisition lost, the library recreating its effect): silence and
-// wait for an accepted zero, never a release.
+// The HRESULTs the mod treats as transient (focus or acquisition lost, the library recreating its effect): no release
+// yet, but an accepted zero is due.
 bool transient(long hr){
     return hr==DIERR_NOTEXCLUSIVEACQUIRED||hr==DIERR_INPUTLOST||hr==DIERR_NOTACQUIRED||hr==E_HANDLE||hr==DIERR_NOTDOWNLOADED;
 }
@@ -52,7 +52,6 @@ const char* phase_name(Phase p){
     case Phase::Off:return "off";
     case Phase::Waiting:return "waiting";
     case Phase::Open:return "open";
-    case Phase::Recovering:return "recovering";
     case Phase::Released:return "released";
     case Phase::Stopped:return "stopped";
     }
@@ -60,13 +59,12 @@ const char* phase_name(Phase p){
 }
 
 bool Delivery::start(const WheelFfbApi& api,const Config& cfg){
-    *this=Delivery{};
-    api_=api;cfg_=cfg;
+    if(phase_!=Phase::Off||native_){why_="started twice";return false;}   // never discard a started lifecycle
+    api_=api;cfg_=cfg;why_.clear();
     if(auto why=load_refusal(cfg);!why.empty()){why_=why;return false;}
     parse_guid(cfg.steer_dev,guid_);
     const struct { const void* fn; const char* name; } used[]{
         {reinterpret_cast<const void*>(api.GetWheelFfbVersion),"GetWheelFfbVersion"},
-        {reinterpret_cast<const void*>(api.SetHoldTimeoutMs),"SetHoldTimeoutMs"},
         {reinterpret_cast<const void*>(api.SetPreferredDevice),"SetPreferredDevice"},
         {reinterpret_cast<const void*>(api.SetPreferredDeviceIndex),"SetPreferredDeviceIndex"},
         {reinterpret_cast<const void*>(api.SetPreferredDeviceGuid),"SetPreferredDeviceGuid"},
@@ -75,41 +73,39 @@ bool Delivery::start(const WheelFfbApi& api,const Config& cfg){
         {reinterpret_cast<const void*>(api.GetDeviceGuid),"GetDeviceGuid"},
         {reinterpret_cast<const void*>(api.InitDirectInput),"InitDirectInput"},
         {reinterpret_cast<const void*>(api.InstallExitGuards),"InstallExitGuards"},
+        {reinterpret_cast<const void*>(api.SetHoldTimeoutMs),"SetHoldTimeoutMs"},
         {reinterpret_cast<const void*>(api.SetDeviceForcesXY),"SetDeviceForcesXY"},
         {reinterpret_cast<const void*>(api.GetLastHResult),"GetLastHResult"},
-        {reinterpret_cast<const void*>(api.ZeroForces),"ZeroForces"},
         {reinterpret_cast<const void*>(api.PanicStop),"PanicStop"},
         {reinterpret_cast<const void*>(api.FreeDirectInput),"FreeDirectInput"}};
     for(const auto& u:used)if(!u.fn){why_=std::string("WheelFfb.dll has no ")+u.name;phase_=Phase::Released;return false;}
     if(const int v=api_.GetWheelFfbVersion();v<MinVersion){
         why_="WheelFfb.dll "+std::to_string(v)+" is older than "+std::to_string(MinVersion);phase_=Phase::Released;return false;}
-    api_.SetHoldTimeoutMs(HoldMs);
     phase_=Phase::Waiting;
     return true;
 }
 
-void Delivery::zero_best_effort(){
-    if(!silent_){api_.ZeroForces();silent_=true;++counts_.zeroes;}
+bool Delivery::same_device(const std::string& dev)const{
+    GUID g{};
+    return parse_guid(dev,g)&&IsEqualGUID(g,guid_);
+}
+
+// Stops what the library holds: PanicStop for an opened device, then FreeDirectInput (effects stopped, the exit
+// guards' window subclass removed, the hold watchdog joined) whenever the library was given a selection.
+void Delivery::quiesce(){
+    if(opened_)api_.PanicStop();
+    if(native_)api_.FreeDirectInput();
+    native_=opened_=false;
+    silent_=true;
 }
 
 void Delivery::release(const std::string& why){
-    if(opened_){api_.ZeroForces();api_.FreeDirectInput();opened_=false;}
-    silent_=true;phase_=Phase::Released;why_=why;
+    quiesce();
+    phase_=Phase::Released;why_=why;
 }
 
-// A refused command: transient ones wait for an accepted zero, any other releases the device.
-bool Delivery::accept(int result){
-    if(result==1)return true;
-    const long hr=api_.GetLastHResult();
-    if(!transient(hr)){release("the wheel refused output (HRESULT "+hresult(hr)+")");return false;}
-    ++counts_.transient;
-    api_.ZeroForces();silent_=true;
-    if(phase_!=Phase::Recovering){phase_=Phase::Recovering;recovering_clock_=false;}
-    why_="output interrupted (HRESULT "+hresult(hr)+"); waiting for an accepted zero";
-    return false;
-}
-
-void Delivery::open(const Sample& s){
+void Delivery::open_device(const Sample& s){
+    native_=true;   // the selection below may create the library's DirectInput state: FreeDirectInput is owed
     api_.SetPreferredDevice(nullptr);
     api_.SetPreferredDeviceIndex(-1);
     api_.SetPreferredDeviceGuid(&guid_);
@@ -118,49 +114,71 @@ void Delivery::open(const Sample& s){
     const int n=api_.EnumerateDevices();
     for(int i=0;i<n&&!listed;++i){GUID g{};listed=api_.GetDeviceGuid(i,&g)&&IsEqualGUID(g,guid_);}
     if(!listed){release("the steering device "+cfg_.steer_dev+" is not one of the force-feedback devices");return;}
-    opened_=true;   // FreeDirectInput is owed from here, also after a refused open
+    // The ABI takes the window as an int; a window handle is 32 bits wide by design, also in 64-bit Windows.
     if(!api_.InitDirectInput(static_cast<int>(reinterpret_cast<std::intptr_t>(s.hwnd)))){
         release("the steering device refused the open (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
-    api_.InstallExitGuards();
+    opened_=true;
+    if(!api_.InstallExitGuards()){release("the exit guards could not be installed on the game window");return;}
+    api_.SetHoldTimeoutMs(HoldMs);
     // Start through an accepted neutral command, never a retained effect's parameters; a refused zero is a failed open.
     if(api_.SetDeviceForcesXY(0,0)!=1){
         release("the wheel refused the starting zero (HRESULT "+hresult(api_.GetLastHResult())+")");return;}
-    ++counts_.zeroes;silent_=true;need_zero_=false;
+    ++counts_.zeroes;
+    silent_=true;need_zero_=unacked_=false;last_value_=0;last_send_ms_=s.ms;
     phase_=Phase::Open;why_.clear();
 }
 
+// A refused SetDeviceForcesXY: the wheel may still hold the previous force. Transient refusals leave an accepted zero
+// due (tried every sample, SilenceMs at most); any other releases.
+bool Delivery::refused(const Sample& s){
+    const long hr=api_.GetLastHResult();
+    if(!transient(hr)){release("the wheel refused output (HRESULT "+hresult(hr)+")");return false;}
+    ++counts_.transient;
+    silent_=false;need_zero_=true;
+    if(!unacked_){unacked_=true;unacked_ms_=s.ms;}
+    why_="output interrupted (HRESULT "+hresult(hr)+"); waiting for an accepted zero";
+    return false;
+}
+
+bool Delivery::zero(const Sample& s){
+    if(unacked_&&s.ms-unacked_ms_>=SilenceMs){release("no accepted zero within 2 s");return false;}
+    if(api_.SetDeviceForcesXY(0,0)!=1){refused(s);return false;}
+    if(unacked_)++counts_.recoveries;
+    ++counts_.zeroes;
+    silent_=true;need_zero_=unacked_=false;last_value_=0;last_send_ms_=s.ms;why_.clear();
+    return true;
+}
+
 void Delivery::frame(const Sample& s,std::int32_t command){
-    if(phase_!=Phase::Waiting&&phase_!=Phase::Open&&phase_!=Phase::Recovering)return;
+    if(phase_!=Phase::Waiting&&phase_!=Phase::Open)return;
+    // A sampling gap longer than the hold: the library's watchdog may have stopped the wheel; restart through a zero.
+    const bool gap=have_frame_&&s.ms-last_frame_ms_>std::uint64_t(HoldMs);
+    have_frame_=true;last_frame_ms_=s.ms;
     if(phase_==Phase::Waiting){
         if(!s.race||!s.front)return;
-        if(s.steer_dev!=cfg_.steer_dev){why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";return;}
-        open(s);
+        if(!same_device(s.steer_dev)){why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";return;}
+        open_device(s);
         if(phase_!=Phase::Open)return;
     }
     // One device epoch: the opened instance must stay the input layer's steering device.
-    if(s.steer_dev!=cfg_.steer_dev){release("the steering device changed or was lost");return;}
-    if(!s.race||!s.front){
-        zero_best_effort();
-        need_zero_=true;recovering_clock_=false;
+    if(!same_device(s.steer_dev)){release("the steering device changed or was lost");return;}
+    const bool drive=s.race&&s.front;
+    if(gap||!drive)need_zero_=true;
+    if(!drive){
+        if(!silent_||unacked_)zero(s);    // until accepted, or released after SilenceMs
         return;
     }
-    if(phase_==Phase::Recovering){
-        if(!recovering_clock_){recovering_clock_=true;recovery_start_=s.ms;}
-        if(s.ms-recovery_start_>=RecoveryMs){release("no accepted zero within 2 s of an interrupted output");return;}
-        if(!accept(api_.SetDeviceForcesXY(0,0)))return;
-        phase_=Phase::Open;recovering_clock_=false;need_zero_=false;silent_=true;why_.clear();
-        ++counts_.recoveries;++counts_.zeroes;
-    }else if(need_zero_){
-        if(!accept(api_.SetDeviceForcesXY(0,0)))return;
-        need_zero_=false;silent_=true;++counts_.zeroes;
-    }
+    if(need_zero_&&!zero(s))return;
     const std::int32_t c=std::clamp<std::int32_t>(command,-10000,10000);
-    if(!accept(api_.SetDeviceForcesXY(c,0)))return;
-    ++counts_.sent;silent_=c==0;
+    const bool repeat=c==last_value_;
+    if(repeat&&s.ms-last_send_ms_<KeepAliveMs)return;
+    if(api_.SetDeviceForcesXY(c,0)!=1){refused(s);return;}
+    ++counts_.sent;if(repeat)++counts_.keepalive;
+    last_value_=c;last_send_ms_=s.ms;silent_=c==0;
 }
 
 void Delivery::shutdown(){
-    if(opened_){api_.PanicStop();api_.FreeDirectInput();opened_=false;}
+    quiesce();
     if(phase_!=Phase::Off)phase_=Phase::Stopped;
 }
 }
