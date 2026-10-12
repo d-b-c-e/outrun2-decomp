@@ -13,6 +13,7 @@
 // the shared path re-sends the impact every tick and never re-arms. Reported to the mod; not ported.
 #include <cstddef>
 #include <cstdint>
+#include <string>
 namespace outrun::desktop::ffb {
 
 // The mod's [FFB] settings and their compiled defaults (plugin.hpp: the fixture's "legacy-defaults").
@@ -48,10 +49,18 @@ public:
     virtual void periodic(int slot,float magnitude,float hz)=0;
 };
 
+// Settings are checked once (romi 28372): every value finite, strengths within 0..10, the deadzone within 0..100,
+// the global strength within 0..1. Empty when valid; otherwise which value and why.
+std::string validate(const LegacySettings&);
+
 class LegacyForce {
 public:
-    explicit LegacyForce(LegacySettings settings={}):s_(settings){}
+    explicit LegacyForce(LegacySettings settings={}):s_(settings),invalid_(validate(settings)){}
     const LegacySettings& settings()const{return s_;}
+    // Invalid settings: calculate() sends nothing (counted), and invalid() says why.
+    const std::string& invalid()const{return invalid_;}
+    std::uint32_t refused_ticks()const{return refused_;}
+    std::uint32_t nonfinite_ticks()const{return nonfinite_;}   // a non-finite intermediate, sent as 0 (should stay 0)
     // Hardware periodic effects (sine slots) when the device has them; otherwise the vibration is synthesised into
     // the constant force (the CF fallback).
     void set_periodics(bool active,int road_slot,int slip_slot){periodics_=active;road_slot_=road_slot;slip_slot_=slip_slot;}
@@ -62,6 +71,8 @@ public:
     float strength_scale()const;   // the mod's StrengthScale: FFBGlobalStrength clamped to 0..1
 private:
     LegacySettings s_;
+    std::string invalid_;
+    std::uint32_t refused_{},nonfinite_{};
     bool periodics_{};int road_slot_{-1},slip_slot_{-1};
     std::uint32_t prev_gear_{},prev_collision_flags_{};
     float prev_speed_{},smoothed_lateral_{};

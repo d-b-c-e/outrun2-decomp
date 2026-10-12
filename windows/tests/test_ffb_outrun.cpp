@@ -150,10 +150,44 @@ void test_guards(){
     check(surface_roughness(0x80,0,0,&water)==0.85000002&&surface_roughness(0x12345,0,0,&water)==0.31,"rough surface 0x80; an unknown mask 0.31");
 }
 
+void test_settings(){
+    // Settings are validated once (romi 28372): an invalid one sends nothing and says which value; valid extremes stay
+    // finite. The finite goldens above are untouched by these guards.
+    check(validate({}).empty(),"the mod's defaults are valid");
+    LegacySettings bad;bad.spring=NAN;
+    check(validate(bad).find("FFBSpringStrength")==0,"a NaN spring is named");
+    bad={};bad.global_strength=NAN;check(!validate(bad).empty(),"a NaN global strength is invalid");
+    bad={};bad.global_strength=1.5f;check(!validate(bad).empty(),"a global strength above 1 is invalid");
+    bad={};bad.damper=3.4e38f;check(!validate(bad).empty(),"FLT_MAX damper is invalid");
+    bad={};bad.road_texture=-0.1f;check(!validate(bad).empty(),"a negative strength is invalid");
+    bad={};bad.lateral_deadzone=INFINITY;check(!validate(bad).empty(),"an infinite deadzone is invalid");
+    LegacySettings nan_spring;nan_spring.spring=NAN;
+    LegacyForce refused(nan_spring);refused.set_periodics(false,0,1);
+    struct Count:Sink{int c=0;void constant(std::int32_t)override{++c;}void periodic(int,float,float)override{++c;}} k;
+    CarSignals c;c.speed_1c4=0.8f;c.steer_1d0=0.5f;c.gear_208=2;
+    for(int i=0;i<20;++i)refused.calculate(c,0.5f,0,k);
+    check(k.c==0&&refused.refused_ticks()==20&&!refused.invalid().empty(),"invalid settings: nothing sent, every tick counted");
+    check(LegacyForce(nan_spring).strength_scale()==1.0f,"a valid global with an invalid spring keeps its own scale");
+    LegacySettings g;g.global_strength=NAN;check(LegacyForce(g).strength_scale()==0.0f,"a NaN global strength scales to 0, never NaN");
+    // Every strength at its bound, with extreme and non-finite signals: bounded output, no non-finite intermediate.
+    LegacySettings hi;hi.spring=hi.damper=hi.steering_weight=hi.wall_impact=hi.gear_shift=hi.road_texture=hi.tire_slip=10.0f;
+    hi.grip_loss=hi.weight_transfer=hi.engine_idle=10.0f;hi.lateral_deadzone=100.0f;
+    check(validate(hi).empty(),"the bounds themselves are valid");
+    LegacyForce m(hi);m.set_periodics(false,0,1);
+    struct Range:Sink{bool ok=true;void constant(std::int32_t v)override{ok=ok&&v>=-10000&&v<=10000;}void periodic(int,float,float)override{}} r;
+    const float extreme[]{3.4e38f,-3.4e38f,1000.0f,-1000.0f,NAN,INFINITY,0.0f};
+    for(int i=0;i<200;++i){
+        CarSignals x;x.speed_1c4=extreme[i%7];x.steer_1d0=extreme[(i+1)%7];x.steer_rate_1d4=extreme[(i+2)%7];
+        x.lateral_264=extreme[(i+3)%7];x.lateral_268=extreme[(i+4)%7];x.gear_208=std::uint32_t(i%8);x.state_8=(i%9==0)?0x1000u:0u;x.pedal_34=255;
+        m.calculate(x,extreme[(i+5)%7],1,r);
+    }
+    check(r.ok&&m.nonfinite_ticks()==0,"extreme valid settings and signals: bounded, no non-finite intermediate");
+}
+
 int main(int argc,char** argv){
     try{
         if(argc!=2)throw std::runtime_error("usage: test_ffb_outrun <tests/data/ffb>");
-        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();
+        test_goldens(argv[1]);test_periodics();test_contact_edge();test_guards();test_settings();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun force model: "<<checks<<" checks passed\n";
     return 0;

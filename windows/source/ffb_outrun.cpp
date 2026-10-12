@@ -22,7 +22,19 @@ CarSignals car_signals(const std::uint8_t* car,std::size_t bytes){
     return c;
 }
 
-float LegacyForce::strength_scale()const{return std::clamp(s_.global_strength,0.0f,1.0f);}
+std::string validate(const LegacySettings& s){
+    struct V{const char* key;float v;float lo,hi;};
+    const V all[]{{"FFBGlobalStrength",s.global_strength,0,1},{"FFBSpringStrength",s.spring,0,10},{"FFBDamperStrength",s.damper,0,10},
+                  {"FFBSteeringWeight",s.steering_weight,0,10},{"FFBWallImpact",s.wall_impact,0,10},{"FFBRumbleStrip",s.rumble_strip,0,10},
+                  {"FFBGearShift",s.gear_shift,0,10},{"FFBRoadTexture",s.road_texture,0,10},{"FFBTireSlip",s.tire_slip,0,10},
+                  {"FFBGripLoss",s.grip_loss,0,10},{"FFBWeightTransfer",s.weight_transfer,0,10},{"FFBLateralDeadzone",s.lateral_deadzone,0,100},
+                  {"FFBEngineIdle",s.engine_idle,0,10}};
+    for(const auto& x:all)if(!std::isfinite(x.v)||x.v<x.lo||x.v>x.hi)
+        return std::string(x.key)+" = "+std::to_string(x.v)+" outside "+std::to_string(x.lo)+".."+std::to_string(x.hi);
+    return {};
+}
+
+float LegacyForce::strength_scale()const{return std::isfinite(s_.global_strength)?std::clamp(s_.global_strength,0.0f,1.0f):0.0f;}
 
 void LegacyForce::reset(){
     prev_gear_=prev_collision_flags_=0;prev_speed_=smoothed_lateral_=0;
@@ -37,9 +49,11 @@ void LegacyForce::reset(){
 void LegacyForce::calculate(const CarSignals& in,float roughness,std::uint32_t water,Sink& sink){
     // Guards the mod does not have (its fixture refuses such input): a non-finite signal is 0 and the roughness stays
     // in the LUT's 0..1, so NaN never reaches tanh or the integer casts. Valid input is untouched (the golden holds).
-    auto fin=[](float v){return std::isfinite(v)?v:0.0f;};
+    // Signals are also held within the mod fixture's own input bound (|v| <= 1000, speed >= 0), so no product overflows.
+    if(!invalid_.empty()){++refused_;return;}
+    auto fin=[](float v){return std::isfinite(v)?std::clamp(v,-1000.0f,1000.0f):0.0f;};
     CarSignals car=in;
-    car.speed_1c4=fin(car.speed_1c4);car.steer_1d0=fin(car.steer_1d0);car.steer_rate_1d4=fin(car.steer_rate_1d4);
+    car.speed_1c4=std::max(0.0f,fin(car.speed_1c4));car.steer_1d0=fin(car.steer_1d0);car.steer_rate_1d4=fin(car.steer_rate_1d4);
     car.lateral_264=fin(car.lateral_264);car.lateral_268=fin(car.lateral_268);
     roughness=std::isfinite(roughness)?std::clamp(roughness,0.0f,1.0f):0.0f;
     float warmupScale=1.0f;
@@ -164,6 +178,7 @@ void LegacyForce::calculate(const CarSignals& in,float roughness,std::uint32_t w
         float totalForce=F_struct+F_events;
         if(s_.invert)totalForce=-totalForce;
         totalForce*=warmupScale*recreateScale;
+        if(!std::isfinite(totalForce)){totalForce=0.0f;++nonfinite_;}   // never NaN into tanh or an integer cast
         const float compressed=std::tanh(totalForce);   // soft saturation
         // Slew limit on the structural force (DD wheels); the crash and shift pulses bypass it.
         std::int32_t structMag=std::int32_t(compressed*10000.0f);
@@ -186,6 +201,8 @@ void LegacyForce::calculate(const CarSignals& in,float roughness,std::uint32_t w
                 vib+=std::sin(slip_phase_)*slipAmp;
             }else slip_phase_=0.0f;
         }
+        if(!std::isfinite(vib)){vib=0.0f;++nonfinite_;}
+        vib=std::clamp(vib,-2.0f,2.0f);   // two envelopes of at most 1 each (bounded settings): the cast stays in range
         const std::int32_t diMagnitude=std::clamp(structMag+std::int32_t(vib*10000.0f),std::int32_t(-10000),std::int32_t(10000));
         // Deadband: skip an update that barely changed, except during the jolt.
         const std::int32_t delta=std::abs(diMagnitude-prev_constant_);
