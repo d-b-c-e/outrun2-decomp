@@ -77,6 +77,28 @@ void test_open_caps(){
     }
 }
 
+void test_handle_paths(){
+    const std::wstring path=L"\\\\?\\hid#vid_346e&pid_0006&mi_02#exact-\u00e9";
+    const std::string utf8="\\\\?\\hid#vid_346e&pid_0006&mi_02#exact-\xc3\xa9";
+    for(int which=0;which<5;++which){
+        auto* in=new fakecom::Input;auto s=wheel();s.interface_path=path;
+        if(which==1)s.path_result=E_FAIL;
+        if(which==2)s.interface_path.clear();
+        if(which==3)s.path_unterminated=true;
+        if(which==4)s.interface_path=std::wstring(1,wchar_t(0xd800)); // invalid UTF-16 must not be changed into another identity
+        in->add(s);
+        {DInputProvider p(in,nullptr);
+         auto list=p.enumerate();
+         check(in->counters.creates==0&&list[0].interface_path.empty(),"listing does not open a handle or invent a path");
+         list[0].interface_path="untrusted listing path";
+         const auto o=p.open(list[0]);
+         check(o.ok&&o.opened.interface_path==(which==0?utf8:std::string{}),"only a complete successful same-handle UTF-8 path is reported; missing metadata preserves input");
+         check(in->counters.creates==1&&in->counters.path_reads==1&&in->counters.force_calls==0,"path queries reuse the only owned handle, with no effect call");
+         p.close(o.handle);}
+        delete in;
+    }
+}
+
 struct Rig {
     fakecom::Input* in;
     std::unique_ptr<DInputProvider> p;
@@ -92,6 +114,26 @@ struct Rig {
     ~Rig(){core.reset();p->shutdown(100);p.reset();delete in;}
     const Frame& step(){core->service_devices();return core->tick();}
 };
+
+void test_path_epochs(){
+    Rig r(profile({"steer = axis 0 dev="+W()+" prod="+WP()+" range=0..65535 rest=32768 travel=+1"}));
+    auto s=wheel();s.interface_path=L"\\\\?\\hid#original";
+    auto& dev=r.in->scripts[r.in->add(s)];
+    check(r.core->device_reports()[0].identity.interface_path.empty(),"no path before an adopted open");
+    r.core->service_devices();
+    check(r.core->device_reports()[0].identity.interface_path.empty(),"worker result does not publish the path before tick adoption");
+    r.core->tick();
+    check(r.core->device_reports()[0].identity.interface_path=="\\\\?\\hid#original","adopted epoch reports its owned path");
+    dev.reads.push_back({DI_OK,DIERR_INPUTLOST});r.step();
+    check(!r.core->device_reports()[0].opened&&r.core->device_reports()[0].identity.interface_path.empty(),"failed epoch clears the visible path immediately");
+    r.step();
+    check(r.core->device_reports()[0].epoch==2&&r.core->device_reports()[0].identity.interface_path=="\\\\?\\hid#original"&&r.in->counters.creates==1,"same-handle reacquisition keeps that handle's path in the new epoch");
+    dev.reads.push_back({DIERR_UNPLUGGED,DI_OK});r.step();
+    dev.interface_path=L"\\\\?\\hid#replacement";r.step();
+    check(r.core->device_reports()[0].epoch==3&&r.core->device_reports()[0].identity.interface_path=="\\\\?\\hid#replacement"&&r.in->counters.creates==2,"new open replaces the previous handle's path");
+    dev.reads.push_back({DIERR_UNPLUGGED,DI_OK});r.step();dev.path_result=E_FAIL;r.step();
+    check(r.core->device_reports()[0].opened&&r.core->device_reports()[0].epoch==4&&r.core->device_reports()[0].identity.interface_path.empty(),"new handle with unavailable metadata never retains the old path");
+}
 
 // P1-P5 through the real provider: identity, objects, reads, epochs, reacquisition, rescans.
 void test_core_end_to_end(){
@@ -447,7 +489,7 @@ void test_worker_never_blocks_tick(){
 }
 
 int main(){
-    try{test_classify_and_guids();test_open_caps();test_core_end_to_end();test_identity_change();test_two_devices();test_close_and_stale_handles();test_shutdown();
+    try{test_classify_and_guids();test_open_caps();test_handle_paths();test_path_epochs();test_core_end_to_end();test_identity_change();test_two_devices();test_close_and_stale_handles();test_shutdown();
         test_destroyed_during_a_read();test_stop_is_terminal();test_shutdown_races_an_open();test_stale_handle_admission_race();test_pending_reads();
         test_stale_close();test_handle_high_bits();test_open_publication_races_shutdown();
         test_worker_never_blocks_tick();}

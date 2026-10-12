@@ -40,7 +40,11 @@ struct ObjectCaps {
     std::bitset<128> button;
     std::array<bool,4> pov{};
 };
-struct DeviceInfo { std::string dev,prod,name; };           // GUID text, lower case
+struct DeviceInfo {
+    std::string dev,prod,name;                            // GUID text, lower case
+    // Exact UTF-8 DIPROP_GUIDANDPATH from the opened handle, never a name/listing guess. Optional: empty when unavailable.
+    std::string interface_path{};
+};
 
 // ---- the device provider: the single owner of device handles (section 6). The core never opens a device itself.
 // One API call, classified where it was made. The numeric values are part of the observer and recorder contract:
@@ -286,6 +290,7 @@ private:
         DevState state{DevState::Missing};
         std::string reason;
         Handle handle{};
+        std::string interface_path;   // input thread: the adopted handle's path, cleared when its epoch ends
         ObjectCaps caps;
         std::uint32_t epoch{};
         std::uint64_t seq{};
@@ -295,7 +300,7 @@ private:
         std::int64_t last_valid_us{};
         int sample{-1};           // this frame's sample index
     };
-    struct Opened { int device; Handle handle; ObjectCaps caps; std::uint32_t epoch; };
+    struct Opened { int device; Handle handle; ObjectCaps caps; std::uint32_t epoch; std::string interface_path; };
     struct Returned { int device; Handle handle; Call why; std::uint32_t epoch; };
     struct Rearm { bool need_release{},need_rest{}; };
     struct Running { Command cmd; std::int64_t deadline_us{}; std::uint64_t batch{}; Sha256 hash{}; int device{-1}; };
@@ -338,6 +343,7 @@ private:
     // Provider worker only.
     std::vector<std::uint32_t> worker_epochs_;
     std::vector<ObjectCaps> worker_caps_;
+    std::vector<std::string> worker_interface_paths_; // same-handle reacquisition only; a new open replaces this
 
     // Control worker only.
     bool have_last_{};

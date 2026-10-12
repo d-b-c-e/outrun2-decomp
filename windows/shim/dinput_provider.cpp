@@ -1,14 +1,30 @@
 // The DirectInput 8 provider (dinput_provider.hpp; INPUT-SHIM.md section 6).
 #include "dinput_provider.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <thread>
 namespace dbce::shim {
 namespace {
 std::string narrow(const wchar_t* w){std::string s;for(;w&&*w;++w)s.push_back(*w<128?char(*w):'?');return s;}
+// Identity must not use narrow()'s lossy '?' replacement. Read only this owned handle; unavailable metadata never
+// prevents legacy input, but an adapter must not infer a RawInput match from an empty path.
+std::string interface_path(IDirectInputDevice8W* device){
+    DIPROPGUIDANDPATH value{};value.diph.dwSize=sizeof value;value.diph.dwHeaderSize=sizeof value.diph;value.diph.dwHow=DIPH_DEVICE;
+    if(FAILED(device->GetProperty(DIPROP_GUIDANDPATH,&value.diph)))return {};
+    const auto end=std::find(std::begin(value.wszPath),std::end(value.wszPath),L'\0');
+    if(end==std::begin(value.wszPath)||end==std::end(value.wszPath))return {};
+    const int length=int(end-std::begin(value.wszPath));
+    const int bytes=WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,value.wszPath,length,nullptr,0,nullptr,nullptr);
+    if(bytes<=0)return {};
+    std::string result(std::size_t(bytes),'\0');
+    if(WideCharToMultiByte(CP_UTF8,WC_ERR_INVALID_CHARS,value.wszPath,length,result.data(),bytes,nullptr,nullptr)!=bytes)return {};
+    return result;
+}
 constexpr DWORD AxisOffsets[8]{DIJOFS_X,DIJOFS_Y,DIJOFS_Z,DIJOFS_RX,DIJOFS_RY,DIJOFS_RZ,DIJOFS_SLIDER(0),DIJOFS_SLIDER(1)};
 BOOL CALLBACK collect(const DIDEVICEINSTANCEW* d,void* user){
     static_cast<std::vector<DeviceInfo>*>(user)->push_back({guid_text(d->guidInstance),guid_text(d->guidProduct),narrow(d->tszProductName)});
@@ -157,7 +173,7 @@ OpenResult DInputProvider::open(const DeviceInfo& listed){
     // The identity of the handle actually opened.
     DIDEVICEINSTANCEW di{};di.dwSize=sizeof di;
     if(FAILED(d->GetDeviceInfo(&di)))return fail("cannot read the opened device's identity");
-    r.opened={guid_text(di.guidInstance),guid_text(di.guidProduct),narrow(di.tszProductName)};
+    r.opened={guid_text(di.guidInstance),guid_text(di.guidProduct),narrow(di.tszProductName),interface_path(d)};
     (void)d->Acquire();   // a refusal shows as NOTACQUIRED at the first read, and takes the reacquisition path
     // Reserve a free slot under a new generation, store the device, then publish.
     for(int i=0;i<MaxSlots;++i){
