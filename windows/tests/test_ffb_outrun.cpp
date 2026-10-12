@@ -78,6 +78,7 @@ void test_goldens(const std::string& dir){
     // Cases generated with the mod's fixture (README.md): <name>.csv in, <name>.expected out.
     std::ifstream list(dir+"/cases.txt");std::string name;int n=0;
     while(std::getline(list,name)){
+        if(!name.empty()&&name.back()=='\r')name.pop_back();   // a CRLF checkout of cases.txt
         if(name.empty()||name[0]=='#')continue;
         const auto frames=parse(read(dir+"/"+name+".csv"));
         check(observe(frames,{},false)==read(dir+"/"+name+".expected"),"the mod's fixture output for "+name);
