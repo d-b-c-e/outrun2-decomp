@@ -72,7 +72,7 @@ static partial class Program {
         var artifact=TextHash(manifest.ToString());Check(Str(r,"artifactSha256")==artifact,"completion artifact digest");return artifact;
     }
 
-    static void RecordingCommand(bool seal,string dir,string request,string exe,ulong pid,ulong creation,string receipt,bool export=false){
+    static void RecordingCommand(bool seal,string dir,string request,string exe,ulong pid,ulong creation,string receipt,bool export=false,bool forPlayback=false){
         // Receipt is not a capture member. Refuse an output inside the sealed directory before writing any seal.
         var root=Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
         var output=Path.GetFullPath(receipt);
@@ -86,6 +86,12 @@ static partial class Program {
             if(!seal)VerifyRecordingSeal(dir);
             var rows=ValidateQueued(dir);
             var artifact=ValidateRecordingReport(dir,request,exe,pid,creation);
+            ConsumedComparison.Motion motion=null;
+            if(forPlayback){
+                using var proof=JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,RecordingReport)));
+                Check(!proof.RootElement.TryGetProperty("action",out var action)||action.GetString()=="record","reference must be an ordinary recording");
+                motion=ConsumedComparison.RequirePlaybackSource(Path.Combine(dir,"source.jsonl"));
+            }
             if(seal){ArtifactSeal.CompleteNamed(dir,RecordingSeal,RecordingRequired);VerifyRecordingSeal(dir);}
             if(export){
                 WriteExport(rows,output);
@@ -93,6 +99,7 @@ static partial class Program {
             }
             var result=new {schema="outrun.recording-verified@1",requestId=request,processId=pid,processCreationFileTime=creation,
                 exeSha256=exe,artifactSha256=artifact,sealSha256=ArtifactSeal.Hash(Path.Combine(dir,RecordingSeal)),
+                playbackEligible=forPlayback,pose=motion==null?null:new {validRows=motion.ValidRows,pathLength=motion.PathLength,range=motion.Range},
                 recordingSaved=true,rows=rows.Length,scope="recording saved; process exit not asserted"};
             using(var stream=new FileStream(output,FileMode.CreateNew,FileAccess.Write))JsonSerializer.Serialize(stream,result);
             Console.WriteLine($"PASS recording saved: {rows.Length} rows; process exit not asserted; {checks} checks");

@@ -90,8 +90,21 @@ The finalizer also serves the ordinary recording companion. It accepts
 `--compare-recordings <reference-capture> <replay-capture> <new-output.json>`.
 Both captures must have valid `dbce.shim.outrun-capture@2` recording seals and
 completion reports from the same executable. The replay report must name
-`action=playback` and `stoppedBy=tape-end`. Older reports without an action remain
+`action=playback`, `stoppedBy=tape-end` and `sourceSealSha256` matching the
+reference seal. The reference must have no action (legacy) or `action=record`.
+Older reports without an action remain
 ordinary recordings; they cannot use the tape-end stop reason.
+
+Before launch, `--export-playback <capture> <request> <exe-hash> <pid>
+<creation-file-time> <new-tape>` performs the ordinary sealed export checks and
+requires complete finite observation/pose channels, boolean-valued pose validity
+and a moved active car. An unsuitable source refuses before writing a tape.
+`--read-playback-recording` takes the same arguments but writes an admission
+receipt instead: `outrun.recording-verified@1` with `playbackEligible=true` and
+`pose` (validRows, pathLength, range). Use it after save to determine whether the
+descriptor may advertise playback. Admission failure uses exit 1, its reason on
+stderr and no output receipt. `--export-recording` / `--read-recording` retain
+their existing analysis/saved-recording semantics and do not grant eligibility.
 
 `ConsumedComparison.cs` ports `shim_first_loop/compare_consumed.py` at `86f4640`:
 complete loss-free streams, each tape row once in order, exact supplied `final.*`

@@ -37,10 +37,13 @@ static partial class Program
                 using var a = JsonDocument.Parse(File.ReadAllText(Path.Combine(reference, RecordingReport)));
                 using var b = JsonDocument.Parse(File.ReadAllText(Path.Combine(replay, RecordingReport)));
                 Check(Str(a.RootElement, "exeSha256") == Str(b.RootElement, "exeSha256"), "same replay executable required");
+                Check(!a.RootElement.TryGetProperty("action", out var referenceAction) || referenceAction.GetString() == "record",
+                    "reference must be an ordinary recording");
                 Check(Str(b.RootElement, "action") == "playback" && Str(b.RootElement, "stoppedBy") == "tape-end",
                     "replay capture reached tape end required");
                 aSeal = ArtifactSeal.Hash(Path.Combine(reference, RecordingSeal));
                 bSeal = ArtifactSeal.Hash(Path.Combine(replay, RecordingSeal));
+                Check(Str(b.RootElement, "sourceSealSha256") == aSeal, "replay is bound to this reference seal");
                 reference = Path.Combine(reference, "source.jsonl"); replay = Path.Combine(replay, "source.jsonl");
             }
             var result = ConsumedComparison.Compare(reference, replay);

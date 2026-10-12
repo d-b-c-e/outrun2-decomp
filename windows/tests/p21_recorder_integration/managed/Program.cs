@@ -148,8 +148,9 @@ static partial class Program {
     static int Main(string[] args){try{
         if(args.Length==4&&(args[0]=="--compare-recordings"||args[0]=="--compare-consumed-sources"))
             return ComparisonCommand(args[1],args[2],args[3],args[0]=="--compare-recordings");
-        if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording"||args[0]=="--export-recording")){
-            RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6],args[0]=="--export-recording");return 0;
+        if(args.Length==7&&(args[0]=="--seal-recording"||args[0]=="--read-recording"||args[0]=="--export-recording"||args[0]=="--read-playback-recording"||args[0]=="--export-playback")){
+            RecordingCommand(args[0]=="--seal-recording",Path.GetFullPath(args[1]),args[2],args[3],U(args[4]),U(args[5]),args[6],
+                args[0] is "--export-recording" or "--export-playback",args[0] is "--read-playback-recording" or "--export-playback");return 0;
         }
         // Reuse the exact reviewed validator for a capture from the combined
         // real-provider/recorder fixture. The export is outside the sealed bundle.
