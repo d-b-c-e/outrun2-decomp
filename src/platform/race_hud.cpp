@@ -1,4 +1,5 @@
 #include "platform/race_hud.hpp"
+#include "platform/ui_spacing.hpp"
 #include "driving/pc_d3dx.hpp"
 #include "driving/pc_x87.hpp"
 #include <cmath>
@@ -65,6 +66,7 @@ void sprani_display_428170(FrontendSprites& pool,SpraniGlobals& g,driving::PcMat
             driving::pc_matrix_push(stack);
             sprani_matrix_429010(stack,s->canvas_width,s->canvas_height,s->matrix,blend);
             SpraniDraw d;d.handle=handle;d.token=s->token;d.layer=layer;d.frame=s->frame;d.id_7551b4=s->id_2c;
+            d.spacing=std::uint8_t(ui_spacing_scope());   // UIScalingMode 1: the HUD scope now (off outside the HUD routines)
             auto top=stack.current();for(unsigned k=0;k<16;++k)d.matrix[k]=top.f32(k*4);
             draws.push_back(d);                                                 // 429460
             driving::pc_matrix_pop(stack);
@@ -95,6 +97,7 @@ bool sprani_draw_428a10(const FrontendSprites& pool,SpraniGlobals& g,driving::Pc
         driving::PcMatrix16 a{};for(unsigned k=0;k<16;++k)a[k]=top.f32(k*4);
         const auto r=driving::pc_d3dx_matrix_multiply(a,*matrix);for(unsigned k=0;k<16;++k)top.putf(k*4,r[k]);}
     SpraniDraw d;d.handle=~0u;d.token=token;d.layer=layer;d.frame=float(frame);d.scale=scale;d.id_7551b4=g.current_7551b4;
+    d.spacing=std::uint8_t(ui_spacing_scope());   // UIScalingMode 1: the HUD scope the draw is queued in
     top=stack.current();for(unsigned k=0;k<16;++k)d.matrix[k]=top.f32(k*4);
     draws.push_back(d);                                                       // 429460
     driving::pc_matrix_pop(stack);

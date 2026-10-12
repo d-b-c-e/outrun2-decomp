@@ -55,6 +55,10 @@ inline bool g_pc_restore_jp_clarissa=false;
 // Sumo_CountdownTimerEnable, .data 637911): the race clock does not count down. The byte's only two readers (450B03 /
 // 450B4B) are race_manager.cpp's time_decrement_637911 tests; race_manager_runtime.cpp sets it from this.
 inline bool g_pc_disable_countdown_timer=false;
+// [Graphics] UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a): the HUD spacing in 640-wide UI units, (aspect * 480
+// - 640) / 2 of the 2D rectangle's frame (106.7 at 16:9), set by the renderer each frame; 0 in modes 0 and 2.
+// layer_429350 moves a scoped footage layer by it (pc_sprite_2d.hpp ui_spacing_shift).
+inline float g_pc_ui_spacing=0.0f;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'

@@ -3,6 +3,7 @@
 #include "triple_screens.hpp"
 #include "triple_rig.hpp"
 #include "display_fit.hpp"
+#include "platform/ui_spacing.hpp"
 #include "driving/pc_camera.hpp"
 #include <cmath>
 #include <vector>
@@ -32,22 +33,44 @@ int main(){
     CHECK(!parse_triple_screens("Surround2"));
     CHECK(std::string(triple_screens_name(TripleScreens::separate))=="Separate monitors");
     CHECK(std::string(triple_screens_name(TripleScreens::off))=="Off");
-    // [Graphics] UIScalingMode (display_fit.hpp): "0" / "2" (blanks around; empty = 2); "1" and anything else give 2 with
-    // a note. The 2D rectangle: 2 = the centred 4:3 on 16:9 and on a span, as before (none on a 4:3 frame); 0 = none
-    // (stretched) on 16:9, the centre panel on a span (a third of its aspect), so the HUD stays on the centre monitor.
+    // [Graphics] UIScalingMode (display_fit.hpp): "0" / "1" / "2" (blanks around; empty = 2); anything else gives 2 with a
+    // note, and 1 notes that it is partial (step 2a). The 2D rectangle: 2 = the centred 4:3 on 16:9 and on a span, as
+    // before (none on a 4:3 frame), no spacing; 0 = none (stretched) on 16:9, the centre panel on a span (a third of its
+    // aspect), so the HUD stays on the centre monitor; 1 = the centred 4:3 plus the spacing to the frame's edges, or to
+    // the centre panel's on a span (never past it), and nothing on a 4:3 frame.
     {   using outrun::xbox_runtime::parse_ui_scaling_mode;using outrun::xbox_runtime::ui_scaling_rect;
         std::string note;
         CHECK(parse_ui_scaling_mode("",note)==2u&&note.empty());
         CHECK(parse_ui_scaling_mode(" 2 ",note)==2u&&note.empty());
         CHECK(parse_ui_scaling_mode("0\r",note)==0u&&note.empty());
-        CHECK(parse_ui_scaling_mode("1",note)==2u&&note.find("not built yet; 2 (keep centred) applies")!=std::string::npos);
+        CHECK(parse_ui_scaling_mode("1",note)==1u&&note.find("is partial")!=std::string::npos);
         CHECK(parse_ui_scaling_mode("3",note)==2u&&note=="UIScalingMode = 3 refused (0, 1 or 2); 2 (keep centred) applies");
         CHECK(parse_ui_scaling_mode("02",note)==2u&&note.find("refused")!=std::string::npos);
         auto rect=[](unsigned mode,bool wide,float span,bool on,double aspect){
-            const auto r=ui_scaling_rect(mode,wide,span);return r.on==on&&(!on||std::fabs(r.aspect-aspect)<1e-12);};
+            const auto r=ui_scaling_rect(mode,wide,span);return r.on==on&&(!on||std::fabs(r.aspect-aspect)<1e-12)&&(mode==1u||r.spacing==0.);};
         CHECK(rect(2,true,0.f,true,4./3.)&&rect(2,false,0.f,false,0.)&&rect(2,false,48.f/9.f,true,4./3.)&&rect(2,true,48.f/9.f,true,4./3.));
         CHECK(rect(0,true,0.f,false,0.)&&rect(0,false,0.f,false,0.));
         CHECK(rect(0,true,48.f/9.f,true,double(48.f/9.f)/3.)&&std::fabs(ui_scaling_rect(0,true,48.f/9.f).aspect-16./9.)<1e-6);
+        const auto m169=ui_scaling_rect(1,true,0.f,16./9.),m219=ui_scaling_rect(1,true,0.f,21./9.),mspan=ui_scaling_rect(1,true,48.f/9.f,16./9.);
+        CHECK(m169.on&&m169.aspect==4./3.&&std::fabs(m169.spacing-320./3.)<1e-9);                  // (853.3 - 640) / 2
+        CHECK(m219.on&&std::fabs(m219.spacing-240.)<1e-9);                                         // (1120 - 640) / 2
+        CHECK(mspan.on&&std::fabs(mspan.spacing-320./3.)<1e-4);                                     // the centre panel's 16:9, not the span's
+        CHECK(std::fabs(640.+2.*mspan.spacing-480.*double(48.f/9.f)/3.)<1e-3);                     // 4:3 + both spacings = the centre panel
+        CHECK(!ui_scaling_rect(1,false,0.f,4./3.).on&&ui_scaling_rect(1,false,0.f,4./3.).spacing==0.);
+        // The footage-layer rule (pc_sprite_2d.hpp, Tweaks' drawFootage): detect moves the left third left and the right
+        // third right; left / right force; off or no spacing moves nothing.
+        using outrun::platform::UiSpacing;using outrun::platform::ui_spacing_shift;
+        CHECK(ui_spacing_shift(UiSpacing::detect,100.f,106.f)==-106.f&&ui_spacing_shift(UiSpacing::detect,500.f,106.f)==106.f);
+        CHECK(ui_spacing_shift(UiSpacing::detect,320.f,106.f)==0.f&&ui_spacing_shift(UiSpacing::detect,213.f,106.f)==-106.f);
+        CHECK(ui_spacing_shift(UiSpacing::detect,427.f,106.f)==106.f&&ui_spacing_shift(UiSpacing::detect,426.f,106.f)==0.f);
+        CHECK(ui_spacing_shift(UiSpacing::left,500.f,106.f)==-106.f&&ui_spacing_shift(UiSpacing::right,100.f,106.f)==106.f);
+        CHECK(ui_spacing_shift(UiSpacing::off,100.f,106.f)==0.f&&ui_spacing_shift(UiSpacing::detect,100.f,0.f)==0.f);
+        {   using outrun::platform::UiSpacingGuard;using outrun::platform::ui_spacing_scope;
+            CHECK(ui_spacing_scope()==UiSpacing::off);
+            {   const UiSpacingGuard a(UiSpacing::detect);CHECK(ui_spacing_scope()==UiSpacing::detect);
+                {const UiSpacingGuard b(UiSpacing::off);CHECK(ui_spacing_scope()==UiSpacing::off);}
+                CHECK(ui_spacing_scope()==UiSpacing::detect);}
+            CHECK(ui_spacing_scope()==UiSpacing::off);}
     }
     // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
     // only in a normal process with the borderless window over a span, each refusal named.

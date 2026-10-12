@@ -65,7 +65,7 @@ needed in a native build.
 | Telemetry | Enable, SharedMemName | ⬜ | step 5 |
 | FFB | all | ⬜ | step 4 |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
-| | UIScalingMode | 🟡 | step 1 of windows/docs/UI-SCALING.md: 2 (keep centred, the centred 4:3) by default here until Tweaks' 1 is built; 0 stretches the 2D over the 16:9 frame, or over a span's centre panel only; 1 and invalid values log a line and apply 2. Tweaks' 1 (HUD spacing to the edges) is step 2: the scope map is in the note. Unit-tested (test_triple_screens); not yet seen in game |
+| | UIScalingMode | 🟡 | windows/docs/UI-SCALING.md: 2 (keep centred, the centred 4:3) by default here; 0 stretches the 2D over the 16:9 frame, or over a span's centre panel only; 1 (Tweaks' Online Arcade) is partial (step 2a): the 2D mapping widens at the 4:3 scale to the frame's edges (or the centre panel's), and NaviPub_Disp's HUD is spaced to them with Tweaks' unspaced parts (rival labels / markers, hearts, LAN markers, and from the level / lap / countdown on). Time attack's forced sides, the put_scroll positions, the ghost gap and C2C are later slices. Unit-tested (test_triple_screens; the device path in test_d3d11_vertex_path); not yet seen in game |
 | | UILetterboxing | ⬜ | |
 | | AnisotropicFiltering, ReflectionResolution, TransparencySupersampling | ✅ | `[Graphics]`, off by default; anisotropy only on samplers linear in both min and mag (the HUD stays sharp); alpha-to-coverage only under MSAA |
 | | DisableVehicleLODs, DisableStageCulling | ✅ | off by default. With all five options on (2026-10-12 A/B, n = 1 vs 2): GPU draws about 2.1x and 1 to 2.5 % of race frames miss vsync; not attributed per option |

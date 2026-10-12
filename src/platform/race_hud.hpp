@@ -30,6 +30,7 @@ struct SpraniDraw {
     std::array<float,16> matrix{};     // matrix-stack top left by 429010
     std::int32_t id_7551b4{-1};
     std::uint8_t depth{};              // 428AF0: 1 = 9564F4, 2 = 9564F8 set around the 429460 call
+    std::uint8_t spacing{};            // UIScalingMode 1: the HUD scope (pc_sprite_2d.hpp UiSpacing) when it was queued
 };
 void sprani_init_427e30(FrontendSprites&,SpraniGlobals&);
 // 427F70 is FrontendSprites::tick with clock {740CA4!=0, 8A8CDC>=8A8CA8, 95B214!=0}.

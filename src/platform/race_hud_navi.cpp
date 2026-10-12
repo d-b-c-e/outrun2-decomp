@@ -3,6 +3,7 @@
 #include "platform/frontend_text.hpp"
 #include "platform/race_hud_navi.hpp"
 #include "platform/race_hud.hpp"
+#include "platform/ui_spacing.hpp"
 #include "driving/pc_x87.hpp"
 #include "driving/pc_d3dx.hpp"
 #include <algorithm>
@@ -1829,6 +1830,7 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     if(m.u32(0x8447f8)==0)return true;
     const auto md=n.mode();const auto car=n.car();
     auto tail=[&](bool release){
+        const UiSpacingGuard unspaced(UiSpacing::off);                          // after Tweaks' 4BEDE0 / 4BEE21 offs
         if(release&&m.i32(0x844700)>=0){n.sprite_release(m.i32(0x844700));m.put32(0x844700,0xffffffffu);}
         m.put32(0x842c10,1);
         if(!s.heart||!s.heart(s.heart_user,0x46ed20u))return n.fail(0x46ed20);   // 46ED20 pair markers (state 9)
@@ -1836,6 +1838,11 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     if(md==0xdu){m.put32(0x842c10,0);if(!s.heart||!s.heart(s.heart_user,0x46ed20u))return n.fail(0x46ed20);return !s.missing;}
     const auto var=n.variant();
     if(var!=6u&&var!=9u&&var!=2u&&var!=1u&&var!=0u&&var!=7u&&var!=3u&&var!=4u)return n.fail(var<=9u?0x4beb3f:0x4bedb8);
+    // UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a; Tweaks hooks_uiscaling.cpp): NaviPub_Disp's HUD is spaced to
+    // the screen edges from 4BEB31 (on) to 4BEDE0 (off), re-asserted at 4BEDBE. Inside it the rival labels / markers
+    // (4BEB8E..4BEBAF), the heart service 462CD0 (4BEBE1..4BEBE6) and the LAN markers (4BEC83..4BEC88) are unspaced;
+    // from 4BEDE0 on (level, split, ghost, lap, countdown, the 4BEDF0 tail) nothing is. The guards restore on every exit.
+    const UiSpacingGuard spaced(UiSpacing::detect);
     if(var==1u&&m.u32(0x8446ec)){n.draw(0x429530,{0x2c002f,0,0,3,0});if(!score_4bd480(n,car))return false;}   // 4BEB46
     if(md!=16u)return tail(true);                                               // 4BEDF0 protected test: mode != 16
     if(var==0u||var==7u){                                                       // 4BEBF0
@@ -1845,25 +1852,29 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
     }else if(var==1u){                                                          // 4BEB74 OutRun
         n.draw(0x429530,{0x2c002e,0,0,3,0});
         if(!clock_4bd900(n))return false;
-        if(m.u32(0x80fb14)){if(!navi_rival_labels_4bad20_impl(s,car))return false;}
-        else if(!rival_markers_4bb640(n))return false;
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEB8E .. 4BEBAF
+            if(m.u32(0x80fb14)){if(!navi_rival_labels_4bad20_impl(s,car))return false;}
+            else if(!rival_markers_4bb640(n))return false;}
         final_stretch_4bb890(n,car);
     }else if(var==2u){                                                          // 4BEBB9 Heart Attack
         if(!tracked_45b790(n))return false;
         n.draw(0x429530,{0x2c0030,0,0,1,0});
         if(!requests_4bcd50(n))return false;
-        if(!s.heart||!s.heart(s.heart_user,0x462cd0u))return n.fail(0x462cd0);
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEBE1 .. 4BEBE6
+            if(!s.heart||!s.heart(s.heart_user,0x462cd0u))return n.fail(0x462cd0);}
         if(!clock_4bd900(n))return false;
     }else if(var==3u||var==4u){                                                 // 4BEC3D LAN races
         // 456D50: [7DE784] (CommRace: a player has finished) hides the 2C004C panel
         if(!(m.r.mapped(0x7de784,1)&&m.u8(0x7de784)))n.draw(0x429530,{0x2c004c,0,0,3,0});
         if(n.selection()&&n.mission_type()==0u&&m.u32(0x8446d0)){if(!position_4b9d80(n,car))return false;}   // 4957F0 / 495B20 / 8446D0
-        if(!lan_markers_4bb300(n))return false;
+        {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEC83 .. 4BEC88
+            if(!lan_markers_4bb300(n))return false;}
         ranks_4b99e0(n,car);
         if(!messages_456540(n))return false;
     }else if(!mission_4bed13(n,s,car))return false;
     if(!speed_4bcf10(n,car)||!needle_4b8f30(n,car)||!gear_4b9010(n,car)||!route_4b9100(n)||!stage_banner_4b9450(n))return false;
     warning_4ba070(n,car);
+    const UiSpacingGuard unspaced(UiSpacing::off);                              // Tweaks 4BEDE0: off from here on
     if(m.i16(0x8446e8)>0){                                                      // 4BD0A0
         if(var==2u){if(!level_4bd0a0(n))return false;}
         else if(var==1u)split_4b9320(n,1);

@@ -347,8 +347,11 @@ void D3D11D3D9Device::clear(std::uint32_t flags,std::uint32_t c,float z,std::uin
 void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
     if(count<3)return;
     batch_rhw_=pretransformed_;
+    const float ex=pretransformed_?ui_extension():0.f;   // UIScalingMode 1: the 2D range widened by ex UI units each side
     auto push=[&](const Vertex& source){auto v=source;
-        if(pretransformed_){const float w=1.f/v.pos[3];v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x)/soft_viewport_.w-1)*w;
+        if(pretransformed_){const float w=1.f/v.pos[3];
+            if(ex>0.f)v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x+ex)/(soft_viewport_.w+2*ex)-1)*w;
+            else v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x)/soft_viewport_.w-1)*w;
             v.pos[1]=(1-2*(v.pos[1]+.5f-soft_viewport_.y)/soft_viewport_.h)*w;v.pos[2]=v.pos[2]*w;v.pos[3]=w;}
         else{v.pos[0]+=v.pos[3]/soft_viewport_.w;v.pos[1]-=v.pos[3]/soft_viewport_.h;}
         batch_.push_back(v);};
@@ -522,11 +525,12 @@ void D3D11D3D9Device::apply_state(){
     // rectangle, pretransformed (2D) draws keep a centred area of its aspect (4:3, or
     // a span's centre panel with UIScalingMode 0; the 4:3 keeps its original arithmetic).
     const bool back=colour_target_==BackBuffer;
-    double sx=back?double(back_w_)/back_width_:1,sy=back?double(back_h_)/back_height_:1,ox=0;
+    double sx=back?double(back_w_)/back_width_:1,sy=back?double(back_h_)/back_height_:1,ox=0,ex=0;
     if(back&&ui_rect_&&batch_rhw_){
         const double w=ui_aspect_==4./3.?double(back_h_)*4/3:double(back_h_)*ui_aspect_;
-        ox=std::floor((back_w_-w)/2);sx=w/back_width_;}
-    const float vx=float(ox+soft_viewport_.x*sx),vy=float(soft_viewport_.y*sy),vw=float(soft_viewport_.w*sx),vh=float(soft_viewport_.h*sy);
+        ox=std::floor((back_w_-w)/2);sx=w/back_width_;
+        ex=ui_extension();}   // UIScalingMode 1: the same scale, ex UI units more each side (raster maps them in)
+    const float vx=float(ox+(soft_viewport_.x-ex)*sx),vy=float(soft_viewport_.y*sy),vw=float((soft_viewport_.w+2*ex)*sx),vh=float(soft_viewport_.h*sy);
     const D3D11_VIEWPORT vp{vx,vy,vw,vh,soft_viewport_.min_z,soft_viewport_.max_z};
     if(!bound_.viewport_set||std::memcmp(&vp,&bound_.viewport,sizeof vp)!=0){context_->RSSetViewports(1,&vp);bound_.viewport=vp;bound_.viewport_set=true;}
     const D3D11_RECT scissor{LONG(std::lround(vx)),LONG(std::lround(vy)),LONG(std::lround(vx+vw)),LONG(std::lround(vy+vh))};

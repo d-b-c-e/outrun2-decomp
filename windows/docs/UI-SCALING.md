@@ -61,7 +61,7 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 Triple screens: the HUD stays on the centre monitor in both planar and three-view modes, which is STD-007. With
 three views, mode 1's spacing applies to the centre panel's 16:9 only.
 
-## Step 2a, proposed slice (for review; no code yet)
+## Step 2a (accepted, sana 38916; built: see the ROADMAP row and the commit)
 
 **A finding that step 2 must handle first.** With the centred 4:3 rectangle, the 2D viewport and scissor cover only
 that rectangle.
@@ -85,15 +85,27 @@ So mode 1 needs a wider 2D mapping at the same scale:
    - `pc_sprani_render_429460` passes the record's value to `layer_429350`. After `matrix_429220`, as Tweaks' 4293F3,
      that shifts the layer matrix's m[12] by ±ext: detect moves x < 213 left and x ≥ 426 right; left / right force
      the direction.
-3. First scope only: NaviPub_Disp's own on / off (4BEB31 / 4BEDBE on, 4BEDE0 / 4BEE21 off) in
-   `navi_pub_display_4beb00_impl` / `mission_4bed13`. That covers the race HUD's speed, gear, time and route elements.
-   The disables inside it (rivals, hearts, markers), DispTimeAttack2D's forced sides, the put_scroll positions, ghost
-   gap and C2C come in later slices.
-4. Mode 1 then applies (no fallback). The default stays 2 until the visual check (step 4).
+3. NaviPub_Disp's scope, with its own disables, placed by the calls in 4BEB00..4BEE40 of the EXE:
+   - on (detect) from 4BEB31: score, clocks, time attack, OutRun, Heart Attack, LAN and mission bodies, then speed,
+     needle, gear, route, stage banner, warning (re-asserted at 4BEDBE);
+   - unspaced inside it:
+     - the rival labels / markers (4BEB8E .. 4BEBAF);
+     - the heart service 462CD0 (4BEBE1 .. 4BEBE6);
+     - the LAN markers (4BEC83 .. 4BEC88);
+   - off from 4BEDE0: level, split, ghost, lap, countdown, and the 4BEDF0 tail (its own guard, since the decomp
+     reaches it early for mode != 16).
+   - Guards (`UiSpacingGuard`, platform/ui_spacing.hpp) restore the scope on every return.
+   - DispTimeAttack2D's forced sides, the put_scroll positions, ghost gap and C2C come in later slices, so mode 1 is
+     **partial**: the log note says so.
+4. Mode 1 applies (no fallback). The default stays 2 until the visual check (step 4). Pool sprites drawn by 428170
+   capture the scope current then (off), as Tweaks' global would be.
 5. Tests:
-   - the side rule and the extended mapping as pure functions, fixture-tested at 16:9 and on a span's centre panel;
-   - modes 2 and 0 unchanged (the existing checks);
-   - test_d3d11_vertex_path for the device path.
+   - `test_triple_screens`: parse (1 is partial), the rectangle and spacing at 16:9, at 21:9 and on a span's centre
+     panel (4:3 plus both spacings = the centre panel, never past it), the side rule, and the guard's nesting;
+   - `test_d3d11_vertex_path`, on WARP:
+     - an in-range pretransformed quad has the same pixels with and without spacing;
+     - one left of the 4:3 is clipped in mode 2 and drawn at the same scale in mode 1;
+     - one beyond the extension stays clipped.
 
 Under triples the HUD stays on the centre panel (ext from the centre panel's 16:9), as STD-007.
 

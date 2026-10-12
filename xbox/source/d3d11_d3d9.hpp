@@ -39,7 +39,10 @@ public:
     // 2D layer came). The setters apply between frames.
     void resize_back_buffer(unsigned width,unsigned height);
     // aspect: the rectangle's width per unit of height (4:3 by default; UIScalingMode 0 on a span: its centre panel's).
-    void set_ui_rect(bool on,double aspect=4./3.){ui_rect_=on;ui_aspect_=aspect>0.?aspect:4./3.;}
+    // spacing (UIScalingMode 1, step 2a): 640-wide UI units the 2D mapping extends on each side of the 4:3 at the same
+    // scale, so the spaced HUD is not clipped; 0 keeps the plain rectangle.
+    void set_ui_rect(bool on,double aspect=4./3.,double spacing=0.){
+        ui_rect_=on;ui_aspect_=aspect>0.?aspect:4./3.;ui_spacing_=spacing>0.?spacing:0.;}
     void set_fxaa(bool on){fxaa_=on;}
     void set_msaa(unsigned samples){msaa_=samples==2||samples==4?samples:1;}
     void finish_scene();
@@ -150,6 +153,11 @@ private:
     ComPtr<ID3D11VertexShader> fxaa_vertex_;ComPtr<ID3D11PixelShader> fxaa_pixel_;ComPtr<ID3D11SamplerState> fxaa_sampler_;
     ComPtr<ID3D11RasterizerState> fxaa_rasterizer_;ComPtr<ID3D11DepthStencilState> fxaa_depth_;ComPtr<ID3D11BlendState> fxaa_blend_;
     bool msaa_live_{},ui_rect_{},fxaa_{},scene_finished_{},batch_rhw_{};
-    double ui_aspect_{4./3.};
+    double ui_aspect_{4./3.},ui_spacing_{};
+    // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport (a game
+    // sub-viewport keeps its own clipping).
+    float ui_extension()const{
+        return ui_rect_&&ui_spacing_>0.&&colour_target_==BackBuffer&&soft_viewport_.x==0.f&&soft_viewport_.w==float(back_width_)?
+            float(ui_spacing_):0.f;}
 };
 }
