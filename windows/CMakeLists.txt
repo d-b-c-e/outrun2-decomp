@@ -51,6 +51,23 @@ target_compile_definitions(test_ffb_delivery PRIVATE NOMINMAX WIN32_LEAN_AND_MEA
 target_compile_features(test_ffb_delivery PRIVATE cxx_std_17)
 add_test(NAME ffb_delivery COMMAND test_ffb_delivery)
 
+# F4b's load gates with the real ffb_live.cpp (romi 30155): a fake WheelFfb.dll (tests/fake_wheelffb.cpp) beside the test
+# in their own folder, never beside OutRunDesktop.exe. Muted, latched, default or unbound: it must never attach.
+add_library(fake_wheelffb SHARED tests/fake_wheelffb.cpp)
+set_target_properties(fake_wheelffb PROPERTIES OUTPUT_NAME WheelFfb RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ffb_wiring/$<CONFIG>)
+target_compile_definitions(fake_wheelffb PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+add_executable(test_ffb_wiring tests/test_ffb_wiring.cpp source/ffb_live.cpp source/ffb_settings.cpp source/ffb_outrun.cpp
+    source/ffb_device.cpp source/desktop_settings.cpp)
+target_include_directories(test_ffb_wiring PRIVATE source vendor/controls vendor/wheelffb ${PROJECT_SOURCE_DIR}/xbox/source)
+target_compile_definitions(test_ffb_wiring PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_features(test_ffb_wiring PRIVATE cxx_std_17)
+# outrun_native_runtime's clang-cl objects call the compiler-rt builtins (128-bit division), as in xbox/CMakeLists.txt.
+file(GLOB OR2_WIRING_CLANG_BUILTINS "${CMAKE_GENERATOR_INSTANCE}/VC/Tools/Llvm/x64/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib")
+target_link_libraries(test_ffb_wiring PRIVATE outrun_native_runtime ${OR2_WIRING_CLANG_BUILTINS})
+set_target_properties(test_ffb_wiring PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ffb_wiring/$<CONFIG>)
+add_dependencies(test_ffb_wiring fake_wheelffb)
+add_test(NAME ffb_wiring COMMAND test_ffb_wiring)
+
 # The input shim's core (windows/shim, docs/INPUT-SHIM.md), slice 1: pure C++17 against a scripted device provider.
 add_executable(test_shim tests/test_shim.cpp shim/parse.cpp shim/core.cpp)
 target_include_directories(test_shim PRIVATE shim tests vendor/controls)
