@@ -103,6 +103,16 @@ r = run(PREF, rep); check(not r["followed"] and r["firstDivergence"]["channel"] 
 rep = copy.deepcopy(PREP); rep[4]["gameInput.stageKey"] = 18
 r = run(PREF, rep); check(not r["followed"] and r["firstDivergence"]["channel"] == "gameInput.stageKey", "another stage key is a divergence")
 rep = copy.deepcopy(PREP); del rep[5]["gameInput.vec20Z"]; invalid("a missing pose channel in the replay", PREF, rep)
+# sana 36094: the two comparer false passes. Pose capability is the whole reference's, not row 0's; poseValid exactly 0/1.
+ref = copy.deepcopy(PREF); del ref[0]["gameInput.poseValid"]; rep = copy.deepcopy(PREP); rep[6]["gameInput.posX"] += 1.0
+invalid("poseValid missing only from reference row 0, a later pose divergence", ref, rep)
+ref = copy.deepcopy(PREF); del ref[2]["gameInput.posZ"]; invalid("a pose channel missing from one reference row", ref, PREP)
+ref, rep = copy.deepcopy(PREF), copy.deepcopy(PREP); ref[6]["gameInput.poseValid"] = rep[6]["gameInput.poseValid"] = 0.5; rep[6]["gameInput.posX"] += 1.0
+invalid("poseValid 0.5 in both at a moving row, its position diverged", ref, rep)
+rep = copy.deepcopy(PREP); rep[4]["gameInput.poseValid"] = 2; invalid("poseValid 2 in the replay", PREF, rep)
+rep = copy.deepcopy(PREP); rep[4]["gameInput.poseValid"] = True; invalid("a boolean poseValid", PREF, rep)
+# The legacy case stays input-only even when the replay has pose channels.
+r = run(REF, PREP); check(r["valid"] and r["followed"] and not r["pose"]["compared"], "a pose-free reference against a posed replay: input-only")
 invalid("no racing rows with a valid pose", [dict(c, **{"gameInput.poseValid": 0}) for c in PREF], [dict(c, **{"gameInput.poseValid": 0}) for c in PREP])
 still = [dict(c, **{"gameInput.posX": 1.0, "gameInput.posZ": 2.0}) for c in PREF]
 invalid("a car that never moved", still, [dict(c, **{"gameInput.posX": 1.0, "gameInput.posZ": 2.0}) for c in PREP])

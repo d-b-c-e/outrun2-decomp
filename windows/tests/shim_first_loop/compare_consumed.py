@@ -73,8 +73,9 @@ def compare(ref_path, rep_path):
         if r != expected: problems.append("replay row %d: tape row %d, expected %d (in order, each once)" % (i, r, expected)); break
         played.append(c); expected += 1
     if ref and len(played) != len(ref): problems.append("%d of %d reference rows played" % (len(played), len(ref)))
-    # The pose is compared only when the reference has it; an older input-only tape stays input-only (never default-filled).
-    pose = bool(ref) and VALID in ref[0]
+    # The pose is compared when any reference row has a pose channel (sana 36094: then every row must have all of them);
+    # only a wholly pose-free reference, an older input-only tape, stays input-only (never default-filled).
+    pose = any(k in c for c in ref for k in (VALID,) + POSE)
     always = GAME + ((VALID,) if pose else ())
     out_pose = dict(compared=pose, scope="input, startup and pose" if pose else "input and startup only (the reference has no pose channels)")
     def motion(rows, name):   # admission: rows with the active car, and how far it moved in them
@@ -93,6 +94,8 @@ def compare(ref_path, rep_path):
         a, b = ref[r], played[r]
         missing = [k for k in always + (POSE if pose else ()) + tuple(fed) if number(a, k) is None or number(b, k) is None]
         if missing: problems.append("row %d: missing or non-finite %s" % (r, ", ".join(missing[:4]))); break
+        if pose and not (a[VALID] in (0, 1) and b[VALID] in (0, 1)):   # exactly 0 or 1 (sana 36094)
+            problems.append("row %d: poseValid %r / %r is not 0 or 1" % (r, a[VALID], b[VALID])); break
         if all(a[k] == b[k] for k in fed): out["fedEqualRows"] += 1
         elif out["fedFirstDifference"] is None:
             k = next(k for k in fed if a[k] != b[k]); out["fedFirstDifference"] = dict(row=r, channel=k, reference=a[k], replay=b[k])
