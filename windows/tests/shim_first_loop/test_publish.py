@@ -16,6 +16,13 @@ import run
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 k32.CreateFileW.restype = wt.HANDLE
 k32.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, ctypes.c_void_p, wt.DWORD, wt.DWORD, wt.HANDLE]
+# Explicit prototypes keep the HANDLE pointer width (romi 24736): ctypes otherwise passes an int.
+k32.ReadFile.restype = wt.BOOL
+k32.ReadFile.argtypes = [wt.HANDLE, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD), ctypes.c_void_p]
+k32.CloseHandle.restype = wt.BOOL
+k32.CloseHandle.argtypes = [wt.HANDLE]
+k32.ReplaceFileW.restype = wt.BOOL
+k32.ReplaceFileW.argtypes = [wt.LPCWSTR, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_void_p, ctypes.c_void_p]
 GENERIC_READ, SHARE_READ, SHARE_DELETE, OPEN_EXISTING = 0x80000000, 1, 4, 3
 INVALID = wt.HANDLE(-1).value
 failures = []
