@@ -7,6 +7,7 @@
 #include "outrun_recorder.hpp"
 #include "outrun_replay.hpp"
 #include "provider_host.hpp"
+#include "journal_identity.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include <chrono>
@@ -33,33 +34,9 @@ struct State {
 };
 State g;
 
-std::uint64_t process_start(){
-    FILETIME a,b,k,u;
-    if(!GetProcessTimes(GetCurrentProcess(),&a,&b,&k,&u))return 0;
-    return (std::uint64_t(a.dwHighDateTime)<<32)|a.dwLowDateTime;
-}
-
-// The journal identity, built once on the input thread before the control worker starts (no file is read here: the
-// profile bytes are the ones Core parsed). The executable and adapter-schema hashes are not built yet; the sink
-// reports them as unavailable rather than inventing them (CONTROL-JOURNAL.md section 10).
+// The journal identity (host/journal_identity.hpp, shared with dbce_shim.dll).
 std::shared_ptr<const c::JournalIdentity> identity(){
-    auto id=std::make_shared<c::JournalIdentity>();
-    id->id.process=GetCurrentProcessId();
-    id->id.process_start=process_start();
-    for(std::size_t i=0;i<id->id.nonce.size()&&i<g.plan.nonce.size();++i)id->id.nonce[i]=std::uint8_t(g.plan.nonce[i]);
-    const auto parsed=sh::read_profile(g.profile);
-    id->id.profile=parsed.file_hash;             // read_profile hashes the very bytes it parsed
-    id->latched=true;id->nonce_text=g.plan.nonce;
-    id->executable_known=false;id->build_known=false;   // the identity builder (by handle, shared with the observer) is next
-    id->core_version=CoreVersion;id->adapter_version=AdapterVersion;
-    const auto devices=g.host->device_reports();
-    for(const auto& d:devices)id->devices.push_back(d.identity);
-    id->id.profile_devices=std::uint32_t(id->devices.size());
-    const auto start=g.host->start_report();
-    id->start_line=start.line;
-    for(const auto& n:start.notes)id->start_line+="\n"+n;
-    id->profile_revision=parsed.ok?parsed.section.revision:"";
-    return id;
+    return h::journal_identity(*g.host,g.plan.nonce,g.profile,CoreVersion,AdapterVersion);
 }
 
 void start(){

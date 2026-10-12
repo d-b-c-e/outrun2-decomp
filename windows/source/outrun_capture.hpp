@@ -23,11 +23,16 @@ inline rec::Channels signal_channels(const Signals& s){
     c["adapter.recordButtons"]=s.record_buttons;c["adapter.nativeSuppressed"]=s.native_suppressed;c["adapter.gearbox"]=int(s.gearbox);
     return c;
 }
-inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots: rec::encode's fixed sample slots
-    auto c=rec::encode(s.frame,slots);const auto a=signal_channels(s.signals);c.insert(a.begin(),a.end());
+// OutRun's own channels of a tick (the frame recorder appends them to the Core frame's).
+inline rec::Channels game_channels(const Snapshot& s){
+    auto c=signal_channels(s.signals);
     c["gameInput.mode"]=s.view.mode;c["gameInput.car"]=s.view.car;c["gameInput.gear"]=s.view.gear;c["gameInput.speed"]=s.view.speed;
     if(s.tape_row!=NotReplay)c["replay.tapeRow"]=double(s.tape_row);
     c["gameInput.consumedSteer"]=s.view.consumed_steer;c["gameInput.consumedAccel"]=s.view.consumed_accel;c["gameInput.consumedBrake"]=s.view.consumed_brake;
+    return c;
+}
+inline rec::Channels channels(const Snapshot& s,std::size_t slots=0){   // slots: rec::encode's fixed sample slots
+    auto c=rec::encode(s.frame,slots);const auto g=game_channels(s);c.insert(g.begin(),g.end());
     return c;
 }
 inline rec::Channels frame_channels(const rec::Channels& all){
