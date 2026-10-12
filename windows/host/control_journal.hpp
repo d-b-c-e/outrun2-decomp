@@ -25,6 +25,7 @@ struct JournalIdentity {
     bool latched{};
     std::string nonce_text;                     // the fence nonce, latched only
     std::string profile_revision, core_version, adapter_version;
+    std::string input_source;                  // optional versioned external provider identity; not a sample capture
     std::vector<DeviceInfo> devices;            // the immutable profile device table, in index order
     std::string start_line;                     // the human start line (also in runtime.log), split into rows
     // False until the shared identity builder hashes them; the journal then writes null, never an invented value.
@@ -131,6 +132,10 @@ class JournalFile {
         using journal_detail::json_string;using journal_detail::num;
         const auto& i=*id_;
         prefix_="\"v\":1,\"pid\":"+num(i.id.process)+",\"created\":"+num(i.id.process_start);
+        if(!i.input_source.empty()){
+            prefix_+=",\"inputSource\":";
+            if(!json_string(prefix_,i.input_source,lim_.small_bytes))return false;
+        }
         if(i.latched)prefix_+=",\"nonce\":\""+hex(i.id.nonce.data(),i.id.nonce.size())+"\"";
         prefix_+=",\"profileSha256\":\""+hex(i.id.profile)+"\",\"build\":{\"core\":";
         if(!json_string(prefix_,i.core_version,lim_.small_bytes))return false;

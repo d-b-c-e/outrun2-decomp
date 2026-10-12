@@ -17,7 +17,7 @@ inline std::uint64_t process_start_time() {
 
 template <class Host>
 std::shared_ptr<const control::JournalIdentity> journal_identity(const Host& host, const std::string& nonce, const std::string& profile,
-                                                                  const char* core_version, const char* adapter_version) {
+                                                                  const char* core_version, const char* adapter_version, const char* input_source = nullptr) {
     auto id = std::make_shared<control::JournalIdentity>();
     id->id.process = GetCurrentProcessId();
     id->id.process_start = process_start_time();
@@ -27,6 +27,7 @@ std::shared_ptr<const control::JournalIdentity> journal_identity(const Host& hos
     id->latched = true; id->nonce_text = nonce;
     id->executable_known = false; id->build_known = false;   // the identity builder (by handle, shared with the observer) is next
     id->core_version = core_version; id->adapter_version = adapter_version;
+    if (input_source) id->input_source = input_source;
     const auto devices = host.device_reports();
     for (const auto& d : devices) id->devices.push_back(d.identity);
     id->id.profile_devices = std::uint32_t(id->devices.size());

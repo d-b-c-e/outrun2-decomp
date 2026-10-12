@@ -4,6 +4,9 @@
 #include <windows.h>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -51,6 +54,25 @@ void core(){
     now+=10000;auto right=sample(3,now);right.raw.axes[0]=65535;check(p.samples({right},why)&&c.tick().action[0].value==1.f,"resolver drives endpoint");
     p.finish_frame();check(c.tick().action[0].status==Status::ReadPending&&c.tick().action[0].value==0.f,"omission cannot replay prior axis");
 }
+void latched_core(){
+    std::int64_t now=1000000;BridgeProvider p([&]{return now;});std::string why;
+    CoreConfig cfg;cfg.latched=true;Core c(p,cfg);c.set_profile(read_profile(Profile));
+    check(p.devices({device()},why),"latched Core descriptors");c.service_devices();
+    c.request_admission(Session{"bridgecheck1",1000600},1000000,true,true);
+    auto physical=sample(1,now);physical.raw.axes[0]=65535;check(p.samples({physical},why),"copied physical endpoint");
+    const auto waiting=c.tick();
+    check(waiting.run==Run::Waiting&&waiting.suppress_native&&waiting.action[0].status==Status::TestNeutral&&waiting.action[0].value==0&&!waiting.action[0].injected,"copied physical input stays test-neutral, native suppressed");
+    check(waiting.samples.size()==1&&waiting.samples[0].source_generation==1&&waiting.samples[0].source_sequence==1&&waiting.samples[0].read_end_us==now,"latched physical provenance retained separately");
+    check(c.offer_batch("nonce=bridgecheck1\nbatch=1\ninject action steer -0.5 ms=3000\n").verdict!=BatchVerdict::Refused,"latched Core batch accepted");
+    now+=10000;physical=sample(2,now);physical.raw.axes[0]=65535;check(p.samples({physical},why),"second physical endpoint");
+    const auto running=c.tick();
+    check(running.run==Run::Running&&running.action[0].injected&&std::fabs(running.action[0].value+.5f)<1e-3f&&running.samples[0].source_sequence==2,"only accepted command is injected, source sequence remains physical");
+    check(running.samples[0].physical.axes[0]==65535&&running.samples[0].delivered.axes[0]!=65535&&running.samples[0].injected.axes==1,"injection marks delivered copy without rewriting original physical sample");
+    check(c.offer_batch("nonce=bridgecheck1\nbatch=2\nend\n").verdict!=BatchVerdict::Refused,"end accepted");
+    now+=10000;physical=sample(3,now);physical.raw.axes[0]=65535;check(p.samples({physical},why),"physical endpoint after end");
+    const auto ended=c.tick();check(ended.run==Run::Completed&&ended.suppress_native&&ended.down==0&&std::all_of(ended.action.begin(),ended.action.end(),[](const auto& a){return a.value==0;}),"terminal frame is neutral and native remains suppressed");
+    check(c.offer_batch("nonce=bridgecheck1\nbatch=3\ninject action steer 1 ms=3000\n").verdict==BatchVerdict::Refused,"terminal run cannot rearm");
+}
 std::int64_t clock_us(){LARGE_INTEGER f{},n{};QueryPerformanceFrequency(&f);QueryPerformanceCounter(&n);return n.QuadPart/f.QuadPart*1000000+n.QuadPart%f.QuadPart*1000000/f.QuadPart;}
 void abi(){
     check(dbce_shim_abi_version()==2&&dbce_shim_frame_size()==296&&dbce_shim_open_args_size()==128,"base ABI unchanged");
@@ -80,5 +102,44 @@ void abi(){
     check(dbce_shim_stop(h,why,sizeof(why),nullptr)==DBCE_SHIM_OK,"bridge Host resolved stop");
     check(dbce_shim_bridge_tick(h,nullptr,0,&f)==DBCE_SHIM_STOPPED,"spent bridge handle");
 }
+void latched_abi(){
+    const auto dir=std::filesystem::temp_directory_path()/("dbce-bridge-latched-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64()));
+    std::filesystem::create_directories(dir);const auto folder=dir.wstring(),session=(dir/"inject.on").wstring(),batch=(dir/"inject.txt").wstring();
+    const auto expires=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()+600;
+    {std::ofstream file(dir/"inject.on",std::ios::binary);file<<"nonce=bridgecheck1\nexpires="<<expires<<"\n";}
+    dbce_shim_open_args a{};a.struct_size=sizeof(a);a.folder=folder.c_str();a.nonce="bridgecheck1";a.profile=Profile.data();a.profile_len=int(Profile.size());a.adapter_version="bridge-latched-test";
+    a.session_file=session.c_str();a.batch_file=batch.c_str();a.fences_verified=a.force_absent=1;
+    void* h=nullptr;char why[1024]{};
+    a.flags=8;check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_BAD_ARGUMENT&&!h,"unknown flags refused");
+    a.flags=DBCE_SHIM_LATCHED|DBCE_SHIM_CAPTURE;check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_REFUSED&&!h,"latched cannot bypass capture format refusal");
+    a.flags=DBCE_SHIM_LATCHED;
+    for(const auto value:{0,2}){
+        a.fences_verified=uint8_t(value);check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_REFUSED&&!h,"fences require exactly one");a.fences_verified=1;
+        a.force_absent=uint8_t(value);check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_REFUSED&&!h,"force absent requires exactly one");a.force_absent=1;
+    }
+    a.session_file=nullptr;check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_REFUSED&&!h,"session path required");a.session_file=session.c_str();
+    a.batch_file=nullptr;check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_REFUSED&&!h,"batch path required");a.batch_file=batch.c_str();
+    check(dbce_shim_bridge_open(&a,&h,why,sizeof(why))==DBCE_SHIM_OK&&h,"latched copied host opens with fences and no DirectInput");
+    dbce_shim_bridge_device_v1 d{};d.struct_size=sizeof(d);d.abi=1;d.generation=9;d.axis_mask=d.range_mask=1;d.maximum[0]=65535;
+    const GUID wg={0xd71b8350,0x61b7,0x11f1,{0x80,1,0x44,0x45,0x53,0x54,0,0}},pg={0x0006346e,0,0,{0,0,0x50,0x49,0x44,0x56,0x49,0x44}};
+    std::memcpy(d.instance,&wg,16);std::memcpy(d.product,&pg,16);check(dbce_shim_bridge_devices(h,&d,1)==DBCE_SHIM_OK,"latched copied metadata");
+    dbce_shim_bridge_sample_v1 s{};s.struct_size=sizeof(s);s.abi=1;s.generation=9;s.valid=1;s.axes[0]=65535;
+    dbce_shim_frame f{};f.struct_size=sizeof(f);
+    auto tick=[&]{++s.sequence;s.read_start_us=s.read_end_us=clock_us();if(dbce_shim_bridge_tick(h,&s,1,&f)!=DBCE_SHIM_OK)throw std::runtime_error("latched copied ABI tick");};
+    auto until=[&](Run run){for(int i=0;i<600;++i){tick();if(f.run==uint8_t(run))return true;Sleep(5);}return false;};
+    check(until(Run::Waiting)&&f.latched&&f.suppress_native&&f.action[0].value==0&&!f.action[0].injected,"real control worker admission leaves copied physical endpoint neutral");
+    {std::ofstream file(dir/"inject.txt",std::ios::binary);file<<"nonce=bridgecheck1\nbatch=1\ninject action steer -0.5 ms=3000\n";}
+    check(until(Run::Running)&&f.action[0].injected&&std::fabs(f.action[0].value+.5f)<1e-3f,"real control worker injects accepted batch");
+    {std::ofstream file(dir/"next.txt",std::ios::binary);file<<"nonce=bridgecheck1\nbatch=2\nend\n";}
+    check(MoveFileExW((dir/"next.txt").c_str(),(dir/"inject.txt").c_str(),MOVEFILE_REPLACE_EXISTING)!=FALSE,"atomic next batch");
+    check(until(Run::Completed)&&f.suppress_native&&f.down==0&&std::all_of(std::begin(f.action),std::end(f.action),[](const auto& v){return v.value==0;}),"end produces terminal neutral native-suppressed frame");
+    tick();check(f.run==uint8_t(Run::Completed)&&f.suppress_native&&f.action[0].value==0,"physical endpoint cannot return after completion");
+    check(dbce_shim_stop(h,why,sizeof(why),nullptr)==DBCE_SHIM_OK,"latched bridge control journal and memory provider resolve stop");
+    check(dbce_shim_bridge_tick(h,nullptr,0,&f)==DBCE_SHIM_STOPPED,"latched bridge handle spent");
+    std::ifstream journal(dir/"controls-journal.jsonl",std::ios::binary);std::string text((std::istreambuf_iterator<char>(journal)),{});
+    check(text.find("\"inputSource\":\"external-physical-input@1\"")!=std::string::npos&&text.find("\"profileSha256\":\""+hex(read_profile(Profile).file_hash)+"\"")!=std::string::npos&&text.find(W)!=std::string::npos,"journal names exact Controls hash/device and versioned external physical source");
+    check(text.find("\"complete\":true")!=std::string::npos&&text.find("completed")!=std::string::npos,"complete control journal records native-suppressed terminal run");
+    std::cout<<"latched journal: "<<(dir/"controls-journal.jsonl").string()<<"\n";
 }
-int main(){try{provider();core();abi();std::cout<<"PASS: "<<checks<<" copied-provider/Core/ABI checks; no device acquisition or force\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}}
+}
+int main(){try{provider();core();latched_core();abi();latched_abi();std::cout<<"PASS: "<<checks<<" copied-provider/Core/ABI checks; no device acquisition or force\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}}

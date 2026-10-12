@@ -223,7 +223,8 @@ int32_t open_impl(IDirectInput8W* input, const dbce_shim_open_args& a, void** ou
         if (latched) {   // the reviewed control worker and journal, in the run folder
             c::JournalLimits limits; limits.cap_bytes = c::LatchedJournalCap;
             auto io = std::make_shared<c::FileIo>(a.session_file, a.batch_file, a.folder, false,
-                                                  h::journal_identity(*shell->host, nonce, bytes, CoreVersion, adapter.c_str()), limits);
+                                                  h::journal_identity(*shell->host, nonce, bytes, CoreVersion, adapter.c_str(),
+                                                                      bridge ? "external-physical-input@1" : nullptr), limits);
             shell->host->start_control(io, {true, a.fences_verified == 1, a.force_absent == 1, nonce});
         }
         { std::lock_guard<std::mutex> l(registry_lock); registry.insert(shell.get()); }
@@ -310,7 +311,10 @@ static std::string bridge_guid(const uint8_t* bytes){GUID g{};std::memcpy(&g,byt
 int32_t dbce_shim_bridge_open(const dbce_shim_open_args* args,void** out,char* why,int32_t why_len){
     if(out)*out=nullptr;
     if(!args || args->struct_size!=sizeof(*args))return fail(DBCE_SHIM_BAD_ARGUMENT,"bridge args size",why,why_len);
-    if(args->flags)return fail(DBCE_SHIM_REFUSED,"bridge control/capture provenance is not qualified",why,why_len);
+    if(args->flags & ~std::uint32_t(DBCE_SHIM_LATCHED | DBCE_SHIM_CAPTURE))return fail(DBCE_SHIM_BAD_ARGUMENT,"unknown bridge open flags",why,why_len);
+    if(args->flags & DBCE_SHIM_CAPTURE)return fail(DBCE_SHIM_REFUSED,"bridge capture source format is not qualified",why,why_len);
+    // LATCHED reuses open_impl's exact fence/mute checks, control journal and
+    // terminal suppression. It does not turn copied physical samples into injection.
     try{return open_impl(nullptr,*args,out,why,why_len,std::make_shared<sh::BridgeProvider>(bridge_clock));}
     catch(...){return fail(DBCE_SHIM_REFUSED,"bridge allocation failed",why,why_len);}
 }

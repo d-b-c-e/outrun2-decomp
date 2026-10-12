@@ -28,8 +28,9 @@ Review these paths in order:
 5. `shim_dll/dbce_shim.cpp`: bridge open/devices/tick routes use copied buffers
    and the existing owner-thread/spent-handle registry. Base tick refuses a
    bridge handle; bridge calls refuse normal handles. No call to DirectInput8Create
-   occurs in bridge open. All capture/control flags refuse: source provenance
-   needs a new recording/control qualification before those routes are usable.
+   occurs in bridge open. Ordinary and fenced LATCHED opens are admitted (see
+   the October 12 addition below). CAPTURE still refuses: the recording format
+   does not carry external source sample provenance.
 
 Original HRESULTs and validity travel in the extension sample. Core consumes
 the original classified results; the caller must retain the original buffer
@@ -95,3 +96,40 @@ passes 46 checks, including atomic path validation, immutable generations,
 copied input buffers, Core path reporting and JSON publication. Art's fake-source
 actual DLL tests pass 431 checks on .NET8 and Unity Mono, exercising both the
 original metadata export and the new path export. No real path/device was opened.
+
+## Fenced latched control (2026-10-12)
+
+`dbce_shim_bridge_open` now admits `DBCE_SHIM_LATCHED` through the existing
+`open_impl` and `ProviderHost` control worker. Exact base checks remain: both
+session/batch paths, `fences_verified == 1`, `force_absent == 1`, nonce-bound
+session admission, and the existing expiry/readiness rules. These bits attest
+the consumer's verified process-latched force mute and fences; the DLL cannot
+independently prove game-side mute/score guards. Art must qualify those before
+live use. Unknown flag bits return BAD_ARGUMENT; CAPTURE and LATCHED|CAPTURE
+return REFUSED. No ordinary/direct-provider admission rule changes.
+
+Copied snapshots remain **physical** evidence, with original source generation,
+sequence, QPC interval and physical values preserved in Core. During a latched
+run those values alone produce TestNeutral. Only an accepted nonce-bound control
+batch produces injected actions. Completed/failed/expired runs stay neutral and
+`suppress_native` stays true. The existing P21 stop performs the final neutral
+tick, control journal drain, worker join and memory-only bridge release.
+
+Bridge control journals use the existing v1 rows with the optional immutable
+identity field `inputSource: "external-physical-input@1"` on every row. The exact
+Controls SHA-256 and profile device identities still come from Core's parse;
+executable/build hashes remain explicitly unavailable as before. Direct-provider
+journals omit the field and retain their format. The strict reader rejects an
+unknown external source or a missing/changed field later in a copied journal.
+This is a control/status journal, **not** a physical sample recording: it does
+not serialize every copied sample's source generation/sequence/interval. Capture
+therefore remains unavailable until a separately reviewed versioned format does.
+
+Offline validation: ClangCL /W4 /WX native targets build; CTest shim, shim_abi
+and shim_bridge pass 3/3. The bridge run reports 77 checks (readiness-loop count
+can vary), including exact fence values/missing paths, unknown/capture flags,
+actual-Core physical versus injected provenance, actual ABI control-worker
+admission/batch/end, terminal suppression, complete journal and resolved stop.
+The journal harness passes 366 checks; its reader also checks optional external
+source identity and drift. No game, DirectInput device, force, install or capture
+was opened. The earlier DLL hash above is historical, not this new candidate.

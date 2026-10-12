@@ -44,6 +44,19 @@ unknown = out / "unknown-event-epoch.jsonl"; unknown.write_bytes(b"\n".join(line
 for name, path, want in (("identity-drift", drift, "identity differs"), ("seq-gap", seqgap, "seq gap"), ("unknown-event-epoch", unknown, "event epoch 999")):
     v = read_journal.read(str(path)); ok = (not v["qualifies"]) and any(want in e for e in v["errors"])
     results.append(dict(case=name, verdict=v, problems=[] if ok else ["reader accepted a %s" % name]))
+# Optional copied-provider identity is immutable on every row; ordinary v1
+# journals keep their original bytes and remain accepted without this field.
+for name, physical_source, drift in (("external-source", "external-physical-input@1", False),
+                            ("external-source-unknown", "unqualified-source", False),
+                            ("external-source-drift", "external-physical-input@1", True)):
+    body = [dict(json.loads(x), inputSource=physical_source) for x in text if x]
+    if drift: del body[1]["inputSource"]
+    encoded = [json.dumps(x, separators=(",", ":")).encode() for x in body[:-1]]
+    body[-1]["bytes"] = sum(len(x) + 1 for x in encoded)
+    path = out / (name + ".jsonl")
+    path.write_bytes(b"\n".join(encoded + [json.dumps(body[-1], separators=(",", ":")).encode()]) + b"\n")
+    v = read_journal.read(str(path)); expected = name == "external-source"
+    results.append(dict(case=name, verdict=v, problems=[] if v["qualifies"] == expected else ["external source identity verdict differs"]))
 problems = [(r["case"], r["problems"]) for r in results if r["problems"]]
 (out / "receipt.json").write_text(json.dumps(dict(source=source, passed=not problems, proof=proof.stdout.strip(), cases=results), indent=2))
 if problems: raise SystemExit("FAIL " + json.dumps(problems, indent=1))

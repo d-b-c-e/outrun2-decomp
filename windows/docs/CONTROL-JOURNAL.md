@@ -53,6 +53,13 @@ both receive the same `shared_ptr<const RunIdentity>`.
 Every line carries `pid`, `created`, `nonce` (latched only), `profileSha256` and
 `build` = {`core`, `adapter`, `executableSha256`, `buildSha256`}.
 
+October 12 copied-provider addition: bridge latched journals also carry immutable
+`inputSource: "external-physical-input@1"` on every v1 row. The strict reader
+requires the same supported value throughout when present in the header. Existing
+direct-provider journals omit it. This identifies the physical provider used for
+admission evidence; it does not label physical input as injection or constitute
+a per-sample provenance capture. Bridge CAPTURE remains refused.
+
 ## 3. Lines and field limits from the input contracts (point 3)
 
 One JSON object per line (UTF-8, `\n`). Each has `v:1`, `type`, the identity, `seq` (contiguous
