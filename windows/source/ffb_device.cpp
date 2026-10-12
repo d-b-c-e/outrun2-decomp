@@ -41,6 +41,7 @@ std::string load_refusal(const Config& c){
     if(!c.output)return "[FFB] Output is not wheel (the default: no force output)";
     if(c.muted)return "DBCE_FFB_MUTE=1";
     if(c.latched)return "a latched (test) process";
+    if(c.shim)return ShimRefusal;
     if(c.steer_dev.empty())return "[Controls] steer names no device";
     GUID g;
     if(!parse_guid(c.steer_dev,g))return "[Controls] steer dev= is not an instance GUID";

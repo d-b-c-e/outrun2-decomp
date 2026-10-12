@@ -1,6 +1,7 @@
 // The [FFB] settings and the computation's lifecycle (ffb_live.hpp): pure, so test_ffb_outrun checks them.
 #include "ffb_live.hpp"
 #include "dbce_controls.hpp"
+#include "shim_input.hpp"
 #include <cctype>
 #include <cstdlib>
 namespace outrun::desktop {
@@ -47,6 +48,7 @@ ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mu
     else if(!v.empty()&&v!="none")notes+="[FFB] Output = "+v.substr(0,24)+" is neither wheel nor none; no force output. ";
     c.muted=mute_env&&*mute_env&&std::string(mute_env)!="0";
     c.latched=latched;
+    c.shim=!latched&&shim_backend_selected(settings);   // a latched process never runs the ordinary shim backend
     const auto section=dbce::controls::parseSection(settings.section_lines("Controls"));
     for(const auto& e:section.bound)if(e.action=="steer"){c.steer_dev=e.binding.dev;break;}
     return c;

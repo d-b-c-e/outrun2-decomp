@@ -81,7 +81,10 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    dbce::panel::Status("At the next start",v.output_next?"on":"off",v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
+    // The shim backend has no wheel force yet (ffbdev::ShimRefusal): a saved Output = wheel does not turn it on there.
+    const bool shim=!shim_input_status_text().empty();
+    dbce::panel::Status("At the next start",!v.output_next?"off":shim?"on, but not with Input = Shim yet":"on",
+                        v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
     dbce::panel::Text("Turning the wheel output on is not offered in this panel yet. Stop FFB and F8 turn it off now and at "
@@ -105,14 +108,17 @@ void page_ffb(bool advanced){
 void page_cameras(bool advanced){
     static const char* const modes[]{"Off","Surround","Separate monitors"};
     {const int before=v.triple;
-     if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
-         "Separate monitors: one window over three equal side-by-side monitors."))
+     if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: one wide view in a Surround desktop's "
+         "wide window. Separate monitors: one wide view in one window over three equal side-by-side monitors."))
          keep(&v.triple,before,[&]{return save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));});}
     const auto& st=triple_screens_status();
     char now[256];
     if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1 (planar, not three views)",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
     else std::snprintf(now,sizeof now,"%s, %s, one 16:9 view",triple_screens_name(st.mode),st.where.c_str());
     dbce::panel::Status("Now",now);
+    // romi 31510: the span is one planar view; never imply three angled views before they exist.
+    dbce::panel::Text("Surround and Separate monitors both draw one wide view across the screens; separate angled side views "
+                      "are not built yet.");
     if(v.triple!=int(st.mode))dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
     static const char* const latency[]{"0 (plain)","1","2 (default)","3"};

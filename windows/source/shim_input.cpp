@@ -8,6 +8,7 @@
 #include "outrun_recorder.hpp"
 #include "outrun_replay.hpp"
 #include "provider_host.hpp"
+#include "shim_steer.hpp"
 #include "journal_identity.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 namespace outrun::desktop {
 namespace {
@@ -56,6 +58,7 @@ struct Ordinary {
     std::unique_ptr<Adapter> adapter;
     bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
     Steering steering;                         // [Wheel], as the native wheel path reads it
+    std::optional<dbce::controls::Binding> steer;   // [Controls] steer from the parse of `profile` (shim_input_steer)
     StartReports reports;
 };
 Ordinary o;
@@ -196,11 +199,6 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
 }
 
-bool shim_backend_selected(const Ini& settings){
-    const auto backend=settings.text("Input","Backend","Native");
-    return _stricmp(backend.c_str(),"Shim")==0;
-}
-
 std::string shim_input_status_text(){
     if(!o.configured)return {};
     if(!o.host)return o.started?"the shared input shim did not start (see runtime.log); the keyboard and the pad still drive"
@@ -212,11 +210,22 @@ std::string shim_input_status_text(){
     return s;
 }
 
+ShimSteer shim_input_steer(){
+    if(!o.configured)return {};
+    const auto* steer=o.steer?&*o.steer:nullptr;
+    if(o.host)return shim_steer(steer,o.host->device_reports());
+    auto s=shim_steer(steer,{});
+    if(steer)s.status=o.started?"the shared input shim did not start":"the shared input shim starts with the first frame";
+    return s;
+}
+
 void shim_input_configure_ordinary(const Ini& settings,const std::string& folder){
     o.profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))o.profile+=line+"\n";
     const auto parsed=sh::read_profile(o.profile);
     o.transmission=parsed.ok?parsed.section.transmission:"";
+    o.steer.reset();
+    if(parsed.ok)if(const auto* b=dbce::controls::find(parsed.section,"steer"))o.steer=*b;
     o.folder=folder;
     const auto steering=wheel_steering(settings);   // as wheel_input reads it; non-finite values are the defaults
     o.steering.sensitivity=steering.sensitivity;o.steering.dead_zone=steering.dead_zone;

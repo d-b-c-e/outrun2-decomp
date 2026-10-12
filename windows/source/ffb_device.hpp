@@ -3,8 +3,10 @@
 // wheel toolkit's WheelFfb.dll (vendor/wheelffb), loaded at run time from the game folder. Off unless [FFB] Output =
 // wheel. The gates, in order; the first that fails keeps the wheel silent:
 //   load    Output = wheel; not DBCE_FFB_MUTE=1 (STD-035 item 8: the library stays unloaded); not a latched (test)
-//           process; [Controls] steer names a device instance (dev=); the DLL is 0.9.0 or newer and has every export
-//           used here. No library state is created before the open.
+//           process; not the shim input backend (it holds the wheel's handle, and a second open of a force device is
+//           never made: INPUT-SHIM.md section 6; its force lease is not built yet); [Controls] steer names a device
+//           instance (dev=); the DLL is 0.9.0 or newer and has every export used here. No library state is created
+//           before the open.
 //   open    in the race and in front (an exclusive handle is not acquired behind another window, and the game never
 //           takes the focus), with the input layer reading that same instance as the steering device; the instance is
 //           one of the library's force-feedback devices; strict selection opens exactly it (never a name or an
@@ -40,10 +42,13 @@ struct Config {
     bool output{};             // [FFB] Output = wheel
     bool muted{};              // DBCE_FFB_MUTE=1
     bool latched{};            // a test process
+    bool shim{};               // [Input] Backend = Shim: the shared input shim reads (and owns) the wheel
     std::string steer_dev;     // [Controls] steer dev= ("{...}"); empty when steer names no device
 };
 // Why the library may not be loaded ("" when it may).
 std::string load_refusal(const Config&);
+inline constexpr const char* ShimRefusal="the shared input shim reads the steering wheel ([Input] Backend = Shim), and wheel "
+    "force needs the shim's force lease (INPUT-SHIM.md section 6), which is not built yet; the wheel is never opened twice";
 // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", any case; nothing else.
 bool parse_guid(const std::string&,GUID&);
 enum class Phase { Off, Waiting, Open, Released, Stopped };

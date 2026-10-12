@@ -33,8 +33,9 @@ struct RaceEpochs {
 };
 
 // The wheel output's configuration (pure): [FFB] Output = wheel | none (default none; anything else is noted and is
-// none), the mute (`mute_env`, DBCE_FFB_MUTE: any value but empty or 0 mutes), the process kind, and the device instance
-// [Controls] steer reads (the force goes to the wheel the player steers with, never one chosen by name or index).
+// none), the mute (`mute_env`, DBCE_FFB_MUTE: any value but empty or 0 mutes), the process kind, the input backend
+// ([Input] Backend = Shim: no wheel output, ffbdev::ShimRefusal) and the device instance [Controls] steer reads (the
+// force goes to the wheel the player steers with, never one chosen by name or index).
 ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mute_env,std::string& notes);
 
 // latched_run_folder: the fence's run folder in a latched process (empty otherwise).
@@ -42,7 +43,8 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
 // Installs the per-tick computation after the current input filter (call after it is chosen). No-op when off.
 void ffb_wrap_input_filter();
 void ffb_shutdown();
-// For the F6 panel: the wheel output's state ("off: <why>", or the delivery's phase and why), whether it was started,
+// For the F6 panel: the wheel output's state ("off", the shim backend's reason with its steering wheel as the shim reads
+// it (shim_input_steer), or the delivery's phase and why), whether it was started,
 // and Stop FFB (F8, STD-004): the device quiesced and released for this process, then the DLL unloaded.
 std::string ffb_status_text();
 bool ffb_output_running();

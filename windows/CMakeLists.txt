@@ -88,6 +88,13 @@ target_include_directories(test_shim PRIVATE shim tests vendor/controls)
 target_compile_features(test_shim PRIVATE cxx_std_17)
 target_compile_options(test_shim PRIVATE /W4)
 add_test(NAME shim COMMAND test_shim)
+# The shim's steering wheel for force feedback (source/shim_steer.hpp): the steer binding joined to the real Core's
+# device reports over the scripted provider.
+add_executable(test_shim_steer tests/test_shim_steer.cpp shim/parse.cpp shim/core.cpp)
+target_include_directories(test_shim_steer PRIVATE source shim tests vendor/controls)
+target_compile_features(test_shim_steer PRIVATE cxx_std_17)
+target_compile_options(test_shim_steer PRIVATE /W4)
+add_test(NAME shim_steer COMMAND test_shim_steer)
 
 # The OutRun 2006 shim adapter (source/outrun_adapter), slice 2: the game's pad adapter, the shim core and the adapter
 # on fakes, into the NativeInputState the game consumes.

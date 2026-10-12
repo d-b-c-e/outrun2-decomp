@@ -1,10 +1,12 @@
 // F4b's load gates with the real ffb_live.cpp (romi 30155: muted, no DLL). A fake WheelFfb.dll beside this exe
 // (tests/fake_wheelffb.cpp, its own output folder) counts its attaches and logs every call it receives into the process
-// environment. Under the default, Output = none, DBCE_FFB_MUTE=1, a latched process or no steer device the module must
-// never attach; with Output = wheel it attaches, receives only GetWheelFfbVersion until a race sample, and is unloaded at
-// ffb_shutdown. Stubs stand in for the game window, the input filter slot and the wheel input layer only.
+// environment. Under the default, Output = none, DBCE_FFB_MUTE=1, a latched process, the shim input backend or no steer
+// device the module must never attach; with Output = wheel it attaches, receives only GetWheelFfbVersion until a race
+// sample, and is unloaded at ffb_shutdown. Stubs stand in for the game window, the input filter slot and the two input
+// layers' steering devices only.
 #include "ffb_live.hpp"
 #include "native_window.hpp"
+#include "shim_input.hpp"
 #include "platform/runtime_input.hpp"
 #include "platform/native_runtime.hpp"
 #include <windows.h>
@@ -22,6 +24,8 @@ NativeWindow& native_window(){static NativeWindow w;return w;}
 namespace outrun::desktop {
 std::string g_steer;   // what the wheel input layer reports as the connected steering device
 std::string wheel_input_steer_device(){return g_steer;}
+ShimSteer g_shim;      // the shim backend's steering wheel, as the test sets it
+ShimSteer shim_input_steer(){return g_shim;}
 bool g_panel_open=false;
 bool desktop_panel_open(){return g_panel_open;}   // the F6 panel's open state, as the test sets it
 }
@@ -82,6 +86,34 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel without a steer device: never attached");
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
+    // The shim backend (INPUT-SHIM.md section 6): the shim holds the wheel, so WheelFfb.dll is not even loaded, although
+    // the fake would accept this very wheel; the F6 status names why and the wheel as the shim reads it.
+    {
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
+        _putenv_s("DBCE_FFB_MUTE","");_putenv_s("OR2_FFB_TRACE","");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        const int before=attaches();
+        const std::string prod="{0006346e-0000-0000-0000-504944564944}";
+        outrun::desktop::g_shim={Wheel,prod,"live",true,2};
+        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_wrap_input_filter();
+        if(auto f=outrun::xbox_runtime::input_filter()){outrun::platform::NativeInputState in{};f(in,nullptr);}
+        check(attaches()==before&&env(L"FAKE_WHEELFFB_CALLS").empty()&&!GetModuleHandleW(L"WheelFfb.dll"),
+              "Backend = Shim, Output = wheel, the fake accepting: never attached");
+        check(!outrun::desktop::ffb_output_running(),"no wheel output with the shim backend");
+        auto status=outrun::desktop::ffb_status_text();
+        check(status.find("Input = Shim")!=std::string::npos&&status.find("open, epoch 2")!=std::string::npos,"status: the shim reason and its open wheel's epoch");
+        outrun::desktop::g_shim={Wheel,prod,"read-failed",false,2};
+        status=outrun::desktop::ffb_status_text();
+        check(status.find("Input = Shim")!=std::string::npos&&status.find("read-failed")!=std::string::npos,"status: the wheel's shim status when not open");
+        outrun::desktop::ffb_shutdown();
+        check(attaches()==before&&!GetModuleHandleW(L"WheelFfb.dll"),"still never attached after shutdown");
+        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nOutput = none\r\n"),false,std::string());
+        check(outrun::desktop::ffb_status_text()=="off","Output = none: the plain off, no shim reason");
+        outrun::desktop::ffb_shutdown();
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+        outrun::desktop::g_shim={};
+    }
     // Positive control: the same exe and fake do attach when every gate allows it; only the version is asked, nothing
     // reaches a device outside the race, and the module is gone after shutdown.
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\n",false,nullptr);

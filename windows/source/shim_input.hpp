@@ -5,11 +5,13 @@
 //   Control worker: FileIo over the fence's inject.on / inject.txt, journal in the run folder.
 //   OutRun adapter: at xbox_runtime::input_filter, after the pad adapter and before 453BB0 consumes the input.
 // No recorder yet (NoCapture): capture and replay are the next slice.
+#include "desktop_settings.hpp"
 #include "test_fence.hpp"
+#include <cstdint>
 #include <string>
+#include <cstring>   // _stricmp
 namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::desktop {
-class Ini;
 // Before the game starts: keeps the plan and the exact [Controls] bytes. Nothing is opened.
 void shim_input_configure(const fence::Plan& plan,const Ini& settings);
 // The input thread: opens at the first sample (the game window exists by then), then one Core frame per tick.
@@ -24,7 +26,7 @@ void shim_input_shutdown();
 // devices are read by the shim alone. That is the isolation: no device identity is compared or guessed. The pad
 // (Windows.Gaming.Input) and the desktop keyboard keep their own native paths, the keyboard exactly as with the native
 // wheel path (Adapter::apply with a Keyboard). The default stays Native.
-bool shim_backend_selected(const Ini& settings);
+inline bool shim_backend_selected(const Ini& settings){return _stricmp(settings.text("Input","Backend","Native").c_str(),"Shim")==0;}
 // Before the game starts: the exact [Controls] bytes, and the folder for the host's shutdown report (the game folder).
 void shim_input_configure_ordinary(const Ini& settings,const std::string& folder);
 // The input thread: opens at the first sample, then one Core frame per tick, applied with the desktop keyboard.
@@ -34,4 +36,12 @@ void shim_input_shutdown_ordinary();
 // For the F6 panel's Controls page: the ordinary shim backend's devices (open / not, each one's state); empty when this
 // backend is not the one in use. Game thread (the input sample's thread).
 std::string shim_input_status_text();
+// The steering wheel as the ordinary shim backend reads it, for force feedback (INPUT-SHIM.md section 6, one owner):
+// the [Controls] steer binding's device instance and product, from the profile bytes Core parses (no second mapping
+// store), joined to Core's live report of that instance. `opened` only when that report is open and its product (Core
+// checks it against the listing and the opened handle) is the binding's; `epoch` is the report's (a reopen is a new
+// epoch, 0 before the first open). `dev` is empty when steer is not bound or this backend is not in use; `status` is
+// Core's device status, or why there is none. Game thread (the input sample's thread).
+struct ShimSteer { std::string dev,prod,status; bool opened{}; std::uint32_t epoch{}; };
+ShimSteer shim_input_steer();
 }
