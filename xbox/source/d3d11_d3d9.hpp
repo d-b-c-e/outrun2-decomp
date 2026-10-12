@@ -8,6 +8,8 @@
 #include <vector>
 namespace outrun::xbox_runtime {
 using Microsoft::WRL::ComPtr;
+void set_anisotropic_filtering(unsigned level);   // [Graphics] AnisotropicFiltering: 0/1 the game's filtering, 2..16 the level
+void set_transparency_supersampling(bool on);     // [Graphics] TransparencySupersampling: alpha-to-coverage under MSAA
 // Direct3D 11 back end of the D3D9 device, the same split as the PS5 GL
 // device (ps5/source/gl_d3d9.cpp): the recovered vertex programs and the D3D9
 // resource/state ownership stay in PcSoftD3D9Device; raster, pixel shaders,

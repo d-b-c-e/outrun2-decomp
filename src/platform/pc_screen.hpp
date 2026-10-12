@@ -6,6 +6,25 @@
 #include <string>
 namespace outrun::platform {
 inline float g_pc_view_half_width=320.0f;
+// [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
+// (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
+// objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).
+inline bool g_pc_screen_edge_cull_fix=true;
+// [Bugfixes] FixParticleRendering (the Tweaks key, on by default there and here; hooks_bugfixes.cpp):
+// - 418CF0's screen mapping is the Xbox code, whose [740C8C] / [740C90] were half the resolution; on the PC they are
+//   the whole of it, so those particles (grass among them) land off screen. Tweaks halves the screen x, y and the
+//   size at 419009 (the size before its clamp, rounded to float); race_particles_draw.cpp does the same there.
+// - Metropolis fireworks: 44DE10 draws object 0x630001 with no node list (node 0: road barriers instead); Tweaks draws
+//   0x1A000A with the node list of DrawDistanceBehind = 2 in its place (race_area.cpp).
+inline bool g_pc_fix_particle_rendering=true;
+// [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
+// any finite value >= 0, as Tweaks reads it).
+// The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'
+// RestoreCarBaseShadow puts it back: the flat shadow object drawn with DrawObjectAlpha (4056D0) under the car's
+// own matrix (+B0) raised 0.05, its alpha the call's argument times this factor (C2C Xbox halved it, too faint on
+// the PC). vehicle_model_draw.cpp: the race model draw 469600 (its 49A650 call at 469EB4) and the car-select draws
+// 46A560 (46AC76) and 46AE70 (46B766), Tweaks' three sites.
+inline float g_pc_car_base_shadow_opacity=1.0f;
 // Port performance overlay (Minus): lines separated by '\n', drawn by the 2D
 // flush 42D710 on top of the frame with the game's font 9. Empty = hidden.
 inline std::string g_pc_overlay_text;

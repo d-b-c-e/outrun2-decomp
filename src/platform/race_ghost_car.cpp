@@ -869,6 +869,7 @@ void heart_item_draw_4ae386(Draw& d,std::uint32_t car){
     d.pop();                                                                     // 40A010
 }
 // 4AE0F0 (ESI = car), offline path (the network draws are refused).
+bool& other_car_lods_disabled(){static bool off=false;return off;}
 void other_car_draw_4ae0f0(PcRaceContext& c,std::uint32_t car){
     Draw d(c);auto& m=c.m;
     if(m.u32(0x7f94c0u)!=0u)throw std::runtime_error("4AE0F0: network car draw (55A930) not ported");
@@ -886,7 +887,7 @@ void other_car_draw_4ae0f0(PcRaceContext& c,std::uint32_t car){
         if(!(K1<=alpha)&&!std::isnan(alpha)){m.put32(0x842040u,1);m.putf(0x84203cu,alpha);}   // FCOMIP 1.0,alpha; JBE
     }
     const std::uint32_t list=d.lods(car);
-    const auto lod=std::int32_t(std::int8_t(m.u8(car+0x328)));
+    const auto lod=other_car_lods_disabled()?0:std::int32_t(std::int8_t(m.u8(car+0x328)));
     d.leaf(0x4052b0u,{});
     if(lod>=0&&lod<=4&&m.u32(list+std::uint32_t(lod)*4u))d.model(car,std::uint32_t(lod));
     if(m.u32(0x842040u)){

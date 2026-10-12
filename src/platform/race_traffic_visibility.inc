@@ -98,7 +98,7 @@
     // 4F0E40: object set-ups, the 84D8E0 frame, then each live object (5DA050 lanes 0x20.., 0x11A..,
     // 0x15C.., then the gates 0x134..) is visible (+54 bit 0) when its sphere (+40, radius +50 * +4C)
     // projected by 449E70 through the camera (+140, focal +B4) lies within the depth range
-    // +BC..+C0 and the 640 x 480 screen.
+    // +BC..+C0 and the 640 x 480 screen (wider with ScreenEdgeCullFix: g_pc_screen_edge_cull_fix).
     void objects_4f0e40(){
         Frame F(*this,0x28);
         objects_reinit_4f0920();
@@ -106,6 +106,9 @@
         const std::uint32_t cam=u32(0x79f574u);
         p32(0x84d8e0u,u32(0x84d8e0u)+1u);
         push_load(cam+0x140);
+        // x bounds 5DA2D4 / 6281C8 (-320 / 320), or the port's widescreen view as in 4F02D0.
+        const auto bounds=object_screen_bounds_4f0e40(K(0x5da2d4u),K(0x6281c8u),g_pc_view_half_width,g_pc_screen_edge_cull_fix);
+        const float low=bounds.low,high=bounds.high;
         auto check=[&](std::uint32_t id){
             if((u8(0x79fb48u+id)&3u)!=2u)return;
             const std::uint32_t w=u32(0x799b38u+id*0x3cu);
@@ -121,8 +124,8 @@
             bool on=true;
             if(gt(f32(cam+0xbc),ssub(r,sz)))on=false;
             else if(gt(ssub(ssub(0.0f,sz),r),f32(cam+0xc0)))on=false;
-            else if(gt(K(0x5da2d4u),sadd(sx,sr)))on=false;
-            else if(gt(ssub(sx,sr),K(0x6281c8u)))on=false;
+            else if(gt(low,sadd(sx,sr)))on=false;
+            else if(gt(ssub(sx,sr),high))on=false;
             else if(gt(K(0x5c6fc8u),sadd(sy,sr)))on=false;
             else if(gt(ssub(sy,sr),K(0x6281ccu)))on=false;
             p32(w+0x54,on?u32(w+0x54)|1u:u32(w+0x54)&~1u);

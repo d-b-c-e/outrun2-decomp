@@ -119,6 +119,8 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
+    std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
+                (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     std::printf("vertex path: %llu GPU draws, %llu CPU draws; vertex programs %u compiled, %u from the cache, %u failed (%.0f ms); %llu buffer uploads (%llu bytes)\n",
                 (unsigned long long)native_stats_.draws,(unsigned long long)native_stats_.cpu_draws,native_stats_.compiled,native_stats_.loaded,native_stats_.failed,native_stats_.ms,
                 (unsigned long long)native_stats_.uploads,(unsigned long long)native_stats_.upload_bytes);
@@ -435,6 +437,16 @@ void D3D11D3D9Device::uniform(unsigned slot,const void* data,std::size_t bytes){
     std::memcpy(m.pData,data,bytes);context_->Unmap(ubo_[slot].Get(),0);
     shadow.assign(static_cast<const std::uint8_t*>(data),static_cast<const std::uint8_t*>(data)+bytes);
 }
+// [Graphics] AnisotropicFiltering (the Tweaks key; 0 or 1 = the game's own filtering, 0 the default; 2..16 = that
+// anisotropy level): the samplers the
+// game filters linearly when minifying take anisotropic filtering at that level; point-filtered ones are left alone.
+namespace { unsigned g_anisotropy=0;bool g_transparency_supersampling=false; }
+void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;}
+// [Graphics] TransparencySupersampling (the Tweaks key; off by default): alpha-to-coverage for the alpha-tested,
+// unblended draws of the multisampled scene (barriers, foliage, cloth at the track edge). The game's alpha test still
+// discards below its reference, so nothing below it appears; above it, the texel's alpha becomes partial MSAA
+// coverage, which smooths the cut edge. Needs MSAA (options.ini antialiasing=msaa2/4); without it, no effect.
+void set_transparency_supersampling(bool on){g_transparency_supersampling=on;}
 void D3D11D3D9Device::apply_state(){
     // The logical PC target stretched to the back buffer's pixels; with the UI
     // rectangle, pretransformed (2D) draws keep a centred 4:3 area.
@@ -466,6 +478,7 @@ void D3D11D3D9Device::apply_state(){
     t.BlendEnable=render[RS_ALPHABLENDENABLE]!=0;t.SrcBlend=blend_factor(render[RS_SRCBLEND]);t.DestBlend=blend_factor(render[RS_DESTBLEND]);t.BlendOp=blend_op(render[RS_BLENDOP]);
     t.SrcBlendAlpha=alpha_factor(render[separate?RS_SRCBLENDALPHA:RS_SRCBLEND]);t.DestBlendAlpha=alpha_factor(render[separate?RS_DESTBLENDALPHA:RS_DESTBLEND]);
     t.BlendOpAlpha=blend_op(render[separate?RS_BLENDOPALPHA:RS_BLENDOP]);t.RenderTargetWriteMask=UINT8(render[RS_COLORWRITEENABLE]&15);
+    b.AlphaToCoverageEnable=g_transparency_supersampling&&back&&msaa_live_&&render[RS_ALPHATESTENABLE]!=0&&!t.BlendEnable?TRUE:FALSE;
     if(!last_blend_state_||std::memcmp(&b,&last_blend_,sizeof b)!=0){
         auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState");
         last_blend_=b;last_blend_state_=bs.Get();}
@@ -478,6 +491,9 @@ void D3D11D3D9Device::bind_textures(){
         const auto& p=sampler[s];const bool linear=p[SAMP_MINFILTER]!=1,mag=p[SAMP_MAGFILTER]!=1;const auto mip=p[SAMP_MIPFILTER];
         D3D11_SAMPLER_DESC d{};
         d.Filter=D3D11_FILTER((linear?D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT:0)|(mag?D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT:0)|(mip==2?D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR:0));
+        // D3D11's anisotropic filter covers min, mag and mip together; D3D9 (Tweaks) sets only MINFILTER. So only
+        // samplers already linear in both min and mag take it: a point-magnified texture (HUD, 2D) stays sharp (nene 27514).
+        if(g_anisotropy>1u&&linear&&mag){d.Filter=D3D11_FILTER_ANISOTROPIC;d.MaxAnisotropy=g_anisotropy;}
         d.AddressU=address(p[SAMP_ADDRESSU]);d.AddressV=address(p[SAMP_ADDRESSV]);d.AddressW=address(p[SAMP_ADDRESSW]);
         // D3D9 takes any LOD bias; D3D11 refuses one outside -16..15.99 (or NaN) with E_INVALIDARG.
         const float bias=f(p[SAMP_MIPMAPLODBIAS]);

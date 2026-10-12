@@ -7,8 +7,21 @@
 #include "d3d11_display.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
+#include "d3d11_d3d9.hpp"
+#include "platform/pc_car_reflection.hpp"
+#include "platform/pc_render_queue.hpp"
+#include "platform/race_ghosts.hpp"
+#include "platform/pc_pmt_loader.hpp"
+#include "platform/pc_scene_renderer.hpp"
+#include "platform/pc_screen.hpp"
+#include "platform/race_draw_distance.hpp"
 #include "platform/race_particles.hpp"
+#include <cmath>
+#include <fstream>
+#include <iterator>
+#include <algorithm>
 #include "desktop_settings.hpp"
+#include "triple_screens.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "test_fence.hpp"
@@ -23,6 +36,13 @@
 namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true;
+outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
+BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
+    MONITORINFO i{};i.cbSize=sizeof i;
+    if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
+        {i.rcMonitor.left,i.rcMonitor.top,i.rcMonitor.right,i.rcMonitor.bottom});
+    return TRUE;
+}
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
@@ -47,14 +67,30 @@ NativeWindow& native_window(){
     WNDCLASSW c{};c.lpfnWndProc=window_proc;c.hInstance=instance;c.lpszClassName=L"OutRunDesktop";c.hCursor=LoadCursor(nullptr,IDC_ARROW);
     c.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));
     RegisterClassW(&c);
+    namespace td=outrun::desktop;
+    std::string span_note;
     if(borderless){
         MONITORINFO m{};m.cbSize=sizeof m;
         GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m);
-        const RECT r=m.rcMonitor;
+        RECT r=m.rcMonitor;
+        // Separate monitors (STD-015): the window over three equal side-by-side monitors, in physical pixels (the process
+        // is per-monitor DPI aware; the left monitor's x is negative). No display mode or layout is ever changed.
+        if(triple==td::TripleScreens::separate){
+            std::vector<td::ScreenRect> monitors;EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&monitors));
+            td::ScreenRect span{};
+            if(td::triple_span_from_monitors(monitors,span)){r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";}
+            else span_note=std::string("refused: ")+td::triple_span_refusal(monitors)+" ("+std::to_string(monitors.size())+
+                           " found); the primary monitor";
+        }
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
+        if(span_note.empty())span_note="the primary monitor";
+        std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centred%s\n",td::triple_screens_name(triple),
+                    w.width,w.height,r.left,r.top,span_note.c_str(),triple==td::TripleScreens::off?"":" (the wide views are not implemented yet)");
     }else{
+        if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
+                                                      "no --windowed); one 16:9 view\n",td::triple_screens_name(triple));
         RECT r{0,0,1280,720};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,
                              r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
@@ -81,6 +117,7 @@ unsigned select_refresh_rate(unsigned){
     return EnumDisplaySettingsW(info.szDevice,ENUM_CURRENT_SETTINGS,&mode)&&mode.dmDisplayFrequency>1?unsigned(mode.dmDisplayFrequency):60u;
 }
 void set_borderless(bool on){borderless=on;}
+void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
 }
 // A crash writes its address and the return addresses on the stack (as
 // offsets in the executable, for llvm-symbolizer with the PDB) to runtime.log.
@@ -136,6 +173,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
+    // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
+    // start (the window opens once). Anything else is logged and Off applies. A latched (test) process keeps Off: a
+    // display preference must not reach the harness, as with FrameLatency. windows/docs/TRIPLE-SCREENS.md.
+    {   const auto text=settings.text("Triple","Screens");
+        const auto mode=outrun::desktop::parse_triple_screens(text);
+        if(mode&&!plan.latched)outrun::xbox_runtime::set_triple_screens(*mode);
+        else if(mode&&*mode!=outrun::desktop::TripleScreens::off)std::printf("settings: [Triple] Screens = %s not applied in a test process; Off\n",
+                                                                       outrun::desktop::triple_screens_name(*mode));
+        else if(!mode&&!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
@@ -146,6 +192,84 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
         if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
+    // [Graphics] AnisotropicFiltering, the Tweaks key: 0 (absent) or 1 keeps the game's own filtering, 2..16 the anisotropy
+    // level of its linearly filtered textures. An integer 0..16; anything else is logged and 0 applies.
+    {   const auto text=settings.text("Graphics","AnisotropicFiltering");unsigned level=0u;bool ok=text.empty();
+        if(!text.empty()&&text.size()<=2u&&std::all_of(text.begin(),text.end(),[](char c){return c>='0'&&c<='9';})){
+            level=unsigned(std::stoul(text));ok=level<=16u;if(!ok)level=0u;}
+        if(!ok)std::printf("settings: [Graphics] AnisotropicFiltering = %.32s refused (0..16); 0 applies\n",text.c_str());
+        if(level>1u)std::printf("settings: anisotropic filtering %ux\n",level);
+        else if(level==1u)std::printf("settings: [Graphics] AnisotropicFiltering = 1 is the game's own filtering (1x)\n");
+        outrun::xbox_runtime::set_anisotropic_filtering(level);}
+    // [Graphics] ReflectionResolution, the Tweaks key: the car reflection cube's edge. Absent: the game's 128. A power of
+    // two from 64 to 4096; anything else is logged and 128 applies.
+    {   const auto text=settings.text("Graphics","ReflectionResolution");unsigned edge=128u;
+        if(!text.empty()){
+            unsigned v=0u;bool ok=text.size()<=4u&&std::all_of(text.begin(),text.end(),[](char c){return c>='0'&&c<='9';});
+            if(ok){v=unsigned(std::stoul(text));ok=v>=64u&&v<=4096u&&(v&(v-1u))==0u;}
+            if(ok)edge=v;else std::printf("settings: [Graphics] ReflectionResolution = %.32s refused (a power of two, 64..4096); 128 applies\n",text.c_str());
+        }
+        if(edge!=128u)std::printf("settings: car reflection %ux%u\n",edge,edge);
+        outrun::platform::car_reflection_edge()=edge;}
+    // [Graphics] TransparencySupersampling, the Tweaks key: alpha-to-coverage for alpha-tested edges under MSAA. Off when
+    // absent.
+    {   const bool on=settings.flag("Graphics","TransparencySupersampling",false);
+        if(on)std::printf("settings: transparency supersampling (alpha-to-coverage under MSAA)\n");
+        outrun::xbox_runtime::set_transparency_supersampling(on);}
+    // [Graphics] DisableVehicleLODs / DisableStageCulling, the Tweaks keys: other cars always at their full model; every
+    // stage node drawn whether in view or not (no pop-in, more draws). Off when absent.
+    {   const bool lods=settings.flag("Graphics","DisableVehicleLODs",false),cull=settings.flag("Graphics","DisableStageCulling",false);
+        if(lods)std::printf("settings: vehicle LODs disabled (other cars at full detail)\n");
+        if(cull)std::printf("settings: stage culling disabled (every node drawn)\n");
+        outrun::platform::other_car_lods_disabled()=lods;outrun::platform::render_disable_culling()=cull;}
+    // [Graphics] DrawDistanceIncrease / DrawDistanceBehind, the Tweaks keys (sections of track, 0 = the game's own, the
+    // default; at most 1024 / 256): more of the stage drawn ahead of / behind the car, less the exclusions of a lods.ini
+    // in the game folder (OutRunDesktop.lods.ini, else OutRun2006Tweaks.lods.ini; read only). The render queues grow.
+    {   auto& dd=outrun::platform::draw_distance();
+        auto sections=[&](const char* key,int max){
+            const auto t=settings.text("Graphics",key);if(t.empty())return 0;
+            char* end=nullptr;const long v=std::strtol(t.c_str(),&end,10);
+            if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
+            return int(v);};
+        dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
+        if(dd.active()){
+            outrun::platform::render_queues_extended()=true;
+            const char* from=nullptr;std::size_t excluded=0;
+            for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
+                std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
+                const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
+                excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
+            std::printf("settings: draw distance +%d sections ahead, %d behind; %zu excluded nodes (%s)\n",dd.increase,dd.behind,excluded,
+                from?from:"no lods.ini");
+        }}
+    // [Graphics] CarBaseShadowOpacity, the Tweaks key (1.0 unless set; 0 = the PC's own, no base shadow): the car's flat
+    // base shadow of O2SP / C2C Xbox restored (pc_screen.hpp). Like Tweaks, any finite value >= 0 (above 1 strengthens
+    // it; nene 29993); a negative or non-finite value is refused.
+    {   const float o=settings.number("Graphics","CarBaseShadowOpacity",1.0f);
+        if(std::isfinite(o)&&o>=0.f)outrun::platform::g_pc_car_base_shadow_opacity=o;
+        else std::printf("settings: [Graphics] CarBaseShadowOpacity refused (a finite value >= 0); 1 applies\n");
+        if(outrun::platform::g_pc_car_base_shadow_opacity!=1.f)std::printf("settings: car base shadow opacity %.2f\n",double(outrun::platform::g_pc_car_base_shadow_opacity));}
+    // [Bugfixes] FixParticleRendering, the Tweaks key (on unless set false, as there): the half-resolution particle
+    // mapping of 418CF0 and the Metropolis fireworks object (pc_screen.hpp).
+    outrun::platform::g_pc_fix_particle_rendering=settings.flag("Bugfixes","FixParticleRendering",true);
+    if(!outrun::platform::g_pc_fix_particle_rendering)std::printf("settings: particle rendering fix off (the PC's own particle mapping)\n");
+    // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
+    // widescreen edge rather than the 4:3 one.
+    outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
+    if(!outrun::platform::g_pc_screen_edge_cull_fix)std::printf("settings: screen edge cull fix off (objects culled at the 4:3 edge)\n");
+    // [Graphics] FixZBufferPrecision, the Tweaks key: the race camera's near plane raised from 0.1 (1.0 in the chase and
+    // bumper views) so far geometry stops z-fighting; the lens flare keeps 0.05. Off when absent.
+    if(settings.flag("Graphics","FixZBufferPrecision",false)){
+        outrun::platform::fix_znear()=true;std::printf("settings: z-buffer precision fix (race camera near plane by view)\n");}
+    // [Graphics] SceneTextureReplacement / TextureBaseFolder, the Tweaks keys: stage, car and object textures replaced
+    // from <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Off when absent; the folder defaults to
+    // "textures". A path that leaves the game folder is refused.
+    {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false);
+        std::string base=settings.text("Graphics","TextureBaseFolder","textures");
+        if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
+            if(on)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
+            base="textures";}
+        outrun::platform::pmt_texture_replacement_configure(on,folder+"/"+base+"/load");}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(!plan.latched){
@@ -178,6 +302,17 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::telemetry_shutdown();
     outrun::desktop::ffb_shutdown();
+    if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files){
+        std::printf("texture replacement: %u replaced of %u looked up (%u kept stock: unreadable, unusable or not created)\n",
+            t.replaced,t.looked,t.failed);
+        // Banks the pack covers, one line each; the others named once (a stage variant the pack lacks shows up here).
+        std::string others;unsigned uncovered=0;
+        for(const auto& [bank,b]:outrun::platform::pmt_texture_replacement_banks()){
+            if(b.folder){std::printf("texture replacement: %s %u of %u replaced (%u kept stock)\n",bank.c_str(),b.replaced,b.looked,b.failed);continue;}
+            ++uncovered;if(others.size()<400)others+=(others.empty()?"":", ")+bank;
+        }
+        if(uncovered)std::printf("texture replacement: %u banks without a pack folder: %s%s\n",uncovered,others.c_str(),others.size()>=400?", ...":"");
+    }
     if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
         // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).
         const auto r=smoke.longest_record;const bool player=r<0x9345b8u;
@@ -186,6 +321,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             "%llu ended early on a full source (%llu iterations)\n",static_cast<unsigned long long>(smoke.loops),smoke.longest,
             smoke.longest_function==0x41cb30u?"41CB30 player":"41CED0 rivals",car,tire,double(smoke.longest_moved),smoke.longest_frame,
             static_cast<unsigned long long>(smoke.full_tails),static_cast<unsigned long long>(smoke.skipped));}
+    if(const auto dropped=outrun::platform::render_queue_dropped())
+        std::printf("render queues: %llu draws dropped (queue full)\n",static_cast<unsigned long long>(dropped));
     outrun::desktop::wheel_input_shutdown();
     if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
     else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks

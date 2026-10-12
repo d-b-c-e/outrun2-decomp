@@ -4,6 +4,7 @@
 // The tire records are 0x5C bytes: 934448 (player, 4), 9345B8 + car*0x170
 // (cars 1..23, 4 each).
 #include "platform/race_particles_port.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 namespace outrun::platform::particles_detail {
@@ -164,7 +165,8 @@ template<class F> void smoke_colours(P& p,std::uint32_t rec,F factor){
 // remaining iteration only rewrites source 4's base position with the advanced value. The loops below finish such a
 // tail by advancing the position alone and writing it once: the same memory and generator state as the full loop.
 SmokeEmitStats& smoke_stats(){static SmokeEmitStats s;return s;}
-bool& tire_smoke_shortcut(){static bool on=true;return on;}
+// OR2_SMOKE_TAIL=0 (measurement only) runs the loops in full, as the PC does, for an A/B of the stall on one exe.
+bool& tire_smoke_shortcut(){static bool on=[]{const char* e=std::getenv("OR2_SMOKE_TAIL");return !(e&&e[0]=='0'&&!e[1]);}();return on;}
 namespace {
 void count_loop(P& p,std::uint32_t function,std::uint32_t record,std::uint32_t n){
     auto& s=smoke_stats();++s.loops;

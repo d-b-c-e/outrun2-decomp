@@ -50,6 +50,9 @@ struct PcCarReflectionStats {
 // matrices in the current stack matrix (leaving RotationY(pi) there at
 // bootstrap); `scratch` is the stack it uses here.
 void car_reflection_init_413b30(PcFlushContext&,driving::PcMatrixStack& scratch);
+// The edge of the car reflection cube and its depth surface: the PC's 128 (0x80) unless the host sets another before
+// the first race (the desktop's [Graphics] ReflectionResolution, the Tweaks key). Read by car_reflection_init_413b30.
+std::uint32_t& car_reflection_edge();
 // 413F50: releases the cube and the depth surface, clears 8A89F0..8A8BF8.
 void car_reflection_release_413f50(PcFlushContext&);
 // 414340 / 414050 / 413FC0. view: the renderer's culling copy of 95D860 and

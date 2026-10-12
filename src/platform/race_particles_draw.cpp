@@ -109,9 +109,12 @@ std::uint32_t draw_418cf0(D& d,std::uint32_t buffer,std::uint32_t src){
         const auto v=vec4(p,p.f(edi+4),p.f(edi+8),p.f(edi+0xc),1.f);
         {const X w=X(v[3]);if(!(w>X(0.0f))&&!(c2(w,X(0.0f))))continue;}   // jnp: w <= 0 skips, NaN draws
         const float inv=st(X(1.0f)/X(v[3]));
-        const float sx=st((p.x(0x740c8cu)*X(v[0]))*X(inv)+p.x(0x740c8cu));
-        const float sy=st((-(p.x(0x740c90u)*X(v[1])))*X(inv)+p.x(0x740c90u));
+        float sx=st((p.x(0x740c8cu)*X(v[0]))*X(inv)+p.x(0x740c8cu));
+        float sy=st((-(p.x(0x740c90u)*X(v[1])))*X(inv)+p.x(0x740c90u));
         X s=(((p.x(edi+0x3c)*p.x(src+0x44))*p.x(0x740c8cu))*X(inv))*X(scale);
+        if(g_pc_fix_particle_rendering){   // FixParticleRendering at 419009 (pc_screen.hpp): the Xbox half-resolution mapping
+            sx=sx*0.5f;sy=sy*0.5f;s=X(st(s)*0.5f);
+        }
         if(!c0c3(s,p.x(0x74f7bcu)))s=(s-p.x(0x74f7bcu))*p.x(0x74f7c0u)+p.x(0x74f7bcu);
         const std::uint32_t colour=p.u(edi+0x38);
         const float z=st(X(inv)*X(v[2]));

@@ -120,6 +120,12 @@ add_test(NAME shim_abi COMMAND test_shim_abi $<TARGET_FILE:dbce_shim>)
 
 # The test fence (source/test_fence), slice 2b: a temporary game tree, the real game-free writers (options, profiles,
 # the EXE setup, the log), success and fault paths, the complete game-tree inventory compared before and after.
+add_executable(test_triple_screens tests/test_triple_screens.cpp)
+target_include_directories(test_triple_screens PRIVATE source ${PROJECT_SOURCE_DIR}/xbox/source)
+target_compile_features(test_triple_screens PRIVATE cxx_std_17)
+target_compile_options(test_triple_screens PRIVATE /W4 /WX)
+add_test(NAME triple_screens COMMAND test_triple_screens)
+
 add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp shim/parse.cpp)
 target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_fence PRIVATE cxx_std_17)

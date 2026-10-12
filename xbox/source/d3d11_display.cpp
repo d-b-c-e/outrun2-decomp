@@ -1,4 +1,5 @@
 #include "d3d11_display.hpp"
+#include "display_fit.hpp"
 #include "frame_profile.hpp"
 #include "native_window.hpp"
 #include "platform_api.hpp"
@@ -67,6 +68,8 @@ Graphics& graphics(){
     check(g.device->CreateRenderTargetView(back.Get(),nullptr,&g.target),"CreateRenderTargetView(swap chain)");
     g.width=w.width;g.height=w.height;
     std::fprintf(stdout,"Xbox display: Direct3D 11 feature level %x, swap chain %ux%u\n",unsigned(g.device->GetFeatureLevel()),g.width,g.height);
+    if(const auto fit=display_fit(g.width,g.height,16u,9u);fit.width!=g.width||fit.height!=g.height)
+        std::fprintf(stdout,"Xbox display: the 16:9 frame at %ux%u+%u+%u, black around it (not stretched)\n",fit.width,fit.height,fit.x,fit.y);
     if(latency){
         // A chain created with the waitable flag no longer throttles in Present, so its object is always waited on,
         // even if SetMaximumFrameLatency is refused (the waitable default is then 1).
@@ -120,7 +123,9 @@ void D3D11Display::clear(){
     auto& g=graphics();auto* c=g.context.Get();
     ID3D11RenderTargetView* target=g.target.Get();c->OMSetRenderTargets(1,&target,nullptr);
     const float black[4]{0,0,0,1};c->ClearRenderTargetView(target,black);
-    const D3D11_VIEWPORT vp{0,0,float(g.width),float(g.height),0,1};c->RSSetViewports(1,&vp);
+    // The logical frame (width_ x height_) in the largest centred rectangle of its aspect (display_fit.hpp), not stretched.
+    const auto fit=display_fit(g.width,g.height,width_,height_);
+    const D3D11_VIEWPORT vp{float(fit.x),float(fit.y),float(fit.width),float(fit.height),0,1};c->RSSetViewports(1,&vp);
     c->RSSetState(raster_.Get());c->OMSetDepthStencilState(no_depth_.Get(),0);c->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);
     c->IASetInputLayout(layout_.Get());c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     c->VSSetShader(vertex_.Get(),nullptr,0);c->PSSetShader(pixel_.Get(),nullptr,0);

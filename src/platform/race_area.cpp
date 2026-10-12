@@ -1,4 +1,6 @@
 #include "platform/race_area.hpp"
+#include "platform/race_draw_distance.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/pc_address_view.hpp"
 #include "system/perf.hpp"
 #include <algorithm>
@@ -928,6 +930,14 @@ void race_area_control_44f7c0(PcRaceContext& c,std::uint32_t entry_ecx){
     race_area_stage_44cf00(c);
     race_area_objects_44f190(c);
 }
+// DrawDistanceIncrease (race_draw_distance.hpp): the merged node lists live in a synthetic PC range (beside the soft
+// device's QueryBase 0xB0001000) so the recorded 405360 calls read them at execution like the game's own lists. One
+// slot per object drawn in a display (PcRaceContext::draw_distance_lists); past the last slot the game's list is used.
+namespace {
+constexpr std::uint32_t DrawDistanceBase=0xb1000000u;
+constexpr std::size_t DrawDistanceSlots=64,DrawDistanceSlot=4097;   // 4096 unique nodes + 0xFFFF
+std::vector<std::uint16_t>& draw_distance_store(){static std::vector<std::uint16_t> v(DrawDistanceSlots*DrawDistanceSlot,0xffffu);return v;}
+}
 void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t desc){
     Port p(c);auto& m=c.m;
     p.draw(0x4052b0u,{});
@@ -962,9 +972,28 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
         const std::uint32_t base=m.u32(desc+4)<<16;
         const std::uint32_t r=p.call(0x40ecb0u,{});
         const std::uint32_t byte=std::uint32_t(std::int32_t(std::int8_t(std::uint8_t(r%0x28u+1u))));
+        // Tweaks' 44DF6D patch (it nops 0x4B bytes: 44DF6D..44DFB8, this per-object 405360 loop, per the listing of 44DE10):
+        // each object's lists of the nearby sections merged (DrawDistanceIncrease / Behind).
+        const auto& dd=draw_distance();
+        int stage=0,max_sections=0,ahead=0;
+        auto& store=draw_distance_store();
+        if(dd.active()){
+            const std::size_t bytes=store.size()*2u;
+            if(!m.mapped(DrawDistanceBase,bytes))m.map(DrawDistanceBase,reinterpret_cast<std::uint8_t*>(store.data()),bytes);
+            stage=m.i32(0x7d2e8cu);                                    // 7D2E8C: the stage number
+            max_sections=std::int32_t(p.call(0x43d470u,{0}));          // 43D470(0): the stage's section count
+            ahead=draw_distance_ahead(dd,stage,std::int32_t(bp));
+        }
+        std::vector<std::uint16_t> merged;
         for(std::int32_t i=0;i<count;++i){
             const std::uint32_t part=m.u32(geo+8+std::uint32_t(i)*4)+geo;
-            const std::uint32_t nodes=m.u32(part+bp*4)+part;
+            std::uint32_t nodes=m.u32(part+bp*4)+part;
+            if(dd.active()&&c.draw_distance_lists<DrawDistanceSlots&&draw_distance_merge(std::int32_t(bp),max_sections,ahead,dd.behind,
+                dd.increase,dd.excluded(stage,i),[&](int s,std::size_t k){return m.u16(part+m.u32(part+std::uint32_t(s)*4u)+std::uint32_t(k)*2u);},merged)){
+                const std::size_t slot=c.draw_distance_lists++;
+                std::copy(merged.begin(),merged.end(),store.begin()+std::ptrdiff_t(slot*DrawDistanceSlot));
+                nodes=DrawDistanceBase+std::uint32_t(slot*DrawDistanceSlot*2u);
+            }
             p.obj(std::uint32_t(i)|base,0,nodes,m.u32(desc+0x70),byte,0);
         }
     }
@@ -1001,7 +1030,17 @@ void race_area_geometry_44de10(PcRaceContext& c,std::uint32_t car,std::uint32_t 
             p.pop();
         }else p.obj(sign,0,0,0,None,0);
     }
-    if(m.u32(desc)==0xbu&&p.call(0x44ff10u,{}))p.obj(0x630001u,0,0,0,None,0);
+    if(m.u32(desc)==0xbu&&p.call(0x44ff10u,{})){
+        // FixParticleRendering (pc_screen.hpp): Tweaks' fireworks object and node list. Its hook at 44E179 resumes at 44E190:
+        // exactly this 405360(0x630001, 0, 0, 0, -1, 0) (44E179..44E18D), inside the [desc] == 0xB && 44FF10 branch
+        // (44E169 / 44E170), per the REA/Ghidra listing of 44DE10.
+        if(g_pc_fix_particle_rendering){
+            static const std::uint16_t nodes[]{0,4,5,6,7,0xb,0xc,0xd,0xe,0x12,0x13,0x14,0x15,0x1a,0x1b,0x1f,0x20,0x21,0xffff};
+            constexpr std::uint32_t FireworksNodes=0xb1100000u;      // synthetic PC range (beside the draw-distance lists)
+            if(!m.mapped(FireworksNodes,sizeof nodes))m.map_const(FireworksNodes,reinterpret_cast<const std::uint8_t*>(nodes),sizeof nodes);
+            p.obj(0x1a000au,0,FireworksNodes,0,None,0);
+        }else p.obj(0x630001u,0,0,0,None,0);
+    }
     if(m.u32(desc)==0x1cu){
         if(p.call(0x43f960u,{})){done();return;}
         if(p.call(0x46c500u,{})||(p.byte_call(0x48b310u)&&p.byte_call(0x48b350u))){m.put32(0x636bb8u,2);done();return;}

@@ -2,6 +2,8 @@
 #include <chrono>
 #include <cstdio>
 #include "platform/pc_scene_renderer.hpp"
+#include "system/exe_image.hpp"
+#include <cstring>
 #include "enhancements/frame_rate.hpp"
 #include "driving/pc_d3dx.hpp"
 #include <memory>
@@ -42,9 +44,21 @@ void PcSceneRenderer::flush_alpha(){
     render_queue_flush_405890(*flush_,alpha_,order);
     alpha_.count=0;alpha_.matrix_count=0;++alpha_flushes;
 }
-std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error){
+// The bank's file stem from the PC resource filename table 633558 ("\Stage\BEAC\cs_CS_BEAC_pmt.sz" -> "cs_CS_BEAC_pmt"):
+// the folder its replacement textures sit in. Empty when the EXE image or the entry is missing.
+std::string pc_bank_pack_name(std::uint32_t resource){
+    if(resource>=0x223u)return {};
+    const auto* entry=exe_image_bytes(0x633558u+resource*4u,4);if(!entry)return {};
+    std::uint32_t at;std::memcpy(&at,entry,4);if(!at)return {};
+    std::string path;
+    for(std::uint32_t k=0;k<260;++k){const auto* ch=exe_image_bytes(at+k,1);if(!ch||!*ch)break;path.push_back(char(*ch));}
+    const auto slash=path.find_last_of("\\/");if(slash!=std::string::npos)path=path.substr(slash+1);
+    const auto dot=path.find_last_of('.');if(dot!=std::string::npos)path=path.substr(0,dot);
+    return path;
+}
+std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error,std::uint32_t resource){
     if(pmt.size()<16){error="PMT too small";return nullptr;}
-    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);
+    auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);bank->resources.pack_name=pc_bank_pack_name(resource);
     Bytes pb(bank->pmt.data(),bank->pmt.size());
     const auto system=pb.u32(8),video=pb.u32(12);
     if(std::uint64_t(system)+video+16u>bank->pmt.size()){error="PMT sections outside the archive";return nullptr;}
@@ -65,7 +79,7 @@ bool PcSceneRenderer::step_bank(PendingBank& p){
 }
 bool PcSceneRenderer::queue_bank(std::uint32_t resource,std::vector<std::uint8_t> pmt,std::string& error){
     if(owned_banks_.count(resource)||bank_queued(resource)){error.clear();return true;}
-    auto bank=open_bank(std::move(pmt),error);
+    auto bank=open_bank(std::move(pmt),error,resource);
     if(!bank)return false;
     PendingBank p;p.resource=resource;p.bank=std::move(bank);
     pmt_objects_begin_42e490(p.bank->resources,p.cursor);
@@ -97,7 +111,7 @@ bool PcSceneRenderer::load_bank(std::uint32_t resource,std::vector<std::uint8_t>
     for(auto it=pending_banks_.begin();it!=pending_banks_.end();++it)
         if(it->resource==resource){p=std::move(*it);pending_banks_.erase(it);break;}   // queued: finish it now
     if(!p.bank){
-        p.resource=resource;p.bank=open_bank(std::move(pmt),error);
+        p.resource=resource;p.bank=open_bank(std::move(pmt),error,resource);
         if(!p.bank)return false;
         pmt_objects_begin_42e490(p.bank->resources,p.cursor);
     }
@@ -150,6 +164,34 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     view_.view_95d860=d.slots_95d860[0];
     view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
+}
+bool& fix_znear(){static bool on=false;return on;}
+// Tweaks re-runs all of CalcCameraMatrix around Clr_SceneEffect; only 404310's outputs depend on the near plane (the
+// projection, slot 1, and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so
+// only the projection is rebuilt with 0.05; afterwards the projection in effect before (95D8A0) is put back as it was.
+void PcSceneRenderer::scene_effect_projection(bool begin){
+    if(!begin){
+        if(!effect_saved_)return;
+        effect_saved_=false;
+        render_set_matrix_410f90(*flush_,effect_projection_,1);
+        device_.set_transform(3,effect_projection_.data());
+        view_.frustum_95bf40=effect_frustum_;view_.planes_95bf58=effect_planes_;
+        return;
+    }
+    Bytes vehicle(nullptr,0),camera(nullptr,0);
+    if(!vehicle_camera||!vehicle_camera(vehicle,camera)||camera.size()<0x3b4u)return;
+    std::memcpy(effect_projection_.data(),globals_.transform().slot[1],64);
+    effect_frustum_=view_.frustum_95bf40;effect_planes_=view_.planes_95bf58;effect_saved_=true;
+    driving::PcCameraDevice d;
+    driving::pc_matrix_push(matrices_);
+    driving::camera_perspective_404310(matrices_,camera.f32(0xa0),camera.f32(0xb8),0.05f,camera.f32(0xc0),
+        camera.f32(0xc4),camera.f32(0xc8),d);
+    driving::camera_device_store(matrices_,d,1);
+    driving::pc_matrix_pop(matrices_);
+    std::array<float,16> m{};std::memcpy(m.data(),d.slots_95d860[1].data(),64);
+    render_set_matrix_410f90(*flush_,m,1);
+    device_.set_transform(3,m.data());   // D3DTS_PROJECTION
+    view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
 }
 void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uint8_t>& before){
     auto after=std::make_shared<std::vector<std::uint8_t>>(camera.data(),camera.data()+0x3b4);
@@ -232,6 +274,10 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
                 if(race_camera_inputs(race))control.race=&race;
             }
             bool answered=false;
+            // FixZBufferPrecision: the 484BD0 projections inside this control (the main camera) take Tweaks' near plane.
+            struct Arm{Arm(std::uint32_t mode,std::int32_t model){driving::camera_znear_context()={fix_znear(),mode,model};}
+                       ~Arm(){driving::camera_znear_context().armed=false;}}
+                arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1);
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
@@ -532,6 +578,7 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
         if(profile)profile(1u,pc,std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-t0).count()));},events,scene_,
         environment_.lights_899b98.data()+0x140,display,tables};
     sv.mode_84a318=mode_84a318;
+    if(fix_znear())sv.scene_effect_projection=[this](bool begin){scene_effect_projection(begin);};
     if(layer_callback)for(std::uint32_t k=0;k<frame_.layers.size();++k)frame_.layers[k].callback=layer_callback(k);
     frame_render_449050(*flush_,frame_,in,sv);
     ++frames;
