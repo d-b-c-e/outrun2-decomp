@@ -91,6 +91,13 @@ int main(){try{
         CHECK(fast.longest>=10000u&&fast.longest_record==k.record&&fast.longest_function==(k.rivals?0x41ced0u:0x41cb30u));
         if(k.free_slots){World c=make(k.record,travel,k.free_slots);CHECK(!c.same(a));}   // the free records did fill
     }
+    // nene 29389: a loop that never fills (no tail) and one whose first 0 is on its last iteration (nothing to skip).
+    for(const unsigned free_slots:{10u,4u}){                           // travel 1.75 / 0.35 = 5 iterations
+        smoke_stats()=SmokeEmitStats{};
+        World a=make(0x934448u,1.75f,free_slots),b=a;
+        run(a,false,false,0x934448u);run(b,true,false,0x934448u);
+        CHECK(a.same(b)&&smoke_stats().full_tails==0&&smoke_stats().skipped==0&&smoke_stats().longest==5u);
+    }
     std::printf("tire smoke tail: %u checks\n",checks);
     return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"tire smoke tail: %s\n",e.what());return 1;}
