@@ -50,6 +50,13 @@ int main(){
     CHECK(!pc_point_sprite_corners(away,8.f,64.f,32.f,c));             // entirely outside
     CHECK(!pc_point_sprite_corners(nanc,8.f,64.f,32.f,c)&&!pc_point_sprite_corners(centre,inf,64.f,32.f,c));
     CHECK(!pc_point_sprite_corners(centre,8.f,0.f,32.f,c));
+    // romi 29547: an infinite viewport, a finite overflow, and NaN / infinite limits are refused too.
+    CHECK(!pc_point_sprite_corners(centre,8.f,inf,32.f,c)&&!pc_point_sprite_corners(centre,8.f,64.f,inf,c));
+    const float huge[4]{3e38f,0.f,1.f,3e38f};CHECK(!pc_point_sprite_corners(huge,1e30f,1e-30f,32.f,c));
+    {PcPointSpriteParams q;q.size=8.f;
+     for(float PcPointSpriteParams::*f:{&PcPointSpriteParams::min,&PcPointSpriteParams::max,&PcPointSpriteParams::max_point_size,
+                                        &PcPointSpriteParams::size,&PcPointSpriteParams::a,&PcPointSpriteParams::b,&PcPointSpriteParams::c})
+         for(const float bad:{nan,inf}){PcPointSpriteParams r=q;r.*f=bad;CHECK(!pc_point_sprite_size(r,eye,100.f,s));}}
     // The soft device: one point at the origin, side 8 (no scaling), red, in a 64 x 64 target: an 8 x 8 square
     // centred on (32, 32), the pixels with centres 28..35 (top-left rule).
     {

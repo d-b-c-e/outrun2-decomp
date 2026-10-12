@@ -20,12 +20,12 @@ struct PcPointSpriteParams {
     bool scale{};                         // D3DRS_POINTSCALEENABLE
     float max_point_size{8192.f};         // D3DCAPS9::MaxPointSize; the game's _MAX (64) binds first
 };
-// The screen-space side in pixels. False when it is not a finite, non-negative number: a non-finite eye position,
-// A + B*De + C*De^2 negative or NaN, or an undefined 0 * infinity.
+// The screen-space side in pixels. False when a parameter (size, limits, cap, A, B, C) is not finite, or the result is
+// not a finite, non-negative number: a non-finite eye position, A + B*De + C*De^2 negative or NaN, 0 * infinity.
 bool pc_point_sprite_size(const PcPointSpriteParams&,const float eye[3],float viewport_h,float& size);
 // The square's clip-space corners (top-left, top-right, bottom-left, bottom-right) for a point at clip (x, y, z, w)
-// with side `size` pixels in a viewport_w x viewport_h viewport. False when D3D9 draws nothing (see above) or an input
-// is not finite.
+// with side `size` pixels in a viewport_w x viewport_h viewport. False when D3D9 draws nothing (see above), an input
+// (viewport size included) is not finite, or a finite input overflows the corners.
 bool pc_point_sprite_corners(const float clip[4],float size,float viewport_w,float viewport_h,float corners[4][4]);
 // The texture coordinate of each corner, in the same order.
 inline constexpr float PcPointSpriteUv[4][2]{{0.f,0.f},{1.f,0.f},{0.f,1.f},{1.f,1.f}};
