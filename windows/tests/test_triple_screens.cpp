@@ -43,10 +43,15 @@ int main(){
     CHECK(!parse_triple_projection("Angled views"));
     CHECK(std::string(triple_projection_name(TripleProjection::angled))=="Angled");
     CHECK(std::string(triple_projection_name(TripleProjection::planar))=="Planar");
-    CHECK(triple_projection_refusal(false,true,48.f/9.f)==nullptr);
-    CHECK(std::string(triple_projection_refusal(true,true,48.f/9.f))=="not in a test process");
-    CHECK(std::string(triple_projection_refusal(false,false,0.f))=="needs the borderless window");
-    CHECK(std::string(triple_projection_refusal(false,true,0.f)).find("Surround or Separate monitors")!=std::string::npos);
+    CHECK(triple_projection_refusal(false,true,TripleScreens::separate,true,48.f/9.f)==nullptr);     // three monitors spanned
+    CHECK(triple_projection_refusal(false,true,TripleScreens::surround,false,48.f/9.f)==nullptr);    // a Surround desktop
+    CHECK(std::string(triple_projection_refusal(true,true,TripleScreens::separate,true,48.f/9.f))=="not applied in a test session");
+    CHECK(std::string(triple_projection_refusal(false,false,TripleScreens::separate,false,0.f))=="needs the borderless window");
+    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::off,false,0.f))=="needs Surround or Separate monitors");
+    // sana 35719: Separate monitors whose span failed fell back to the primary monitor; an ultrawide primary (21:9)
+    // still gives a planar aspect, but no three panels.
+    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::separate,false,21.f/9.f))=="Separate monitors found no three-monitor span");
+    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::surround,false,0.f))=="needs a window wider than 16:9");
     // The span: the owner's "Sim Racing" layout (three 2560x1440 at x = -2560, 0, 2560) in any order.
     const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440},r{2560,0,5120,1440};
     ScreenRect out{};
