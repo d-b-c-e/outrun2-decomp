@@ -426,13 +426,18 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     // A planar span (pc_screen.hpp g_pc_wide_aspect, desktop [Triple] Screens)
     // widens it to the window the same way.
     if(s.pc_scene&&s.runtime){
-        const float width=pf::g_pc_wide_aspect>0.f?480.f*pf::g_pc_wide_aspect:s.widescreen?480.f*16.f/9.f:640.f;
+        // Three views (pc_screen.hpp g_pc_triple_corrections): the camera is the centre panel's, 16:9; the car and
+        // object screen tests pass everything in front of the eye (the side views need it; behind stays culled).
+        const bool three=pf::g_pc_triple_corrections!=nullptr;
+        const float width=three?480.f*16.f/9.f:pf::g_pc_wide_aspect>0.f?480.f*pf::g_pc_wide_aspect:s.widescreen?480.f*16.f/9.f:640.f;
         if(s.pc_scene->screen_width()!=width){
             s.pc_scene->set_screen(width,480.f);
-            pf::g_pc_view_half_width=width*0.5f;
             auto& cam=s.runtime->event_function36.car_select.camera_79fe10;
             if(cam.size()>=0xbcu){const float aspect=width/480.f;std::memcpy(cam.data()+0xb8,&aspect,4);}
         }
+        // Set apart from the screen, so three views widen it even when the screen is already 16:9 (romi 30784). The
+        // other cases write what the screen change wrote (the screen starts at 640, whose 320 is the default).
+        pf::g_pc_view_half_width=three?1.0e6f:width*0.5f;
     }
     if(s.pc_scene&&s.runtime&&!p.set_pc_scene([&s](pf::PcD3D9Device&){
            // 82E7D4/82E7D8: event 7 (init 4866D0, control 4874A0, goal 4871A0).

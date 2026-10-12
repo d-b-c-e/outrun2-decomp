@@ -90,6 +90,14 @@ void race_robot_flagman_destroy_487a00(PcRaceContext&,std::uint32_t work);
 void race_robot_common_init_487810(PcRaceContext&,std::uint32_t work);
 std::uint32_t race_robot_set_chara_487c30(PcRaceContext&,std::uint32_t work,std::uint32_t chara);
 std::uint32_t race_robot_driver_chara_487ee0(PcRaceContext&);
+// [Graphics] UseHiDefCharacters (pc_screen.hpp; Tweaks hooks_graphics.cpp, on by default there and here): the character
+// sets 487EE0 (driver) and 487F50 (passenger) return, as Tweaks patches them. Driver: the 6549B0 entry 0 (Alberto) and
+// the non-console constant M00 (487F41) become MH00 (12). Passenger: the 6549C8 entries 3 (Jennifer) and 4 (Clarissa)
+// become LH00 (10) and GH00 (7); the non-console constants L00 9 (48803A) and G00_USA 6 (488044) become LH00 and
+// GH00_USA (8). Everything else is returned unchanged. table: a table read (index = its entry) or a constant.
+// race_robots.cpp and the native 488090 path both use these.
+std::uint32_t race_robot_hidef_driver(bool table,std::uint32_t index,std::uint32_t chrset);
+std::uint32_t race_robot_hidef_passenger(bool table,std::uint32_t index,std::uint32_t chrset);
 bool race_robot_hand_motion_487940(const PcRaceMemory&,std::uint32_t motion_id);
 void race_robot_display_487880(PcRaceContext&,std::uint32_t work);
 std::uint32_t race_robot_flagman_runaway_487a30(PcRaceContext&);
