@@ -568,17 +568,27 @@ void test_device_reports(){
     Rig r(false,profile({"steer = "+axis(0,32768),wheel("camera = button 0")}),false);
     auto before=r.core->device_reports();
     check(before.size()==1&&!before[0].opened&&before[0].epoch==0&&!before[0].caps.axis[0],"no capabilities before an adopted open");
+    check(before[0].identity.interface_path.empty(),"no interface path before an adopted open");
+    r.dev(r.w).opened=r.dev(r.w).listed;
+    r.dev(r.w).listed.interface_path="untrusted-enumeration";
+    r.dev(r.w).opened.interface_path="\\\\?\\hid#opened";
     r.dev(r.w).caps.min[0]=-1234;r.dev(r.w).caps.max[0]=5678;
     r.step();
     auto live=r.core->device_reports();
     check(live.size()==1&&live[0].opened&&live[0].epoch==1&&live[0].status=="live","live epoch report");
     check(live[0].identity.dev==W&&live[0].identity.prod==WP,"verified bound identity retained");
+    check(live[0].identity.interface_path=="\\\\?\\hid#opened","report uses the opened handle's path, not enumeration or the profile");
     check(live[0].caps.axis[0]&&!live[0].caps.axis[1]&&live[0].caps.range_ok[0]&&live[0].caps.min[0]==-1234&&live[0].caps.max[0]==5678,"actual sparse caps and range readback");
     live[0].caps.min[0]=0;
     check(r.core->device_reports()[0].caps.min[0]==-1234,"a report copy cannot change the live caps");
     r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});r.step();
     auto lost=r.core->device_reports();
     check(!lost[0].opened&&lost[0].epoch==1&&!lost[0].caps.axis[0]&&lost[0].caps.button.none(),"lost epoch clears advertised capabilities without inventing a new epoch");
+    check(lost[0].identity.interface_path.empty(),"lost epoch exposes no stale interface path");
+    r.dev(r.w).open_fails=true;r.step();
+    check(r.core->device_reports()[0].identity.interface_path.empty(),"failed reopen exposes no stale interface path");
+    r.dev(r.w).open_fails=false;r.dev(r.w).opened.interface_path.clear();r.step();
+    check(r.core->device_reports()[0].opened&&r.core->device_reports()[0].identity.interface_path.empty(),"successful reopen without path cannot inherit the prior path");
 }
 
 void test_status_identity(){

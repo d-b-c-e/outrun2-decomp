@@ -43,6 +43,9 @@ struct DeviceScript {
     bool range_unreadable[8]{};                    // GetProperty(DIPROP_RANGE) fails for this axis
     int buttons=12,povs=1;
     bool fail_data_format=false,fail_device_info=false;
+    std::wstring interface_path;                 // DIPROP_GUIDANDPATH read from this device (empty is valid metadata absence)
+    HRESULT path_result=DI_OK;
+    bool path_unterminated=false;
     DIJOYSTATE2 state{};
     std::deque<std::pair<HRESULT,HRESULT>> reads;  // the next (Poll, GetDeviceState) results; empty: (S_OK, S_OK)
     std::deque<HRESULT> acquires;                  // the next Acquire results; empty: S_OK
@@ -70,7 +73,7 @@ struct DeviceScript {
 };
 
 struct Counters {
-    std::atomic<int> creates{0},releases{0},polls{0},state_reads{0},acquires{0},force_calls{0},after_release{0},release_during_read{0};
+    std::atomic<int> creates{0},releases{0},polls{0},state_reads{0},acquires{0},force_calls{0},after_release{0},release_during_read{0},path_reads{0};
 };
 
 class Device final:public IDirectInputDevice8W {
@@ -91,6 +94,14 @@ public:
     HRESULT STDMETHODCALLTYPE EnumObjects(LPDIENUMDEVICEOBJECTSCALLBACKW,LPVOID,DWORD)override{return check(),E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE GetProperty(REFGUID p,LPDIPROPHEADER h)override{
         check();
+        if(&p==&DIPROP_GUIDANDPATH){
+            ++c_.path_reads;
+            if(h->dwSize!=sizeof(DIPROPGUIDANDPATH)||h->dwHeaderSize!=sizeof(DIPROPHEADER)||h->dwHow!=DIPH_DEVICE||h->dwObj!=0)return DIERR_INVALIDPARAM;
+            auto* value=reinterpret_cast<DIPROPGUIDANDPATH*>(h);
+            if(s_.path_unterminated)for(auto& c:value->wszPath)c=L'x';
+            else wcsncpy_s(value->wszPath,s_.interface_path.c_str(),_TRUNCATE);
+            return s_.path_result;   // deliberately writes even on failure, like a faulty driver
+        }
         if(&p!=&DIPROP_RANGE)return E_NOTIMPL;   // DIPROP_* are pseudo-GUID addresses: compare addresses only
         if(h->dwHow!=DIPH_BYOFFSET)return DIERR_INVALIDPARAM;
         for(int a=0;a<8;++a)if(AxisOffsets[a]==h->dwObj&&s_.axis[a]){

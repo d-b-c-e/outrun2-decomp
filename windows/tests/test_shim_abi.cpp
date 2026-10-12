@@ -64,8 +64,12 @@ void test_refusals() {
 void test_lifecycle() {
     const auto dir = scratch() / "host"; std::filesystem::create_directories(dir);
     char why[256] = {}; void* h = nullptr; std::size_t slot = 0; auto* in = wheel_input(slot);
+    in->scripts[slot].interface_path=L"\\\\?\\hid#abi";
     check(dbce_shim_open_with_input(in, dir.wstring().c_str(), "abinonce1", Profile.data(), int32_t(Profile.size()), "handbrake=not in this test game", nullptr, &h, why, 256) == DBCE_SHIM_OK && h,
           std::string("open: ") + why);
+    char initial[2048] = {};
+    check(dbce_shim_device_reports(h, initial, sizeof initial, nullptr) == DBCE_SHIM_OK &&
+          std::string(initial).find("\"interfacePath\":\"\"") != std::string::npos, "initial report has no path until input tick adopts the handle");
     dbce_shim_frame f{}; f.struct_size = sizeof f;
     bool live = false;
     for (int n = 0; n < 400 && !live; ++n) { check(dbce_shim_tick(h, &f) == DBCE_SHIM_OK, "tick"); live = f.action[idx("steer")].status == uint8_t(dbce::shim::Status::Live); if (!live) Sleep(5); }
@@ -94,11 +98,32 @@ void test_lifecycle() {
     char devices[2048] = {};
     check(dbce_shim_device_reports(h, devices, sizeof devices, nullptr) == DBCE_SHIM_OK && std::string(devices).find(W) != std::string::npos &&
           std::string(devices).find("\"opened\":true") != std::string::npos, "the device table names the open wheel");
+    check(std::string(devices).find(R"("interfacePath":"\\\\?\\hid#abi")") != std::string::npos,
+          "device JSON exposes the exact live path with JSON escaping");
+    { std::lock_guard<std::mutex> l(in->m); in->scripts[slot].reads.push_back({DIERR_UNPLUGGED,DI_OK}); }
+    check(dbce_shim_tick(h, &f) == DBCE_SHIM_OK && dbce_shim_device_reports(h, devices, sizeof devices, nullptr) == DBCE_SHIM_OK &&
+          std::string(devices).find("\"interfacePath\":\"\"") != std::string::npos, "ended epoch removes the path from ABI JSON");
     char stopped[512] = {};
     check(dbce_shim_stop(h, stopped, sizeof stopped, nullptr) == DBCE_SHIM_OK && std::string(stopped) == "resolved", "the P21 stop resolves");
     check(read_text(dir / "host-shutdown.json").find("\"state\":\"resolved\"") != std::string::npos, "the host's own report says resolved");
     check(dbce_shim_tick(h, &f) == DBCE_SHIM_STOPPED && dbce_shim_stop(h, nullptr, 0, nullptr) == DBCE_SHIM_STOPPED, "a spent handle refuses");
     check(in->counters.force_calls == 0 && in->counters.after_release == 0 && in->refs == 0, "no force call, no use after release, DirectInput released");
+}
+
+void test_path_unavailable() {
+    for (int failure=0; failure<2; ++failure) {
+        const auto dir=scratch()/(failure?"path-failed":"path-empty");std::filesystem::create_directories(dir);
+        std::size_t slot=0;auto* in=wheel_input(slot);
+        if(failure){in->scripts[slot].interface_path=L"must-not-leak";in->scripts[slot].path_result=E_FAIL;}
+        char why[256]{};void* h=nullptr;
+        check(dbce_shim_open_with_input(in,dir.wstring().c_str(),"pathnonce",Profile.data(),int32_t(Profile.size()),nullptr,nullptr,&h,why,sizeof why)==DBCE_SHIM_OK,"open with unavailable path remains ABI compatible");
+        dbce_shim_frame f{};f.struct_size=sizeof f;bool live=false;
+        for(int n=0;n<400&&!live;++n){check(dbce_shim_tick(h,&f)==DBCE_SHIM_OK,"unavailable path tick");live=f.action[idx("steer")].status==uint8_t(dbce::shim::Status::Live);if(!live)Sleep(5);}
+        char report[2048]{};
+        check(live&&dbce_shim_device_reports(h,report,sizeof report,nullptr)==DBCE_SHIM_OK&&std::string(report).find("\"interfacePath\":\"\"")!=std::string::npos&&std::string(report).find("must-not-leak")==std::string::npos,"missing/failed path query reports empty path with live legacy input");
+        check(in->counters.creates==1&&in->counters.path_reads==1&&in->counters.force_calls==0,"ABI metadata query opens no extra device or force");
+        check(dbce_shim_stop(h,report,sizeof report,nullptr)==DBCE_SHIM_OK&&std::string(report)=="resolved","metadata fixture stop resolves");
+    }
 }
 
 std::vector<std::string> sample_lines(const std::filesystem::path& source) {
@@ -277,7 +302,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--capture-child") return capture_child(std::filesystem::path(argv[2]), false);
     if (argc == 3 && std::string(argv[1]) == "--latched-capture-child") return capture_child(std::filesystem::path(argv[2]), true);
     try {
-        test_layout(); test_refusals(); test_lifecycle(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
+        test_layout(); test_refusals(); test_lifecycle(); test_path_unavailable(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
         if (argc == 2) test_dll(std::filesystem::path(argv[1]).wstring());
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
     std::error_code ec; std::filesystem::remove_all(scratch(), ec);
