@@ -12,6 +12,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -22,6 +23,8 @@ namespace c=dbce::shim::control;
 namespace sh=dbce::shim;
 constexpr const char* CoreVersion="input-shim core (fe120fe line)";
 constexpr const char* AdapterVersion="outrun adapter slice 2a.1";
+// The signals line's own throttle (log_signals): the last line written, per path.
+struct SignalLog { Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{}; };
 struct State {
     fence::Plan plan;
     std::string profile;                       // the exact [Controls] bytes Core parses; their hash is the identity
@@ -31,7 +34,7 @@ struct State {
     std::unique_ptr<Adapter> adapter;
     bool replay_run{};                         // [ShimReplay] Tape= names a tape: an R3 replay run (outrun_replay.hpp)
     std::unique_ptr<Tape> tape;                // null in a replay run whose tape was refused: nothing is played
-    Signals last{};bool logged{};std::chrono::steady_clock::time_point last_log{};
+    SignalLog log;
 };
 State g;
 
@@ -46,6 +49,7 @@ struct Ordinary {
     bool configured{},started{},stopped{};
     std::unique_ptr<h::ProviderHost<NoCapture>> host;
     std::unique_ptr<Adapter> adapter;
+    bool debug{};SignalLog log;               // OR2_INPUT_DEBUG: the signals line, as in a latched run, plus the keyboard state
 };
 Ordinary o;
 
@@ -83,16 +87,17 @@ void start(){
 
 // The first loop's game-side evidence (the observer comes next): what the adapter wrote and what the game consumed,
 // in runtime.log, on every mode change and at most every 250 ms while the values move.
-void log_signals(const Signals& s,sh::Run run){
+// Ordinary play logs it only with OR2_INPUT_DEBUG, with `extra` (the keyboard state) at the end of the line.
+void log_signals(const Signals& s,const char* run,SignalLog& l,const std::string& extra={}){
     const auto now=std::chrono::steady_clock::now();
-    const bool moved=!g.logged||s.record_steer!=g.last.record_steer||s.record_accel!=g.last.record_accel||s.record_brake!=g.last.record_brake||
-        s.record_buttons!=g.last.record_buttons||s.consumed_steer!=g.last.consumed_steer||s.consumed_accel!=g.last.consumed_accel||
-        s.consumed_brake!=g.last.consumed_brake||s.gear!=g.last.gear;
-    if(g.logged&&s.mode==g.last.mode&&(!moved||now-g.last_log<std::chrono::milliseconds(250)))return;
-    std::printf("input shim: frame %llu run %s mode %u%s record steer %d accel %d brake %d buttons %08x consumed steer %d accel %d brake %d gear %u speed %.1f suppressed %08x\n",
-        (unsigned long long)s.frame_seq,sh::run_name(run),s.mode,s.in_gameplay?" race":"",s.record_steer,s.record_accel,s.record_brake,s.record_buttons,
-        s.consumed_steer,s.consumed_accel,s.consumed_brake,s.gear,double(s.speed),s.native_suppressed);
-    g.last=s;g.logged=true;g.last_log=now;
+    const bool moved=!l.logged||s.record_steer!=l.last.record_steer||s.record_accel!=l.last.record_accel||s.record_brake!=l.last.record_brake||
+        s.record_buttons!=l.last.record_buttons||s.consumed_steer!=l.last.consumed_steer||s.consumed_accel!=l.last.consumed_accel||
+        s.consumed_brake!=l.last.consumed_brake||s.gear!=l.last.gear;
+    if(l.logged&&s.mode==l.last.mode&&(!moved||now-l.last_log<std::chrono::milliseconds(250)))return;
+    std::printf("input shim: frame %llu run %s mode %u%s record steer %d accel %d brake %d buttons %08x consumed steer %d accel %d brake %d gear %u speed %.1f suppressed %08x%s\n",
+        (unsigned long long)s.frame_seq,run,s.mode,s.in_gameplay?" race":"",s.record_steer,s.record_accel,s.record_brake,s.record_buttons,
+        s.consumed_steer,s.consumed_accel,s.consumed_brake,s.gear,double(s.speed),s.native_suppressed,extra.c_str());
+    l.last=s;l.logged=true;l.last_log=now;
 }
 
 GameView view(const platform::NativeRuntimeContext* runtime){
@@ -150,7 +155,7 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     }
     g.adapter->apply(*frame,v,out);
     g.host->recorder().push(Snapshot{*frame,g.adapter->signals(),out,v,row});   // one capture row per tick, copied now
-    log_signals(g.adapter->signals(),live.run);
+    log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
 }
 
 bool shim_backend_selected(const Ini& settings){
@@ -164,6 +169,7 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     const auto parsed=sh::read_profile(o.profile);
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.folder=folder;
+    o.debug=std::getenv("OR2_INPUT_DEBUG")!=nullptr;
     o.configured=true;
 }
 
@@ -193,6 +199,9 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
     static const sh::Frame no_shim{};
     o.adapter->apply(o.host?o.host->tick():no_shim,view(runtime),out,&kb);
+    // The record is the wheel's (the adapter's); with "keyboard 1" the race reads the PC layer's (the keyboard's) instead.
+    if(o.debug)log_signals(o.adapter->signals(),"ordinary",o.log,std::string(" keyboard ")+(out.pc_overlay_yield?"1":"0")+" layer "+(out.pc_input_layer?"1":"0")+
+        " overlay "+(out.pc_overlay?"1":"0")+(o.host?"":" no-host"));
 }
 
 void shim_input_shutdown_ordinary(){
