@@ -739,9 +739,15 @@
  },
  {
   "file": "windows/source/wheel_input.cpp",
-  "line": "if(!open(*d,hwnd)){std::printf(\"controls: %s: cannot open %s\\n\",e.action.c_str(),d->name.c_str());continue;}",
+  "line": "if(!open(*d,hwnd)){if(initial)std::printf(\"controls: %s: cannot open %s\\n\",e.action.c_str(),d->name.c_str());continue;}",
   "class": "not-a-file",
-  "reason": "the 35a8aa3 DirectInput device open"
+  "reason": "the 35a8aa3 DirectInput device open; 9c31d66 rescans log only the initial attempt"
+ },
+ {
+  "file": "windows/source/wheel_input.cpp",
+  "line": "g.open.erase(std::remove(g.open.begin(),g.open.end(),&d),g.open.end());",
+  "class": "not-a-file",
+  "reason": "9c31d66 rescan: std::remove on the in-memory list of open devices (a lost device leaves it), not a file"
  },
  {
   "file": "windows/source/window_desktop.cpp",
