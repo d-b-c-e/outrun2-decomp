@@ -380,8 +380,8 @@ t56.
     model 44CD30, course objects), as does absent content.
   - Runtime.log now reports `render queue: N node draws dropped (queue full)`. The 404D10 walk drops nodes when a
     queue is full, which would also look like missing geometry, so a run with drops is read with that in mind.
-- **Next diagnostic: `OR2_TRIPLE_NODE_DUMP=<n>`** (`4909f8b`; three views only, log only, default off; source for
-  review, no run yet).
+- **Diagnostic `OR2_TRIPLE_NODE_DUMP=<n>`** (`4909f8b`, with sana's review fixes in `5f56690`; three views only, log
+  only, default off; run N1, hub `triples-20261012`).
   - On the n-th stage display (44DE10), every object that 405360 walks before the next one is first walked whole
     without queuing. Each node is logged with node_visible's view-space centre and radius, its flags, LOD meshes and
     verdict. The corrections callback logs P and C[0..2].
@@ -390,6 +390,16 @@ t56.
     - No overlap excludes only these logged bounds, and only if the bounds and transforms are conservative.
     - It does not establish absent loaded geometry, and it does not exclude other submission paths.
     - Overlapping nodes are candidates, not evidence that triangles cover those pixels.
+  - **Run N1** (the dump at stage display 400, mid grid plateau; reader `wedge_rays.py` with a certified bound and
+    enforced projection and view checks):
+    - 2,267 nodes kept with the device view. Every wedge sample (2,761 left, 1,277 right) lies inside at least one
+      node sphere, partly the stage's group nodes (100 to 1,300 m), so nothing is excluded at sphere granularity.
+    - Smallest covering bounds: on the left, `000f0006` node 663 (20.9 m, centred 20 m left of and 6 m behind the
+      eye, one LOD-0 mesh); on the right, nothing under 50 m.
+    - With W1 (every node of these objects drawn whole, 0 drops, pixels still clear), these candidates' triangles,
+      as rasterized, do not cover the wedges.
+    - Untested: GPU-side rejection of submitted triangles (face culling, alpha test, blending at zero alpha). The
+      next proposal is a raw-coverage diagnostic for that.
 
 ### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
 
