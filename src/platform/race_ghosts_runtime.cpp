@@ -111,6 +111,15 @@ template<class F> bool run_ghost(NativeRuntimeContext& c,F&& body,driving::PcMat
         case 0x416700u:{std::array<std::uint32_t,7> v{};for(unsigned i=0;i<7;++i)v[i]=a[i];return ghost_save_open_416700(*current,v);}
         case 0x416930u:{std::array<std::uint32_t,9> v{};for(unsigned i=0;i<9;++i)v[i]=a[i];ghost_save_read_416930(*current,v);return 0u;}
         case 0x416830u:ghost_save_close_416830(*current);return 0u;
+        // The PC's launcher check (OpenEventA of the protection's named object "v7_%04d", pid ^ 19EA3FD3), which the
+        // Steam build never creates, so it fails there: Tweaks' FixC2CRankings creates the event. The decomp has no
+        // launcher; as its other gated code (the record inserts, race_end_runtime.cpp), it takes the present path:
+        // - 465EC0 (from 466DD0 after the NHOT ghost test, and 467A72) answers 1;
+        // - 4168D0 (from 4677E7 and 467A29) is ghost_save_write_4168d0, its write path (absent, the PC returns 1
+        //   without writing).
+        // tests/launcher_gate_audit.py keeps every gated site of the EXE accounted for.
+        case 0x465ec0u:return 1u;
+        case 0x4168d0u:return ghost_save_write_4168d0(*current,a[0],a[1],a[2])?1u:0u;
         // record module (variant 0) services of the record ghost cars
         case 0x47f1a0u:return records_frame_47f1a0(m,a[0]);
         case 0x47f140u:return records_state_47f140(m,a[0]);

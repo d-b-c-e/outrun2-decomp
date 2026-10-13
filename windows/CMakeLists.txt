@@ -260,6 +260,8 @@ if(Python3_FOUND)
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 # The shim files under windows/ mirror the wheel toolkit's native/shim, pinned by vendor/shim.lock.json (vendor/SHIM.md).
 add_test(NAME shim_vendor_pin COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shim_vendor_pin.py)
+# FixC2CRankings: every launcher-gated site of the EXE takes the launcher-present path (tests/launcher_gate_audit.py).
+add_test(NAME launcher_gate_audit COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher_gate_audit.py ${PROJECT_SOURCE_DIR})
 add_test(NAME shim_first_loop_timing COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_run_timing.py)
 add_test(NAME shim_first_loop_consumed_compare COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/shim_first_loop/test_compare_consumed.py)
 add_test(NAME controls_consumer COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_controls_consumer.py

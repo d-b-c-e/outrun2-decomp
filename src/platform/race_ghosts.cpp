@@ -134,6 +134,9 @@ void ghost_save_read_416930(PcRaceContext& c,const std::array<std::uint32_t,9>& 
     (void)ghost_save_copy_416870(c,index,a[0],a[1]);
 }
 
+// 4168D0 first calls the PC's launcher check 40E400 and, without the launcher, returns 1 without writing (the
+// protection's tripwire; Tweaks' FixC2CRankings makes the check pass). That check is not reproduced: the write below
+// is the launcher-present path (tests/launcher_gate_audit.py).
 bool ghost_save_write_4168d0(PcRaceContext& c,std::uint32_t index,std::uint32_t src,std::uint32_t n){
     auto& m=c.m;const std::uint32_t o=m.u32(0x8a8c7cu);
     const std::uint32_t buffer=m.u32(o+0x130u);
