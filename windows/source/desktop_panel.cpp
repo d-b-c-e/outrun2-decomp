@@ -49,6 +49,7 @@ Letterbox lb;
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
+    int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
@@ -163,6 +164,16 @@ void page_cameras(bool advanced){
     const int before=v.latency;
     if(dbce::panel::Choice("Frame latency",latency,4,&v.latency,"Frames the swap chain may queue; fewer is less input lag, more is smoother."))
         keep(&v.latency,before,[&]{return save("Window","FrameLatency",std::to_string(v.latency));});
+    // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
+    // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
+    // no row here yet.
+    {static const char* const boxing[]{"Off","Outside the race (default)","Always"};
+     const int before=v.letterbox;
+     if(dbce::panel::Choice("Letterboxing",boxing,3,&v.letterbox,"Black bars beside the centered 4:3 at the next start, as Tweaks' "
+         "UILetterboxing: outside the race (menus, loading), or always."))
+         keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});}
+    if(v.letterbox>0&&v.ui_scaling==0)dbce::panel::Status("Letterboxing now","inactive: [Graphics] UIScalingMode is 0 (stretched)");
+    if(v.letterbox!=v.letterbox_start)dbce::panel::Text("The choice applies at the next game start.");
 }
 void page_telemetry(bool advanced){
     {const bool before=v.telemetry;
@@ -325,6 +336,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
     v.projection=v.projection_start=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
+    {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
+    {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
      v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
