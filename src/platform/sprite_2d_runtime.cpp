@@ -118,7 +118,7 @@ void ensure_bank(NativeRuntimeContext& c,NativeSprite2d& o,PcD3D9Device& device,
         const char* path=XstPath639cb8[bank];std::string error;
         if(!path){o.bank_status[bank]="no XST path";return;}
         const auto* bytes=retail_asset_guest_path(*store,path,true,&error);
-        if(bytes&&pc_sprite_bank_load_xst(b,device,*bytes,error))o.bank_status[bank]="xst loaded ("+std::to_string(b.textures.size())+" textures)";
+        if(bytes&&pc_sprite_bank_load_xst(b,device,*bytes,error,pc_sprite_xst_pack_name(path)))o.bank_status[bank]="xst loaded ("+std::to_string(b.textures.size())+" textures)";
         else{o.bank_status[bank]="xst failed: "+error;b.state=0;}
         return;
     }
@@ -130,7 +130,8 @@ void ensure_bank(NativeRuntimeContext& c,NativeSprite2d& o,PcD3D9Device& device,
     else status="ani failed: "+error;
     error.clear();
     const std::string xst=XstPath639cb8[bank]?XstPath639cb8[bank]:"";std::vector<std::uint8_t> inflated;
-    if(!xst.empty()&&retail_asset_read_relative_inflated(*store,xst,inflated,128u*1024u*1024u,&error)&&pc_sprite_bank_load_xst(b,device,inflated,error))
+    if(!xst.empty()&&retail_asset_read_relative_inflated(*store,xst,inflated,128u*1024u*1024u,&error)&&
+       pc_sprite_bank_load_xst(b,device,inflated,error,pc_sprite_xst_pack_name(xst.c_str())))
         status+=", xst loaded ("+std::to_string(b.textures.size())+" textures)";
     else{status+=", xst failed: "+error;b.state=0;}
     o.bank_status[bank]=status;
