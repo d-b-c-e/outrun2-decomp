@@ -43,11 +43,12 @@ struct Rig {
     fk::Provider p;
     std::unique_ptr<Core> core;
     std::size_t w=0,s=0;
-    explicit Rig(bool latched,const std::string& profile_text,bool with_shifter=false,CoreConfig cfg={}){
+    explicit Rig(bool latched,const std::string& profile_text,bool with_shifter=false,CoreConfig cfg={},bool immediate_rescan=true){
         fk::Device d;d.listed={W,WP,"Wheel"};d.caps=fk::wheel_caps();
         w=p.add(d);
         if(with_shifter){fk::Device x;x.listed={S,SP,"Shifter"};x.caps=fk::wheel_caps();s=p.add(x);}
         cfg.latched=latched;cfg.capability=capability();
+        if(immediate_rescan)cfg.missing_rescan_us=0;  // existing step fixtures test immediate retries; test_missing_rescan keeps the wait
         core=std::make_unique<Core>(p,cfg);
         core->set_profile(read_profile(profile_text));
     }
@@ -591,6 +592,61 @@ void test_device_reports(){
     check(r.core->device_reports()[0].opened&&r.core->device_reports()[0].identity.interface_path.empty(),"successful reopen without path cannot inherit the prior path");
 }
 
+// An absent device is looked for every missing_rescan_us (250 ms by default), not on every worker pass. Connected
+// reads and loss handling are never throttled, and every waiting device shares one enumeration.
+void test_missing_rescan(){
+    const auto prof=profile({"steer = "+axis(0,32768),shifter("shiftUp = button 0")});
+    const std::int64_t wait=CoreConfig{}.missing_rescan_us;
+    check(wait==250000,"the default absent-device wait is 250 ms");
+    {Rig r(false,prof,true,{},false);
+     r.dev(r.s).attached=false;   // the shifter is absent at start
+     auto f=r.step();
+     check(r.p.enumerations==1&&r.dev(r.w).opens==1,"first scan: immediate, with no initial wait");
+     check(act(f,"steer").status==Status::Live&&act(f,"shiftUp").status==Status::DeviceMissing,"first scan: wheel live, shifter missing");
+     r.step();
+     check(r.p.enumerations==2,"one more scan right after a pass that opened a device");
+     const int polls=r.dev(r.w).polls;
+     for(int i=0;i<24;++i)f=r.step();   // 240 ms of 10 ms passes, inside the wait
+     check(r.p.enumerations==2,"no enumeration on every worker pass while only the shifter is absent");
+     check(r.dev(r.w).polls==polls+24&&act(f,"steer").status==Status::Live,"connected reads continue on every pass");
+     r.dev(r.s).attached=true;     // late attach, in the middle of the wait
+     f=r.step();
+     check(r.p.enumerations==3&&r.dev(r.s).opens==1,"late attach: found at the next scheduled scan");
+     f=r.step();
+     check(act(f,"shiftUp").status==Status::Live,"late-attached shifter is live");}
+    {Rig r(false,prof,true,{},false);
+     r.dev(r.w).attached=false;r.dev(r.s).attached=false;   // both absent
+     r.step();
+     check(r.p.enumerations==1,"both absent: one scan");
+     for(int i=0;i<24;++i)r.step();
+     check(r.p.enumerations==1,"both absent: they share one wait, not one scan each");
+     r.dev(r.w).attached=true;r.dev(r.s).attached=true;
+     r.step();
+     check(r.p.enumerations==2&&r.dev(r.w).opens==1&&r.dev(r.s).opens==1,"one shared enumeration opens both devices");}
+    {Rig r(false,prof,true,{},false);
+     r.dev(r.s).attached=false;
+     r.step();r.step();   // the second pass sets the wait
+     check(r.p.enumerations==2,"rollback fixture: the wait is set");
+     r.p.advance(-600000);     // the clock goes back 600 ms with the deadline still ahead
+     r.step();
+     check(r.p.enumerations==3,"clock rollback: a deadline beyond one interval is ignored and the scan runs");
+     for(int i=0;i<24;++i)r.step();
+     check(r.p.enumerations==3,"after a rollback the wait restarts from the new clock");
+     r.step();
+     check(r.p.enumerations==4,"and the next scan follows one interval later");}
+    {Rig r(false,prof,true,{},false);
+     r.dev(r.s).attached=false;
+     r.step();r.step();   // the wheel is open; the shifter's wait is pending
+     check(r.p.enumerations==2&&r.dev(r.w).opens==1,"loss fixture: wheel open, shifter waiting");
+     r.dev(r.w).script.push_back({Call::Gone,Call::NotCalled});
+     auto f=r.step();   // this tick's read fails and hands the handle back
+     check(act(f,"steer").status!=Status::Live,"the loss is reported on the failing tick");
+     r.step();          // the worker closes it and looks for the wheel at once, despite the shifter's wait
+     check(r.p.enumerations==3&&r.dev(r.w).closes==1&&r.dev(r.w).opens==2,"immediate loss: closed and reopened in the next worker pass");
+     for(int i=0;i<24;++i)r.step();
+     check(r.p.enumerations==4,"after the reopen: one follow-up scan, then only the shifter waits again");}
+}
+
 void test_status_identity(){
     auto find=[](const std::vector<StatusChange>& rows,StatusChange::Of of,int index){
         for(const auto& c:rows)if(c.of==of&&c.index==index)return c;
@@ -643,7 +699,7 @@ int main(){
         test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
-        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();test_status_identity();
+        test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();test_missing_rescan();test_status_identity();
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"shim slice 1: "<<checks<<" checks passed\n";
     return 0;

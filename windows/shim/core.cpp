@@ -90,6 +90,7 @@ bool Core::service_devices(){
             d.worker_state=DevState::Open;d.worker_reason.clear();
         }else{
             d.worker_state=DevState::Missing;d.worker_reason=std::string("read failed (")+call_name(r.why)+"), reopening";
+            missing_scan_after_us_=0;   // a fresh loss looks for the device now, not after another device's wait
         }
     }
     std::vector<int> need;
@@ -98,10 +99,15 @@ bool Core::service_devices(){
          const auto st=devs_[i].worker_state;
          if(st==DevState::Missing||st==DevState::ProductMismatch)need.push_back(int(i));
      }}
-    if(need.empty())return did;
+    if(need.empty()){missing_scan_after_us_=0;return did;}
+    // Only absent devices wait: connected reads and loss handling above are never throttled. All waiting devices
+    // share one enumeration. A deadline more than one interval ahead means the clock went back: scan now.
+    const auto now=p_.now_us();
+    if(cfg_.missing_rescan_us>0&&missing_scan_after_us_&&now<missing_scan_after_us_&&
+       missing_scan_after_us_-now<=cfg_.missing_rescan_us)return did;
     const auto listed=p_.enumerate();   // outside the lock: it may be slow
     did=true;
-    int opens=0;
+    int opens=0;bool opened_any=false;
     for(const int i:need){
         auto& d=devs_[std::size_t(i)];
         const DeviceInfo* found=nullptr;
@@ -126,7 +132,11 @@ bool Core::service_devices(){
         std::lock_guard<std::mutex> l(m_);
         opened_.push_back({i,o.handle,o.caps,epoch,o.opened.interface_path});
         d.worker_state=DevState::Open;d.worker_reason.clear();
+        opened_any=true;
     }
+    // Keep filling a batch immediately when some devices opened. Once only absent or refused devices remain, wait
+    // missing_rescan_us before the next EnumDevices instead of repeating it on every 5 ms worker pass.
+    missing_scan_after_us_=opened_any||cfg_.missing_rescan_us<=0?0:now+cfg_.missing_rescan_us;
     return did;
 }
 

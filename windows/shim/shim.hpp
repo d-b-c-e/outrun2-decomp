@@ -227,6 +227,7 @@ struct CoreConfig {
     int reacquire_tries=3;
     std::int64_t pending_limit_us=1000000;    // continuous E_PENDING for longer ends the epoch (reacquisition)
     int max_opens_per_pass=4;
+    std::int64_t missing_rescan_us=250000;     // a missing device does not re-enumerate on every worker pass
     std::size_t status_queue=256,event_queue=1024,generation_queue=8,control_event_queue=64;
 };
 
@@ -344,6 +345,7 @@ private:
     std::vector<std::uint32_t> worker_epochs_;
     std::vector<ObjectCaps> worker_caps_;
     std::vector<std::string> worker_interface_paths_; // same-handle reacquisition only; a new open replaces this
+    std::int64_t missing_scan_after_us_{};
 
     // Control worker only.
     bool have_last_{};
