@@ -19,7 +19,7 @@ inline bool g_widescreen=false;
 // the desktop host reads 0 or 1.
 inline unsigned g_ui_scaling_mode=2u;
 // [Window] AutoDetectResolution (set by the desktop before the game starts): the display's height in pixels, used while
-// options.ini holds no resolution (enhancements/video.hpp auto_detect_resolution); 0 keeps the PC's 640x480.
+// options.ini holds no resolution (enhancements/video.hpp auto_detect_resolution); 0 keeps the fixed 1920x1440 default.
 inline unsigned g_auto_detect_height=0u;
 
 

@@ -187,7 +187,8 @@ void page_cameras(bool advanced){
     {const bool before=v.auto_resolution;
      if(dbce::panel::OffOn("Resolution from the display",&v.auto_resolution,
          "While the game's own Settings hold no resolution, the next start renders at the supported height nearest the "
-         "display's instead of 640x480, as Tweaks' AutoDetectResolution. A resolution chosen in Settings always wins."))
+         "display's instead of the fixed 1440 default, as Tweaks' AutoDetectResolution. A resolution chosen in Settings "
+         "always wins."))
          keep(&v.auto_resolution,before,[&]{return save("Window","AutoDetectResolution",v.auto_resolution?"true":"false");});}
     if(v.auto_resolution!=v.auto_resolution_start)dbce::panel::Text("The choice applies at the next game start.");
 }

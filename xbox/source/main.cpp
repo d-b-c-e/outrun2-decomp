@@ -104,7 +104,8 @@ u64 dualsense_mapped(){u64 m=0;for(const auto& e:PadMap)m|=e.first;return m;}
 //   widescreen=0        16:9 (Hor+) instead of the PC's 4:3
 //   resolution=WxH      3D resolution: its height (480 .. 2160); the width follows the aspect
 //   antialiasing=off    off, msaa2, msaa4 or fxaa
-struct Options {bool reflections{true};outrun::enhancements::VideoSettings video{false,{1920,1440},outrun::enhancements::Antialiasing::Off};} g_options;
+struct Options {bool reflections{true};outrun::enhancements::VideoSettings video{false,outrun::enhancements::host_default_resolution,outrun::enhancements::Antialiasing::Off};
+               bool resolution_chosen{};} g_options;   // options.ini set resolution= (AutoDetectResolution then stays out)
 const char* const OptionsDefault=
     "# OutRun 2006 Xbox options (edit and restart)\n"
     "reflections=1\n";
@@ -118,7 +119,7 @@ void load_options(){
         const auto eq=l.find('=');if(l.empty()||l[0]=='#'||eq==std::string::npos)continue;
         const std::string k=l.substr(0,eq);const unsigned v=unsigned(std::strtoul(l.c_str()+eq+1,nullptr,10));
         if(k=="reflections")g_options.reflections=v!=0;
-        else if(outrun::enhancements::GpuVideoBackend::parse_option(k,l.substr(eq+1),g_options.video)){}
+        else if(outrun::enhancements::GpuVideoBackend::parse_option(k,l.substr(eq+1),g_options.video)){if(k=="resolution")g_options.resolution_chosen=true;}
         else std::fprintf(stdout,"Xbox options: unsupported key %s\n",k.c_str());
     }
     std::fclose(f);
@@ -198,13 +199,12 @@ int or2_xbox_main(int argc,char** argv){
     // FRAME RATE default: 60 as on the PC; 120 is chosen in Settings (options.ini overrides).
     g_options.video.frame_rate=60u;
     load_options();
-    {   // [Window] AutoDetectResolution (renderer.hpp g_auto_detect_height): no resolution in options.ini renders at the
-        // display's height, snapped to a listed one by GpuVideoBackend, rather than the PC's 480.
-        const auto before=g_options.video.resolution;
-        g_options.video.resolution=outrun::enhancements::auto_detect_resolution(before,outrun::xbox_runtime::g_auto_detect_height);
-        if(g_options.video.resolution!=before)
-            std::fprintf(stdout,"Xbox options: no resolution in options.ini; the display's height %u (AutoDetectResolution)\n",
-                         unsigned(g_options.video.resolution.height));}
+    // [Window] AutoDetectResolution (renderer.hpp g_auto_detect_height): no resolution in options.ini renders at the
+    // display's height, snapped to a listed one by GpuVideoBackend, rather than the fixed 1440 default. Logged whenever
+    // it applies, also where the display's height is that default's.
+    if(outrun::enhancements::auto_detect_resolution(g_options.video.resolution,g_options.resolution_chosen,outrun::xbox_runtime::g_auto_detect_height))
+        std::fprintf(stdout,"Xbox options: no resolution in options.ini; the display's height %u (AutoDetectResolution)\n",
+                     unsigned(g_options.video.resolution.height));
     rt::GameHost diag{};
     XboxAudioOutput audio;
     diag.audio_output=&audio;

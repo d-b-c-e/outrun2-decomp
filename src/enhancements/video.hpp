@@ -22,13 +22,16 @@ struct Resolution {
 
 // The resolution of a height in an aspect: 4:3 or 16:9 width (even).
 Resolution resolution_at(std::uint32_t height,bool widescreen);
-// [Window] AutoDetectResolution (the Tweaks key; its GameDefaultConfigOverride): a resolution options.ini left unset
-// (height 0, which the backend would round to the PC's 480) takes the display's height; the backend then snaps it to
-// a listed height and derives the width from the aspect. A set resolution, or no display height (0: the setting off,
-// or a latched run), stays as it is.
-inline Resolution auto_detect_resolution(Resolution r,std::uint32_t display_height){
-    if(r.height==0u&&display_height>0u)r.height=display_height;
-    return r;
+// The Xbox / desktop host's 3D resolution while options.ini holds none (xbox/source/main.cpp g_options): 4:3 at 1440.
+inline constexpr Resolution host_default_resolution{1920u,1440u};
+// [Window] AutoDetectResolution (the Tweaks key; its GameDefaultConfigOverride): while options.ini chose no resolution,
+// the host's default takes the display's height; the backend then snaps it to a listed height and derives the width
+// from the aspect. True when it applied. A resolution chosen by options.ini, or no display height (0: the setting
+// off, or a latched run), leaves `r` as it is.
+inline bool auto_detect_resolution(Resolution& r,bool chosen_by_file,std::uint32_t display_height){
+    if(chosen_by_file||display_height==0u)return false;
+    r.height=display_height;
+    return true;
 }
 
 struct VideoSettings {
