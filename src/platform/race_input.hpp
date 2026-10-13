@@ -26,6 +26,21 @@ struct PcInputAnalog {                                                          
     std::array<std::int32_t,7> current{},previous{};   // +4/+8 of each 0x10 channel
     std::int32_t accel_edge_1c{},brake_edge_2c{};
 };
+// [Bugfixes] FixFullPedalChecks (the Tweaks key, on by default there and here; Tweaks hooks_bugfixes.cpp): the game's
+// full-press checks (the backfire among them) compare the accelerator / brake volume with 255, and a real pedal scaled
+// to 0..255 (lround(value*255) in both input backends) rarely reaches it. As Tweaks' GetVolume / GetVolumeOld hooks do,
+// 453720 / 453750 report 250..254 as 255 on channels 1 (accelerator) and 2 (brake) only. The stored 7D6810 values, and
+// so the pedal edges, the consumed-input capture and replays, stay as written. Off: the PC's own 255-only checks.
+inline bool g_pc_fix_full_pedal_checks=true;
+constexpr std::int32_t pc_input_volume_read(std::int32_t stored,unsigned channel,bool fix){
+    return fix&&(channel==1u||channel==2u)&&stored>=250&&stored<255?255:stored;
+}
+inline std::int32_t pc_input_volume_current(const PcInputAnalog& a,unsigned channel){   // 453720
+    return pc_input_volume_read(a.current[channel],channel,g_pc_fix_full_pedal_checks);
+}
+inline std::int32_t pc_input_volume_previous(const PcInputAnalog& a,unsigned channel){  // 453750
+    return pc_input_volume_read(a.previous[channel],channel,g_pc_fix_full_pedal_checks);
+}
 void pc_input_switch_453640(PcInputSwitchRecord&,const PcInputDevice&,const PcInputConfig&);
 // filter_7d6884: per-player steering filter; option_7c24cb: steering speed
 // option (race table 5A7C30 row); game_mode_78026c selects 5A7C30 (16) or 5A7CF0.

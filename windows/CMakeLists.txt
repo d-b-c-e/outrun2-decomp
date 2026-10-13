@@ -185,6 +185,13 @@ target_compile_options(test_consumed_replay PRIVATE /W4 /WX)
 target_compile_definitions(test_consumed_replay PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_consumed_replay PRIVATE bcrypt)
 add_test(NAME consumed_replay COMMAND test_consumed_replay)
+# FixFullPedalChecks (src/platform/race_input.hpp): 453720 / 453750 pedal volumes over every word both backends write,
+# current and previous, through the game's own 453860 update, with the fix on and off.
+add_executable(test_pedal_volume tests/test_pedal_volume.cpp ${PROJECT_SOURCE_DIR}/src/platform/race_input.cpp)
+target_include_directories(test_pedal_volume PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_pedal_volume PRIVATE cxx_std_17)
+target_compile_options(test_pedal_volume PRIVATE /W4 /WX)
+add_test(NAME pedal_volume COMMAND test_pedal_volume)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
 add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp

@@ -65,8 +65,8 @@ struct Frame {
     std::array<float,2> area_yaw()const{return {c.game_mode.course_runtime.zero_7d3124[1],c.game_mode.course_runtime.zero_7d3178[1]};}
     std::int32_t game_mode()const{return std::int32_t(c.mode_state.current);}
     std::int32_t variant()const{return std::int32_t(c.game_mode.game_variant);}
-    std::int32_t volume(unsigned ch)const{return w.analog_7d6810.current[ch];}                // 453720
-    std::int32_t old_volume(unsigned ch)const{return w.analog_7d6810.previous[ch];}           // 453750
+    std::int32_t volume(unsigned ch)const{return pc_input_volume_current(w.analog_7d6810,ch);}   // 453720 (FixFullPedalChecks)
+    std::int32_t old_volume(unsigned ch)const{return pc_input_volume_previous(w.analog_7d6810,ch);}  // 453750 (FixFullPedalChecks)
     std::uint32_t pressed(std::uint32_t mask)const{return w.switch_7d6770.pressed&mask;}      // 4536F0
     driving::PcRouteContext route(){
         return {native_race_route_words(c),Bytes(selection.data(),selection.size()),   // race manager 7D39A0..

@@ -57,8 +57,8 @@
         // input (47F110 = 0): 7D6770 switch words, 7D6810 analogue channels
         case 0x4536c0u:return c.race.car_world.switch_7d6770.held&a[0];
         case 0x453720u:if(a[0]>=7u)throw EndUnported(k.pc,"analogue channel");
-            return std::uint32_t(c.race.car_world.analog_7d6810.current[a[0]]);
-        case 0x453750u:if(a[0]>=7u)throw EndUnported(k.pc,"analogue channel");return std::uint32_t(c.race.car_world.analog_7d6810.previous[a[0]]);
+            return std::uint32_t(pc_input_volume_current(c.race.car_world.analog_7d6810,a[0]));   // FixFullPedalChecks
+        case 0x453750u:if(a[0]>=7u)throw EndUnported(k.pc,"analogue channel");return std::uint32_t(pc_input_volume_previous(c.race.car_world.analog_7d6810,a[0]));
         case 0x453780u:
             if(a[0]==1u)return std::uint32_t(c.race.car_world.analog_7d6810.accel_edge_1c);
             if(a[0]==2u)return std::uint32_t(c.race.car_world.analog_7d6810.brake_edge_2c);

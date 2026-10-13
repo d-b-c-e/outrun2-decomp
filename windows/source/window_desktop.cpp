@@ -19,6 +19,7 @@
 #include "platform/pc_screen.hpp"
 #include "platform/race_draw_distance.hpp"
 #include "platform/race_particles.hpp"
+#include "platform/race_input.hpp"
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -406,6 +407,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // mapping of 418CF0 and the Metropolis fireworks object (pc_screen.hpp).
     outrun::platform::g_pc_fix_particle_rendering=settings.flag("Bugfixes","FixParticleRendering",true);
     if(!outrun::platform::g_pc_fix_particle_rendering)std::printf("settings: particle rendering fix off (the PC's own particle mapping)\n");
+    // [Bugfixes] FixFullPedalChecks, the Tweaks key (on unless set false, as there): 453720 / 453750 read accelerator and
+    // brake volumes of 250..254 as 255 for the game's full-press checks (race_input.hpp).
+    outrun::platform::g_pc_fix_full_pedal_checks=settings.flag("Bugfixes","FixFullPedalChecks",true);
+    if(!outrun::platform::g_pc_fix_full_pedal_checks)std::printf("settings: full pedal check fix off (the PC's own 255-only full-press checks)\n");
     // [Bugfixes] FixIncorrectShading and FixLensFlarePath, the Tweaks keys (on unless set false, as there): double-sided
     // lighting linked as the DOUBLE fragments, and the lens flare offsets read from Media\ (pc_screen.hpp).
     outrun::platform::g_pc_fix_incorrect_shading=settings.flag("Bugfixes","FixIncorrectShading",true);

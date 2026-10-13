@@ -112,8 +112,18 @@ Wheelkit runs this companion, never the game directly (sana 34164/34207). It mir
   - refusals: the native backend, record disabled, a tampered finalizer, ambiguous records, a stray request, an
     existing result folder.
 
-## Not in this slice
+## Since this slice
 
-- Playback: this build refuses a playback request and exits.
+- Playback:
+  - An admitted playback request runs in a private home seeded from the recording's startup snapshot (17e7ddd).
+  - A refused playback ends before anything is written, and a recording stopped at its limit replays (e9ba10b).
+  - The proof names the replayed recording, `sourceSealSha256` (9ac1d68).
+  - The companion's `-Playback` compares the replay and checks that the owner's files are unchanged (f402edf).
+- The owner package carries the companion and the record's `session` block. The C1, C1s and C1h qualifications on
+  b08f143 ran it live: Wheelkit Apply, record, cold replay.
+- Wheelkit plays a saved OutRun recording through its `OutRunPlaybackContract`.
+
+## Still open
+
 - Menu, car and stage checkpoints.
-- The companion in the owner package (install.ps1 and the record's `session` block), and a live companion run.
+- The owner's first attended recording and its playback.
