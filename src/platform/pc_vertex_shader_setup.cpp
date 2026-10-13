@@ -56,7 +56,10 @@ std::uint32_t pc_adler32_43a6f0(const std::uint8_t* data,std::size_t size){
 std::uint32_t pc_shader_data_u32(std::uint32_t va){
     for(std::size_t k=0;k<EmbeddedRenderRangeCount;++k){
         const auto& r=EmbeddedRenderRanges[k];
-        if(va>=r.va&&va-r.va<=r.size-4u)return le32(r.bytes+(va-r.va));
+        if(va>=r.va&&va-r.va<=r.size-4u){
+            if(!r.bytes)break;   // unbound (no EXE image loaded): the unmapped-address error below, never a null read
+            return le32(r.bytes+(va-r.va));
+        }
     }
     char text[64];std::snprintf(text,sizeof text,"PC renderer data address %08x",va);
     throw std::out_of_range(text);

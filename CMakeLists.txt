@@ -970,6 +970,7 @@ add_test(NAME pc_scene_renderer_retail COMMAND test_pc_scene_renderer
 add_executable(test_d3d9_resource_lifetime tests/test_d3d9_resource_lifetime.cpp)
 target_link_libraries(test_d3d9_resource_lifetime PRIVATE outrun_native_runtime)
 add_test(NAME d3d9_resource_lifetime COMMAND test_d3d9_resource_lifetime)
+set_tests_properties(d3d9_resource_lifetime PROPERTIES SKIP_RETURN_CODE 77)   # no OR2_EXE: the scene part is skipped
 # macOS port (mac/): Metal renderer over the D3D9 device, SDL2 window/audio/input.
 if(APPLE)
     add_subdirectory(mac)
