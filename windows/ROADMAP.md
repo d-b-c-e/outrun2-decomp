@@ -70,6 +70,18 @@ go upstream as small pull requests (first: `tweaks-exe`).
    - Per-field accuracy is not yet checked.
 6. ⬜ **Tweaks parity** (table below) and the original game's limits the
    decomp can lift, e.g. steering quantised to -127..127 in 453860.
+   - Fine steering: source finding (2026-10-13, deferred by sana 61131), nothing built.
+     - Where the steps come from: race_input.cpp:91 stores cvttss2si(steer*127) after the dead zone and the filter.
+       OperationInput 49fad0 (pc_common_control.cpp:2189) then writes the car's +0x202 as volume0 << 8.
+     - The physics readers of +0x202 are continuous in that i16, with 0x7f00 as full lock: pc_steering.cpp:57 and
+       :78 (the 0x7000 correction), :106 (|+0x202| / 32512), pc_common_control.cpp:93, :237 and :1560.
+     - The wheel arrives at 16 bits (shim record word 0x0E = lround(n*32767)).
+     - FFB (ffb_outrun.cpp:20) and telemetry (telemetry_forza.cpp:43) read the car's float +0x1D0 / +0x1D4, never
+       +0x202.
+     - step_native_gameplay (pc_vehicle_control.cpp:293, clamped -128..127) has no caller.
+     - The slice: on the analog path only, +0x202 = lround(steer*0x7f00), clamped. At k/127 that equals the PC's k<<8.
+       current[0] and the consumed capture stay byte-identical. A latched run forces it off, and a recorded session
+       names it.
 7. Upstream bugs, as pull requests: #2 30-second hang at the end of a race,
    #3 rival drift score stays at zero, #4 level impossible to win.
 
