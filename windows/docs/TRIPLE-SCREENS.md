@@ -400,6 +400,16 @@ t56.
       as rasterized, do not cover the wedges.
     - Untested: GPU-side rejection of submitted triangles (face culling, alpha test, blending at zero alpha). The
       next proposal is a raw-coverage diagnostic for that.
+- **Diagnostic `OR2_TRIPLE_RAW_COVERAGE=1`** (`128d2aa`; three views only, default off; reviewed PASS by sana 43021).
+  - Replicated draws run with face culling, depth/stencil, blending and the alpha test off, writing every colour
+    channel. The states are bound in triple_bind after apply_state and restored by the next draw.
+  - **Run RC1** (grid, default union, with CLEAR_PROBE): 81.4 % of the left wedge pixels and 91.9 % of the right stay
+    uncovered.
+    - The filled part is mostly normally hidden geometry, the back and underside of the grandstand structure,
+      plausibly backfaces. That is not a defect by itself.
+    - No triangle submitted in that frame reaches the bulk under those states.
+    - Still open: pixel-program texkill, depth clipping, the viewport and scissor, geometry outside that frame's
+      submitted set (WHOLE_STAGE was not combined), and absent content.
 
 ### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
 
