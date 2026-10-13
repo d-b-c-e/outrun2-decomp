@@ -46,9 +46,12 @@ go upstream as small pull requests (first: `tweaks-exe`).
      - the shim's WheelFfb read-slot bridge.
      The tests are test_ffb_outrun, test_ffb_delivery, test_ffb_wiring and test_wheelffb_bridge. The muted
      integration passed (hub `artifacts/outrun-bridge-muted-20261012`).
-   - Not yet:
-     - an owner package carrying WheelFfb.dll (the add-on design: hub `artifacts/outrun-ffb-package-design-20261012`);
-     - the physical output on the wheel, and the feel against the art of rally reference (attended).
+   - Packaged: the force add-on carries WheelFfb.dll (hub `artifacts/outrun-ffb-addon-20261012`).
+     - It was installed beside the owner's b08f143 on 2026-10-12, with the force off (no `[FFB] Output`).
+     - Its muted copy check logged the refusal under `DBCE_FFB_MUTE` and did not load the DLL.
+   - In source, not yet in an owner build: F6 saves the wheel output for the next start (f67f196). It is not
+     yet seen rendered.
+   - Not yet: the physical output on the wheel, and the feel against the art of rally reference (attended).
 5. 🟡 **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
    toolkit `native/forza`), plus the Tweaks fork's shared memory for its SimHub plugin; see `README.md` Telemetry.
    - 2026-10-12: SimHub logged valid OutRun data on port 8000 during a shim run.
@@ -114,4 +117,5 @@ needed in a native build.
 | Overlay, WheelSettings | in-game overlay, F6 wheel page | 🟡 | the F6 panel (docs/F6-PANEL.md): Controls, FFB (strength, effects, Stop FFB, the wheel output at the next start), Cameras, Telemetry, Help; Tweaks' own overlay windows are not reproduced |
 | Bugfixes | FixLensFlarePath, FixIncorrectShading | 🟡 | on by default as in Tweaks. FixLensFlarePath: 44A630's offsets read from `Media\lens_flare_offset.bin` (where the game ships it) when present, else `common\`; runtime.log names the source. FixIncorrectShading: 40E140's TWOSIDE lighting entries (73F04C / 73F050) link the DOUBLE fragments (61FB48 / 61FC88), unit-tested in test_pc_shader_programs. Neither yet seen in game |
 | | FixFullPedalChecks | ✅ | on by default as in Tweaks: 453720 / 453750 read accelerator and brake 250..254 as 255 (race_input.hpp), for the full-press checks such as the backfire; the stored channels, edges and consumed capture are unchanged; `[Bugfixes] FixFullPedalChecks = false` restores the PC's own; tests/test_pedal_volume.cpp |
-| | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, FixParticleRendering, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting. FixParticleRendering (Tweaks default on) = two parts: draw_418cf0's screen mapping uses the full width/height where the Xbox code had half (grass off screen; Tweaks halves sx, sy and the size at 419009), and the Metropolis fireworks (44DE10 object 0x630001 without a node list; Tweaks draws 0x1A000A with a fixed list) |
+| | FixPegasusClopping, FixRightSideBunkiAnimations, FixC2CRankings, PreventDESTSaveCorruption, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting |
+| | FixParticleRendering | 🟡 | in source since b8c9f8b, on by default as in Tweaks (pc_screen.hpp): draw_418cf0's screen mapping used the full width/height where the Xbox code had half (grass off screen; race_particles_draw.cpp halves sx, sy and the size at 419009 as Tweaks does), and the Metropolis fireworks (44DE10 object 0x630001 had no node list; race_area.cpp draws 0x1A000A with a fixed list as Tweaks does). Not yet seen at the rig |
