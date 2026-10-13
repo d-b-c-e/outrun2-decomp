@@ -18,6 +18,10 @@
 namespace outrun::xbox_runtime {
 using namespace platform::d3d9;
 namespace {
+// OR2_TRIPLE_RAW_COVERAGE=1 (diagnostic; windows/docs/TRIPLE-SCREENS.md "Start wedges"; three views only, default off):
+// see triple_bind. Never a setting: it changes how the scene is drawn.
+bool triple_raw_coverage(){static const bool on=[]{const char* v=std::getenv("OR2_TRIPLE_RAW_COVERAGE");return v&&std::string(v)=="1";}();return on;}
+std::uint64_t g_triple_raw_draws=0,g_triple_raw_alpha_skipped=0;
 constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
@@ -170,6 +174,10 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                     "%llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
                     (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
+    if(platform::g_pc_triple_corrections&&triple_raw_coverage())
+        std::printf("triple views: RAW COVERAGE (diagnostic): %llu replicated draws drawn with culling, depth/stencil and blending off; "
+                    "alpha test off in all but %llu (unexpected constant size)\n",(unsigned long long)g_triple_raw_draws,
+                    (unsigned long long)g_triple_raw_alpha_skipped);
     if(platform::g_pc_triple_corrections){std::size_t unmatched=0;std::uint64_t changes=0;
         for(const auto& p:triple_programs_){unmatched+=p.second.base<0?1u:0u;changes+=p.second.changes;}
         std::printf("triple views: %zu vertex programs classified, %zu without a match at their last draw, %llu changes of outcome\n",
@@ -687,6 +695,29 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     if(!triple_logged_){triple_logged_=true;
         std::printf("triple views: back buffer %ux%u, viewports x %.0f / %.0f / %.0f, width %.0f each, height %.0f\n",back_w_,back_h_,
                     double(v[0].TopLeftX),double(v[1].TopLeftX),double(v[2].TopLeftX),double(v[0].Width),double(v[0].Height));}
+    // OR2_TRIPLE_RAW_COVERAGE (diagnostic): this replicated draw with face culling, depth and stencil, blending and the
+    // alpha test off and every colour channel written, so those states no longer keep its triangles off a pixel (shader
+    // texkill, depth clipping, the viewport and the scissor still can). Bound here,
+    // after apply_state, and recorded in bound_, so the next draw's apply_state binds its own states again; the
+    // alpha-test constant goes through uniform(), whose shadow then differs from the next draw's.
+    if(triple_raw_coverage()){
+        D3D11_RASTERIZER_DESC r=last_rasterizer_;r.CullMode=D3D11_CULL_NONE;
+        auto& rs=rasterizer_states_[key(r)];if(!rs)check(device_->CreateRasterizerState(&r,&rs),"CreateRasterizerState(raw coverage)");
+        context_->RSSetState(rs.Get());bound_.rasterizer=rs.Get();
+        D3D11_DEPTH_STENCIL_DESC d=last_depth_;d.DepthEnable=FALSE;d.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;d.StencilEnable=FALSE;
+        auto& ds=depth_states_[key(d)];if(!ds)check(device_->CreateDepthStencilState(&d,&ds),"CreateDepthStencilState(raw coverage)");
+        context_->OMSetDepthStencilState(ds.Get(),0);bound_.depth=ds.Get();bound_.stencil_ref=0;
+        D3D11_BLEND_DESC b=last_blend_;b.AlphaToCoverageEnable=FALSE;b.RenderTarget[0].BlendEnable=FALSE;b.RenderTarget[0].RenderTargetWriteMask=15;
+        auto& bs=blend_states_[key(b)];if(!bs)check(device_->CreateBlendState(&b,&bs),"CreateBlendState(raw coverage)");
+        context_->OMSetBlendState(bs.Get(),nullptr,0xffffffffu);bound_.blend=bs.Get();
+        auto fixed=uniform_shadow_[2];
+        if(fixed.size()==12*sizeof(float)){const float off=0.f;std::memcpy(fixed.data()+8*sizeof(float),&off,sizeof off);uniform(2,fixed.data(),fixed.size());}
+        else ++g_triple_raw_alpha_skipped;   // not the 12-float fixed block pixel_pipeline uploads: alpha test left as is
+        static bool logged=false;
+        if(!logged){logged=true;std::printf("triple views: RAW COVERAGE (diagnostic, OR2_TRIPLE_RAW_COVERAGE): replicated draws with culling, "
+                                            "depth/stencil, blending and the alpha test off, all colour channels written\n");}
+        ++g_triple_raw_draws;
+    }
     ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;
     return true;
 }
