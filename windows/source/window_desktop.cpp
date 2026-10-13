@@ -417,6 +417,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     if(!outrun::platform::g_pc_fix_incorrect_shading)std::printf("settings: incorrect shading fix off (the TWOSIDE lighting fragments)\n");
     outrun::platform::g_pc_fix_lens_flare_path=settings.flag("Bugfixes","FixLensFlarePath",true);
     if(!outrun::platform::g_pc_fix_lens_flare_path)std::printf("settings: lens flare path fix off (common\\lens_flare_offset.bin only)\n");
+    // [Bugfixes] FixPegasusClopping, the Tweaks key (on unless set false, as there): the Pegasus off callback 44BCC0 also
+    // stops the hoof clop loop 0x8D (pc_screen.hpp).
+    outrun::platform::g_pc_fix_pegasus_clopping=settings.flag("Bugfixes","FixPegasusClopping",true);
+    if(!outrun::platform::g_pc_fix_pegasus_clopping)std::printf("settings: Pegasus clopping fix off (the PC's own single stop)\n");
     // [Graphics] UseHiDefCharacters, the Tweaks key (on unless set false, as there): the hi-def driver and heroine
     // character sets in gameplay (pc_screen.hpp).
     outrun::platform::g_pc_use_hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);

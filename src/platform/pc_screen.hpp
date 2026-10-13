@@ -40,6 +40,16 @@ inline bool g_pc_fix_incorrect_shading=true;
 // but the game ships it in Media\, so the sun offsets stay zero. With the fix the Media\ copy is read when it exists
 // (as Tweaks, which repoints the path only then), else the common\ one (race_course_passes.cpp).
 inline bool g_pc_fix_lens_flare_path=true;
+// [Bugfixes] FixPegasusClopping (the Tweaks key, on by default there and here; hooks_bugfixes.cpp): the Pegasus event
+// 44BB30 starts the hoof clop as a loop (4249F0(SND_LOOP | 0x8D) = 0x88D), but its off callback SndOff_PEGA 44BCC0 stops
+// only 0x8C (0x808C), so the clopping never ends. As Tweaks does after SndOff_PEGA, 44BCC0 then also requests
+// SND_STOP | 0x8D (0x808D). Off: the PC's own single stop.
+inline bool g_pc_fix_pegasus_clopping=true;
+// 44BCC0's 4249F0 sound requests in order; returns how many (the race code issues exactly these).
+inline int pc_pegasus_sound_off_44bcc0(bool fix,unsigned out[2]){
+    out[0]=0x808cu;if(!fix)return 1;
+    out[1]=0x808du;return 2;
+}
 // [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
 // and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),
 // and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;

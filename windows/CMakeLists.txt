@@ -192,6 +192,12 @@ target_include_directories(test_pedal_volume PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_pedal_volume PRIVATE cxx_std_17)
 target_compile_options(test_pedal_volume PRIVATE /W4 /WX)
 add_test(NAME pedal_volume COMMAND test_pedal_volume)
+# FixPegasusClopping (src/platform/pc_screen.hpp): 44BCC0's exact sound requests with the fix on and off.
+add_executable(test_pegasus_sound tests/test_pegasus_sound.cpp)
+target_include_directories(test_pegasus_sound PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_pegasus_sound PRIVATE cxx_std_17)
+target_compile_options(test_pegasus_sound PRIVATE /W4 /WX)
+add_test(NAME pegasus_sound COMMAND test_pegasus_sound)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
 add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp

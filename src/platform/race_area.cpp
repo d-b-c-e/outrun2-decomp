@@ -262,7 +262,7 @@ struct Port {
             if(v%0xc8==0||v%0x140==0)se(0x8c);
             if(v==0x258)se(0x808c);
             return;
-        case 0x44bcc0u:se(0x808c);return;
+        case 0x44bcc0u:{unsigned r[2];const int n=pc_pegasus_sound_off_44bcc0(g_pc_fix_pegasus_clopping,r);for(int i=0;i<n;++i)se(r[i]);}return;   // FixPegasusClopping (pc_screen.hpp)
         case 0x44bb90u:if(v==0)se(0x8e);return;
         case 0x44bbb0u:if(v==0)se(0x90);else if(v==0xc8||v==0x12c)se(0x8f);return;
         case 0x44bcd0u:se(0x8090);return;
