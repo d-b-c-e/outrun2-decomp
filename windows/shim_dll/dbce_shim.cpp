@@ -406,6 +406,36 @@ int32_t dbce_shim_profile_info(void* handle, char* text, int32_t len, int32_t* n
     return text_out(s->profile_info, text, len, needed);
 }
 
+int32_t dbce_shim_profile_action_info(const char* profile, int32_t profile_len, int32_t action,
+                                    char* text, int32_t len, int32_t* needed) {
+    if (needed) *needed = 0;
+    if (text && len > 0) text[0] = 0;
+    if (!profile || profile_len < 0 || profile_len > int32_t(sh::MaxProfileBytes) || action < 0 || action >= sh::ActionCount)
+        return DBCE_SHIM_BAD_ARGUMENT;
+    try {
+        const auto parsed = sh::read_profile(std::string(profile, std::size_t(profile_len)));
+        const auto plan = sh::plan_profile(parsed);
+        std::string status = "invalid", reason;
+        const dbce::controls::Binding* binding = nullptr;
+        if (!parsed.ok) reason = parsed.error;
+        else if (!plan.usable) reason = parsed.section.error;
+        else if (!plan.invalid_keys.empty()) reason = "profile contains invalid or conflicting action: " + plan.invalid_keys.front();
+        else if (plan.bound_of[std::size_t(action)] < 0) { status = "unbound"; reason = "action is not bound"; }
+        else { status = "bound"; binding = &plan.bound[std::size_t(plan.bound_of[std::size_t(action)])].binding; }
+        using dbce::shim::control::journal_detail::json_string;
+        std::string result = "{\"schema\":1";
+        auto field = [&](const char* key, const std::string& value) {
+            result += std::string(",\"") + key + "\":";
+            return json_string(result, value, sh::MaxProfileBytes);
+        };
+        if (!field("action", sh::action_name(action)) || !field("status", status) || !field("reason", reason) ||
+            !field("sha256", sh::hex(parsed.file_hash)) || !field("kind", binding ? dbce::controls::kindName(binding->kind) : "") ||
+            !field("instance", binding ? binding->dev : "") || !field("product", binding ? binding->prod : "") ||
+            !field("name", binding ? binding->name : "")) return DBCE_SHIM_BAD_ARGUMENT;
+        return text_out(result + "}", text, len, needed);
+    } catch (...) { return DBCE_SHIM_REFUSED; }
+}
+
 int32_t dbce_shim_stop(void* handle, char* report, int32_t len, int32_t* needed) {
     Shim* s = nullptr;
     if (const auto r = lookup(handle, s)) return r;

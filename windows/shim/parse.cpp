@@ -125,6 +125,40 @@ Profile read_profile(const std::string& bytes){
     return r;
 }
 
+ProfilePlan plan_profile(const Profile& profile,const Capability& capability){
+    ProfilePlan r;r.bound_of.fill(-1);
+    for(int i=0;i<ActionCount;++i){
+        const char* why=capability.unsupported[std::size_t(i)];
+        r.base[std::size_t(i)]=why?Status::Unsupported:Status::Unbound;
+        r.reasons[std::size_t(i)]=why?why:"";
+    }
+    r.usable=profile.ok&&profile.section.error.empty();
+    if(!r.usable)return r;
+    for(const auto& [key,why]:profile.section.invalid){
+        r.invalid_keys.push_back(key);
+        const int i=action_index(key);
+        if(i>=0&&!capability.unsupported[std::size_t(i)]){r.base[std::size_t(i)]=Status::Invalid;r.reasons[std::size_t(i)]=why;}
+    }
+    for(const auto& e:profile.section.bound){
+        const int i=action_index(e.action);
+        if(i<0)continue;
+        r.in_profile[std::size_t(i)]=true;
+        if(capability.unsupported[std::size_t(i)])continue;
+        int d=-1;
+        for(std::size_t k=0;k<r.devices.size();++k)if(r.devices[k].dev==e.binding.dev)d=int(k);
+        if(d>=0&&r.devices[std::size_t(d)].prod!=e.binding.prod){
+            r.base[std::size_t(i)]=Status::Invalid;
+            r.reasons[std::size_t(i)]="prod "+e.binding.prod+" differs from the other bindings of "+e.binding.dev;
+            r.invalid_keys.push_back(e.action);
+            continue;
+        }
+        if(d<0){r.devices.push_back({e.binding.dev,e.binding.prod,e.binding.name});d=int(r.devices.size())-1;}
+        r.bound_of[std::size_t(i)]=int(r.bound.size());
+        r.bound.push_back({i,e.binding,d});r.base[std::size_t(i)]=Status::Opening;
+    }
+    return r;
+}
+
 bool parse_session(const std::string& bytes,std::uint64_t now_unix,Session& out,std::string& why){
     out={};
     if(bytes.size()>512){why="inject.on is larger than 512 bytes";return false;}

@@ -234,6 +234,20 @@ struct JournalCut {
 // ---- the adapter's declaration (section 8, item 1): nullptr = supported, else why not
 struct Capability { std::array<const char*,ActionCount> unsupported{}; };
 
+// Pure binding admission shared by Core and metadata inspection. No provider or clock is consulted.
+struct ProfileBinding { int action{}; ctl::Binding binding; int device{-1}; };
+struct ProfilePlan {
+    bool usable{};
+    std::vector<ProfileBinding> bound;
+    std::vector<DeviceInfo> devices;
+    std::array<int,ActionCount> bound_of{};
+    std::array<bool,ActionCount> in_profile{};
+    std::array<Status,ActionCount> base{};
+    std::array<std::string,ActionCount> reasons{};
+    std::vector<std::string> invalid_keys;
+};
+ProfilePlan plan_profile(const Profile&,const Capability& = {});
+
 struct CoreConfig {
     bool latched{};               // inject.on existed at process start (decided by the entry point)
     Capability capability;
@@ -296,7 +310,7 @@ public:
     std::string run_reason()const{return run_reason_;}
 
 private:
-    struct Bound { int action{}; ctl::Binding binding; int device{-1}; };
+    using Bound=ProfileBinding;
     enum class DevState : std::uint8_t { Missing,ProductMismatch,Opening,Open,ReadFailed };
     struct Device {
         DeviceInfo id;            // immutable after set_profile

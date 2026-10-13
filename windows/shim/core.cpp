@@ -25,41 +25,10 @@ Core::Core(Provider& p,CoreConfig cfg):p_(p),cfg_(std::move(cfg)){
 void Core::set_profile(const Profile& profile){
     profile_=profile;
     const auto& s=profile_.section;
-    for(int i=0;i<ActionCount;++i){
-        const char* why=cfg_.capability.unsupported[std::size_t(i)];
-        base_[std::size_t(i)]=why?Status::Unsupported:Status::Unbound;
-        base_reason_[std::size_t(i)]=why?why:"";
-    }
-    usable_=profile_.ok&&s.error.empty();
-    if(usable_){
-        for(const auto& [key,why]:s.invalid){
-            invalid_keys_.push_back(key);
-            const int i=action_index(key);
-            if(i>=0&&!cfg_.capability.unsupported[std::size_t(i)]){base_[std::size_t(i)]=Status::Invalid;base_reason_[std::size_t(i)]=why;}
-        }
-        for(const auto& e:s.bound){
-            const int i=action_index(e.action);
-            if(i<0)continue;
-            in_profile_[std::size_t(i)]=true;
-            if(cfg_.capability.unsupported[std::size_t(i)])continue;
-            // One device per instance. Bindings that disagree on the instance's product are invalid, never merged.
-            int d=-1;
-            for(std::size_t k=0;k<devs_.size();++k)if(devs_[k].id.dev==e.binding.dev)d=int(k);
-            if(d>=0&&devs_[std::size_t(d)].id.prod!=e.binding.prod){
-                base_[std::size_t(i)]=Status::Invalid;
-                base_reason_[std::size_t(i)]="prod "+e.binding.prod+" differs from the other bindings of "+e.binding.dev;
-                invalid_keys_.push_back(e.action);
-                continue;
-            }
-            if(d<0){
-                Device dev;dev.id={e.binding.dev,e.binding.prod,e.binding.name};
-                devs_.push_back(dev);d=int(devs_.size())-1;
-            }
-            bound_of_[std::size_t(i)]=int(bound_.size());
-            bound_.push_back({i,e.binding,d});
-            base_[std::size_t(i)]=Status::Opening;
-        }
-    }
+    auto plan=plan_profile(profile_,cfg_.capability);
+    usable_=plan.usable;bound_=std::move(plan.bound);bound_of_=plan.bound_of;in_profile_=plan.in_profile;
+    base_=plan.base;base_reason_=std::move(plan.reasons);invalid_keys_=std::move(plan.invalid_keys);
+    for(auto& id:plan.devices){Device dev;dev.id=std::move(id);devs_.push_back(std::move(dev));}
     worker_epochs_.assign(devs_.size(),0);
     worker_caps_.assign(devs_.size(),ObjectCaps{});
     worker_interface_paths_.assign(devs_.size(),std::string{});

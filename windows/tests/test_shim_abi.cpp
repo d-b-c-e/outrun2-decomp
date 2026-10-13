@@ -45,6 +45,38 @@ void test_layout() {
     check(!dbce_shim_action_name(-1) && !dbce_shim_action_name(31), "out-of-range action names are null");
 }
 
+void test_profile_inspection() {
+    auto inspect = [](const std::string& profile, int action = 0) {
+        int32_t needed = 0;
+        check(dbce_shim_profile_action_info(profile.data(), int32_t(profile.size()), action, nullptr, 0, &needed) == DBCE_SHIM_OK && needed > 1,
+              "pure inspection length without a handle, folder or provider");
+        std::vector<char> text(std::size_t(needed), char(0)); int32_t actual = 0;
+        check(dbce_shim_profile_action_info(profile.data(), int32_t(profile.size()), action, text.data(), needed, &actual) == DBCE_SHIM_OK &&
+              actual == needed && text.back() == 0, "pure inspection bounded fill");
+        return std::string(text.data());
+    };
+    const auto good = inspect(Profile);
+    check(good.find("\"status\":\"bound\"") != std::string::npos && good.find("\"kind\":\"axis\"") != std::string::npos &&
+          good.find("\"instance\":\"" + W + "\"") != std::string::npos && good.find("\"product\":\"" + WP + "\"") != std::string::npos &&
+          good.find(dbce::shim::hex(dbce::shim::sha256(Profile))) != std::string::npos, "configured steering identity and exact full-file hash");
+    check(inspect(Profile, idx("brake")).find("\"status\":\"unbound\"") != std::string::npos, "unbound action is explicit");
+    for (const auto& invalid : {Profile + "steer =\n", Profile + "brake = nonsense\n", Profile + "unknown = value\n",
+                               Profile + "confirm = button 0 dev=" + W + " prod={00000001-0000-0000-0000-504944564944}\n",
+                               std::string("[Controls]\nSchema = 2\n"), std::string("[Controls]\nSchema = 1\nProfile = \xC0\x80\n")}) {
+        const auto result = inspect(invalid);
+        check(result.find("\"status\":\"invalid\"") != std::string::npos && result.find("\"instance\":\"\"") != std::string::npos &&
+              result.find("\"product\":\"\"") != std::string::npos, "malformed/full-profile invalidity never exposes a steering target");
+    }
+    char short_text[4] = {}; int32_t needed = 0;
+    check(dbce_shim_profile_action_info(Profile.data(), int32_t(Profile.size()), 0, short_text, 4, &needed) == DBCE_SHIM_OK &&
+          short_text[3] == 0 && needed > 4, "truncation is terminated and reports full required length");
+    for (int action : {-1, DBCE_SHIM_ACTIONS})
+        check(dbce_shim_profile_action_info(Profile.data(), int32_t(Profile.size()), action, nullptr, 0, &needed) == DBCE_SHIM_BAD_ARGUMENT && needed == 0, "invalid action refused");
+    check(dbce_shim_profile_action_info(nullptr, 0, 0, nullptr, 0, &needed) == DBCE_SHIM_BAD_ARGUMENT, "null profile refused");
+    check(dbce_shim_profile_action_info(Profile.data(), -1, 0, nullptr, 0, &needed) == DBCE_SHIM_BAD_ARGUMENT, "negative profile length refused");
+    check(dbce_shim_profile_action_info(Profile.data(), 65537, 0, nullptr, 0, &needed) == DBCE_SHIM_BAD_ARGUMENT, "oversize refused before reading profile pointer");
+}
+
 void test_refusals() {
     const auto folder = scratch().wstring(); char why[256]; void* h = nullptr; std::size_t slot = 0;
     auto* in = wheel_input(slot);
@@ -288,7 +320,7 @@ void test_dll(const std::wstring& path) {
     HMODULE m = LoadLibraryW(path.c_str()); check(m != nullptr, "the built DLL loads");
     for (const char* name : {"dbce_shim_abi_version", "dbce_shim_frame_size", "dbce_shim_open_args_size", "dbce_shim_action_name", "dbce_shim_open",
                              "dbce_shim_open2", "dbce_shim_tick", "dbce_shim_record", "dbce_shim_start_report", "dbce_shim_device_reports",
-                             "dbce_shim_profile_info", "dbce_shim_stop"})
+                             "dbce_shim_profile_info", "dbce_shim_stop", "dbce_shim_profile_action_info"})
         check(GetProcAddress(m, name) != nullptr, std::string("export ") + name);
     auto proc = [&](const char* n) { return reinterpret_cast<void (*)()>(GetProcAddress(m, n)); };   // the usual FARPROC idiom
     auto version = reinterpret_cast<int32_t (*)()>(proc("dbce_shim_abi_version"));
@@ -302,7 +334,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--capture-child") return capture_child(std::filesystem::path(argv[2]), false);
     if (argc == 3 && std::string(argv[1]) == "--latched-capture-child") return capture_child(std::filesystem::path(argv[2]), true);
     try {
-        test_layout(); test_refusals(); test_lifecycle(); test_path_unavailable(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
+        test_layout(); test_profile_inspection(); test_refusals(); test_lifecycle(); test_path_unavailable(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
         if (argc == 2) test_dll(std::filesystem::path(argv[1]).wstring());
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
     std::error_code ec; std::filesystem::remove_all(scratch(), ec);
