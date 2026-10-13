@@ -37,6 +37,8 @@ void test_report(){
           "start line: "+r.start_line);
     check(r.notes.size()==2,"one note per unsupported / invalid action");
     check(unavailable_reason("gear6")==nullptr&&unavailable_reason("gear7")!=nullptr&&unavailable_reason("reverse")!=nullptr,"gear coverage");
+    check(std::string(unavailable_reason("reverse"))=="OutRun 2006 has no reverse gear"&&std::string(unavailable_reason("modMenu"))==
+          "not mapped yet (the F6 key opens the panel)","the native reasons are the shim capability's (outrun_actions.hpp)");
     const auto none=report_controls(ctl::parseSection({"steer = axis 0 dev="+Wheel+" prod="+WheelProd+" range=0..65535 rest=0 travel=+1"}));
     check(!none.ok&&none.start_line=="controls: nothing applied via ini-controls-1: no Schema","no Schema: nothing applies");
     const auto two=report_controls(ctl::parseSection({"Schema = 2"}));

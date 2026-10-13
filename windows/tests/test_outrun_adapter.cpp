@@ -3,6 +3,7 @@
 // shim core's frame from the scripted provider through outrun::desktop::Adapter, into the NativeInputState the game
 // consumes at 453BB0. No devices, no game, no files.
 #include "outrun_adapter.hpp"
+#include "outrun_actions.hpp"
 #include "shim_fake_provider.hpp"
 #include "input/dual_sense.hpp"
 #include <algorithm>
@@ -427,9 +428,29 @@ void test_keyboard_latched(){
     check(!out.menu_confirm,"latched: no keyboard menu edges");
 }
 
+// One action table (outrun_actions.hpp) for the shim capability and the native controls report (controls_store.cpp
+// forwards to outrun_unavailable_reason): every contract action is delivered or has its reason, and the capability
+// carries exactly the table's reasons.
+void test_action_table(){
+    const auto c=outrun_capability();
+    int delivered=0;
+    for(int i=0;i<ActionCount;++i){
+        const std::string name=action_name(i);
+        const char* why=outrun_unavailable_reason(name);
+        check(why==nullptr||std::string(why)!="unknown action","the table covers "+name);
+        const char* cap=c.unsupported[std::size_t(i)];
+        check((why==nullptr)==(cap==nullptr)&&(why==nullptr||std::string(why)==cap),"the capability's reason for "+name);
+        delivered+=why==nullptr;
+    }
+    check(delivered==19&&std::size(DeliveredActions)==19&&std::size(UnavailableActions)==12,"19 delivered, 12 unavailable");
+    check(std::string(outrun_unavailable_reason("reverse"))=="OutRun 2006 has no reverse gear","reverse has one reason");
+    check(std::string(outrun_unavailable_reason("gear9"))=="unknown action","an action outside the contract is unknown");
+}
+
 int main(){
     try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
-        test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();}
+        test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();
+        test_action_table();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;

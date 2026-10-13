@@ -1,5 +1,6 @@
 // The OutRun 2006 input-shim adapter (INPUT-SHIM.md section 15). Pure: no Windows headers, no runtime access.
 #include "outrun_adapter.hpp"
+#include "outrun_actions.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -36,21 +37,10 @@ std::uint32_t suppress_native(platform::NativeInputState& o){
 }
 }
 
+// The unavailable actions and their reasons: outrun_actions.hpp, one table with the controls report.
 shim::Capability outrun_capability(){
     shim::Capability c;
-    auto no=[&](const char* id,const char* why){c.unsupported[std::size_t(A(id))]=why;};
-    no("clutch","OutRun 2006 has no clutch");
-    no("handbrake","OutRun 2006 has no handbrake");
-    no("neutral","OutRun 2006 has no neutral gear");
-    no("reverse","OutRun 2006 has no reverse gear");
-    no("gear7","the H-pattern mapping covers gears 1-6");
-    no("gear8","the H-pattern mapping covers gears 1-6");
-    no("select","no game action");
-    no("lookBack","not mapped yet");
-    no("reset","not mapped yet");
-    no("horn","not mapped yet");
-    no("modMenu","no F6 panel yet");
-    no("muteFfb","no force feedback yet");
+    for(const auto& u:UnavailableActions)c.unsupported[std::size_t(A(u.id))]=u.why;
     return c;
 }
 
