@@ -20,17 +20,27 @@ bool running=true;
 std::string retail_root;
 // -1..1 (y up) to the DualSense byte (0..255, 128 centre, y down).
 std::uint8_t axis(double v,bool invert){v=std::clamp(invert?-v:v,-1.0,1.0);return std::uint8_t(std::clamp<long>(std::lround(128.0+v*(v<0?128.0:127.0)),0,255));}
-// A pad's USB identity, read once per pad (RawGameController); known false when it cannot be read. The cache holds
-// the pads it has seen, so a pad's address is never reused for another while cached.
-outrun::xbox_runtime::GamepadIdentity identity(const wgi::Gamepad& pad){
-    static std::vector<std::pair<wgi::Gamepad,outrun::xbox_runtime::GamepadIdentity>> cache;
-    for(const auto& c:cache)if(c.first==pad)return c.second;
+// A pad's USB identity (RawGameController); known false when it cannot be read.
+outrun::xbox_runtime::GamepadIdentity lookup(const wgi::Gamepad& pad){
     outrun::xbox_runtime::GamepadIdentity id{false,0,0};
     try{if(const auto raw=wgi::RawGameController::FromGameController(pad))id={true,raw.HardwareVendorId(),raw.HardwareProductId()};}
     catch(...){}
-    if(cache.size()>=16)cache.clear();
-    cache.emplace_back(pad,id);
     return id;
+}
+// Cached per pad: a known identity for good; an unreadable one is read again after 2 s (sana 44396: a transient failure
+// must not leave an unrelated pad out for the whole process; until it reads, the pad stays unread while anything is
+// owned). The cache holds the pads it has seen, so a pad's address is never reused for another while cached.
+outrun::xbox_runtime::GamepadIdentity identity(const wgi::Gamepad& pad){
+    struct Entry { wgi::Gamepad pad; outrun::xbox_runtime::GamepadIdentity id; std::chrono::steady_clock::time_point retry; };
+    static std::vector<Entry> cache;
+    const auto now=std::chrono::steady_clock::now();
+    for(auto& c:cache)if(c.pad==pad){
+        if(!c.id.known&&now>=c.retry){c.id=lookup(pad);c.retry=now+std::chrono::seconds(2);}
+        return c.id;
+    }
+    if(cache.size()>=16)cache.clear();
+    cache.push_back(Entry{pad,lookup(pad),now+std::chrono::seconds(2)});
+    return cache.back().id;
 }
 // The desktop's choice (native_window.hpp gamepad_choice), logged whenever the pads or the choice change.
 int choose_pad(const winrt::Windows::Foundation::Collections::IVectorView<wgi::Gamepad>& pads){
