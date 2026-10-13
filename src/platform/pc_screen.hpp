@@ -19,6 +19,10 @@ inline float g_pc_wide_aspect=0.0f;
 // back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
 using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
 inline PcTripleCorrections g_pc_triple_corrections=nullptr;
+// OR2_TRIPLE_NODE_DUMP (diagnostic; TRIPLE-SCREENS.md "Start wedges"): set by race_area.cpp for the one selected frame.
+// While set, 405360 logs each object it walks whole (pc_render_queue.cpp) and the device logs the projection,
+// corrections, view and pixel-centre fix of its replicated draws (d3d11_d3d9.cpp triple_bind): all of that frame.
+inline bool g_pc_triple_node_dump=false;
 // [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
 // (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
 // objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).

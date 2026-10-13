@@ -2,6 +2,7 @@
 #include "driving/pc_x87.hpp"
 #include "system/perf.hpp"
 #include "platform/pc_pmt_records.hpp"
+#include "platform/pc_screen.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -200,13 +201,17 @@ void walk_descriptor(PcRenderContext& c,const PcModelBank& bank,const PmtObject&
     if(!c.flush_4052c0)throw std::runtime_error("immediate mode without a 4052C0 owner");
     c.flush_4052c0();
 }
-// OR2_TRIPLE_NODE_DUMP: the tree as 404D10 walks it (node matrices pushed, flag 0x800 facing the camera), every node
-// logged with node_visible's view-space centre and radius, its flags, LOD meshes and verdict. Nothing is queued.
+// OR2_TRIPLE_NODE_DUMP: the tree as 404D10 walks it (flag 0x40's LOD threshold 7 for the node and its subtree, node
+// matrices pushed, flag 0x800 facing the camera), every node logged with node_visible's view-space centre and radius,
+// the local centre and radius, the effective node matrix (all full float precision), the LOD meshes and node_visible's
+// verdict and LOD (node_visible alone: with three views 404D10 queues every node). Nothing is queued.
 void dump_walk(PcRenderContext& c,const PcModelBank& bank,const PmtObject& obj,std::uint32_t id,std::int32_t first){
     const Bytes sys=bank.system;
     for(std::int32_t index=first;;){
         const u32 node_at=obj.nodes+u32(index)*0x38u;
         const auto node=pmt<PmtNode>(sys,node_at);
+        const std::int32_t saved=c.lod_threshold_8999b8;   // 404D10: 7 under flag 0x40, the entry value again after the node
+        if(node.flags&0x40u)c.lod_threshold_8999b8=7;
         bool pushed=false;
         if(node.matrix>=0){
             const Bytes m=sys.sub(obj.matrices+u32(node.matrix)*0x40u,0x40);
@@ -216,12 +221,23 @@ void dump_walk(PcRenderContext& c,const PcModelBank& bank,const PmtObject& obj,s
         }
         CourseProbe v{};std::int32_t lod=0;float r=0.f;
         const bool visible=node_visible(c,node,v,lod,&r);
-        std::printf("node dump: %08x %d flags %x mesh %d %d %d %d centre %.4f %.4f %.4f r %.4f visible %d\n",unsigned(id),index,
-                    unsigned(node.flags),node.mesh[0],node.mesh[1],node.mesh[2],node.mesh[3],double(v.x),double(v.y),double(v.z),
-                    double(r),visible?1:0);
+        // r is the game's |M (1,1,1)/sqrt 3| x radius, exact only for a uniform scale: the matrix lets the reader bound the
+        // sphere conservatively.
+        std::string row;char t[64];
+        std::snprintf(t,sizeof t,"node dump: %08x %d flags %x",unsigned(id),index,unsigned(node.flags));row+=t;
+        std::snprintf(t,sizeof t," mesh %d %d %d %d",node.mesh[0],node.mesh[1],node.mesh[2],node.mesh[3]);row+=t;
+        std::snprintf(t,sizeof t," centre %.9g %.9g %.9g",double(v.x),double(v.y),double(v.z));row+=t;
+        std::snprintf(t,sizeof t," r %.9g",double(r));row+=t;
+        std::snprintf(t,sizeof t," local %.9g %.9g %.9g",double(node.centre[0]),double(node.centre[1]),double(node.centre[2]));row+=t;
+        std::snprintf(t,sizeof t," radius %.9g matrix",double(node.radius));row+=t;
+        {   const auto m=c.matrices.current();m.check(0,64);
+            for(int k=0;k<16;++k){float f;std::memcpy(&f,m.data()+k*4,4);std::snprintf(t,sizeof t," %.9g",double(f));row+=t;}}
+        std::snprintf(t,sizeof t," visible %d lod %d",visible?1:0,lod);row+=t;
+        std::printf("%s\n",row.c_str());
         if(node.child>=0&&node.child!=first)dump_walk(c,bank,obj,id,node.child);
         const std::int32_t sibling=pmt<PmtNode>(sys,node_at).sibling;
         if(pushed)driving::pc_matrix_pop(c.matrices);
+        c.lod_threshold_8999b8=saved;
         if(sibling<0)return;
         index=sibling;
     }
@@ -241,7 +257,6 @@ void render_queues_reset_405160(PcRenderQueue& o,PcRenderQueue& a){
     a.capacity=k;a.matrix_capacity=k;a.entries.resize(k);a.matrices.resize(k);
 }
 bool& render_disable_culling(){static bool off=false;return off;}
-bool& render_node_dump(){static bool on=false;return on;}
 bool render_node_visible_404b00(PcRenderContext& c,Bytes node,CourseProbe& v,std::int32_t& lod_out){
     return node_visible(c,pmt<PmtNode>(node,0),v,lod_out);
 }
@@ -260,7 +275,12 @@ void render_object_405360(PcRenderContext& c,std::uint32_t id,std::int32_t opaqu
     const auto obj=pmt<PmtObject>(bank.system,object);
     auto d=descriptor(id,id>>16,object,opaque,colour,colour_byte);
     d.flags=flag!=0?1u:0u;
-    if(render_node_dump())dump_walk(c,bank,obj,id,0);   // OR2_TRIPLE_NODE_DUMP (diagnostic): the whole object, logged only
+    if(g_pc_triple_node_dump){                          // OR2_TRIPLE_NODE_DUMP (diagnostic): the whole object, logged only
+        std::string row;char t[32];std::snprintf(t,sizeof t,"node dump: object %08x view",unsigned(id));row+=t;
+        for(int k=0;k<16;++k){float f;std::memcpy(&f,c.view.view_95d860.data()+k*4,4);std::snprintf(t,sizeof t," %.9g",double(f));row+=t;}
+        std::printf("%s\n",row.c_str());
+        dump_walk(c,bank,obj,id,0);
+    }
     auto build=[&]{
         OR2_PERF_ZONE("4050F0 walk");
         if(node_list.size()==0){walk_404d10(c,bank,obj,d,0);return;}

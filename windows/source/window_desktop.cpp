@@ -57,16 +57,6 @@ bool triple_fixture_corrections(const float* projection,float* out){
     outrun::desktop::TripleViews v{};
     if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),v))return false;
     for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
-    // OR2_TRIPLE_NODE_DUMP (diagnostic): the projection and its three corrections, for projecting the dumped spheres.
-    static const bool dump=std::getenv("OR2_TRIPLE_NODE_DUMP")!=nullptr;
-    static int dumped=0;
-    if(dump&&dumped<8){
-        ++dumped;std::string row="node dump: projection";
-        for(std::size_t k=0;k<16;++k){char t[32];std::snprintf(t,sizeof t," %.9g",double(projection[k]));row+=t;}
-        for(std::size_t i=0;i<3;++i){row+=" | C";row+=char('0'+i);
-            for(std::size_t k=0;k<16;++k){char t[32];std::snprintf(t,sizeof t," %.9g",double(out[i*16+k]));row+=t;}}
-        std::printf("%s\n",row.c_str());
-    }
     return true;
 }
 BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){

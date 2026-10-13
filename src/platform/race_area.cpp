@@ -1,6 +1,5 @@
 #include "platform/race_area.hpp"
 #include "platform/race_draw_distance.hpp"
-#include "platform/pc_render_queue.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/pc_address_view.hpp"
 #include "system/perf.hpp"
@@ -948,13 +947,15 @@ bool triple_whole_stage(){
     return on&&g_pc_triple_corrections!=nullptr;
 }
 // OR2_TRIPLE_NODE_DUMP=<n> (diagnostic; three views only, a normal process; windows/docs/TRIPLE-SCREENS.md "Start
-// wedges"): the n-th stage display of the process sets render_node_dump until the next one, so the objects 405360
-// walks in that frame are logged whole first (pc_render_queue.cpp). Log only: nothing drawn changes.
+// wedges"): the n-th stage display of the process sets g_pc_triple_node_dump until the next one, so the objects 405360
+// walks in that frame are logged whole first (pc_render_queue.cpp), with the device's projection, corrections and view
+// of the same frame (d3d11_d3d9.cpp). Log only: nothing drawn changes. Cleared on every tick first.
 void triple_node_dump_tick(){
+    g_pc_triple_node_dump=false;
     static const long at=[]{const char* v=std::getenv("OR2_TRIPLE_NODE_DUMP");return v?std::strtol(v,nullptr,10):0L;}();
     if(at<=0||g_pc_triple_corrections==nullptr)return;
     static long n=0;
-    ++n;render_node_dump()=n==at;
+    ++n;g_pc_triple_node_dump=n==at;
     if(n==at)std::printf("node dump: stage display %ld\n",n);
 }
 }

@@ -647,6 +647,18 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
             std::memcpy(m.pData,e->c,sizeof e->c);context_->Unmap(triple_cb_.Get(),0);}
     }
+    // OR2_TRIPLE_NODE_DUMP (diagnostic): the projection, corrections, view and pixel-centre fix of the dump frame's
+    // replicated draws, each distinct projection once while that frame is armed (pc_screen.hpp g_pc_triple_node_dump).
+    {   static std::vector<std::array<float,16>> seen;
+        if(!platform::g_pc_triple_node_dump)seen.clear();
+        else if(standard&&std::none_of(seen.begin(),seen.end(),[&](const std::array<float,16>& p){return std::memcmp(p.data(),proj.data(),64)==0;})){
+            seen.push_back(proj);std::array<float,48> c{};const bool ok=corrections(proj.data(),c.data());
+            std::string row="node dump: device projection";
+            const auto put=[&](const float* v,std::size_t n){for(std::size_t k=0;k<n;++k){char t[24];std::snprintf(t,sizeof t," %.9g",double(v[k]));row+=t;}};
+            put(proj.data(),16);row+=ok?" | C":" | C refused";put(c.data(),48);row+=" | view";put(transform_view.data(),16);
+            char t[64];std::snprintf(t,sizeof t," | fix %.9g %.9g",double(fx),double(fy));row+=t;
+            std::printf("%s\n",row.c_str());}
+    }
     const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
     const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
         float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
