@@ -198,7 +198,10 @@ add_executable(test_pc_pmt_loader tests/test_pc_pmt_loader.cpp)
 target_link_libraries(test_pc_pmt_loader PRIVATE outrun_native_runtime)
 add_test(NAME pc_pmt_loader COMMAND test_pc_pmt_loader)
 add_executable(test_pc_sprite_replacement tests/test_pc_sprite_replacement.cpp)
-target_link_libraries(test_pc_sprite_replacement PRIVATE outrun_native_runtime)
+# The retail check reaches sprite_2d_runtime, whose clang-cl objects call the compiler-rt builtins (128-bit division),
+# as in windows/CMakeLists.txt.
+file(GLOB OR2_SPRITE_TEST_CLANG_BUILTINS "${CMAKE_GENERATOR_INSTANCE}/VC/Tools/Llvm/x64/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib")
+target_link_libraries(test_pc_sprite_replacement PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
 add_test(NAME pc_sprite_replacement COMMAND test_pc_sprite_replacement)
 add_executable(test_pc_shader_programs tests/test_pc_shader_programs.cpp)
 target_link_libraries(test_pc_shader_programs PRIVATE outrun_native_runtime)

@@ -125,8 +125,8 @@ void make_animation(PcSpriteBank& b){
     put32(a,0x140,(Bank<<16)|1u);putf(a,0x144,2.0f);putf(a,0x148,1.0f);putf(a,0x14c,6.0f);putf(a,0x150,3.0f); // frame
 }
 struct Drawn { Device dev; PcSprite2dState s; };
-// Load the bank, queue image 0 at (100, 50), image 1 at (200, 60), the footage at frame 1, a 42C0F0 quad of image 0
-// (record flags 0x108: centred), and flush.
+// Load the bank and queue, on layer 1, images 0, 1 and 2, image 0 flipped in x, image 0 rotated by 0.5 rad (a 42CFE0
+// record); on layer 2 a 42C0F0 quad of image 0 (record flags 0x108: centred); on layer 3 the footage at frame 1; flush.
 void draw_bank(Drawn& r,const std::vector<std::uint8_t>& xst){
     std::string error;
     CHECK(pc_sprite_bank_load_xst(r.s.banks[Bank],r.dev,xst,error,"spr_test_xst"));
@@ -134,6 +134,13 @@ void draw_bank(Drawn& r,const std::vector<std::uint8_t>& xst){
     r.s.screen_740c94=2.0f;r.s.screen_740c98=2.0f;r.s.sprite_95b218=true;
     pc_image_42d280(r.s,(Bank<<16)|0u,100,50,0,1.0f,0xffffffffu);
     pc_image_42d280(r.s,(Bank<<16)|1u,200,60,0,1.0f,0xffffffffu);
+    pc_image_42d280(r.s,(Bank<<16)|2u,250,80,0,1.0f,0xffffffffu);
+    pc_image_42d280(r.s,(Bank<<16)|0u,120,90,1,1.0f,0xffffffffu);
+    {std::array<std::uint8_t,0x48> rot{};pc_image_entry_42c2f0(r.s,rot.data(),(Bank<<16)|0u);
+     const float one=1.0f,x=140.0f,y=95.0f,angle=0.5f;const std::uint32_t col=0xffffffffu;
+     std::memcpy(rot.data()+0x14,&one,4);std::memcpy(rot.data()+0x18,&one,4);std::memcpy(rot.data()+0x24,&x,4);
+     std::memcpy(rot.data()+0x28,&y,4);std::memcpy(rot.data()+0x2c,&col,4);std::memcpy(rot.data()+0x30,&angle,4);
+     pc_image_record_42cfe0(r.s,rot,1.0f);}
     std::array<std::uint8_t,0x48> quad{};pc_image_entry_42c2f0(r.s,quad.data(),(Bank<<16)|0u);
     {const float one=1.0f,x=300.0f,y=70.0f;std::memcpy(quad.data()+0x14,&one,4);std::memcpy(quad.data()+0x18,&one,4);
      std::memcpy(quad.data()+0x24,&x,4);std::memcpy(quad.data()+0x28,&y,4);
@@ -180,8 +187,8 @@ int retail(const char* root,const char* pack){
         for(auto& ch:l)ch=char(std::tolower(static_cast<unsigned char>(ch)));
         if(l.rfind("spr_",0)==0&&!used.count(l))std::printf("  pack folder no XST bank names: %s\n",l.c_str());
     }
-    texture_replacement_configure(false,false,{});
     CHECK(t.replaced>0);
+    texture_replacement_configure(false,false,{});
     std::printf("pc sprite replacement (retail): %u checks\n",checks);
     return 0;
 }
@@ -190,37 +197,40 @@ int main(int argc,char** argv){
     if(argc>2)return retail(argv[1],argv[2]);
     namespace fs=std::filesystem;
     CHECK(pc_sprite_xst_pack_name("sprite/spr_etc_xst.sz")=="spr_etc_xst"&&pc_sprite_xst_pack_name("SPRITE\\spr_sprani_sumo_loading_Exst.sz")=="spr_sprani_sumo_loading_Exst");
-    const auto a=dds32(8,4,0x10,false),b=dds32(8,4,0x40,false);
-    // Entry 0 has no texture, so Tweaks' index of entry 1 is 0 and of entry 2 is 1. Images: 0 = texels (2,1)-(6,3) of
-    // texture 1; 1 = the whole of texture 2.
-    const auto xst=make_xst({{},a,b},{{1,2,1,6,3},{2,0,0,0,0}});
+    const auto a=dds32(8,4,0x10,false),b=dds32(8,4,0x40,false),c=dds32(8,4,0x60,false);
+    // Entry 0 has no texture, so Tweaks' index of entry 1 is 0, of entry 2 is 1, of entry 3 is 2. Images: 0 = texels
+    // (2,1)-(6,3) of texture 1; 1 = the whole of texture 2; 2 = texels (1,1)-(7,4) of texture 3.
+    const auto xst=make_xst({{},a,b,c},{{1,2,1,6,3},{2,0,0,0,0},{3,1,1,7,4}});
     const auto dir=fs::temp_directory_path()/"or2_ui_texture_replacement_test";
     fs::remove_all(dir);fs::create_directories(dir/"spr_TEST_xst");
     auto name=[&](const std::vector<std::uint8_t>& f,const char* prefix){
         char n[64];std::snprintf(n,sizeof n,"%s%X_8x4.dds",prefix,pmt_xxh32(f.data(),f.size()));return std::string(n);};
     auto write=[&](const std::string& n,const std::vector<std::uint8_t>& f){
         std::ofstream o(dir/"spr_TEST_xst"/n,std::ios::binary);o.write(reinterpret_cast<const char*>(f.data()),std::streamsize(f.size()));};
-    const auto ra=dds32(16,8,0x77,true),rb=dds32(24,12,0x22,false),decoy=dds32(40,20,0x33,false);
+    const auto ra=dds32(16,8,0x77,true),rb=dds32(24,12,0x22,false),rc=dds32(24,8,0x55,false),decoy=dds32(40,20,0x33,false);
     write(name(a,"0_"),ra);        // 2x, stored A8B8G8R8
     write(name(b,"1_"),rb);        // 3x, under Tweaks' index (1)
     write(name(b,"2_"),decoy);     // the entry position (2): must not be taken
+    write(name(c,""),rc);          // 3x wide, 2x high; hash name only
     // Stock: UI replacement off.
     texture_replacement_configure(false,false,dir.string());
     Drawn stock;draw_bank(stock,xst);
-    CHECK(stock.dev.textures.size()==2&&stock.dev.textures[0].bytes==a&&stock.dev.textures[1].bytes==b);
-    CHECK(stock.s.banks[Bank].textures==(std::vector<std::uint32_t>{0,1,2}));
-    CHECK(stock.s.banks[Bank].stock_sizes.size()==3&&stock.s.banks[Bank].stock_sizes[1][0]==0);
+    CHECK(stock.dev.textures.size()==3&&stock.dev.textures[0].bytes==a&&stock.dev.textures[1].bytes==b&&stock.dev.textures[2].bytes==c);
+    CHECK(stock.s.banks[Bank].textures==(std::vector<std::uint32_t>{0,1,2,3}));
+    CHECK(stock.s.banks[Bank].stock_sizes.size()==4&&stock.s.banks[Bank].stock_sizes[1][0]==0);
     CHECK(ui_texture_replacement_stats().looked==0);
-    CHECK(stock.dev.rects.size()==2&&stock.dev.strips.size()==2);
+    CHECK(stock.dev.rects.size()==5&&stock.dev.strips.size()==2);
     CHECK((stock.dev.rects[0]==std::array<std::int32_t,4>{2,1,5,3})&&(stock.dev.rects[1]==std::array<std::int32_t,4>{0,0,7,4}));
+    CHECK((stock.dev.rects[2]==std::array<std::int32_t,4>{1,0,6,3})&&stock.dev.rects[3]==stock.dev.rects[0]&&stock.dev.rects[4]==stock.dev.rects[0]);
     // Replaced: UI replacement on, scene off.
     texture_replacement_configure(false,true,dir.string());
-    CHECK(ui_texture_replacement_stats().files==3&&pmt_texture_replacement_stats().files==0);
+    CHECK(ui_texture_replacement_stats().files==4&&pmt_texture_replacement_stats().files==0);
     Drawn hd;draw_bank(hd,xst);
-    CHECK(hd.dev.textures.size()==2&&hd.dev.textures[0].w==16&&hd.dev.textures[0].h==8&&hd.dev.textures[1].w==24&&hd.dev.textures[1].bytes==rb);
-    {const auto& z=hd.s.banks[Bank].stock_sizes;CHECK(z.size()==3&&z[0][0]==0&&z[1][0]==8&&z[1][1]==4&&z[2][0]==8&&z[2][1]==4);}
+    CHECK(hd.dev.textures.size()==3&&hd.dev.textures[0].w==16&&hd.dev.textures[0].h==8&&hd.dev.textures[1].w==24&&hd.dev.textures[1].bytes==rb);
+    CHECK(hd.dev.textures[2].bytes==rc);
+    {const auto& z=hd.s.banks[Bank].stock_sizes;CHECK(z.size()==4&&z[0][0]==0&&z[1][0]==8&&z[1][1]==4&&z[2][0]==8&&z[2][1]==4&&z[3][0]==8&&z[3][1]==4);}
     const auto& st=ui_texture_replacement_stats();
-    CHECK(st.looked==2&&st.replaced==2&&st.failed==0&&pmt_texture_replacement_stats().looked==0);
+    CHECK(st.looked==3&&st.replaced==3&&st.failed==0&&pmt_texture_replacement_stats().looked==0);
     CHECK(ui_texture_replacement_banks().at("spr_test_xst").folder);
     // The A8B8G8R8 file reaches the device as A8R8G8B8 with the same colours.
     {   const auto& f=hd.dev.textures[0].bytes;
@@ -230,12 +240,18 @@ int main(int argc,char** argv){
         const auto rgba=pc_dds_rgba(tex,0,0);
         for(std::uint32_t i:{0u,5u,127u})CHECK(rgba[i*4]==std::uint8_t(0x77+i)&&rgba[i*4+1]==std::uint8_t(0x77+2*i)&&rgba[i*4+2]==std::uint8_t(0x77+3*i)&&rgba[i*4+3]==std::uint8_t(255-i));}
     // Images: the source rectangle on the replacement's texels, the scale reduced by the same ratio, the position kept.
-    CHECK(hd.dev.rects.size()==2);
+    // Image 2 has 3x wide, 2x high; image 3 is image 0 flipped in x; image 4 is image 0 rotated (row-major
+    // diag(sx, sy) * Rz: row 0 scales with x, row 1 with y).
+    CHECK(hd.dev.rects.size()==5);
     CHECK((hd.dev.rects[0]==std::array<std::int32_t,4>{4,2,10,6})&&(hd.dev.rects[1]==std::array<std::int32_t,4>{0,0,21,12}));
-    for(unsigned k=0;k<2;++k){
-        const float ratio=k==0?2.0f:3.0f;const auto& m0=stock.dev.transforms[k];const auto& m1=hd.dev.transforms[k];
-        CHECK(near(m1[0]*ratio,m0[0])&&near(m1[5]*ratio,m0[5])&&m1[12]==m0[12]&&m1[13]==m0[13]);
+    CHECK((hd.dev.rects[2]==std::array<std::int32_t,4>{3,0,18,6})&&hd.dev.rects[3]==hd.dev.rects[0]&&hd.dev.rects[4]==hd.dev.rects[0]);
+    constexpr float RatioX[5]{2,3,3,2,2},RatioY[5]{2,3,2,2,2};
+    for(unsigned k=0;k<5;++k){
+        const auto& m0=stock.dev.transforms[k];const auto& m1=hd.dev.transforms[k];
+        CHECK(near(m1[0]*RatioX[k],m0[0])&&near(m1[1]*RatioX[k],m0[1])&&near(m1[4]*RatioY[k],m0[4])&&near(m1[5]*RatioY[k],m0[5]));
+        CHECK(m1[12]==m0[12]&&m1[13]==m0[13]);
     }
+    CHECK(stock.dev.transforms[3][0]<0.0f&&stock.dev.transforms[4][1]!=0.0f);   // the flip and the rotation reached the matrix
     // Strips (vertex stride 0x1C: x, y, z, rhw, colour, u, v): the 42C0F0 quad, then the footage. Positions equal; the
     // UVs equal apart from the half-texel offset footage adds, which follows the texture drawn (0.51 of its texel).
     CHECK(hd.dev.strips.size()==2);
@@ -258,9 +274,9 @@ int main(int argc,char** argv){
         auto t=ra;t.resize(0x90);write(name(a,""),t);
         texture_replacement_configure(false,true,dir.string());
         Drawn r;draw_bank(r,xst);
-        CHECK(r.dev.textures[0].bytes==a&&r.dev.textures[1].bytes==b&&r.s.banks[Bank].stock_sizes[1][0]==0);
+        CHECK(r.dev.textures[0].bytes==a&&r.dev.textures[1].bytes==b&&r.dev.textures[2].bytes==c&&r.s.banks[Bank].stock_sizes[1][0]==0);
         CHECK((r.dev.rects[0]==std::array<std::int32_t,4>{2,1,5,3}));
-        const auto& s=ui_texture_replacement_stats();CHECK(s.looked==2&&s.replaced==0&&s.failed==1);}
+        const auto& s=ui_texture_replacement_stats();CHECK(s.looked==3&&s.replaced==0&&s.failed==1);}
     texture_replacement_configure(false,false,{});fs::remove_all(dir);
     std::printf("pc sprite replacement: %u checks\n",checks);
     return 0;
