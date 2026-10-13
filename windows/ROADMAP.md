@@ -22,21 +22,38 @@ go upstream as small pull requests (first: `tweaks-exe`).
    Tweaks `[DirectInput]` keys, H-pattern, test injection + observer for
    Wheelkit's closed-loop tests (with Astra). Next: Astra's review, a run at the
    rig, the closed-loop qualification (STD-034), hot-plug.
-2a. ⬜ **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
+2a. 🟡 **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
    our own D3D11 renderer, standard pages, each later feature adds its controls.
+   - In code (`source/desktop_panel.cpp`): the Help, Controls (status), Force (strength, invert, output; F8 stops),
+     Telemetry and Cameras (the triple selector and projection) pages.
+   - The Help page was seen in game (hub `artifacts/outrun-f6-help-20261012`). The other pages are not yet checked at
+     the rig. `docs/F6-PANEL.md`'s status lags the code.
 3. 🟡 **Triple screens** (`windows/docs/TRIPLE-SCREENS.md`): `[Triple] Screens` Off / Surround / Separate monitors
    with the planar span (the Tweaks parity floor) is done and seen at the rig. True per-screen projection
    (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
    into three viewports, each with its clip correction from the toolkit rig math. First rig pictures 2026-10-12: three
    projections with the side sky. Open: culling for the union of the three frusta, the F6 selector, the owner's
    physical check.
-4. ⬜ **Force feedback**: the force model of the Tweaks fork
+4. 🟡 **Force feedback**: the force model of the Tweaks fork
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
    DirectInput effects on the wheel opened exclusively.
-5. ⬜ **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
-   toolkit `native/forza`); the Tweaks fork's shared memory as well if the SimHub
-   plugin still needs it.
+   - Built and tested offline:
+     - the model;
+     - the delivery, which loads `WheelFfb.dll` from the game folder only with `[FFB] Output = wheel`, outside test
+       runs and without `DBCE_FFB_MUTE`;
+     - the shim's WheelFfb read-slot bridge.
+     The tests are test_ffb_outrun, test_ffb_delivery, test_ffb_wiring and test_wheelffb_bridge. The muted
+     integration passed (hub `artifacts/outrun-bridge-muted-20261012`).
+   - Not yet:
+     - an owner package carrying WheelFfb.dll (the add-on design: hub `artifacts/outrun-ffb-package-design-20261012`);
+     - the physical output on the wheel, and the feel against the art of rally reference (attended).
+5. 🟡 **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
+   toolkit `native/forza`), plus the Tweaks fork's shared memory for its SimHub plugin; see `README.md` Telemetry.
+   - 2026-10-12: SimHub logged valid OutRun data on port 8000 during a shim run.
+   - The owner confirmed reception on the wheel's screen through SimHub, forwarded to Pit House (hub
+     `docs/2026-10-12-session-release-progress.md`, 20:16).
+   - Per-field accuracy is not yet checked.
 6. ⬜ **Tweaks parity** (table below) and the original game's limits the
    decomp can lift, e.g. steering quantised to -127..127 in 453860.
 7. Upstream bugs, as pull requests: #2 30-second hang at the end of a race,
@@ -62,8 +79,8 @@ needed in a native build.
 | DirectInput.Shifter | sequential | ✅ | |
 | | hpattern gears 1-6 | 🟡 | pulses toward the gate's gear (car +208); R: the game has no reverse |
 | DirectInput.Aux | DeviceGuid, buttons | ✅ | any action may sit on any device (one binding per action) |
-| Telemetry | Enable, SharedMemName | ⬜ | step 5 |
-| FFB | all | ⬜ | step 4 |
+| Telemetry | Enable, SharedMemName | 🟡 | step 5: `[Telemetry] Enabled`, `SharedMemName`, `Layout`; reception confirmed, per-field accuracy open |
+| FFB | all | 🟡 | step 4: built and tested offline; no owner package ships WheelFfb.dll yet |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
 | | UIScalingMode | 🟡 | windows/docs/UI-SCALING.md: 2 (keep centred, the centred 4:3) by default here; 0 stretches the 2D over the 16:9 frame, or over a span's centre panel only; 1 (Tweaks' Online Arcade) is partial (step 2a): the 2D mapping widens at the 4:3 scale to the frame's edges (or the centre panel's), and NaviPub_Disp's HUD is spaced to them with Tweaks' unspaced parts (rival labels / markers, hearts, LAN markers, and from the level / lap / countdown on). Step 2b adds time attack's forced sides, the put_scroll positions (time attack, rank, REV, heart number) and the ghost gap; the C2C bubbles remain. Unit-tested (test_triple_screens; the device path in test_d3d11_vertex_path). Seen in game on the race route only (UI-SCALING.md, Step 4): the HUD moves ±240 px at 2560x1440 with no clipping. A start-camera "1P" banner drawn past the 4:3 edge appears in mode 1 only. Time attack and C2C have not been seen |
 | | UILetterboxing | ⬜ | |

@@ -47,7 +47,8 @@ instance GUID only. Mapped actions: `steer`, `throttle`, `brake`, `shiftUp`,
 `shiftDown`, `gear1`..`gear6` (with `Transmission = H-pattern`), `confirm`,
 `back`, `start`, `navUp/Down/Left/Right`, `camera`. Others are reported as
 unavailable with the reason (no clutch, handbrake, neutral or reverse in the game;
-no F6 panel or force feedback yet). At start `runtime.log` gets the standard line
+`modMenu` and `muteFfb` are not mapped yet: F6 opens the panel, and its Force page sets the output). At start
+`runtime.log` gets the standard line
 `controls: profile "<name>" revision <rev> via ini-controls-1: applied n (...); unsupported m (...); invalid k (...)`.
 
 Without a `[Controls]` section, the OutRun2006Tweaks `[DirectInput]`,
@@ -104,6 +105,7 @@ full-range steering word (index 0x0E), the 0..255 accelerator (0x0D) and brake
 them. The original game then applies its own small dead zone and quantises the
 steering to -127..127.
 
-Not yet: force feedback, telemetry, the F6 panel, multiple screens (see the
-roadmap). Standards adoption: [TOOLKIT-ADOPTION.md](TOOLKIT-ADOPTION.md); product
+Telemetry is described above. For the F6 panel, the triple screens and force feedback, see the roadmap (steps 2a, 3
+and 4). Force feedback is built and tested offline. No owner package ships WheelFfb.dll yet, so no installed build
+sends force. Standards adoption: [TOOLKIT-ADOPTION.md](TOOLKIT-ADOPTION.md); product
 record for Wheelkit: [product.json](product.json).
