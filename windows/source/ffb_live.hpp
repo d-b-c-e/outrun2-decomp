@@ -49,6 +49,9 @@ void ffb_shutdown();
 std::string ffb_status_text();
 bool ffb_output_running();
 void ffb_stop_output();
+// For the F6 panel's next-start setting: WheelFfb.dll (the force add-on) is beside the game. A file check only; it never
+// loads the library.
+bool ffb_library_present();
 // "The game window is this process's and the foreground window" (default: GetForegroundWindow). A test seam, so a test
 // never has to take the focus on the desktop.
 using FfbFrontCheck=bool(*)(void* hwnd);

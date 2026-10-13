@@ -151,14 +151,14 @@ NativeWindow& native_window(){
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the rig "
                         "(panels %.1f x %.1f mm%s, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
                         "viewports; stage culling off; stage sections drawn +%d ahead and %d behind the car; objects behind the eye "
-                        "still culled; the HUD, menus and screen-space particles on the centre only\n",td::triple_screens_name(triple),
+                        "still culled; the HUD, menus and screen-space particles on the center only\n",td::triple_screens_name(triple),
                         w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,used_h,height,
                         triple_rig.side_angle_deg,triple_rig.bezel_mm,eye,dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
-                        "not three views); 2D, menus and movies on the centre 16:9\n",td::triple_screens_name(triple),w.width,w.height,
+                        "not three views); 2D, menus and movies on the center 16:9\n",td::triple_screens_name(triple),w.width,w.height,
                         r.left,r.top,span_note.c_str(),double(outrun::platform::g_pc_wide_aspect));
-        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centred\n",td::triple_screens_name(triple),
+        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centered\n",td::triple_screens_name(triple),
                          w.width,w.height,r.left,r.top,span_note.c_str());
     }else{
         if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
@@ -433,7 +433,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::xbox_runtime::g_ui_scaling_mode=outrun::xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note);
         if(!note.empty())std::printf("settings: [Graphics] %s\n",note.c_str());
         if(outrun::xbox_runtime::g_ui_scaling_mode==0u)
-            std::printf("settings: UI scaling 0: the 2D stretched over the 16:9 frame (over the centre panel on a span)\n");}
+            std::printf("settings: UI scaling 0: the 2D stretched over the 16:9 frame (over the center panel on a span)\n");}
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);

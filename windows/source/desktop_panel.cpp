@@ -11,6 +11,7 @@
 #include "wheel_input.hpp"
 #include "platform/runtime_input.hpp"
 #include <cmath>
+#include <cstdlib>
 #include "dbce_panel.h"
 #include "dbce_panel_input.h"
 #include "imgui.h"
@@ -24,6 +25,7 @@ namespace outrun::desktop {
 namespace {
 struct Panel {
     bool configured{},latched{},input{},backend{},was_open{},playback{};
+    bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
     std::string ini,dev,name;
@@ -83,11 +85,24 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    dbce::panel::Status("At the next start",v.output_next?"on":"off",v.output_next&&!ffb_output_running()?dbce::panel::Tone::Warning:dbce::panel::Tone::Normal);
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
-    dbce::panel::Text("Turning the wheel output on is not offered in this panel yet. Stop FFB and F8 turn it off now and at "
-                      "the next start.");
+    // The saved setting for the NEXT start ([FFB] Output = wheel | none), apart from the output above. It is never applied
+    // live: On cannot start torque in this session, and Off does not stop a running output (Stop FFB and F8 do). The
+    // delivery's own gates (a race, the game in front, the steering wheel, DBCE_FFB_MUTE) still decide when it runs.
+    {const bool before=v.output_next;
+     if(v.output_next||p.force_library){
+         if(dbce::panel::OffOn("Wheel output at the next start",&v.output_next,
+                "Saved for the next start of the game. On: force on the steering wheel during a race, with the game in "
+                "front. Nothing changes in this session."))
+             keep(&v.output_next,before,[&]{return save("FFB","Output",v.output_next?"wheel":"none");});
+     }else dbce::panel::Status("Wheel output at the next start","off: turning it on needs the force add-on (WheelFfb.dll beside the game)");}
+    if(ffb_output_running()&&!v.output_next)
+        dbce::panel::Status("This session","the output still runs until the game closes; Stop FFB or F8 stops it now",dbce::panel::Tone::Warning);
+    else if(v.output_next&&!ffb_output_running())
+        dbce::panel::Status("This session",p.force_muted?"not running: this process is force-muted (DBCE_FFB_MUTE)":"not running in this session; see Wheel output above",
+                            dbce::panel::Tone::Normal);
+    dbce::panel::Text("Stop FFB and F8 turn the output off now and at the next start.");
     const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
     percent_key("Strength",&v.global,100,pct(d.global_strength),"FFBGlobalStrength");
     if(!advanced)return;
@@ -181,7 +196,7 @@ const char* display_text(){
     else std::snprintf(text,sizeof text,"%s span, one wide view %.2f:1",triple_screens_name(st.mode),double(st.aspect));
     return text;
 }
-// The REC badge (Play with Recording): top right of the centre 16:9 view (the middle screen of a span), above the
+// The REC badge (Play with Recording): top right of the center 16:9 view (the middle screen of a span), above the
 // game and the panel. Red while recording or failed, amber while saving or verifying, green once saved.
 void draw_badge(const std::string& text,int w,int h){
     auto* list=ImGui::GetForegroundDrawList();
@@ -277,7 +292,9 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
      v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
      v.idle=pct(s.engine_idle);v.invert=s.invert;}
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
-    {std::string notes;v.output_next=ffb_output_config(settings,false,nullptr,notes).output;}
+    {std::string notes;const auto o=ffb_output_config(settings,false,std::getenv("DBCE_FFB_MUTE"),notes);
+     v.output_next=o.output;p.force_muted=o.muted;}
+    p.force_library=ffb_library_present();   // the force add-on beside the game: a file check, never a load
     dbce::panel::Config c;
     c.modName=p.name.c_str();
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing

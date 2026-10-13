@@ -257,6 +257,14 @@ std::string ffb_status_text(){
 }
 
 bool ffb_output_running(){return f.output;}
+bool ffb_library_present(){
+    wchar_t exe[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,exe,MAX_PATH);
+    std::wstring path=n&&n<MAX_PATH?std::wstring(exe,n):std::wstring();
+    const auto slash=path.find_last_of(L"\\/");
+    if(slash==std::wstring::npos)return false;
+    const DWORD a=GetFileAttributesW((path.substr(0,slash+1)+L"WheelFfb.dll").c_str());
+    return a!=INVALID_FILE_ATTRIBUTES&&!(a&FILE_ATTRIBUTE_DIRECTORY);
+}
 
 const WheelFfbApi* ffb_shim_wheel_api(){return f.output&&f.shim&&f.delivery.phase()==ffbdev::Phase::Waiting?&f.api:nullptr;}
 void ffb_set_shim_owner(ffbdev::Owner* o){if(f.output&&f.shim&&f.delivery.phase()==ffbdev::Phase::Waiting){f.delivery.set_owner(o);f.owner=o;}}

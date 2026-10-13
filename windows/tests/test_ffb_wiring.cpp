@@ -73,6 +73,9 @@ int main(){
      p=p.substr(0,p.find_last_of(L"\\/")+1)+L"WheelFfb.dll";
      check(GetFileAttributesW(p.c_str())!=INVALID_FILE_ATTRIBUTES,"the fake WheelFfb.dll is beside the test");}
     check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"not loaded at start");
+    // The F6 next-start setting asks only whether the add-on is there: a file check that never loads it.
+    check(outrun::desktop::ffb_library_present(),"the panel sees the force add-on beside the game");
+    check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"asking whether the add-on is present does not load it");
 
     auto r=run(Controls,false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"no [FFB] Output key: WheelFfb.dll never attached");
