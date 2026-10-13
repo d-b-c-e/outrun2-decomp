@@ -420,8 +420,16 @@ t56.
     What remains: depth clipping and the viewport/scissor (implausible for nearby ground, but not instrumented);
     content outside the submitted set (objects of loaded banks that nothing draws at the grid, or unloaded banks);
     and absent content in the shipped stage.
-  - The one specific inspection that could narrow it is offline: compare every object of the BEAC banks with those
-    drawn at the grid (N1), and check whether any undrawn object's bounds reach the start-line surround.
+  - **Offline object census** (hub `triples-20261012` "Offline object census"; sana 43966 / 44285):
+    - The grid stage is **PALM** (resource table 633558: bank 000f = `cs_CS_PALM_pmt`), not BEAC.
+    - Every object of the stage bank (10) and the environment bank `cs_ENV_PALM_pmt` (4) is already submitted at
+      the grid, and RC2 drew all their nodes whole.
+    - Undrawn objects exist only in the course-object and sky banks, with per-instance placement that is not read
+      (unknown).
+    - Claim, exactly: no unsubmitted stage or environment object in the enumerated loaded set. Placement, clipping
+      and unloaded banks remain unknown.
+  - **Status: a documented limitation (sana 44285).** The start-line gaps stay as they are. No added scenery, no
+    crop or zoom framing, no more toggle runs.
 
 ### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
 
