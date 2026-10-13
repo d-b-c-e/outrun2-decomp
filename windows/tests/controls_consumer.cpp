@@ -8,6 +8,7 @@
 #include "desktop_settings.hpp"
 #include "outrun_adapter.hpp"
 #include "shim_input.hpp"
+#include "controls_store.hpp"
 #include <cstdio>
 #include <string>
 namespace {
@@ -34,7 +35,7 @@ int main(int argc,char** argv){
     const bool shim=desk::shim_backend_selected(ini);
     std::string bytes="[Controls]\n";
     for(const auto& line:ini.section_lines("Controls"))bytes+=line+"\n";
-    const auto profile=sh::read_profile(bytes);
+    const auto profile=sh::read_profile(bytes,desk::ControlsReads);   // as an ordinary start reads it (STD-037)
     const auto capability=desk::outrun_capability();
     const auto reason=[&](const std::string& action)->const char*{
         const int i=sh::action_index(action);return i<0?"unknown action":capability.unsupported[std::size_t(i)];};

@@ -87,7 +87,10 @@ struct Profile {
     ctl::Section section;         // the contract's parse of [Controls] (its own Schema / invalid handling)
     Sha256 file_hash{};
 };
-Profile read_profile(const std::string& bytes);
+// `reads`: the highest controls schema the caller's readers all apply (STD-037 item 4). 1, the default, is what the DLL
+// ABI (dbce_shim.cpp) and every existing caller use; 2 only for a consumer whose input, force-target and shaping readers
+// all opt in. ok=1 means the bytes parsed; whether the section applies is section.error.
+Profile read_profile(const std::string& bytes,int reads=1);
 constexpr std::size_t MaxProfileBytes=64*1024;
 
 // ---- the session file (section 9): exactly nonce= and expires=, nothing else

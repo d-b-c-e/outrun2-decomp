@@ -33,13 +33,17 @@ ControlsReport report_controls(const ctl::Section& s){
         return r;
     }
     r.ok=true;
+    std::vector<std::string> calibrated;
     for(const auto& e:s.bound){
         if(const char* why=unavailable_reason(e.action)){r.unsupported.push_back(e.action);r.notes.push_back("controls: "+e.action+" unavailable: "+why);}
-        else r.applied.push_back(e.action);
+        else{r.applied.push_back(e.action);if(!e.binding.cal.empty())calibrated.push_back(e.action);}
     }
-    r.start_line="controls: profile \""+s.profile+"\" revision "+(s.revision.empty()?std::string("-"):s.revision)+" via ini-controls-1: applied "+
+    // A schema-1 section's line is exactly as before; a schema-2 one names its schema and its calibrated actions (STD-037).
+    r.start_line="controls: profile \""+s.profile+"\" revision "+(s.revision.empty()?std::string("-"):s.revision)+
+        (s.schema==2?" via ini-controls-2: applied ":" via ini-controls-1: applied ")+
         std::to_string(r.applied.size())+" ("+joined(r.applied)+"); unsupported "+std::to_string(r.unsupported.size())+" ("+joined(r.unsupported)+
-        "); invalid "+std::to_string(r.invalid.size())+" ("+joined(r.invalid)+")";
+        "); invalid "+std::to_string(r.invalid.size())+" ("+joined(r.invalid)+")"+
+        (s.schema==2?"; calibrated "+std::to_string(calibrated.size())+" ("+joined(calibrated)+")":std::string());
     return r;
 }
 

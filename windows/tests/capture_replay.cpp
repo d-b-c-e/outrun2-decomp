@@ -31,7 +31,8 @@ int main(int argc, char** argv) {
         const std::filesystem::path capture(argv[1]), exported(argv[2]);
         if (read_text(capture / "bundle.meta") != CaptureContract) throw std::runtime_error("not an OutRunDesktop capture");
         if (!std::filesystem::exists(capture / "complete.tsv")) throw std::runtime_error("capture not sealed (no complete.tsv)");
-        const auto profile = dbce::shim::read_profile(read_text(capture / "profile.ini"));
+        // As the game read it: controls schema 1 and 2 (source/controls_store.hpp ControlsReads, STD-037).
+        const auto profile = dbce::shim::read_profile(read_text(capture / "profile.ini"), 2);
         if (!profile.ok) throw std::runtime_error("capture profile.ini does not parse");
         // Sanity check only (see above): the rows are the sealed worker report's written frames.
         std::vector<std::string> worker;{std::stringstream w(read_text(capture / "worker.tsv"));std::string f;while(std::getline(w,f,'\t'))worker.push_back(f);}

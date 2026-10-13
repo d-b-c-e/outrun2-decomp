@@ -244,7 +244,7 @@ bool import_legacy_bindings(){
     std::printf("controls: imported %zu binding line(s) from %s into [Controls] (backup %s)\n",body.size()-4,src.path().c_str(),backup.c_str());
     for(const auto& n:notes)std::printf("controls: import note: %s\n",n.c_str());
     Ini again;again.load(g.settings_path);
-    g.section=ctl::parseSection(again.section_lines("Controls"));
+    g.section=ctl::parseSection(again.section_lines("Controls"),ControlsReads);
     return true;
 }
 
@@ -321,7 +321,7 @@ void wheel_input_configure(const Ini& ini){
     const auto slash=g.settings_path.find_last_of("\\/");g.folder=slash==std::string::npos?".":g.settings_path.substr(0,slash);
     const auto steering=wheel_steering(ini);   // non-finite values are the defaults (romi 25900)
     g.sensitivity=steering.sensitivity;g.dead_zone=steering.dead_zone;
-    g.section=ctl::parseSection(ini.section_lines("Controls"));
+    g.section=ctl::parseSection(ini.section_lines("Controls"),ControlsReads);   // STD-037 (controls_store.hpp)
     // No canonical section yet: import the Tweaks bindings once (this file's [DirectInput], else the folder's
     // OutRun2006Tweaks.ini). The marker makes it once; a canonical [Controls] is never remapped from them.
     const bool canonical=g.section.error!="no Schema";

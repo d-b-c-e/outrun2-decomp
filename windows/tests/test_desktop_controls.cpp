@@ -42,7 +42,21 @@ void test_report(){
     const auto none=report_controls(ctl::parseSection({"steer = axis 0 dev="+Wheel+" prod="+WheelProd+" range=0..65535 rest=0 travel=+1"}));
     check(!none.ok&&none.start_line=="controls: nothing applied via ini-controls-1: no Schema","no Schema: nothing applies");
     const auto two=report_controls(ctl::parseSection({"Schema = 2"}));
-    check(!two.ok&&two.start_line.find("Schema 2 is not supported")!=std::string::npos,"Schema 2 refused");
+    check(!two.ok&&two.start_line.find("Schema 2 is not supported")!=std::string::npos,"Schema 2 refused by a schema-1 reader (the parser's default)");
+    // STD-037: what this build's readers apply (ControlsReads): a schema-2 section names its schema and calibrated actions;
+    // a schema-1 section's line is unchanged, and its cal= stays ignored.
+    check(ControlsReads==2,"this build reads controls schema 2");
+    const auto cal=report_controls(ctl::parseSection({"Schema = 2","Profile = Rig","Revision = r2",
+        "steer = axis 0 dev="+Wheel+" prod="+WheelProd+" range=0..65535 rest=33265 travel=-1 cal=1000..33265..64000",
+        "navUp = hat 0 0 dev="+Wheel+" prod="+WheelProd},ControlsReads));
+    check(cal.ok&&cal.start_line=="controls: profile \"Rig\" revision r2 via ini-controls-2: applied 2 (steer,navUp); unsupported 0 (); invalid 0 (); calibrated 1 (steer)",
+          "schema 2 start line: "+cal.start_line);
+    const auto one=report_controls(ctl::parseSection({"Schema = 1","Profile = Rig","Revision = r1",
+        "steer = axis 0 dev="+Wheel+" prod="+WheelProd+" range=0..65535 rest=33265 travel=-1 cal=1000..33265..64000"},ControlsReads));
+    check(one.ok&&one.start_line=="controls: profile \"Rig\" revision r1 via ini-controls-1: applied 1 (steer); unsupported 0 (); invalid 0 ()",
+          "schema 1 at reads 2: the line as before, cal ignored: "+one.start_line);
+    const auto three=report_controls(ctl::parseSection({"Schema = 3"},ControlsReads));
+    check(!three.ok&&three.start_line.find("this mod reads 1 or 2")!=std::string::npos,"Schema 3 refused at reads 2");
 }
 
 // The owner's (Redux) Tweaks settings: steering 0, throttle 2, brake 5, Moza buttons, DS-8X H-pattern.

@@ -2,6 +2,7 @@
 #include "ffb_live.hpp"
 #include "dbce_controls.hpp"
 #include "shim_input.hpp"
+#include "controls_store.hpp"
 #include <cctype>
 #include <cstdlib>
 namespace outrun::desktop {
@@ -49,7 +50,8 @@ ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mu
     c.muted=mute_env&&*mute_env&&std::string(mute_env)!="0";
     c.latched=latched;
     c.shim=!latched&&shim_backend_selected(settings);   // a latched process never runs the ordinary shim backend
-    const auto section=dbce::controls::parseSection(settings.section_lines("Controls"));
+    // The force target reads the section as the input readers do (STD-037 item 4): a schema-2 section keeps its steer device.
+    const auto section=dbce::controls::parseSection(settings.section_lines("Controls"),outrun::desktop::ControlsReads);
     for(const auto& e:section.bound)if(e.action=="steer"){c.steer_dev=e.binding.dev;break;}
     return c;
 }

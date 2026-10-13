@@ -85,7 +85,7 @@ bool strict_utf8(const std::string& s){
     return true;
 }
 
-Profile read_profile(const std::string& bytes){
+Profile read_profile(const std::string& bytes,int reads){
     Profile r;
     r.file_hash=sha256(bytes);
     if(bytes.size()>MaxProfileBytes){r.error="dbce-controls.ini is larger than 64 KiB";return r;}
@@ -120,7 +120,7 @@ Profile read_profile(const std::string& bytes){
         keys.push_back({key,number});
     }
     if(!controls_line){r.error="dbce-controls.ini has no [Controls]";return r;}
-    r.section=ctl::parseSection(body);
+    r.section=ctl::parseSection(body,reads);   // reads 1 (the default): a Schema 2 section applies nothing
     r.ok=true;
     return r;
 }

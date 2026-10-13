@@ -1,7 +1,8 @@
-// Controls contract (STD-033, docs/controls-contract.md), schema 1: the logical binding of a rig profile's action to one
-// DirectInput object, its one-line text form, and normalization. Pure C++17 (no Windows headers), header-only, so every
-// native mod vendors the same file and the offline tests run anywhere. Wheelkit's C# runs the same shared vectors
-// (controls-vectors.txt).
+// Controls contract (STD-033, docs/controls-contract.md), schemas 1 and 2: the logical binding of a rig profile's action
+// to one DirectInput object, its one-line text form, and normalization. Pure C++17 (no Windows headers), header-only, so
+// every native mod vendors the same file and the offline tests run anywhere. Wheelkit's C# runs the same shared vectors
+// (controls-vectors.txt). Schema 2 adds one axis attribute, `cal=` (measured endpoints); a reader opts into it
+// (parse(..., 2), parseSection(..., 2)), and by default everything reads exactly as schema 1.
 #pragma once
 #include <cerrno>
 #include <cmath>
@@ -24,7 +25,8 @@ struct Binding {
     std::string dev, prod;          // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", lowercase
     long min = 0, max = 0, rest = 0;
     int travel = 0;                 // +1 / -1 (axes)
-    bool hasRange = false, hasRest = false, inverted = false, calibrated = false;
+    bool hasRange = false, hasRest = false, inverted = false, calibrated = false;   // calibrated: carried metadata only
+    std::vector<long> cal;          // schema 2 `cal=`, raw in `range`: steer {lo, centre, hi}, pedal {released, full}; empty: none
     std::string name;
 };
 
@@ -80,9 +82,10 @@ inline bool integer(const std::string &s, long &v)
 } // namespace detail
 
 // Text form -> binding. On failure returns false and a stable reason code (the vectors compare it):
-// bad-kind bad-index bad-angle bad-attribute bad-guid bad-range bad-rest bad-travel duplicate missing-dev missing-prod
-// missing-range missing-rest missing-travel axis-only bad-name.
-inline bool parse(const std::string &text, Binding &out, std::string &reason)
+// bad-kind bad-index bad-angle bad-attribute bad-guid bad-range bad-rest bad-travel bad-cal duplicate missing-dev
+// missing-prod missing-range missing-rest missing-travel axis-only bad-name. `schema` 1 ignores `cal=` like any unknown
+// attribute; 2 reads it (two or three integers joined by "..": the shape is checked by fits()).
+inline bool parse(const std::string &text, Binding &out, std::string &reason, int schema = 1)
 {
     out = Binding{};
     // A binding is one line: no control character other than tab anywhere (C0, DEL, or a UTF-8 encoded C1), so a device
@@ -132,6 +135,7 @@ inline bool parse(const std::string &text, Binding &out, std::string &reason)
         k = 3;
     }
     bool seenDev = false, seenProd = false, seenRange = false, seenRest = false, seenTravel = false, seenInv = false, seenCal = false, seenName = false;
+    bool seenCalValues = false;
     auto dup = [&](bool &seen) { if (seen) return true; seen = true; return false; };
     for (; k < tok.size(); ++k) {
         const std::string &t = tok[k];
@@ -159,8 +163,20 @@ inline bool parse(const std::string &text, Binding &out, std::string &reason)
         } else if (key == "travel") {
             if (dup(seenTravel)) { reason = "duplicate"; return false; }
             if (val == "+1") out.travel = 1; else if (val == "-1") out.travel = -1; else { reason = "bad-travel"; return false; }
+        } else if (key == "cal" && schema >= 2) {
+            if (dup(seenCalValues)) { reason = "duplicate"; return false; }
+            std::vector<long> points;
+            for (size_t from = 0;;) {
+                const size_t dots = val.find("..", from);
+                if (!detail::integer(val.substr(from, dots == std::string::npos ? std::string::npos : dots - from), v)) { reason = "bad-cal"; return false; }
+                points.push_back(v);
+                if (dots == std::string::npos) break;
+                from = dots + 2;
+            }
+            if (points.size() != 2 && points.size() != 3) { reason = "bad-cal"; return false; }
+            out.cal = points;
         }
-        // any other key=value: ignored (forward compatibility)
+        // any other key=value (and `cal=` in schema 1): ignored (forward compatibility)
     }
     if (!seenDev) { reason = "missing-dev"; return false; }
     if (!seenProd) { reason = "missing-prod"; return false; }
@@ -169,7 +185,7 @@ inline bool parse(const std::string &text, Binding &out, std::string &reason)
         if (!seenRest) { reason = "missing-rest"; return false; }
         if (!seenTravel) { reason = "missing-travel"; return false; }
         if (out.rest < out.min || out.rest > out.max) { reason = "bad-rest"; return false; }
-    } else if (seenRange || seenRest || seenTravel || seenInv) { reason = "axis-only"; return false; }
+    } else if (seenRange || seenRest || seenTravel || seenInv || seenCalValues) { reason = "axis-only"; return false; }
     reason.clear();
     return true;
 }
@@ -184,6 +200,10 @@ inline std::string format(const Binding &b)
     if (b.kind == Kind::Axis) {
         s += " range=" + std::to_string(b.min) + ".." + std::to_string(b.max) + " rest=" + std::to_string(b.rest);
         s += b.travel > 0 ? " travel=+1" : " travel=-1";
+        if (!b.cal.empty()) {
+            s += " cal=";
+            for (size_t i = 0; i < b.cal.size(); ++i) s += (i ? ".." : "") + std::to_string(b.cal[i]);
+        }
         if (b.inverted) s += " inverted";
     }
     if (b.calibrated) s += " calibrated";
@@ -195,15 +215,36 @@ inline std::string format(const Binding &b)
     return s;
 }
 
-// Does the binding's kind fit the action? "" when it does, else a reason code: unknown-action, wrong-kind, rest-at-full.
+// Schema 2: is `cal` the action's shape and measured, as a fraction of the declared span S = max - min (unit-independent:
+// at 0..65535 these are 512 and 8192 counts)? Steer: min <= lo < centre < hi <= max, each side >= S/128, the sweep >= S/8.
+// Pedal: both points in range, |full - released| >= S/8. Compared in double, exact for any 32-bit range.
+inline bool calibrationFits(Shape shape, const Binding &b)
+{
+    const double lo = double(b.min), hi = double(b.max), span = hi - lo;
+    for (long p : b.cal) if (double(p) < lo || double(p) > hi) return false;
+    if (shape == Shape::Centred) {
+        if (b.cal.size() != 3) return false;
+        const double l = double(b.cal[0]), c = double(b.cal[1]), h = double(b.cal[2]);
+        return l < c && c < h && (c - l) * 128.0 >= span && (h - c) * 128.0 >= span && (h - l) * 8.0 >= span;
+    }
+    if (b.cal.size() != 2) return false;
+    return std::fabs(double(b.cal[1]) - double(b.cal[0])) * 8.0 >= span;
+}
+
+// Does the binding's kind fit the action? "" when it does, else a reason code: unknown-action, wrong-kind, rest-at-full,
+// bad-calibration.
 inline std::string fits(const std::string &action, const Binding &b)
 {
     switch (shapeOf(action)) {
     case Shape::Unknown: return "unknown-action";
-    case Shape::Centred: return b.kind == Kind::Axis ? "" : "wrong-kind";
+    case Shape::Centred:
+        if (b.kind != Kind::Axis) return "wrong-kind";
+        return b.cal.empty() || calibrationFits(Shape::Centred, b) ? "" : "bad-calibration";
     case Shape::Pedal:
         if (b.kind == Kind::Button) return "";
         if (b.kind != Kind::Axis) return "wrong-kind";
+        // A valid `cal` alone decides (its released and full replace rest and the travel end, which it never reads).
+        if (!b.cal.empty()) return calibrationFits(Shape::Pedal, b) ? "" : "bad-calibration";
         return (b.travel > 0 ? b.max : b.min) == b.rest ? "rest-at-full" : "";
     case Shape::Digital: return (b.kind == Kind::Button || b.kind == Kind::Hat) ? "" : "wrong-kind";
     }
@@ -217,7 +258,10 @@ inline double clampd(double v, double lo, double hi) { return v < lo ? lo : v > 
 inline bool diButtonDown(long byte) { return (byte & 0x80) != 0; }
 
 // Raw sample (axes: in the binding's range; buttons: the shared boolean, 1 down; hats: the POV value) -> normalized:
-// steer -1..1 (right positive), pedal 0..1, digital 0 or 1. Assumes fits(action, b) == "".
+// steer -1..1 (right positive), pedal 0..1, digital 0 or 1. Assumes fits(action, b) == "". A schema-2 `cal` that does not
+// fit the action (calibrationFits) is refused explicitly: the value is neutral (0: steer centred, pedal released), never
+// read through out-of-range points nor through the schema-1 fields (mufa 62480 F2, sana 62527). The managed twin throws
+// unless Fits is "".
 inline double normalize(const std::string &action, const Binding &b, long raw)
 {
     if (b.kind == Kind::Button) return raw != 0 ? 1.0 : 0.0;
@@ -230,14 +274,23 @@ inline double normalize(const std::string &action, const Binding &b, long raw)
     // Every operand widened to double before adding or subtracting: legal ranges reach -2147483648..2147483647, whose
     // sum, span and rest-to-end distance overflow a 32-bit long.
     const double lo = double(b.min), hi = double(b.max);
+    const bool cal = !b.cal.empty();
+    if (cal && !calibrationFits(shapeOf(action), b)) return 0.0;   // refused: neutral
     if (shapeOf(action) == Shape::Centred) {
-        const double centre = (lo + hi) / 2.0, half = (hi - lo) / 2.0;
-        double n = clampd((double(raw) - centre) / half, -1.0, 1.0);
+        double n;
+        if (cal) {   // schema 2: two-sided around the measured centre, saturating beyond the measured locks
+            const double l = double(b.cal[0]), c = double(b.cal[1]), h = double(b.cal[2]), v = double(raw);
+            n = clampd(v >= c ? (v - c) / (h - c) : (v - c) / (c - l), -1.0, 1.0);
+        } else {
+            const double centre = (lo + hi) / 2.0, half = (hi - lo) / 2.0;
+            n = clampd((double(raw) - centre) / half, -1.0, 1.0);
+        }
         return b.inverted ? -n : n;
     }
-    const double full = b.travel > 0 ? hi : lo, rest = double(b.rest);
+    // Schema 2 `cal`: released and full are measured (their order gives the direction); otherwise rest and the travel end.
+    const double full = cal ? double(b.cal[1]) : b.travel > 0 ? hi : lo, rest = cal ? double(b.cal[0]) : double(b.rest);
     const double n = clampd((double(raw) - rest) / (full - rest), 0.0, 1.0);
-    return b.inverted ? 1.0 - n : n;   // the player's explicit inversion, after the captured travel
+    return b.inverted ? 1.0 - n : n;   // the player's explicit inversion, once, after the captured travel or calibration
 }
 
 // Normalized -> raw sample (the exact inverse; rounded half away from zero, clamped to the range; buttons the shared
@@ -248,11 +301,16 @@ inline long denormalize(const std::string &action, const Binding &b, double n)
     if (b.kind == Kind::Hat) return n >= 0.5 ? b.angle : -1;
     double v;
     const double lo = double(b.min), hi = double(b.max);   // widened first, as in normalize()
+    const bool cal = !b.cal.empty();
+    if (cal && !calibrationFits(shapeOf(action), b)) return b.rest;   // refused, as in normalize(): the binding at rest
     if (shapeOf(action) == Shape::Centred) {
         n = clampd(b.inverted ? -n : n, -1.0, 1.0);
-        v = (lo + hi) / 2.0 + n * ((hi - lo) / 2.0);
+        if (cal) {   // inverse within the measured locks (a raw beyond them normalized to +-1 maps to the lock)
+            const double l = double(b.cal[0]), c = double(b.cal[1]), h = double(b.cal[2]);
+            v = n >= 0 ? c + n * (h - c) : c + n * (c - l);
+        } else v = (lo + hi) / 2.0 + n * ((hi - lo) / 2.0);
     } else {
-        const double full = b.travel > 0 ? hi : lo, rest = double(b.rest);
+        const double full = cal ? double(b.cal[1]) : b.travel > 0 ? hi : lo, rest = cal ? double(b.cal[0]) : double(b.rest);
         n = clampd(n, 0.0, 1.0);
         v = rest + (b.inverted ? 1.0 - n : n) * (full - rest);
     }
@@ -282,7 +340,7 @@ inline uint32_t productId(const Binding &b)
     return (uint32_t)std::strtoul(b.prod.substr(1, 8).c_str(), nullptr, 16);
 }
 
-// ---- the [Controls] INI section (storage adapter ini-controls-1) ---------------------------------------------------
+// ---- the [Controls] INI section (storage adapters ini-controls-1, and ini-controls-2 when the reader opts in) --------
 struct Entry { std::string action; Binding binding; };
 struct Section {
     int schema = 0;
@@ -302,17 +360,29 @@ inline std::string trim(const std::string &s)
 }
 
 // Lines "key = value" (as GetPrivateProfileSection returns them, or a file's section body). Comments ';' / '#' skipped.
-inline Section parseSection(const std::vector<std::string> &lines)
+// `reads`: the highest schema this reader applies (1, the default, exactly as before schema 2 existed; or 2). A section
+// whose Schema is above it applies nothing, with the reason in `error`.
+inline Section parseSection(const std::vector<std::string> &lines, int reads = 1)
 {
     Section s;
     bool haveSchema = false;
-    for (const std::string &raw : lines) {
+    auto entry = [&](const std::string &raw, std::string &key, std::string &val) {
         std::string line = trim(raw);
-        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line.empty() || line[0] == ';' || line[0] == '#') return false;
         size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        std::string key = trim(line.substr(0, eq)), val = trim(line.substr(eq + 1));
-        if (key == "Schema") { long v = 0; haveSchema = detail::integer(val, v); s.schema = haveSchema ? (int)v : -1; continue; }
+        if (eq == std::string::npos) return false;
+        key = trim(line.substr(0, eq)); val = trim(line.substr(eq + 1));
+        return true;
+    };
+    for (const std::string &raw : lines) {   // the Schema first (the last one wins), so every binding reads in it
+        std::string key, val;
+        if (entry(raw, key, val) && key == "Schema") { long v = 0; haveSchema = detail::integer(val, v); s.schema = haveSchema ? (int)v : -1; }
+    }
+    const int bindingSchema = haveSchema && s.schema == 2 && reads >= 2 ? 2 : 1;
+    for (const std::string &raw : lines) {
+        std::string key, val;
+        if (!entry(raw, key, val)) continue;
+        if (key == "Schema") continue;
         if (key == "Profile") { s.profile = val; continue; }
         if (key == "Revision") { s.revision = val; continue; }
         if (key == "Transmission") { s.transmission = val; continue; }
@@ -320,7 +390,7 @@ inline Section parseSection(const std::vector<std::string> &lines)
         if (val.empty()) { s.unbound.push_back(key); continue; }
         Binding b;
         std::string why;
-        if (!parse(val, b, why)) { s.invalid.push_back({key, why}); continue; }
+        if (!parse(val, b, why, bindingSchema)) { s.invalid.push_back({key, why}); continue; }
         why = fits(key, b);
         if (!why.empty()) { s.invalid.push_back({key, why}); continue; }
         bool dupe = false;
@@ -329,7 +399,8 @@ inline Section parseSection(const std::vector<std::string> &lines)
         s.bound.push_back({key, b});
     }
     if (!haveSchema) s.error = "no Schema";
-    else if (s.schema != 1) s.error = "Schema " + std::to_string(s.schema) + " is not supported (this mod reads 1)";
+    else if (s.schema < 1 || s.schema > (reads >= 2 ? 2 : 1))
+        s.error = "Schema " + std::to_string(s.schema) + " is not supported (this mod reads " + (reads >= 2 ? "1 or 2" : "1") + ")";
     if (!s.error.empty()) s.bound.clear();
     return s;
 }

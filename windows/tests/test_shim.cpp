@@ -82,6 +82,18 @@ void test_profile(){
     check(!read_profile("[Controls]\nSchema = 1\njust words\n").ok,"a line that is not key = value");
     auto two_schema=read_profile("[Controls]\nSchema = 2\n");
     check(two_schema.ok&&!two_schema.section.error.empty(),"Schema 2: structurally fine, nothing applies");
+    // STD-037: a caller opts Core in with reads 2; the default (the DLL ABI's) stays 1.
+    {
+        const std::string cal="[Controls]\nSchema = 2\n"+wheel("steer = axis 0")+" range=0..65535 rest=33265 travel=+1 cal=1000..33265..64000\n";
+        const auto r1=read_profile(cal),r2=read_profile(cal,2);
+        check(r1.ok&&r1.section.error=="Schema 2 is not supported (this mod reads 1)"&&r1.section.bound.empty(),"reads 1 (default): Schema 2 refused, nothing bound");
+        const auto* s=r2.ok?ctl::find(r2.section,"steer"):nullptr;
+        check(r2.section.error.empty()&&s&&s->cal.size()==3&&s->cal[1]==33265,"reads 2: the section applies, steer carries its cal");
+        check(r1.file_hash==r2.file_hash,"the same bytes, the same hash");
+        const auto v1=read_profile("[Controls]\nSchema = 1\n"+wheel("steer = axis 0")+" range=0..65535 rest=33265 travel=+1 cal=1000..33265..64000\n",2);
+        const auto* s1=v1.ok?ctl::find(v1.section,"steer"):nullptr;
+        check(v1.section.error.empty()&&s1&&s1->cal.empty(),"reads 2 on a schema-1 section: cal ignored");
+    }
 }
 
 void test_session(){

@@ -239,6 +239,12 @@ void test_output_config(){
     check(!c.output&&c.steer_dev==wheel&&notes.empty()&&!outrun::desktop::ffbdev::load_refusal(c).empty(),"no Output key: no wheel output (the default)");
     c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = Wheel\r\n"),false,nullptr,notes);
     check(c.output&&!c.muted&&!c.latched&&c.steer_dev==wheel&&outrun::desktop::ffbdev::load_refusal(c).empty(),"Output = wheel (any case), the steer device");
+    {   // STD-037: a schema-2 section (calibrated steer) keeps the force target, read as the input readers read it.
+        const std::string calibrated="[Controls]\r\nSchema = 2\r\nProfile = Rig\r\nRevision = abc\r\n"
+            "steer = axis 0 dev="+wheel+" prod="+prod+" range=0..65535 rest=33265 travel=-1 cal=1000..33265..64000\r\n";
+        const auto s2=outrun::desktop::ffb_output_config(load(calibrated+"[FFB]\r\nOutput = Wheel\r\n"),false,nullptr,notes);
+        check(s2.output&&s2.steer_dev==wheel,"Schema 2 (calibrated steer): the steer device is still the force target");
+    }
     c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = none\r\n"),false,nullptr,notes);
     check(!c.output&&notes.empty(),"Output = none");
     c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = on\r\n"),false,nullptr,notes);

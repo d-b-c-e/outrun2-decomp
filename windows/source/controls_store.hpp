@@ -12,6 +12,11 @@
 namespace outrun::desktop {
 namespace ctl=dbce::controls;
 
+// The highest controls schema this build reads (STD-037): 2, the `cal=` measured endpoints. Every reader of [Controls]
+// uses it together (the input readers wheel_input / shim_input with Core, and the force target ffb_settings), so no
+// reader applies a section another refuses. The capture tools that re-read a tape's profile do the same.
+inline constexpr int ControlsReads=2;
+
 // nullptr when this build maps the action into the game, else why it does not.
 const char* unavailable_reason(const std::string& action);
 

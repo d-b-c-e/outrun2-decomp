@@ -1,5 +1,6 @@
 // The input shim in a latched (test) process (shim_input.hpp).
 #include "shim_input.hpp"
+#include "controls_store.hpp"
 #include "control_journal.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
@@ -308,7 +309,7 @@ void shim_input_configure(const fence::Plan& plan,const Ini& settings){
     g.plan=plan;
     g.profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))g.profile+=line+"\n";
-    const auto parsed=sh::read_profile(g.profile);
+    const auto parsed=sh::read_profile(g.profile,ControlsReads);
     g.transmission=parsed.ok?parsed.section.transmission:"";
     // R3: a replay run loads its tape before the game loop starts. A refused tape plays nothing (the run stays neutral).
     const auto tape=settings.text("ShimReplay","Tape");
@@ -390,7 +391,7 @@ ShimSteer shim_input_steer(){
 void shim_input_configure_ordinary(const Ini& settings,const std::string& folder){
     o.profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))o.profile+=line+"\n";
-    const auto parsed=sh::read_profile(o.profile);
+    const auto parsed=sh::read_profile(o.profile,ControlsReads);
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.steer.reset();
     if(parsed.ok)if(const auto* b=dbce::controls::find(parsed.section,"steer"))o.steer=*b;
@@ -544,7 +545,7 @@ void shim_input_shutdown_ordinary(){
 bool shim_input_configure_playback(const session::Intake& intake,const Ini& settings){
     std::string profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))profile+=line+"\n";
-    const auto parsed=sh::read_profile(profile);
+    const auto parsed=sh::read_profile(profile,ControlsReads);
     // The tape the start's check hashed (session::take): read, then hashed again, so the rows played are those bytes.
     std::unique_ptr<ConsumedTape> tape;std::string why;
     try{tape=std::make_unique<ConsumedTape>(intake.request.tape);}catch(const std::exception& e){why=e.what();}

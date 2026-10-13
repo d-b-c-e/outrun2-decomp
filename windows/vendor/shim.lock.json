@@ -2,7 +2,7 @@
   "schema": "dbce.vendor-lock@1",
   "source": "d-b-c-e/dbce-wheel-mod-toolkit",
   "path": "native/shim",
-  "commit": "c5a5a6f6269869bdcc494783cfaa2ff709d24904",
+  "commit": "fbd41ab929219ed67bb7a8fa3244901425e402f7",
   "files": {
     "docs/CONTROL-JOURNAL.md": "0df2a76e5bed64d070abfcc3f7a28123667ae139",
     "docs/INPUT-SHIM.md": "b30c079104a086f0aaf6326591dcf698d5a899c5",
@@ -21,9 +21,9 @@
     "shim/dinput_provider.hpp": "3e039e4074fefd85ce24818e59b0420ea8e03738",
     "shim/observer_domain.hpp": "c33de82687e7e8833c912afeff0ff16252ce8b57",
     "shim/observer_transport.hpp": "94cc00c2838042436153b954bb7be641dfd20b92",
-    "shim/parse.cpp": "caefe9468ea25eff8d4bda3d69c160e3cb243cc0",
+    "shim/parse.cpp": "2af201d84cdeedf4b6c1a10bbf0f8b0df763419c",
     "shim/sha256.hpp": "a01d8fb502895e15c138a9dfcdae10fdc2dc1a3d",
-    "shim/shim.hpp": "277e90c1dad867086f6f4bf743a2159e70733942",
+    "shim/shim.hpp": "328e913d1c9cc41b9b0bfeaf138fe75539e454ac",
     "shim_dll/README.md": "e2f2302b207260128945deaaa02c92d682166556",
     "shim_dll/dbce_shim.cpp": "8df5f102acb4539d5e61395d9afaf369fbe03ba2",
     "shim_dll/dbce_shim.h": "47e264627289370ed486789e423fc76b7d6fcbdd",
@@ -31,7 +31,7 @@
     "tests/shim_fake_com.hpp": "d764a3dda797dee03ec90fa8ad19d0e633097c1d",
     "tests/shim_fake_provider.hpp": "6447f2913ba5c085fda0c64dace0beeb0ca31a1b",
     "tests/test_dinput_provider.cpp": "12a030a2e3766943174e17eabd556ed9c97d4ce0",
-    "tests/test_shim.cpp": "2197412a5476be86fdfd12d0071b03e161cdb7ba",
+    "tests/test_shim.cpp": "7c29e16077ffc469f02bf3a0443535824724b8ec",
     "tests/test_shim_abi.cpp": "4cbf4fe5469f905f881fc452aa4da6fbb45060d4"
   }
 }
