@@ -27,8 +27,16 @@ go upstream as small pull requests (first: `tweaks-exe`).
    our own D3D11 renderer, standard pages, each later feature adds its controls.
    - In code (`source/desktop_panel.cpp`): the Help, Controls (status), Force (strength, invert, output; F8 stops),
      Telemetry and Cameras (the triple selector and projection) pages.
-   - The Help page was seen in game (hub `artifacts/outrun-f6-help-20261012`). The other pages are not yet checked at
-     the rig. `docs/F6-PANEL.md`'s status lags the code.
+   - All five pages were seen rendered in game, muted, in disposable copies (render evidence only):
+     - Help: hub `artifacts/outrun-f6-help-20261012`.
+     - Controls, FFB, Cameras, Telemetry on 06e5e19, Native backend: hub `artifacts/outrun-f6-pages-20261012`.
+     - All five on ac68a6f, Shim backend with a pad, `[FFB] Output = wheel` without WheelFfb.dll: hub
+       `artifacts/outrun-candidate-ac68a6f-20261013/regression/f6-ac68a6f-run1`. Controls reads "Shim (the shared
+       input shim, [Input] Backend = Shim)" with the profile device live. FFB reads "Wheel output at the next
+       start" On and, for This session, "not running: this process is force-muted (DBCE_FFB_MUTE)" (UI wording
+       only).
+   - Not checked: saving through the panel by keyboard or mouse (write_key is unit-tested), a three-screen
+     span, the physical wheel. `docs/F6-PANEL.md`'s status lags the code.
 3. 🟡 **Triple screens** (`windows/docs/TRIPLE-SCREENS.md`): `[Triple] Screens` Off / Surround / Separate monitors
    with the planar span (the Tweaks parity floor) is done and seen at the rig. True per-screen projection
    (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
@@ -47,10 +55,12 @@ go upstream as small pull requests (first: `tweaks-exe`).
      The tests are test_ffb_outrun, test_ffb_delivery, test_ffb_wiring and test_wheelffb_bridge. The muted
      integration passed (hub `artifacts/outrun-bridge-muted-20261012`).
    - Packaged: the force add-on carries WheelFfb.dll (hub `artifacts/outrun-ffb-addon-20261012`).
-     - It was installed beside the owner's b08f143 on 2026-10-12, with the force off (no `[FFB] Output`).
+     - It was installed beside the owner's b08f143 on 2026-10-12, with the force off (no `[FFB] Output`), and
+       re-pinned to the owner's ac68a6f on 2026-10-13 (the same DLL, still no `[FFB] Output`).
      - Its muted copy check logged the refusal under `DBCE_FFB_MUTE` and did not load the DLL.
-   - In source, not yet in an owner build: F6 saves the wheel output for the next start (f67f196). It is not
-     yet seen rendered.
+   - F6 saves the wheel output for the next start (f67f196). It is in the owner's ac68a6f TEST install and was
+     seen rendered muted, without the add-on (f6-ac68a6f-run1 above); saving it through the panel is not
+     checked in game.
    - Not yet: the physical output on the wheel, and the feel against the art of rally reference (attended).
 5. 🟡 **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
    toolkit `native/forza`), plus the Tweaks fork's shared memory for its SimHub plugin; see `README.md` Telemetry.
@@ -118,6 +128,6 @@ needed in a native build.
 | Bugfixes | FixLensFlarePath, FixIncorrectShading | 🟡 | on by default as in Tweaks. FixLensFlarePath: 44A630's offsets read from `Media\lens_flare_offset.bin` (where the game ships it) when present, else `common\`; runtime.log names the source. FixIncorrectShading: 40E140's TWOSIDE lighting entries (73F04C / 73F050) link the DOUBLE fragments (61FB48 / 61FC88), unit-tested in test_pc_shader_programs. Neither yet seen in game |
 | | FixFullPedalChecks | ✅ | on by default as in Tweaks: 453720 / 453750 read accelerator and brake 250..254 as 255 (race_input.hpp), for the full-press checks such as the backfire; the stored channels, edges and consumed capture are unchanged; `[Bugfixes] FixFullPedalChecks = false` restores the PC's own; tests/test_pedal_volume.cpp |
 | | FixPegasusClopping | ✅ | on by default as in Tweaks: the Pegasus event 44BB30 starts the clop loop (SND_LOOP \| 0x8D) and SndOff_PEGA 44BCC0 stopped only 0x8C; 44BCC0 now also requests SND_STOP \| 0x8D (pc_screen.hpp, race_area.cpp); `[Bugfixes] FixPegasusClopping = false` restores the single stop; tests/test_pegasus_sound.cpp. Not yet heard at the rig |
-| | PreventDESTSaveCorruption | ➖ | not reachable here (bounded path audit, 2026-10-13): the game-side DirectInput is pc_input_devices.cpp's fake one, which enumerates one pad and the keyboard (create_403de0), so at most 2 device records of 0xB0 are written from 7C211C, below the 0x2C4 before the 7C23E0 license; the real devices never reach that enumeration |
+| | PreventDESTSaveCorruption | ➖ | not reachable here (bounded path audit, 2026-10-13): the game-side DirectInput is pc_input_devices.cpp's fake one, which enumerates one pad and the keyboard (create_403de0), so at most 2 device records of 0xB0 are written from 7C211C, below the 0x2C4 before the 7C23E0 license; the real devices never reach that enumeration, and native_pc_input_create_403de0's created guard keeps a repeated init from adding records |
 | | FixRightSideBunkiAnimations, FixC2CRankings, HideOnlineSigninText | ⬜ | the reconstruction reproduces the original bugs; fix each in source behind its setting |
 | | FixParticleRendering | 🟡 | in source since b8c9f8b, on by default as in Tweaks (pc_screen.hpp): draw_418cf0's screen mapping used the full width/height where the Xbox code had half (grass off screen; race_particles_draw.cpp halves sx, sy and the size at 419009 as Tweaks does), and the Metropolis fireworks (44DE10 object 0x630001 had no node list; race_area.cpp draws 0x1A000A with a fixed list as Tweaks does). Not yet seen at the rig |
