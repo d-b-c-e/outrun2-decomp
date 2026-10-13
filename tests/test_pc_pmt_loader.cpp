@@ -3,8 +3,11 @@
 // pmt_loader_probe oracle.
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_dds.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <utility>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -166,6 +169,51 @@ int main(){
         const auto& banks=pmt_texture_replacement_banks();
         const auto& test=banks.at("cs_TEST_pmt");CHECK(test.folder&&test.looked==2&&test.replaced==1&&test.failed==1);
         CHECK(!banks.at("cs_OTHER_pmt").folder&&banks.at("cs_OTHER_pmt").looked==1&&banks.at("cs_SHORT_pmt").failed==1);
+        pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
+    }
+    // TextureMatchAnyFolder: the synthetic texture's file in other folders only (bank cs_VAR_pmt has no folder).
+    {
+        namespace fs=std::filesystem;
+        const auto dir=fs::temp_directory_path()/"or2_texture_any_folder_test";
+        const auto dxt=[](std::uint32_t w,std::uint32_t h,std::uint8_t fill){
+            std::vector<std::uint8_t> f(0x80+std::size_t(std::max(1u,(w+3)/4))*std::max(1u,(h+3)/4)*8,fill);std::memset(f.data(),0,0x80);
+            auto put=[&](std::size_t o,std::uint32_t v){std::memcpy(f.data()+o,&v,4);};
+            std::memcpy(f.data(),"DDS ",4);put(4,124);put(12,h);put(16,w);put(28,1);put(76,32);put(80,4);put(84,0x31545844u);return f;};
+        const auto a=dxt(4,4,0x5a),b=dxt(4,4,0x33),big=dxt(8,8,0x5a);
+        auto shortened=a;shortened.resize(0x84);
+        PcPmtResources probe{};std::vector<std::uint8_t> pv;synthetic_pmt(probe,pv);
+        char name[64];std::snprintf(name,sizeof name,"%X_4x8.dds",pmt_xxh32(pv.data()+0x20,0x80));
+        const std::string n(name);
+        // Lays out the pack ({relative path, bytes}), configures, loads bank `pack`: the bytes the device got, or empty
+        // when the stock texture was created.
+        auto run=[&](std::vector<std::pair<std::string,std::vector<std::uint8_t>>> layout,bool any,const char* pack="cs_VAR_pmt"){
+            fs::remove_all(dir);
+            for(const auto& [rel,bytes]:layout){fs::create_directories((dir/rel).parent_path());
+                std::ofstream o(dir/rel,std::ios::binary);o.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
+            texture_replacement_configure(true,false,dir.string(),any);
+            PcPmtResources r{};std::vector<std::uint8_t> v;synthetic_pmt(r,v);r.pack_name=pack;Device d;load_synthetic(r,d);
+            CHECK(d.textures.size()==1);
+            return d.textures[0].data==v.data()+0x20?std::vector<std::uint8_t>{}:d.texture_bytes[0];};
+        const auto& st=pmt_texture_replacement_stats();
+        // Off: Tweaks' names only, so a variant folder's file is not used.
+        CHECK(run({{"cs_VAR_T_pmt/7_"+n,a}},false).empty()&&st.looked==1&&st.other==0);
+        // On: the only same-name file (index prefix dropped) is taken, counted as from another folder.
+        CHECK(run({{"cs_VAR_T_pmt/7_"+n,a}},true)==a&&st.replaced==1&&st.other==1&&pmt_texture_replacement_banks().at("cs_VAR_pmt").other==1);
+        // Tweaks' names first: the bank's own folder, then the pack root, before any other folder.
+        CHECK(run({{"cs_VAR_pmt/"+n,a},{"cs_X_pmt/"+n,b}},true)==a&&st.other==0);
+        CHECK(run({{n,a},{"cs_X_pmt/"+n,b}},true)==a&&st.other==0);
+        // Several same-name files: identical bytes are one answer; differing bytes (same or other size) are ambiguous.
+        CHECK(run({{"cs_A_pmt/"+n,a},{"cs_B_pmt/3_"+n,a}},true)==a&&st.other==1&&st.ambiguous==0);
+        CHECK(run({{"cs_A_pmt/"+n,a},{"cs_B_pmt/"+n,b}},true).empty()&&st.ambiguous==1&&st.replaced==0&&st.failed==0);
+        CHECK(run({{"cs_A_pmt/"+n,a},{"cs_B_pmt/"+n,big}},true).empty()&&st.ambiguous==1);
+        // The only file is unusable (shorter than its level): stock, counted as failed.
+        CHECK(run({{"cs_A_pmt/"+n,shortened}},true).empty()&&st.failed==1&&st.other==0);
+        // Decided once per name: two identical files resolve to one answer, which stands for later banks even if a file
+        // changes afterwards (a fresh comparison would now find them different).
+        {   CHECK(run({{"cs_A_pmt/"+n,a},{"cs_B_pmt/"+n,a}},true)==a);
+            {std::ofstream o(dir/"cs_B_pmt"/n,std::ios::binary);o.write(reinterpret_cast<const char*>(b.data()),std::streamsize(b.size()));}
+            PcPmtResources r{};std::vector<std::uint8_t> v;synthetic_pmt(r,v);r.pack_name="cs_VAR_R_pmt";Device d;load_synthetic(r,d);
+            CHECK((d.texture_bytes[0]==a||d.texture_bytes[0]==b)&&st.other==2&&st.ambiguous==0);}   // the chosen path, not compared again
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     std::printf("pc pmt loader: %u checks\n",checks);

@@ -33,13 +33,19 @@ struct PcPmtResources {
 // scene textures only.
 void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder);
 // Scene (SceneTextureReplacement) and UI (UITextureReplacement) replacement from one indexed load folder.
-void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder);
-struct PmtTextureReplacementStats { std::uint32_t files{},looked{},replaced{},failed{}; };
+// any_folder (TextureMatchAnyFolder, not a Tweaks key): when a texture has no file under Tweaks' four names, a file of
+// the same name (XXH32 and size of the stock DDS, by the pack's naming; any index prefix) elsewhere in the pack is
+// taken if it is the only one, or if all such files are byte-identical; several different files are ambiguous and keep
+// the stock texture. Lets a stage variant (cs_CS_PALM_pmt) use files made for another (cs_CS_PALM_T_pmt). The name
+// index is built at configure time; each name's answer is decided once.
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder=false);
+// other: replaced from another bank's folder (part of replaced); ambiguous: same-name files that differ (kept stock).
+struct PmtTextureReplacementStats { std::uint32_t files{},looked{},replaced{},failed{},other{},ambiguous{}; };
 const PmtTextureReplacementStats& pmt_texture_replacement_stats();
 // Per bank (by pack name) since configure: its lookups, and whether the pack has a folder for it, so a log can say
 // which banks a race used that the pack does not cover (a stage variant such as cs_CS_BEAC_T_pmt, for example).
 // `seconds`: wall time in pack lookups, reads and replacement creation (load cost; the stock creations not included).
-struct PmtTextureReplacementBank { std::uint32_t looked{},replaced{},failed{};bool folder{};double seconds{}; };
+struct PmtTextureReplacementBank { std::uint32_t looked{},replaced{},failed{},other{},ambiguous{};bool folder{};double seconds{}; };
 const std::map<std::string,PmtTextureReplacementBank>& pmt_texture_replacement_banks();
 // UI texture replacement: a sprite bank (XST) texture from the same pack, the folder being the XST file stem
 // (spr_etc_xst, spr_sprani_game_cvt_Exst) and `index` Tweaks' count of the textures the bank created before it.

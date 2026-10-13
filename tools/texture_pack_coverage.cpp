@@ -8,6 +8,7 @@
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/retail_asset_store.hpp"
+#include "system/exe_image.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -95,13 +96,22 @@ int main(int argc,char** argv){
         if(const auto u=name.find('_');u!=std::string::npos&&name.find('_',u+1)!=std::string::npos)name=name.substr(u+1);   // index prefix
         by_hash[name].push_back(key);
     }
-    pmt_texture_replacement_configure(true,argv[2]);
+    // A third argument "any": the real path with TextureMatchAnyFolder on (same-name files from other folders).
+    const bool any=argc>3&&std::string(argv[3])=="any";
+    texture_replacement_configure(true,false,argv[2],any);
     std::map<std::string,unsigned> totals;std::set<std::string> named_folders;
     for(std::uint32_t id=0;id<0x223u;++id){
         const auto pack=pc_bank_pack_name(id);
         if(pack.size()<5||lower(pack.substr(pack.size()-4))!="_pmt")continue;
-        const auto* record=retail_asset_lookup(store,id,8u,&error);std::vector<std::uint8_t> pmt;
-        if(!record||!retail_asset_inflate_sz(record->bytes,pmt)||pmt.size()<16){++totals["banks not read"];continue;}
+        // The bank's file by its path in the 633558 table ("\Stage\BEAC\cs_CS_BEAC_pmt.sz"), as pc_bank_pack_name reads it.
+        std::string path;
+        if(const auto* entry=exe_image_bytes(0x633558u+id*4u,4)){
+            std::uint32_t at;std::memcpy(&at,entry,4);
+            for(std::uint32_t k=0;at&&k<260;++k){const auto* ch=exe_image_bytes(at+k,1);if(!ch||!*ch)break;path.push_back(*ch=='\\'?'/':char(*ch));}}
+        while(!path.empty()&&path[0]=='/')path.erase(0,1);
+        std::vector<std::uint8_t> pmt;
+        if(path.empty()||!retail_asset_read_relative_inflated(store,path,pmt,256u<<20,&error)||pmt.size()<16){
+            ++totals["banks not read"];if(totals["banks not read"]<=5)std::printf("%03x %s: not read (%s)\n",id,path.c_str(),error.c_str());continue;}
         const auto system=u32(pmt.data()+8),video=u32(pmt.data()+12);
         if(std::uint64_t(system)+video+16u>pmt.size()){++totals["banks malformed"];continue;}
         PcPmtResources r;r.system.assign(pmt.begin()+16,pmt.begin()+16+system);r.video=pmt.data()+16+system;r.video_size=video;r.pack_name=pack;
@@ -112,7 +122,10 @@ int main(int argc,char** argv){
         if(!count)continue;
         pmt_textures_begin_42e850(r,c);
         const auto first=c.texture_record_957be0;
-        // The real path, then the reasons.
+        // The real path, then the reasons. Several table entries can share a file stem (cs_LRBK_PALM_pmt): the
+        // replacement code counts per stem, so this bank's share is the difference.
+        PmtTextureReplacementBank before{};
+        if(const auto it=pmt_texture_replacement_banks().find(pack);it!=pmt_texture_replacement_banks().end())before=it->second;
         CountingDevice device;
         try{while(!pmt_textures_step_42e8c0(r,c,device)){}}catch(const std::exception& x){std::printf("%02x %s: %s\n",id,pack.c_str(),x.what());continue;}
         const auto stem=lower(pack);const bool has_folder=folders.count(stem)!=0;if(has_folder)named_folders.insert(stem);
@@ -141,15 +154,18 @@ int main(int argc,char** argv){
         }
         PmtTextureReplacementBank b{};
         if(const auto it=pmt_texture_replacement_banks().find(pack);it!=pmt_texture_replacement_banks().end())b=it->second;
+        b.replaced-=before.replaced;b.other-=before.other;b.ambiguous-=before.ambiguous;
         std::printf("%03x %-34s %s %3u textures: replaced %3u (usable match %u), no file %u, own folder other index %u, only in other folders %u",
             id,pack.c_str(),has_folder?"folder   ":"no folder",count,b.replaced,matched,nofile,other_index,elsewhere);
+        if(any)std::printf(" (any folder: %u taken, %u ambiguous)",b.other,b.ambiguous);
         if(!other_folders.empty()){std::string s;for(const auto& f:other_folders)s+=(s.empty()?"":", ")+f;std::printf(" [%s]",s.c_str());}
         for(const auto& [why,n]:refused)std::printf(", refused %u (%s)",n,why.c_str());
         std::printf("\n");
         totals["textures"]+=count;totals["replaced"]+=b.replaced;totals["no file"]+=nofile;totals["only in other folders"]+=elsewhere;
         totals["own folder other index"]+=other_index;
+        if(any){totals["any folder: taken"]+=b.other;totals["any folder: ambiguous"]+=b.ambiguous;}
         for(const auto& [why,n]:refused)totals["refused: "+why]+=n;
-        if(b.replaced!=matched)std::printf("    note: the real path replaced %u, the header check expected %u\n",b.replaced,matched);
+        if(b.replaced-b.other!=matched)std::printf("    note: the real path replaced %u under Tweaks' names, the header check expected %u\n",b.replaced-b.other,matched);
     }
     std::printf("totals:");for(const auto& [k,v]:totals)std::printf(" %s %u;",k.c_str(),v);std::printf("\n");
     for(const auto& f:folders)if(!f.empty()&&f.rfind("spr_",0)!=0&&!named_folders.count(f))std::printf("pack folder no PMT bank names: %s\n",f.c_str());
