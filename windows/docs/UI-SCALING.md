@@ -56,7 +56,15 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
 3. The put_scroll positions, the ghost gap and the time-attack goal, as Tweaks.
 4. A muted visual check at 16:9 across race, time attack and C2C screens, against Tweaks frames if the owner has them.
    Then the default becomes 1, as Tweaks.
-5. `UILetterboxing`.
+5. `UILetterboxing` (**built**, 9214ba3, sana 56327; not yet seen in game). Tweaks' D3DEndScene bars:
+   - black left and right of the centred 4:3 over the finished frame;
+   - 1 (the default) outside the race only, 2 always, 0 none, and only with UIScalingMode 1 or 2;
+   - "the race" is Tweaks' is_in_game: 78026C GAME, SMPAUSEMENU, GOAL, TIMEUP, OUTRUNMILES or TRYAGAIN, or START
+     once its stage 8367A8 is 65.
+   Here:
+   - the desktop present overlay clears the two rectangles (ClearView) before the badge and the F6 panel;
+   - they end at the device's own 4:3 edges, so no 2D pixel is covered (Tweaks' half-pixel quads overlap one);
+   - no bars while the 2D is not in the centred 4:3 (a 4:3 output, or UIScalingMode 0).
 
 Triple screens: the HUD stays on the centre monitor in both planar and three-view modes, which is STD-007. With
 three views, mode 1's spacing applies to the centre panel's 16:9 only.
