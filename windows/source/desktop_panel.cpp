@@ -9,7 +9,12 @@
 #include "shim_input.hpp"
 #include "triple_screens.hpp"
 #include "wheel_input.hpp"
+#include "display_fit.hpp"
+#include "renderer.hpp"
+#include "platform/native_runtime.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/runtime_input.hpp"
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include "dbce_panel.h"
@@ -18,6 +23,7 @@
 #include "backends/imgui_impl_dx11.h"
 #include <windows.h>
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -32,6 +38,13 @@ struct Panel {
     LARGE_INTEGER freq{},last{};
 };
 Panel p;
+// UILetterboxing, outside Panel (desktop_panel_configure resets that): the race state the game thread saw last
+// (input_filter), for the present overlay; and the context's ClearView interface (D3D11.1), queried once per context.
+struct Letterbox {
+    std::atomic<bool> in_race{false};
+    ID3D11DeviceContext* context_for{};ID3D11DeviceContext1* context1{};bool missing_logged{};
+};
+Letterbox lb;
 // The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
@@ -212,6 +225,30 @@ void draw_badge(const std::string& text,int w,int h){
     if(recording)list->AddCircleFilled(ImVec2(at.x+dot*0.4f,at.y+size.y*0.5f),dot*0.35f,tone);
     list->AddText(ImVec2(at.x+dot,at.y),tone,text.c_str());
 }
+// UILetterboxing (pc_screen.hpp): black outside the centred 4:3, on the back buffer before the badge and the panel.
+// ClearView takes no pipeline state, so the renderer's bindings are untouched. Without ID3D11DeviceContext1 no bars
+// are drawn, and the log says so once.
+void letterbox(ID3D11DeviceContext* ctx,ID3D11RenderTargetView* view,unsigned width,unsigned height){
+    using namespace xbox_runtime;
+    if(!platform::pc_letterbox_now(platform::g_pc_ui_letterboxing,g_ui_scaling_mode,lb.in_race.load(std::memory_order_relaxed)))return;
+    const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect,double(width)/double(height));
+    if(!ui.on||ui.aspect!=4./3.)return;   // the 2D is not in the centred 4:3 (4:3 output, or UIScalingMode 0)
+    const auto bars=platform::pc_letterbox_bars(std::int32_t(width),std::int32_t(height));
+    if(!bars.any())return;
+    if(ctx!=lb.context_for){
+        if(lb.context1){lb.context1->Release();lb.context1=nullptr;}
+        lb.context_for=ctx;
+        if(FAILED(ctx->QueryInterface(__uuidof(ID3D11DeviceContext1),reinterpret_cast<void**>(&lb.context1))))lb.context1=nullptr;
+        if(!lb.context1&&!lb.missing_logged){lb.missing_logged=true;
+            log_line("UILetterboxing: the D3D11 context has no ID3D11DeviceContext1 (ClearView); no bars are drawn");}
+    }
+    if(!lb.context1)return;
+    D3D11_RECT r[2]{};UINT n=0;
+    if(bars.left_end>0)r[n++]=D3D11_RECT{0,0,LONG(bars.left_end),LONG(height)};
+    if(bars.right_begin<bars.width)r[n++]=D3D11_RECT{LONG(bars.right_begin),0,LONG(bars.width),LONG(height)};
+    const FLOAT black[4]{0.f,0.f,0.f,1.f};
+    lb.context1->ClearView(view,black,r,n);
+}
 void release_backend(){
     if(p.backend){ImGui_ImplDX11_Shutdown();p.backend=false;}
     p.device=nullptr;
@@ -227,6 +264,8 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
             log_line(p.input?"F6 input attached to the game window":"F6 input hook FAILED; the dev channel still opens it");
         }
     }
+    // UILetterboxing's bars first, every frame, so the badge and the panel are drawn over them.
+    if(context&&view&&width&&height)letterbox(static_cast<ID3D11DeviceContext*>(context),static_cast<ID3D11RenderTargetView*>(view),width,height);
     // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
     const bool open=!p.playback&&dbce::panel::IsOpen();
     const auto badge=shim_input_recording_badge();
@@ -325,6 +364,8 @@ void desktop_panel_neutral_input(platform::NativeInputState& out){
 namespace {
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(p.inner)p.inner(out,rt);
+    // UILetterboxing: the race state for the present overlay (78026C, and START's stage 8367A8).
+    if(rt)lb.in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
     const bool open=desktop_panel_open();
     if(open!=p.was_open){desktop_keys().fill(0);p.was_open=open;}
     if(open)desktop_panel_neutral_input(out);
@@ -342,6 +383,8 @@ void desktop_panel_shutdown(){
     if(!p.configured)return;
     xbox_runtime::present_overlay()=nullptr;
     release_backend();
+    if(lb.context1){lb.context1->Release();lb.context1=nullptr;}
+    lb.context_for=nullptr;
     if(ImGui::GetCurrentContext())ImGui::DestroyContext();
     p.configured=false;
 }

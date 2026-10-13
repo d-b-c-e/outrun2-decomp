@@ -3,6 +3,7 @@
 // game draws. 320 is the PC's 4:3 screen (6281C8 / 5DA2D4); the widescreen
 // option (Y) sets 240*16/9 so the screen-bound visibility tests (4F02D0) keep
 // objects until they leave the wider view.
+#include <cmath>
 #include <cstdint>
 #include <string>
 namespace outrun::platform {
@@ -76,6 +77,37 @@ inline bool pc_show_outrun_miles_4413e2(bool show,bool alternate,std::uint32_t t
 inline std::string pc_outrun_miles_status(const std::string& status,const std::string& label,float miles){
     const std::int32_t n=(miles>-2147483904.0f&&miles<2147483648.0f)?std::int32_t(miles):std::int32_t(0x80000000u);
     return status+" - "+label+" "+std::to_string(n);
+}
+// [Graphics] UILetterboxing (the Tweaks key, 1 by default there and here; Tweaks' overlay/hooks_overlay.cpp D3DEndScene):
+// black bars left and right of the centred 4:3 over the finished frame, under the desktop's overlay (the REC / PLAYBACK
+// badge and the F6 panel stay on top; windows/source/desktop_panel.cpp). 0 none, 1 outside the race only, 2 always;
+// only with UIScalingMode 1 or 2, as Tweaks, and only while the device keeps the 2D in that 4:3 (widescreen or a span).
+inline int g_pc_ui_letterboxing=1;
+// Tweaks' is_in_game: 78026C in GAME 0x10, SMPAUSEMENU 0x12, GOAL 0x13, TIMEUP 0x14, OUTRUNMILES 0x22 or TRYAGAIN 0x23,
+// or START 0xD once its stage 8367A8 (NativeStartModeState::stage, native_runtime.cpp: 65 just before GAME) is 65.
+inline bool pc_letterbox_in_race(std::uint32_t mode_78026c,std::uint32_t start_stage_8367a8){
+    const std::uint32_t m=mode_78026c;
+    return m==0x10u||m==0x12u||m==0x13u||m==0x14u||m==0x22u||m==0x23u||(m==0x0du&&start_stage_8367a8==65u);
+}
+// Tweaks' rule: the setting above 0 and UIScalingMode above 0, then always (2) or outside the race (1).
+inline bool pc_letterbox_now(int setting,unsigned ui_scaling_mode,bool in_race){
+    return setting>0&&ui_scaling_mode>0u&&(setting>=2||!in_race);
+}
+// The bars in back buffer pixels: [0, left_end) and [right_begin, width). They end at the device's own 4:3 edges
+// (xbox/source/d3d11_d3d9.cpp apply_state: ox = floor((W - H * 4/3) / 2), the scissor's right edge lround(ox +
+// H * 4/3) in float), so no bar covers a pixel of the 2D. Tweaks' half-pixel quads overlap one content pixel instead.
+// No bars when the frame is not wider than 4:3.
+struct PcLetterboxBars {
+    std::int32_t left_end{},right_begin{},width{};
+    bool any()const{return left_end>0||right_begin<width;}
+};
+inline PcLetterboxBars pc_letterbox_bars(std::int32_t w,std::int32_t h){
+    if(w<=0||h<=0)return {};
+    const double content=double(h)*4./3.;
+    if(double(w)<=content)return {0,w,w};
+    const double ox=std::floor((double(w)-content)/2.);
+    const long right=std::lround(float(ox)+float(content));
+    return {std::int32_t(ox),right<long(w)?std::int32_t(right):w,w};
 }
 // [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
 // and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),

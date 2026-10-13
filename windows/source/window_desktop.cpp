@@ -451,6 +451,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(!note.empty())std::printf("settings: [Graphics] %s\n",note.c_str());
         if(outrun::xbox_runtime::g_ui_scaling_mode==0u)
             std::printf("settings: UI scaling 0: the 2D stretched over the 16:9 frame (over the center panel on a span)\n");}
+    // [Graphics] UILetterboxing, the Tweaks key (1 by default, as there; clamped to 0..2 as Tweaks reads it): black bars
+    // outside the centered 4:3, 1 outside the race, 2 always, 0 none; only with UIScalingMode 1 or 2 (pc_screen.hpp).
+    {   const int v=settings.integer("Graphics","UILetterboxing",1);
+        outrun::platform::g_pc_ui_letterboxing=v<0?0:v>2?2:v;
+        if(outrun::platform::g_pc_ui_letterboxing==0)std::printf("settings: UI letterboxing off\n");
+        else if(outrun::xbox_runtime::g_ui_scaling_mode==0u)std::printf("settings: UI letterboxing inactive with UI scaling 0 (as Tweaks)\n");
+        else if(outrun::platform::g_pc_ui_letterboxing==2)std::printf("settings: UI letterboxing always on (in the race too)\n");}
     // [Graphics] ScreenEdgeCullFix, the Tweaks key (on unless set false, as there): course objects culled at the
     // widescreen edge rather than the 4:3 one.
     outrun::platform::g_pc_screen_edge_cull_fix=settings.flag("Graphics","ScreenEdgeCullFix",true);
