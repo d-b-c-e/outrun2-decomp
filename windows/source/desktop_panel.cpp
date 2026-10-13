@@ -55,6 +55,7 @@ struct Values {
     bool telemetry{true};int layout{};
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int sensitivity{100},dead_zone{};
+    bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -95,6 +96,13 @@ void page_controls(bool){
     {const int before=v.dead_zone;
      if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))
          keep(&v.dead_zone,before,[&]{return save("Wheel","SteeringDeadZone",fraction(v.dead_zone));});}
+    // [Misc] DefaultManualTransmission (pc_screen.hpp), read at start, so it applies at the next start.
+    {const bool before=v.manual_default;
+     if(dbce::panel::OffOn("Manual transmission by default",&v.manual_default,
+         "At the next start, the transmission menu opens on Manual instead of Automatic, as Tweaks' "
+         "DefaultManualTransmission. Its opening animation still shows Automatic briefly."))
+         keep(&v.manual_default,before,[&]{return save("Misc","DefaultManualTransmission",v.manual_default?"true":"false");});}
+    if(v.manual_default!=v.manual_default_start)dbce::panel::Text("The choice applies at the next game start.");
 }
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
@@ -338,6 +346,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
     {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
+    v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
      v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
