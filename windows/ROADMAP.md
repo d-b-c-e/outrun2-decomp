@@ -84,6 +84,22 @@ go upstream as small pull requests (first: `tweaks-exe`).
        names it.
 7. Upstream bugs, as pull requests: #2 30-second hang at the end of a race,
    #3 rival drift score stays at zero, #4 level impossible to win.
+   - #2: source pass 2026-10-13 (nene; sana 61501). The symptom is NOT confirmed on this build; nothing changed.
+     - Repro: Coast 2 Coast > Flagman 1 > Novice; about 30 s from GOAL to OutRun Miles, and no flagman rank.
+     - Mechanism (race_end_modes.cpp):
+       - mode19_init_49c9c0 sets the GOAL countdown to 0x4B0 (20 s) and shortens it only for variants 2 to 5.
+       - mode19_control_49cc50 has no input skip and leaves for mode 34 when the countdown is below 0.
+       - For C2C (variant 6) only gad_goal_498670 case 6 shortens it: rows 3 s, the rank sprite 5C2184[grade] and
+         voice 0xA8, the grade voice at 4 s, then at 6 s 43F900(0x3C), so GOAL lasts about 7 s.
+       - A display that does not reach that step gives exactly the issue's symptoms.
+     - Every service on that path is ported (race_end_runtime.cpp:646-690, 956). A display exception, though, is only a
+       soft fault (race_end_runtime.cpp:1010-1016) counted in the HUD report, so a faulting step would stall silently.
+     - Diagnostic recipe: finish one C2C mission naturally, then quit. The exit log (OutRunXbox.log, xbox/source/main.cpp:624
+       native_race_hud_report) lists "missing (first frame): pc@frame xN".
+       - If the rank shows and GOAL ends in about 7 s, #2 does not reproduce here.
+       - Otherwise the PC names the call to fix.
+     - A bounded synthetic entry through the native runtime harness could test the display sequencing without a drive.
+       It must be labelled separately from a natural finish.
 
 ## Tweaks parity
 
