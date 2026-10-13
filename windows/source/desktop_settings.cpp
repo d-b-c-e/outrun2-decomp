@@ -1,5 +1,7 @@
 #include "desktop_settings.hpp"
+#include <windows.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cstdio>
@@ -131,11 +133,20 @@ bool write_section(const std::string& path,const std::string& section,const std:
         lines.insert(lines.begin()+std::ptrdiff_t(start),block.begin(),block.end());
     }
     text.clear();for(const auto& l:lines)text+=l;
-    const auto temp=path+".tmp";
-    {std::ofstream f(temp,std::ios::binary|std::ios::trunc);if(!f){error="cannot write "+temp;return false;}
-     f<<text;if(!f){error="cannot write "+temp;return false;}}
-    std::remove(path.c_str());
-    if(std::rename(temp.c_str(),path.c_str())!=0){error="cannot replace "+path;return false;}
+    // Keep the old file in place until the replacement is complete. A unique,
+    // create-new staging name also leaves any earlier failed attempt untouched.
+    static std::atomic<unsigned long> next_temp{0};
+    const auto temp=path+".tmp."+std::to_string(GetCurrentProcessId())+"."+std::to_string(++next_temp);
+    const HANDLE file=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE){error="cannot create "+temp;return false;}
+    DWORD written=0;
+    const bool saved=text.size()<=MAXDWORD&&WriteFile(file,text.data(),DWORD(text.size()),&written,nullptr)&&
+                     written==text.size()&&FlushFileBuffers(file);
+    const bool closed=CloseHandle(file)!=0;
+    if(!saved||!closed){DeleteFileA(temp.c_str());error="cannot write "+temp;return false;}
+    if(!MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){
+        DeleteFileA(temp.c_str());error="cannot replace "+path;return false;
+    }
     return true;
 }
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing){

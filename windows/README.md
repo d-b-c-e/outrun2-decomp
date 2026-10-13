@@ -62,6 +62,9 @@ binding.
 `runtime.log` lists every controller (instance and product GUIDs, name, type,
 axes, buttons, hats, force feedback); for the first two minutes it also logs
 every button pressed and the axes moved on the opened devices.
+The ordinary wheel path rescans controllers every two seconds. A configured
+device connected after launch opens under its saved instance GUID; disconnects
+release its handle and neutralize its actions. Live rig qualification is pending.
 
 H-pattern: each gate holds its gear; the build pulses shift up / down, one every
 other frame, until the car's gear (+208) matches, and stops after four pulses

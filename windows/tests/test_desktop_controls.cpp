@@ -83,12 +83,21 @@ void test_import(){
 void test_write_section(){
     char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
     const std::string path=std::string(dir)+"or2_desktop_settings_test.ini";
-    {std::ofstream f(path,std::ios::binary);f<<"; head\r\n[Wheel]\r\nSteeringSensitivity = 1.0\r\n\r\n[Controls]\r\nSteeringDeadZone = 0.0\r\nold = x\r\n\r\n[Window]\r\nWindowedBorderless = true\r\n";}
+    const std::string original="; head\r\n[Wheel]\r\nSteeringSensitivity = 1.0\r\n\r\n[Controls]\r\nSteeringDeadZone = 0.0\r\nold = x\r\n\r\n[OwnerCustom]\r\nKeep = exactly this ; owner value\r\n\r\n[Window]\r\nWindowedBorderless = true\r\n";
+    {std::ofstream f(path,std::ios::binary);f<<original;}
     std::string error;
+    // Another process can hold the original without FILE_SHARE_DELETE. The
+    // replacement must fail without deleting or changing the owner's file.
+    const HANDLE held=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
+    check(held!=INVALID_HANDLE_VALUE,"open original without delete sharing");
+    check(!write_section(path,"Controls",{"Schema = 1","steer ="},error),"locked replacement refuses");
+    {std::ifstream f(path,std::ios::binary);std::stringstream s;s<<f.rdbuf();check(s.str()==original,"failed replacement preserves original bytes");}
+    CloseHandle(held);
+    error.clear();
     check(write_section(path,"Controls",{"Schema = 1","steer ="},error),"replace: "+error);
     check(write_section(path,"ControlsImport",{"From = test"},error),"append: "+error);
     std::ifstream f(path,std::ios::binary);std::stringstream s;s<<f.rdbuf();
-    check(s.str()=="; head\r\n[Wheel]\r\nSteeringSensitivity = 1.0\r\n\r\n[Controls]\r\nSchema = 1\r\nsteer =\r\n\r\n[Window]\r\nWindowedBorderless = true\r\n\r\n[ControlsImport]\r\nFrom = test\r\n",
+    check(s.str()=="; head\r\n[Wheel]\r\nSteeringSensitivity = 1.0\r\n\r\n[Controls]\r\nSchema = 1\r\nsteer =\r\n\r\n[OwnerCustom]\r\nKeep = exactly this ; owner value\r\n\r\n[Window]\r\nWindowedBorderless = true\r\n\r\n[ControlsImport]\r\nFrom = test\r\n",
           "file after the writes:\n"+s.str());
     Ini ini;ini.load(path);
     check(ini.section_lines("Controls").size()==3&&ini.section_lines("controls")[0]=="Schema = 1","raw section lines, case-insensitive section name");
