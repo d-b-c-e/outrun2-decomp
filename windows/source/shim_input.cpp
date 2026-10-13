@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 namespace outrun::desktop {
 namespace {
 namespace h=dbce::shim::hosting;
@@ -87,8 +88,18 @@ struct Ordinary {
     std::shared_ptr<sh::WheelFfbBridge> bridge;   // with the wheel output and Input = Shim (wheelffb_bridge.hpp)
     BridgeOwner owner;
     StartReports reports;
+    std::vector<std::string> owned;            // the profile's device products: left out of the game's own pad path
 };
 Ordinary o;
+
+// xbox_runtime::gamepad_choice for ordinary play: a WGI Gamepad of a product this profile binds is not read by the game's
+// own pad path (src/input/dual_sense.cpp), so its buttons reach the game only as the profile maps them (sana 44117;
+// C1h run1: a shim-read DualShock 4's Options paused the race and its R1 added a shift). Other pads keep the native path.
+int choose_gamepad(const xbox_runtime::GamepadIdentity* pads,unsigned count){
+    std::vector<PadIdentity> ids;
+    for(unsigned i=0;i<count;++i)ids.push_back(PadIdentity{pads[i].vid,pads[i].pid,{},pads[i].known});
+    return select_pad(ids,o.owned);
+}
 
 // The start report at the first tick comes before the provider's first open, so it lists every bound action as
 // device-missing. It is labelled initial, and a resolved report follows once every profile device is open, or after
@@ -357,7 +368,8 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
 
 std::string shim_input_status_text(){
     if(!o.configured)return {};
-    if(!o.host)return o.started?"the shared input shim did not start (see runtime.log); the keyboard and the pad still drive"
+    if(!o.host)return o.started?(o.owned.empty()?"the shared input shim did not start (see runtime.log); the keyboard and the pad still drive"
+                                                 :"the shared input shim did not start (see runtime.log); the keyboard and any pad the profile does not bind still drive")
                                :"the shared input shim starts with the first frame";
     const auto devices=o.host->device_reports();
     std::size_t open=0;for(const auto& d:devices)if(d.opened)++open;
@@ -382,6 +394,12 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.steer.reset();
     if(parsed.ok)if(const auto* b=dbce::controls::find(parsed.section,"steer"))o.steer=*b;
+    o.owned=parsed.ok?owned_products(parsed.section):std::vector<std::string>{};
+    xbox_runtime::gamepad_choice()=o.owned.empty()?nullptr:choose_gamepad;
+    if(!o.owned.empty()){
+        std::printf("input shim: %zu profile device product(s) left out of the game's own pad path (by product: every pad of one is left out)\n",o.owned.size());
+        std::fflush(stdout);
+    }
     o.folder=folder;
     const auto steering=wheel_steering(settings);   // as wheel_input reads it; non-finite values are the defaults
     o.steering.sensitivity=steering.sensitivity;o.steering.dead_zone=steering.dead_zone;
@@ -455,7 +473,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         (void)o.host->tick();
         if(o.rec.armed())o.rec.set_devices(o.host->device_reports());   // before the first row (the capture's device slots)
         initial_report(*o.host,o.reports);
-        std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); keyboard and pad keep their native paths; "
+        std::printf("input shim: ordinary play on the shim backend ([Input] Backend = Shim); the keyboard and any pad the profile does not bind keep their native paths; "
             "steering sensitivity %g, dead zone %g ([Wheel])\n",double(o.steering.sensitivity),double(o.steering.dead_zone));
         std::fflush(stdout);
     }

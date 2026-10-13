@@ -48,6 +48,7 @@
 namespace outrun::xbox_runtime {
 InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}
 PresentOverlay& present_overlay(){static PresentOverlay overlay=nullptr;return overlay;}
+GamepadChoice& gamepad_choice(){static GamepadChoice choice=nullptr;return choice;}
 std::string& latched_home(){static std::string home;return home;}
 std::string& latched_game_root(){static std::string root;return root;}
 }

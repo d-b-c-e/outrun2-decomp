@@ -464,7 +464,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
         if(outrun::desktop::shim_backend_selected(settings)){
             // [Input] Backend = Shim: the profile's devices through the shared shim (shim_input.hpp). wheel_input is never
-            // configured, so no DirectInput device is opened twice; the pad and the keyboard keep their native paths.
+            // configured, so no DirectInput device is opened twice; the keyboard and any pad the profile does not bind
+            // keep their native paths. A pad of a bound product is left out of the native pad path (gamepad_choice).
             outrun::desktop::shim_input_configure_ordinary(settings,folder);
             outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter_ordinary;
         }else{

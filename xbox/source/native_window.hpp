@@ -16,6 +16,13 @@ InputFilter& input_filter();
 // this header stays free of graphics headers), and the swap chain's full size. Unset on the Xbox and in the PC test build.
 using PresentOverlay=void(*)(void* device,void* context,void* back_buffer_view,unsigned width,unsigned height);
 PresentOverlay& present_overlay();
+// Desktop builds choose which connected WGI Gamepad the game's own pad path reads (platform_api.cpp read_pad), so a
+// device their input profile already reads is not read a second time (windows/docs/INPUT-SHIM.md section 15): given
+// each pad's USB identity (known false when it could not be read), the index of the pad to read, or -1 for none.
+// Unset on the Xbox and in the PC test build: the first pad, as before.
+struct GamepadIdentity { bool known; std::uint16_t vid,pid; };
+using GamepadChoice=int(*)(const GamepadIdentity* pads,unsigned count);
+GamepadChoice& gamepad_choice();
 // A latched (test) desktop process: home() is this run folder and the game folder is only read (data, the EXE image
 // cache). Empty in every other process. Set by the desktop entry point before or2_xbox_main.
 std::string& latched_home();

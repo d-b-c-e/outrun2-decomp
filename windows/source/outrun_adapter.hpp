@@ -113,7 +113,11 @@ private:
 
 // Pre-consumer exclusion for the WGI pad path (R1-F3, P25): a WGI gamepad whose USB identity matches an owned
 // device's product GUID (Data1 = PID << 16 | VID) is dropped before the pad adapter. Returns the index of the pad to
-// read, or -1 when none is left.
-struct PadIdentity { std::uint16_t vid{},pid{}; std::string name; };
+// read, or -1 when none is left. The match is by product, not instance: every pad of an owned product is dropped.
+// With anything owned, a pad whose identity could not be read (known false) is never read: it could be the owned one.
+// Production: the ordinary shim sets it as xbox_runtime::gamepad_choice (shim_input.cpp; sana 44117, C1h run1).
+struct PadIdentity { std::uint16_t vid{},pid{}; std::string name; bool known=true; };
 int select_pad(const std::vector<PadIdentity>& pads,const std::vector<std::string>& owned_products);
+// The distinct product GUIDs a profile's bindings name: what select_pad excludes for that profile.
+std::vector<std::string> owned_products(const dbce::controls::Section& profile);
 }

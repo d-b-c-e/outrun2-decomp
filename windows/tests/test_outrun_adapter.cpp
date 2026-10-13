@@ -257,12 +257,16 @@ void test_hpattern(){
      check(!(o.pc_device.buttons_04&0x2u)&&!o.shift_up,"gate 4 on the next tick: the bit drops");
      o=q.tick();
      check((o.pc_device.buttons_04&0x2u)&&o.shift_up,"then a new pulse with its own edge");}
-    // A scene change between race modes (16 -> 18): no pulse on the change's tick, then a fresh sequence at once rather
-    // than the old one's 250 ms wait.
+    // The race's pause (16 -> 18 -> 16; sana 44117): no pulse while paused, its first tick or after, and no retry spent;
+    // on the resume a fresh sequence starts after the change's released tick, rather than the old one's 250 ms wait.
     r.view.mode=18;out=r.tick();
-    check(!(out.pc_device.buttons_04&0x2u),"no pulse on the scene change's own tick");
+    check(!(out.pc_device.buttons_04&0x2u),"no pulse on the pause's own tick");
+    for(int i=0;i<40;++i){out=r.tick();check(!(out.pc_device.buttons_04&0x2u)&&!out.shift_up,"no pulse while paused");}   // 640 ms
+    check(r.adapter->gearbox().state()!=HPattern::State::Stopped,"a pause spends no retry");
+    r.view.mode=16;out=r.tick();
+    check(!(out.pc_device.buttons_04&0x2u),"no pulse on the resume's own tick");
     out=r.tick();
-    check((out.pc_device.buttons_04&0x2u)&&out.shift_up,"a fresh sequence starts after the scene change");
+    check((out.pc_device.buttons_04&0x2u)&&out.shift_up,"a fresh sequence starts after the resume");
     r.view.mode=3;out=r.tick();out=r.tick();
     check(!(out.pc_device.buttons_04&0x2u)&&r.adapter->gearbox().state()==HPattern::State::Unavailable,"in a menu the gearbox is unavailable");
 }
@@ -447,10 +451,99 @@ void test_action_table(){
     check(std::string(outrun_unavailable_reason("gear9"))=="unknown action","an action outside the contract is unknown");
 }
 
+// A gate (or any shifter button) is read once it was seen released: press and release it outside the race, where it
+// sends nothing, then come back to the mode the test was in (its own scene change follows on the next tick).
+void rearm(Rig& r,std::size_t device,std::initializer_list<int> buttons){
+    const auto mode=r.view.mode;r.view.mode=3;
+    for(int b:buttons)r.dev(device).state.buttons[b]=0x80;
+    r.tick();
+    for(int b:buttons)r.dev(device).state.buttons[b]=0;
+    r.tick();r.view.mode=mode;
+}
+bool up_bit(const NativeInputState& o){return (o.pc_device.buttons_04&0x2u)!=0;}
+bool down_bit(const NativeInputState& o){return (o.pc_device.buttons_04&0x8u)!=0;}
+
+// B (sana 44117; C1h run1): the race's pause (mode 18) takes no shift, so the gearbox is not stepped there: no pulse, no
+// retry, no deadline. The pause's scene changes reset it; on the resume the gate held then starts from the consumed gear.
+void test_hpattern_pause(){
+    const auto prof=profile({sb("gear1",0),sb("gear2",1),sb("gear3",2),sb("gear4",3)},"H-pattern");
+    {   // A gate's onset during the pause: nothing until the resume, then the first step toward it.
+        Rig r(false,prof,true);r.view.car=true;r.view.gear=1;r.view.mode=16;
+        rearm(r,r.s,{2});r.tick();
+        r.view.mode=18;r.tick();
+        r.dev(r.s).state.buttons[2]=0x80;   // gate 3
+        for(int i=0;i<40;++i){const auto o=r.tick();check(!up_bit(o)&&!down_bit(o)&&!o.shift_up,"a gate's onset in the pause: no pulse");}
+        r.view.mode=16;check(!up_bit(r.tick()),"the resume's own tick: released");
+        const auto o=r.tick();
+        check(up_bit(o)&&o.shift_up,"then the first step toward gate 3, from gear 1");
+    }
+    {   // A gate held across the pause: the step it was waiting on is not retried there, and it is not Stopped after.
+        Rig r(false,prof,true);r.view.car=true;r.view.gear=1;r.view.mode=16;
+        rearm(r,r.s,{3});r.tick();
+        r.dev(r.s).state.buttons[3]=0x80;   // gate 4
+        check(up_bit(r.tick()),"gate 4 from gear 1: the first pulse");
+        r.tick();r.view.gear=2;             // the game took one step
+        r.view.mode=18;
+        for(int i=0;i<100;++i){const auto o=r.tick();check(!up_bit(o)&&!down_bit(o),"held across the pause: no pulse");}   // 1.6 s
+        check(r.adapter->gearbox().state()!=HPattern::State::Stopped,"1.6 s paused: no retry spent, not Stopped");
+        r.view.mode=16;r.tick();
+        check(up_bit(r.tick()),"the resume continues from gear 2 toward gate 4");
+    }
+    {   // The gate changed during the pause: the resume follows the gate held then.
+        Rig r(false,prof,true);r.view.car=true;r.view.gear=3;r.view.mode=16;
+        rearm(r,r.s,{0,2});r.tick();
+        r.dev(r.s).state.buttons[2]=0x80;r.tick();   // gate 3 at gear 3: at the target
+        r.view.mode=18;r.tick();
+        r.dev(r.s).state.buttons[2]=0;r.tick();r.dev(r.s).state.buttons[0]=0x80;   // through neutral to gate 1
+        for(int i=0;i<20;++i){const auto o=r.tick();check(!up_bit(o)&&!down_bit(o),"the gate changed in the pause: no pulse");}
+        r.view.mode=16;r.tick();
+        const auto o=r.tick();
+        check(down_bit(o)&&o.shift_down,"the resume steps down toward gate 1, the gate held now");
+    }
+}
+
+// A (sana 44117; C1h run1): the ordinary shim leaves a pad of a product its profile binds out of the game's own pad path,
+// so a button reaches the game only as the profile maps it. The production seam: owned_products and select_pad (what
+// shim_input.cpp's gamepad_choice runs before read_pad reads a pad), the pad adapter (src/input/dual_sense.cpp) on the
+// sample read_pad leaves, then the adapter. The owned pad is the profile's device seen as a WGI Gamepad, holding the
+// C1h gate buttons: Options (gear5), R1 (gear2), Circle (gear4), L1 (gear1).
+void test_owned_pad_path(){
+    const auto prof=profile({Steer,Throttle,wb("gear1",4),wb("gear2",5),wb("gear3",3),wb("gear4",2),wb("gear5",9)},"H-pattern");
+    const auto owned=owned_products(read_profile(prof).section);
+    check(owned==std::vector<std::string>{WP},"the profile's one device product");
+    const PadIdentity mine{0x346e,0x0006,"the profile's device as a WGI Gamepad"},other{0x045e,0x02ff,"Xbox Controller"};
+    const PadIdentity unknown{0,0,"identity unreadable",false};
+    check(select_pad({mine},owned)==-1,"only the owned pad: none is read");
+    check(select_pad({mine,other},owned)==1&&select_pad({other,mine},owned)==0,"an unrelated pad is still read, wherever it is listed");
+    check(select_pad({mine,mine},owned)==-1,"by product: a second pad of the owned product is left out too");
+    check(select_pad({unknown,other},owned)==1&&select_pad({unknown},owned)==-1,"an unidentified pad is never read while a product is owned");
+    check(select_pad({unknown},{})==0&&select_pad({mine},{})==0,"nothing owned: the first pad, as before (the Xbox console)");
+    // One race tick with a gate held on the device (shim) and the pad path's sample: the owned pad read, or left out.
+    auto race=[&](int device_button,std::uint32_t pad_buttons,std::uint32_t gear,int pick)->NativeInputState{
+        Rig r(false,prof);r.view.car=true;r.view.gear=gear;r.view.mode=16;
+        rearm(r,r.w,{device_button});r.tick();
+        r.dev(r.w).state.buttons[device_button]=0x80;
+        ps5::PadSample s;s.connected=true;s.buttons=pad_buttons;
+        r.sample=pick<0?ps5::PadSample{}:s;   // read_pad: the chosen pad's reading, or nothing
+        return r.tick();
+    };
+    const int pick=select_pad({mine},owned);
+    check((race(9,ps5::Options,5,0).pc_device.buttons_04&0x1u)!=0,"read twice (C1h run1): the pad path's Options holds the start bit (the pause)");
+    check((race(9,ps5::Options,5,pick).pc_device.buttons_04&0x1u)==0,"left out: no start bit from gate 5");
+    const auto twice=race(5,ps5::R1,4,0),once=race(5,ps5::R1,4,pick);
+    check(up_bit(twice)&&down_bit(twice),"read twice: gate 2 from gear 4 carries the pad path's held shift-up bit beside the down pulse");
+    check(!up_bit(once)&&down_bit(once)&&once.shift_down,"left out: gate 2 from gear 4 is the gearbox's down pulse alone");
+    check((race(2,ps5::Circle,4,0).pc_device.buttons_04&0x4u)!=0&&(race(2,ps5::Circle,4,pick).pc_device.buttons_04&0x4u)==0,"gate 4 (Circle): no back bit once left out");
+    const auto l1=race(4,ps5::L1,1,pick);
+    check(!down_bit(l1)&&!up_bit(l1),"gate 1 at gear 1 (L1): no held shift-down bit once left out");
+    // An unrelated pad keeps its native path: its Circle is the game's back.
+    check((race(9,ps5::Circle,5,select_pad({mine,other},owned)).pc_device.buttons_04&0x4u)!=0,"an unrelated pad's buttons still reach the game");
+}
+
 int main(){
     try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
         test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();
-        test_action_table();}
+        test_action_table();test_hpattern_pause();test_owned_pad_path();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;

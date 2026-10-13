@@ -149,7 +149,12 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
         bool gates[6];
         static constexpr const char* G[6]{"gear1","gear2","gear3","gear4","gear5","gear6"};
         for(int k=0;k<6;++k)gates[k]=held(f,G[k]);
-        const int dir=scene_change?0:gearbox_.step(gates,race,g.car,g.gear,f.boundary_us);
+        // The race's pause (mode 18) takes no shift (C1h run1: 16 pulses there, no gear change), so the gearbox is not
+        // stepped: no pulse, no retry spent, no deadline running (sana 44117). The pause's own scene changes reset it,
+        // so on the resume the gate held then starts afresh from the consumed gear, after a released tick.
+        const bool paused=g.mode==18u;
+        if(paused&&!scene_change)gearbox_.released_tick();
+        const int dir=scene_change||paused?0:gearbox_.step(gates,race,g.car,g.gear,f.boundary_us);
         if(dir>0)pulse=0x2u;else if(dir<0)pulse=0x8u;
     }
     signals_.gearbox=gearbox_.state();
@@ -228,6 +233,7 @@ void Adapter::apply_neutral(bool latched,platform::NativeInputState& out){
 
 int select_pad(const std::vector<PadIdentity>& pads,const std::vector<std::string>& owned){
     for(std::size_t i=0;i<pads.size();++i){
+        if(!owned.empty()&&!pads[i].known)continue;   // unidentified: it could be the owned pad
         const std::uint32_t id=std::uint32_t(pads[i].pid)<<16|pads[i].vid;
         bool mine=false;
         for(const auto& prod:owned){
@@ -237,5 +243,12 @@ int select_pad(const std::vector<PadIdentity>& pads,const std::vector<std::strin
         if(!mine)return int(i);
     }
     return -1;
+}
+
+std::vector<std::string> owned_products(const dbce::controls::Section& profile){
+    std::vector<std::string> out;
+    for(const auto& e:profile.bound)
+        if(!e.binding.prod.empty()&&std::find(out.begin(),out.end(),e.binding.prod)==out.end())out.push_back(e.binding.prod);
+    return out;
 }
 }

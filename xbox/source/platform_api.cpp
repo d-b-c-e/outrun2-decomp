@@ -10,20 +10,55 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 namespace {
 namespace wgi=winrt::Windows::Gaming::Input;
 bool running=true;
 std::string retail_root;
 // -1..1 (y up) to the DualSense byte (0..255, 128 centre, y down).
 std::uint8_t axis(double v,bool invert){v=std::clamp(invert?-v:v,-1.0,1.0);return std::uint8_t(std::clamp<long>(std::lround(128.0+v*(v<0?128.0:127.0)),0,255));}
-// The first connected gamepad, in the shared DualSense layout (src/input/dual_sense.hpp).
+// A pad's USB identity, read once per pad (RawGameController); known false when it cannot be read. The cache holds
+// the pads it has seen, so a pad's address is never reused for another while cached.
+outrun::xbox_runtime::GamepadIdentity identity(const wgi::Gamepad& pad){
+    static std::vector<std::pair<wgi::Gamepad,outrun::xbox_runtime::GamepadIdentity>> cache;
+    for(const auto& c:cache)if(c.first==pad)return c.second;
+    outrun::xbox_runtime::GamepadIdentity id{false,0,0};
+    try{if(const auto raw=wgi::RawGameController::FromGameController(pad))id={true,raw.HardwareVendorId(),raw.HardwareProductId()};}
+    catch(...){}
+    if(cache.size()>=16)cache.clear();
+    cache.emplace_back(pad,id);
+    return id;
+}
+// The desktop's choice (native_window.hpp gamepad_choice), logged whenever the pads or the choice change.
+int choose_pad(const winrt::Windows::Foundation::Collections::IVectorView<wgi::Gamepad>& pads){
+    const auto choice=outrun::xbox_runtime::gamepad_choice();
+    if(!choice)return 0;
+    std::vector<outrun::xbox_runtime::GamepadIdentity> ids;
+    for(const auto& pad:pads)ids.push_back(identity(pad));
+    const int pick=choice(ids.data(),unsigned(ids.size()));
+    static std::string last;
+    std::string line="pad: "+std::to_string(ids.size())+" WGI Gamepad(s);";
+    for(std::size_t i=0;i<ids.size();++i){
+        char id[32];
+        if(ids[i].known)std::snprintf(id,sizeof id,"VID %04X PID %04X",unsigned(ids[i].vid),unsigned(ids[i].pid));
+        else std::snprintf(id,sizeof id,"identity unreadable");
+        line+=" ["+std::to_string(i)+"] "+id+(int(i)==pick?" read by the game's pad path":pick<0||int(i)<pick?" left out (the input profile reads it, or it cannot be identified)":" not read");
+    }
+    if(line!=last){std::printf("%s\n",line.c_str());std::fflush(stdout);last=line;}
+    return pick<int(ids.size())?pick:-1;
+}
+// The first connected gamepad (or the desktop's choice), in the shared DualSense layout (src/input/dual_sense.hpp).
 void read_pad(outrun::ps5::PadSample& sample){
     using namespace outrun::ps5;
     sample=PadSample{};
     const auto pads=wgi::Gamepad::Gamepads();
     if(pads.Size()==0)return;
-    const auto r=pads.GetAt(0).GetCurrentReading();
+    const int pick=choose_pad(pads);
+    if(pick<0)return;
+    const auto r=pads.GetAt(std::uint32_t(pick)).GetCurrentReading();
     sample.connected=true;
     sample.left_x=axis(r.LeftThumbstickX,false);sample.left_y=axis(r.LeftThumbstickY,true);
     sample.right_x=axis(r.RightThumbstickX,false);sample.right_y=axis(r.RightThumbstickY,true);
