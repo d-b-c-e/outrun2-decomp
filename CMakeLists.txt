@@ -202,6 +202,9 @@ add_executable(test_pc_sprite_replacement tests/test_pc_sprite_replacement.cpp)
 # as in windows/CMakeLists.txt.
 file(GLOB OR2_SPRITE_TEST_CLANG_BUILTINS "${CMAKE_GENERATOR_INSTANCE}/VC/Tools/Llvm/x64/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib")
 target_link_libraries(test_pc_sprite_replacement PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
+# Offline report (not a test): a Tweaks texture pack against the game's PMT banks, read only (tools/texture_pack_coverage.cpp).
+add_executable(texture_pack_coverage tools/texture_pack_coverage.cpp)
+target_link_libraries(texture_pack_coverage PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
 add_test(NAME pc_sprite_replacement COMMAND test_pc_sprite_replacement)
 add_executable(test_pc_shader_programs tests/test_pc_shader_programs.cpp)
 target_link_libraries(test_pc_shader_programs PRIVATE outrun_native_runtime)
