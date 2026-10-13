@@ -22,6 +22,14 @@ struct Resolution {
 
 // The resolution of a height in an aspect: 4:3 or 16:9 width (even).
 Resolution resolution_at(std::uint32_t height,bool widescreen);
+// [Window] AutoDetectResolution (the Tweaks key; its GameDefaultConfigOverride): a resolution options.ini left unset
+// (height 0, which the backend would round to the PC's 480) takes the display's height; the backend then snaps it to
+// a listed height and derives the width from the aspect. A set resolution, or no display height (0: the setting off,
+// or a latched run), stays as it is.
+inline Resolution auto_detect_resolution(Resolution r,std::uint32_t display_height){
+    if(r.height==0u&&display_height>0u)r.height=display_height;
+    return r;
+}
 
 struct VideoSettings {
     bool widescreen{};          // 16:9 (Hor+) instead of the PC's 4:3

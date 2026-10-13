@@ -341,6 +341,20 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
         if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
+    // [Window] AutoDetectResolution, the Tweaks key (on unless set false, as there): while options.ini holds no resolution,
+    // the render resolution takes the display's height instead of the PC's 640x480 (xbox/source/main.cpp). The height
+    // is the primary monitor's (a Surround display or a three-monitor span has the same), or 720 for --windowed. A
+    // latched (test) process keeps the PC's default, as a display preference must not reach the harness. No display mode
+    // is changed.
+    {   const bool on=settings.flag("Window","AutoDetectResolution",true);
+        unsigned height=0u;
+        if(on&&!plan.latched){
+            if(!borderless)height=720u;
+            else{MONITORINFO m{};m.cbSize=sizeof m;
+                 if(GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m))height=unsigned(m.rcMonitor.bottom-m.rcMonitor.top);}
+        }
+        outrun::xbox_runtime::g_auto_detect_height=height;
+        if(!on)std::printf("settings: resolution auto-detect off (640x480 while Settings has no resolution)\n");}
     // [Graphics] AnisotropicFiltering, the Tweaks key: 0 (absent) or 1 keeps the game's own filtering, 2..16 the anisotropy
     // level of its linearly filtered textures. An integer 0..16; anything else is logged and 0 applies.
     {   const auto text=settings.text("Graphics","AnisotropicFiltering");unsigned level=0u;bool ok=text.empty();

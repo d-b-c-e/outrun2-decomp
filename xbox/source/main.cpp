@@ -198,6 +198,13 @@ int or2_xbox_main(int argc,char** argv){
     // FRAME RATE default: 60 as on the PC; 120 is chosen in Settings (options.ini overrides).
     g_options.video.frame_rate=60u;
     load_options();
+    {   // [Window] AutoDetectResolution (renderer.hpp g_auto_detect_height): no resolution in options.ini renders at the
+        // display's height, snapped to a listed one by GpuVideoBackend, rather than the PC's 480.
+        const auto before=g_options.video.resolution;
+        g_options.video.resolution=outrun::enhancements::auto_detect_resolution(before,outrun::xbox_runtime::g_auto_detect_height);
+        if(g_options.video.resolution!=before)
+            std::fprintf(stdout,"Xbox options: no resolution in options.ini; the display's height %u (AutoDetectResolution)\n",
+                         unsigned(g_options.video.resolution.height));}
     rt::GameHost diag{};
     XboxAudioOutput audio;
     diag.audio_output=&audio;

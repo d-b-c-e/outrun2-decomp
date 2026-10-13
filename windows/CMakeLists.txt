@@ -216,6 +216,12 @@ target_include_directories(test_default_transmission PRIVATE ${PROJECT_SOURCE_DI
 target_compile_features(test_default_transmission PRIVATE cxx_std_17)
 target_compile_options(test_default_transmission PRIVATE /W4 /WX)
 add_test(NAME default_transmission COMMAND test_default_transmission)
+# AutoDetectResolution (src/enhancements/video.hpp): an unset options.ini resolution takes the display's height.
+add_executable(test_auto_resolution tests/test_auto_resolution.cpp)
+target_include_directories(test_auto_resolution PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_auto_resolution PRIVATE cxx_std_17)
+target_compile_options(test_auto_resolution PRIVATE /W4 /WX)
+add_test(NAME auto_resolution COMMAND test_auto_resolution)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
 add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp
