@@ -98,6 +98,9 @@ public:
     // only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
     std::uint64_t triple_draws{},triple_draws_affine{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
         triple_single_topology{},triple_single_target{},triple_frames{};
+    // Texture CPU copies (texture(); OR2_KEEP_TEXTURE_RGBA=1 keeps them): file textures released after their upload,
+    // the RGBA bytes released, and file textures kept because they were written on the CPU.
+    std::uint64_t rgba_released_textures{},rgba_released_bytes{},rgba_kept_written{};
 private:
     bool native_enabled_{true};
     struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};

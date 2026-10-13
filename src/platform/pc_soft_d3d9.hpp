@@ -70,6 +70,14 @@ public:
         std::string r;for(unsigned k=0;k<16;++k)if(n[k]||released_kinds[k])r+=" k"+std::to_string(k)+"="+std::to_string(n[k])+"/"+std::to_string(l[k])+"/r"+std::to_string(released_kinds[k]);return r;}
     std::uint32_t released_kinds[16]{};
     std::size_t texture_bytes{};
+    std::uint64_t rgba_levels_decoded_again{};   // released file-texture levels decoded again for a CPU reader (rgba_level)
+    // Releases a file texture's RGBA levels, keeping its DDS levels and the [face][level] shape (rgba_level decodes a
+    // level again on a CPU read). False, nothing released, for any other texture or one written on the CPU.
+    // D3D11D3D9Device::texture calls it once the GPU holds the texels.
+    bool release_rgba(std::uint32_t texture);
+    // Diagnostics (tests): the resident RGBA bytes of a texture, and its [face][level] shape.
+    std::size_t texture_rgba_bytes(std::uint32_t texture)const;
+    std::array<std::uint32_t,2> texture_rgba_shape(std::uint32_t texture)const;
     std::uint32_t draw_indexed_primitive(std::uint32_t,std::int32_t,std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override;
     std::uint32_t get_declaration(std::uint32_t,PcVertexElement*)override;
     // Frame control (IDirect3DDevice9::Clear / SetViewport equivalents).
@@ -158,6 +166,11 @@ protected:
         PcShaderProgram program;
         PcDdsTexture texture;
         std::vector<std::vector<std::vector<std::uint8_t>>> rgba; // [face][level]
+        // A file texture (create_texture_from_file) may release its RGBA levels once a GPU device holds them
+        // (D3D11D3D9Device::texture); rgba_level decodes a level again from `texture` for a CPU reader. A CPU write
+        // (unlock_rect, or the texture as a soft render target) retains it for good, so a later decode can never
+        // bring back the file's texels over the written ones. The face/level structure always stays.
+        bool from_file{},rgba_released{},cpu_written{};
         // Textures created empty: D3DFORMAT. Surfaces: parent texture (0 for
         // a stand-alone depth-stencil surface), face, level, locked texels.
         std::uint32_t format{},parent{},face{},level{},width{},height{};
@@ -172,6 +185,9 @@ protected:
     bool targets_consistent()const{return depth_.size()==std::size_t(width_)*height_&&stencil_.size()==depth_.size();}
     std::uint32_t empty_texture(bool cube,std::uint32_t width,std::uint32_t height,std::uint32_t levels,std::uint32_t format);
     std::uint32_t surface_of(std::uint32_t texture,std::uint32_t face,std::uint32_t level);
+    // The RGBA texels of a texture level for a CPU reader or writer: a released file texture's level is decoded again
+    // from its DDS levels first (pc_dds_rgba, the decoder used at creation).
+    std::vector<std::uint8_t>& rgba_level(Object& texture,unsigned face,unsigned level);
     Object* object(std::uint32_t h){return h&&h<=objects_.size()&&objects_[h-1].refs?&objects_[h-1]:nullptr;}
     void rebind(std::uint32_t& slot,std::uint32_t handle);
     struct Vertex { float pos[4]; pc_shader::V4 d[2],t[8];float fog; };

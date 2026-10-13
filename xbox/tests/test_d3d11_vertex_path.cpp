@@ -18,6 +18,19 @@ using outrun::xbox_runtime::D3D11D3D9Device;
 using Microsoft::WRL::ComPtr;
 
 static int failures=0,checks=0;
+// An uncompressed A8R8G8B8 DDS (B, G, R, A bytes), every level and face with its own texels.
+static std::vector<std::uint8_t> test_dds(std::uint32_t w,std::uint32_t h,std::uint32_t levels,bool cube){
+    std::vector<std::uint8_t> f(0x80,0);std::memcpy(f.data(),"DDS ",4);
+    const auto put=[&](std::size_t at,std::uint32_t v){std::memcpy(f.data()+at,&v,4);};
+    put(4,124);put(12,h);put(16,w);put(28,levels);put(76,32);put(80,0x41);put(88,32);
+    put(92,0xff0000u);put(96,0xff00u);put(100,0xffu);put(104,0xff000000u);put(112,cube?0xfe00u:0u);
+    for(unsigned face=0;face<(cube?6u:1u);++face){std::uint32_t lw=w,lh=h;
+        for(std::uint32_t l=0;l<levels;++l){
+            for(std::uint32_t k=0;k<lw*lh;++k){f.push_back(std::uint8_t(40*l+k*7));f.push_back(std::uint8_t(face*30+k*11));
+                f.push_back(std::uint8_t(200-k*13));f.push_back(255);}
+            lw=lw>1?lw/2:1;lh=lh>1?lh/2:1;}}
+    return f;
+}
 static void check(bool ok,const char* what){++checks;if(!ok){++failures;std::printf("FAIL %s\n",what);}}
 
 static std::vector<std::uint8_t> readback(ID3D11Device* device,ID3D11DeviceContext* context,ID3D11ShaderResourceView* view){
@@ -276,6 +289,43 @@ int main(){
         check(at(partial,28,24,0)<50,"mode 1 under a full-width, partial-height viewport: no extension (quad left of the 4:3 clipped)");
         check(at(partial,36,24,1)>200,"mode 1 under a partial-height viewport: the in-range quad still draws");
         u.set_viewport(0,0,64,48,0.f,1.f);
+    }
+    // Texture CPU-copy lifetime (sana 44416): the D3D11 device uploads a file texture on its first draw and then releases
+    // its RGBA copy (unless OR2_KEEP_TEXTURE_RGBA=1). The drawn texels are exact (point sampling, 2x magnification), and
+    // later frames draw them again from the GPU copy alone. A created texture keeps its copy.
+    {   Gpu tg{};const D3D_FEATURE_LEVEL tl[]{D3D_FEATURE_LEVEL_10_1};
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,tl,1,D3D11_SDK_VERSION,&tg.device,nullptr,&tg.context))){
+            std::printf("FAIL no WARP D3D11 device for the texture lifetime\n");return 1;}
+        D3D11D3D9Device u(tg.device.Get(),tg.context.Get(),64,48);
+        const auto file=test_dds(4,4,3,false);
+        PcTextureFileRequest q{};q.data=file.data();q.size=std::uint32_t(file.size());
+        q.width=q.height=0xffffffffu;q.mip_levels=0;q.pool=1;q.filter=1;q.mip_filter=1;
+        const auto tex=u.create_texture_from_file(q);
+        const char* keep_env=std::getenv("OR2_KEEP_TEXTURE_RGBA");const bool keep=keep_env&&std::strcmp(keep_env,"1")==0;   // as the runtime
+        check(tex!=0&&u.texture_rgba_bytes(tex)==84u,"D3D11: file texture created with its RGBA copy");
+        u.reset_state();u.set_render_state(RS_CULLMODE,CULL_NONE);u.set_render_state(RS_ZENABLE,0);u.set_viewport(0,0,64,48,0.f,1.f);
+        u.set_texture_stage_state(0,1,2);u.set_texture_stage_state(0,2,2);u.set_texture_stage_state(0,4,2);u.set_texture_stage_state(0,5,2);
+        u.set_sampler_state(0,SAMP_MAGFILTER,1);u.set_sampler_state(0,SAMP_MINFILTER,1);u.set_sampler_state(0,SAMP_MIPFILTER,0);
+        u.set_fvf(0x104);   // XYZRHW | TEX1
+        struct V {float x,y,z,rhw,u,v;};
+        const auto frame=[&]{u.begin_frame();u.clear(1,0xff000000,1,0);u.set_texture(0,tex);
+            const V v[4]{{8,8,0,1,0,0},{16,8,0,1,1,0},{8,16,0,1,0,1},{16,16,0,1,1,1}};u.draw_primitive_up(5,2,v,sizeof(V));
+            u.set_texture(0,0);u.end_frame();return readback(tg.device.Get(),tg.context.Get(),u.back_texture());};
+        const auto first=frame();
+        bool exact=first.size()==64u*48u*4u;
+        for(unsigned ty=0;ty<4&&exact;++ty)for(unsigned tx=0;tx<4&&exact;++tx){
+            const unsigned k=ty*4+tx,at=((9+ty*2)*64+(9+tx*2))*4;   // texel (tx, ty) at 2x: its block's second pixel
+            exact=first[at]==std::uint8_t(200-k*13)&&first[at+1]==std::uint8_t(k*11)&&first[at+2]==std::uint8_t(k*7);}
+        check(exact,"D3D11: the file texture's texels are drawn exactly");
+        if(keep)check(u.texture_rgba_bytes(tex)==84u&&u.rgba_released_textures==0u,"OR2_KEEP_TEXTURE_RGBA: the copy is kept");
+        else check(u.texture_rgba_bytes(tex)==0u&&u.rgba_released_textures==1u&&u.rgba_released_bytes==84u,"D3D11: the RGBA copy released after upload");
+        check(frame()==first,"D3D11: later frames draw the same pixels from the GPU copy");
+        check(u.rgba_levels_decoded_again==0u,"D3D11: nothing decoded again (no CPU reader)");
+        const auto made=u.create_texture(4,4,1,1,21,0);
+        u.set_texture(0,made);u.set_texture(0,0);
+        check(!u.release_rgba(made)&&u.texture_rgba_bytes(made)==64u,"D3D11: a created texture keeps its copy");
+        u.release(tex);u.release(made);
+        check(u.errors.empty(),"D3D11: no errors in the texture lifetime fixture");
     }
     std::printf("%s: %d checks, %d failures (GPU vertex draws %llu)\n",failures?"FAIL":"PASS",checks,failures,(unsigned long long)gpu.native_draws());
     return failures?1:0;

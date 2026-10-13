@@ -78,7 +78,7 @@ void PcSoftD3D9Device::set_render_target(std::uint32_t index,std::uint32_t surfa
         if(!next||next->kind!=KSurface||!next->parent){errors.push_back("SetRenderTarget: not a texture surface");return;}
         auto* t=object(next->parent);
         if(!t||next->face>=t->rgba.size()||next->level>=t->rgba[next->face].size()){errors.push_back("SetRenderTarget: surface without texels");return;}
-        next_pixels=&t->rgba[next->face][next->level];
+        next_pixels=&rgba_level(*t,next->face,next->level);t->cpu_written=true;   // the target is written from here on
     }
     if(surface!=colour_target_){
         add_ref(surface);const auto old=colour_target_;
@@ -156,7 +156,27 @@ std::uint32_t PcSoftD3D9Device::create_texture_from_file(const PcTextureFileRequ
     for(const auto& f:o.texture.faces)for(const auto& l:f)texture_bytes+=l.data.size();
     o.rgba.resize(o.texture.faces.size());
     for(unsigned f=0;f<o.texture.faces.size();++f)for(unsigned l=0;l<o.texture.faces[f].size();++l)o.rgba[f].push_back(pc_dds_rgba(o.texture,f,l));
+    o.from_file=true;
     objects_.push_back(std::move(o));return std::uint32_t(objects_.size());}
+std::vector<std::uint8_t>& PcSoftD3D9Device::rgba_level(Object& o,unsigned face,unsigned level){
+    auto& l=o.rgba.at(face).at(level);
+    if(l.empty()&&o.rgba_released&&face<o.texture.faces.size()&&level<o.texture.faces[face].size()){
+        l=pc_dds_rgba(o.texture,face,level);++rgba_levels_decoded_again;}
+    return l;
+}
+bool PcSoftD3D9Device::release_rgba(std::uint32_t h){
+    auto* o=object(h);if(!o||o->kind!=KTexture||!o->from_file||o->cpu_written)return false;
+    for(auto& f:o->rgba)for(auto& l:f)std::vector<std::uint8_t>().swap(l);
+    o->rgba_released=true;return true;
+}
+std::size_t PcSoftD3D9Device::texture_rgba_bytes(std::uint32_t h)const{
+    if(!h||h>objects_.size()||!objects_[h-1].refs)return 0;
+    std::size_t n=0;for(const auto& f:objects_[h-1].rgba)for(const auto& l:f)n+=l.size();return n;
+}
+std::array<std::uint32_t,2> PcSoftD3D9Device::texture_rgba_shape(std::uint32_t h)const{
+    if(!h||h>objects_.size()||!objects_[h-1].refs)return {0,0};
+    const auto& r=objects_[h-1].rgba;return {std::uint32_t(r.size()),r.empty()?0u:std::uint32_t(r[0].size())};
+}
 bool PcSoftD3D9Device::shade_vertex(std::uint32_t index,std::int32_t base,Vertex& out){
     std::array<V4,256> c;
     for(unsigned k=0;k<256;++k)c[k]={vs_constants[k][0],vs_constants[k][1],vs_constants[k][2],vs_constants[k][3]};
@@ -671,6 +691,7 @@ V4 PcSoftD3D9Device::sample(int st,const V4& c,float dudx,float dvdx,float dudy,
         if(ma==0.f)return {0,0,0,1};
         u=(sc/ma+1.f)*0.5f;v=(tc/ma+1.f)*0.5f;dudx=dvdx=dudy=dvdy=0.f;
     }
+    if(o->rgba_released)for(unsigned l=0;l<o->rgba[face].size();++l)rgba_level(*o,face,l);   // a released file texture
     const auto& levels=o->rgba[face];
     const auto& tex=o->texture.faces[face];
     const unsigned base_level=std::min<unsigned>(ss[d3d9::SAMP_MAXMIPLEVEL],unsigned(levels.size()-1));
@@ -777,7 +798,7 @@ std::uint8_t* PcSoftD3D9Device::lock_rect(std::uint32_t s,std::uint32_t& pitch){
 void PcSoftD3D9Device::unlock_rect(std::uint32_t s){
     auto* o=object(s);if(!o||o->kind!=KSurface||!o->parent)return;
     auto* t=object(o->parent);if(!t)return;
-    auto& dst=t->rgba[o->face][o->level];
+    auto& dst=rgba_level(*t,o->face,o->level);t->cpu_written=true;   // never released again (Object::cpu_written)
     const std::size_t n=std::size_t(o->width)*o->height;
     for(std::size_t k=0;k<n;++k){
         if(o->format==23){ // R5G6B5

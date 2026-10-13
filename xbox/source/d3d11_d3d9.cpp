@@ -19,6 +19,8 @@ namespace outrun::xbox_runtime {
 using namespace platform::d3d9;
 namespace {
 constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
+// OR2_KEEP_TEXTURE_RGBA=1 (A/B and rollback): file textures keep their RGBA copies after the GPU upload, as before.
+bool keep_texture_rgba(){static const bool on=[]{const char* v=std::getenv("OR2_KEEP_TEXTURE_RGBA");return v&&std::string(v)=="1";}();return on;}
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
 // The three-view geometry shader (TRIPLE-SCREENS.md step 4): each triangle three times, panel i in viewport i with its
@@ -162,6 +164,10 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 shader_stats_.compiled,shader_stats_.loaded,shader_stats_.ms,shader_stats_.max_ms);
     std::printf("DrawPrimitiveUP not drawn (unsupported primitive, compatibility fallback): points %llu, lines %llu, line strips %llu\n",
                 (unsigned long long)skipped_up[1],(unsigned long long)skipped_up[2],(unsigned long long)skipped_up[3]);
+    std::printf("texture CPU copies: %llu file textures released after upload (%.1f MB)%s, %llu kept (written on the CPU), "
+                "%llu levels decoded again\n",(unsigned long long)rgba_released_textures,double(rgba_released_bytes)/1048576.0,
+                keep_texture_rgba()?" [OR2_KEEP_TEXTURE_RGBA: all kept]":"",(unsigned long long)rgba_kept_written,
+                (unsigned long long)rgba_levels_decoded_again);
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     if(platform::g_pc_triple_corrections)
@@ -290,8 +296,15 @@ D3D11D3D9Device::Texture* D3D11D3D9Device::texture(std::uint32_t handle){
     d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;d.MiscFlags=t.cube?D3D11_RESOURCE_MISC_TEXTURECUBE:0;
     check(device_->CreateTexture2D(&d,nullptr,&t.texture),"CreateTexture2D");
     for(unsigned face=0;face<o->rgba.size();++face)for(unsigned level=0;level<o->rgba[face].size()&&level<t.levels;++level){
-        const auto& rgba=o->rgba[face][level];if(rgba.empty())continue;
+        const auto& rgba=rgba_level(*o,face,level);if(rgba.empty())continue;
         context_->UpdateSubresource(t.texture.Get(),D3D11CalcSubresource(level,face,t.levels),nullptr,rgba.data(),o->texture.faces[face][level].width*4,0);
+    }
+    // The GPU now holds the texels (UpdateSubresource copies pSrcData before it returns). A file texture nobody wrote
+    // on the CPU keeps only its encoded DDS levels; rgba_level decodes a level again for any CPU reader. Written, render-
+    // target and created textures keep their copies. Not a device-loss path: none exists.
+    if(o->from_file&&!keep_texture_rgba()){
+        const auto bytes=texture_rgba_bytes(handle);
+        if(release_rgba(handle)){++rgba_released_textures;rgba_released_bytes+=bytes;}else ++rgba_kept_written;
     }
     check(device_->CreateShaderResourceView(t.texture.Get(),nullptr,&t.srv),"CreateShaderResourceView");
     return &(textures_[handle]=std::move(t));
