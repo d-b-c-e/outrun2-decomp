@@ -411,6 +411,17 @@ t56.
       tested overrides, not proof that no triangle intersects there (sana 43587).
     - Still open: pixel-program texkill, depth clipping, the viewport and scissor, geometry outside that frame's
       submitted set (WHOLE_STAGE was not combined), and absent content.
+  - **Run RC2** (RAW_COVERAGE with WHOLE_STAGE): identical to RC1, 81.4 % (left) and 91.9 % (right) of the wedge
+    pixels without a write. Drawing every node of 44DE10 and 44CD30 whole under the same overrides fills nothing
+    more. The state-toggle runs stop here (sana 43587).
+  - **Shader discard is ruled out by source:** the generated pixel shaders' only `discard` is the alpha test, which
+    RAW_COVERAGE turns off.
+  - **Open limitation:** no pixel write under the tested overrides is not proof that no triangle intersects there.
+    What remains: depth clipping and the viewport/scissor (implausible for nearby ground, but not instrumented);
+    content outside the submitted set (objects of loaded banks that nothing draws at the grid, or unloaded banks);
+    and absent content in the shipped stage.
+  - The one specific inspection that could narrow it is offline: compare every object of the BEAC banks with those
+    drawn at the grid (N1), and check whether any undrawn object's bounds reach the start-line surround.
 
 ### Side flicker (open; positive-control A/B, runs Q1 / Q2, hub `triples-20261012`)
 
