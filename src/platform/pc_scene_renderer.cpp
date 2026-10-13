@@ -290,6 +290,13 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             if(!answered){
                 ++camera_unanswered;last_error="485FE0 debug camera or race mode without inputs: mode "+std::to_string(mode_78026c)+" (view "+std::to_string(camera.u8(0x34a))+", +94/+98/+9C "+std::to_string(camera.u32(0x94))+"/"+std::to_string(camera.u32(0x98))+"/"+std::to_string(camera.u32(0x9c))+")";return true;}
             ++camera_controls;
+            {   // Diagnostic only (sana 70042): read what this control left, still inside its FOV/near arming.
+                const RaceViewSample v{mode_78026c,std::int32_t(race_mode_780258),
+                    driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view,camera.u8(0x34a),
+                    camera.f32(0xa0),camera.f32(0xa4),camera.f32(0xbc),camera.f32(0xb8),screen_.width_740c8c,screen_.height_740c90,
+                    driving::camera_fov_context().fov_y>0.f,driving::camera_znear_context().armed};
+                if(const auto line=race_view_note_.observe(v))std::printf("%s\n",line->c_str());
+            }
             apply_camera(d,camera);
             if(!before.empty())note_camera_replay(camera,before);
             return true;

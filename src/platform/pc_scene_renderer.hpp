@@ -17,6 +17,7 @@
 #include "driving/pc_camera.hpp"
 #include "driving/pc_race_camera.hpp"
 #include "platform/frontend_vehicle_data.hpp"
+#include "platform/race_view_note.hpp"
 #include <map>
 #include <memory>
 #include <functional>
@@ -197,6 +198,7 @@ private:
     const driving::PcEventControlState* events_{};
     std::uint32_t current_mode_{};
     driving::PcCameraScreen screen_{};
+    RaceViewNote race_view_note_{};   // diagnostic: runtime.log line when the main camera's race view changes
     std::vector<std::uint8_t> camera_live_fe8_,camera_live_bb0_,camera_live_750_;
     void apply_camera(const driving::PcCameraDevice&,driving::Bytes camera);
     // FixZBufferPrecision around the 40BE70 sun flare: the main camera's projection with near plane 0.05 (begin), then
