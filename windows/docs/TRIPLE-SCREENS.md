@@ -407,7 +407,8 @@ t56.
     uncovered.
     - The filled part is mostly normally hidden geometry, the back and underside of the grandstand structure,
       plausibly backfaces. That is not a defect by itself.
-    - No triangle submitted in that frame reaches the bulk under those states.
+    - Under those overrides nothing submitted in that frame writes the bulk. That is no pixel write under the
+      tested overrides, not proof that no triangle intersects there (sana 43587).
     - Still open: pixel-program texkill, depth clipping, the viewport and scissor, geometry outside that frame's
       submitted set (WHOLE_STAGE was not combined), and absent content.
 
