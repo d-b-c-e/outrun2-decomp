@@ -50,6 +50,7 @@ Letterbox lb;
 struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
+    bool auto_resolution{true},auto_resolution_start{true};   // [Window] AutoDetectResolution
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
@@ -182,6 +183,13 @@ void page_cameras(bool advanced){
          keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});}
     if(v.letterbox>0&&v.ui_scaling==0)dbce::panel::Status("Letterboxing now","inactive: [Graphics] UIScalingMode is 0 (stretched)");
     if(v.letterbox!=v.letterbox_start)dbce::panel::Text("The choice applies at the next game start.");
+    // [Window] AutoDetectResolution (renderer.hpp g_auto_detect_height), read at start, so it applies at the next start.
+    {const bool before=v.auto_resolution;
+     if(dbce::panel::OffOn("Resolution from the display",&v.auto_resolution,
+         "While the game's own Settings hold no resolution, the next start renders at the supported height nearest the "
+         "display's instead of 640x480, as Tweaks' AutoDetectResolution. A resolution chosen in Settings always wins."))
+         keep(&v.auto_resolution,before,[&]{return save("Window","AutoDetectResolution",v.auto_resolution?"true":"false");});}
+    if(v.auto_resolution!=v.auto_resolution_start)dbce::panel::Text("The choice applies at the next game start.");
 }
 void page_telemetry(bool advanced){
     {const bool before=v.telemetry;
@@ -347,6 +355,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
+    v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
      v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
