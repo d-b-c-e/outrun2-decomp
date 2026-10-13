@@ -56,11 +56,28 @@ Options, cheapest first:
 Recommendation: 1 now (small, no visible change), 2 if the warm stall still matters to the owner, 3 together with
 the device memory work below.
 
+## Coverage of a pack (scene)
+
+`tools/texture_pack_coverage.cpp <game folder> <pack load folder> [any]` runs every PMT bank of the game through the
+scene replacement path (a counting device, nothing created) and explains each texture it does not replace: no file,
+a file only in another bank's folder, a file under another index prefix, or a file the device would refuse (cube
+request with a 2D file, pixel format, shorter than its levels); then the pack folders and files nothing uses. With
+`any` it runs with TextureMatchAnyFolder and counts what that option takes and what it leaves ambiguous. A file stem
+named by several table entries (cs_LRBK_PALM_pmt) is counted per entry.
+
+Against an owner Tweaks pack (2026-10-12): 401 banks with textures, 14,395 textures; the pack's 41 scene folders all
+name a bank, no index mismatch; Tweaks' names replace 1,277; 16 cube requests have 2D files; 2,398 textures have
+their file only in another bank's folder, mostly stage variants (`_R`, `_T`, and the plain cs_CS_PALM of the OutRun
+mode, whose pack folder is cs_CS_PALM_T); TextureMatchAnyFolder takes 2,058 of them and leaves 300 ambiguous.
+
 ## Open: device memory
 
 `PcSoftD3D9Device::create_texture_from_file` keeps the DDS data and a decoded RGBA8 copy of every level for the life
 of the texture; `D3D11D3D9Device::texture` creates the GPU texture (always R8G8B8A8) from that copy on first draw.
 For the 160 textures replaced on the menu-to-race path that is 3.0 GB of CPU memory (vs about 0.2 GB stock) besides
-up to 1.65 GB of GPU textures; private memory went 0.83 -> 4.23 GB. The device owner's preferred fix (zero): drop
-the RGBA8 copy after the GPU upload and decode again if a CPU reader needs it; uploading DXT as BC formats is a larger,
-separately reviewed change. Replacement stays opt-in until then.
+up to 1.65 GB of GPU textures; private memory went 0.83 -> 4.23 GB. The device owner's fix (zero, e167f58 on the
+graphics-parity branch) drops the RGBA8 copy after the GPU upload and decodes again if a CPU reader needs it. Measured
+with one executable on the same route (HD UI, race interval): private 4,250 MB with OR2_KEEP_TEXTURE_RGBA=1, 3,711 MB
+without (544.6 MB released); the rest stays because textures decoded at bank load but never drawn are never uploaded.
+Decoding at first upload instead (moving the cost to the first draw) or BC uploads are the further levers, the
+device's to decide. Replacement stays opt-in.
