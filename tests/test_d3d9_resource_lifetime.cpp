@@ -1,5 +1,6 @@
 #include "platform/pc_soft_d3d9.hpp"
 #include "platform/pc_scene_renderer.hpp"
+#include "system/exe_image.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -49,16 +50,6 @@ int main(){
         check(d.live_objects()==1,"GetDepthStencilSurface retains ownership");
         d.release(saved);check(d.live_objects()==0,"depth surface freed");
     }
-    auto pending=d.create_texture(8,8,1,1,21,0);
-    {
-        outrun::platform::PcSceneRenderer scene(d);
-        check(scene.texture_swap_406630(0x1230000,pending),"deferred swap owns reference");
-        check(scene.texture_swap_406630(0x1230000,pending),"same deferred swap preserves reference");
-        d.release(pending);unsigned width=0,height=0;
-        check(d.texture_level_size(pending,0,width,height),"deferred swap retains producer texture");
-    }
-    unsigned width=0,height=0;
-    check(!d.texture_level_size(pending,0,width,height),"scene shutdown releases unapplied swap");
     // Texture CPU-copy lifetime (pc_soft_d3d9.hpp release_rgba / rgba_level; sana 44416). A file texture's RGBA levels
     // are released with its DDS levels and [face][level] shape kept. A CPU reader (the soft sampler) decodes them again
     // and draws the same pixels, repeatedly. Created textures are never released, and a file texture has no D3DFORMAT, so
@@ -105,6 +96,27 @@ int main(){
         check(!d.release_rgba(tex),"a released handle releases nothing");
         check(d.live_objects()==live_before,"lifetime fixtures freed");
     }
+    // The scene renderer below reads the PC renderer tables from the player's EXE (embedded_shader_data.cpp). With no
+    // OR2_EXE given: report what ran and skip (CTest SKIP_RETURN_CODE 77). Given, it must load (exe_image_autoload
+    // prints its loader error) and everything must pass: a broken configured fixture is a failure, not a skip.
+    const char* exe_env=std::getenv("OR2_EXE");
+    if(!exe_env||!*exe_env){
+        check(d.errors.empty(),"no D3D9 errors in the EXE-independent checks");
+        std::printf("D3D9 renderer resources: %u EXE-independent checks passed (resource cycles, texture CPU-copy lifetime); "
+                    "the scene-renderer checks are skipped: no EXE image (set OR2_EXE)\n",checks);
+        return 77;
+    }
+    check(outrun::platform::exe_image_autoload(),"the OR2_EXE given loads (see its loader error above)");
+    auto pending=d.create_texture(8,8,1,1,21,0);
+    {
+        outrun::platform::PcSceneRenderer scene(d);
+        check(scene.texture_swap_406630(0x1230000,pending),"deferred swap owns reference");
+        check(scene.texture_swap_406630(0x1230000,pending),"same deferred swap preserves reference");
+        d.release(pending);unsigned width=0,height=0;
+        check(d.texture_level_size(pending,0,width,height),"deferred swap retains producer texture");
+    }
+    unsigned width=0,height=0;
+    check(!d.texture_level_size(pending,0,width,height),"scene shutdown releases unapplied swap");
     check(d.errors.empty(),"no D3D9 errors across repeated cycles");
     std::printf("D3D9 renderer resources: %u checks passed\n",checks);
 }
