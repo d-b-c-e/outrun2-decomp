@@ -30,6 +30,7 @@ src/runtime/game_host.cpp|input_sample|silent-skip|s.read_pad # host platform ho
 src/runtime/game_host.cpp|input_sample|silent-skip|s.platform_keys # host platform hook: each platform backend sets it or has no such device
 src/runtime/game_host.cpp|input_sample|silent-skip|s.map_input # host platform hook: each platform backend sets it or has no such device
 src/runtime/game_host.cpp|input_sample|silent-skip|s.sample_status # host platform hook: each platform backend sets it or has no such device
+src/runtime/game_host.cpp|input_sample|silent-skip|s.frame_wait # optional host frame-pacing hook (3e1fa73): the xbox desktop waits for its frame latency before the pad snapshot; other hosts have no such wait
 src/system/setup_screen.cpp|exe_setup_prepare|silent-skip|platform.present # host platform hook: each platform backend sets it or has no such device
 src/system/setup_screen.cpp|exe_setup_prepare|silent-skip|platform.wait_for_exit # host platform hook: each platform backend sets it or has no such device
 src/driving/pc_course_query.cpp|find_secondary_course_run|silent-skip|t.runs.present # the original's own null test of the course run table (returns 0 runs), not a service
