@@ -20,8 +20,9 @@ go upstream as small pull requests (first: `tweaks-exe`).
 2. 🟡 **Wheel input on the toolkit's controls contract** (STD-033): canonical
    `[Controls]` (`ini-controls-1`) that Wheelkit writes, one-time import of the
    Tweaks `[DirectInput]` keys, H-pattern, test injection + observer for
-   Wheelkit's closed-loop tests (with Astra). Next: Astra's review, a run at the
-   rig, the closed-loop qualification (STD-034), hot-plug.
+   Wheelkit's closed-loop tests (with Astra). Ordinary-play hot-plug discovery
+   is in source, awaiting a rig check. Next: Astra's review, a run at the rig,
+   the closed-loop qualification (STD-034).
 2a. 🟡 **F6 panel** (STD-030: the panel comes first): toolkit `native/panel` on
    our own D3D11 renderer, standard pages, each later feature adds its controls.
    - In code (`source/desktop_panel.cpp`): the Help, Controls (status), Force (strength, invert, output; F8 stops),
@@ -70,7 +71,7 @@ needed in a native build.
 | | FramerateFastLoad, FramerateUnlockExperimental | ⬜ | |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
-| | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); DirectInput devices re-acquire, new ones need a restart |
+| | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); ordinary DirectInput rescans every two seconds and reopens the saved instance GUID, built but not checked at the rig |
 | | DefaultManualTransmission, HudToggleKey | ⬜ | |
 | | Vibration\*, ImpulseVibration\* | ⬜ | gamepad rumble / trigger motors |
 | DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | canonical `[Controls]` (`ini-controls-1`); the Tweaks keys are imported once with Tweaks' scaling |

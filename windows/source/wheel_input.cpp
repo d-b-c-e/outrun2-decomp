@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,7 +34,7 @@ struct Device {
     bool ffb{};
     IDirectInputDevice8W* device{};
     DIJOYSTATE2 state{},previous{};
-    bool connected{};
+    bool connected{},present{},was_present{};
 };
 struct Bound { std::string action; ctl::Binding binding; Device* device{}; };
 
@@ -43,12 +44,13 @@ struct State {
     ctl::Section section;
     bool import_pending{};
     float sensitivity{1.f},dead_zone{0.f};
-    std::vector<Device> found;                  // every attached controller (enumeration order)
+    std::deque<Device> found;                   // stable addresses for open and bound through later scans
     std::vector<Device*> open;                  // the opened ones (pointers into found)
     std::vector<Bound> bound;                   // applied bindings with their device
     IDirectInput8W* input{};
     std::uint32_t previous_buttons{};
     std::chrono::steady_clock::time_point start;
+    std::chrono::steady_clock::time_point next_scan;
     std::uint32_t last_gear{},gear_stalls{},gear_target{};
     bool gear_release{};
     bool keyboard_drives{};std::int32_t keyboard_anchor{};   // the race follows the keyboard (see wheel_input_filter)
@@ -126,6 +128,54 @@ void poll(Device& d){
     if(now!=d.connected)std::printf("wheel input: %s %s\n",d.name.c_str(),now?"connected":"lost");
     d.connected=now;
 }
+void scan_devices(){
+    if(!g.input)return;
+    std::vector<Device> attached;
+    if(FAILED(g.input->EnumDevices(DI8DEVCLASS_GAMECTRL,collect,&attached,DIEDFL_ATTACHEDONLY))){
+        std::printf("wheel input: device rescan failed; keeping current devices\n");return;
+    }
+    for(auto& d:g.found){d.was_present=d.present;d.present=false;}
+    for(const auto& listed:attached){
+        Device* d=by_dev(listed.dev);
+        if(!d){g.found.push_back(listed);d=&g.found.back();}
+        const bool arrived=!d->was_present;
+        d->present=true;
+        if(!arrived)continue;
+        d->guid=listed.guid;d->prod=listed.prod;d->name=listed.name;d->type=listed.type;
+        IDirectInputDevice8W* x=nullptr;
+        if(SUCCEEDED(g.input->CreateDevice(d->guid,&x,nullptr))&&x){
+            DIDEVCAPS caps{};caps.dwSize=sizeof caps;
+            if(SUCCEEDED(x->GetCapabilities(&caps))){d->axes=caps.dwAxes;d->buttons=caps.dwButtons;d->povs=caps.dwPOVs;d->ffb=(caps.dwFlags&DIDC_FORCEFEEDBACK)!=0;}
+            x->Release();
+        }
+        std::printf("wheel input: found dev=%s prod=%s \"%s\" type %02lX axes %lu buttons %lu hats %lu%s\n",d->dev.c_str(),d->prod.c_str(),d->name.c_str(),
+            d->type,d->axes,d->buttons,d->povs,d->ffb?" force-feedback":"");
+    }
+    // A failed read can leave a stale handle even when the same instance GUID
+    // is attached again. Reopen it at the scan boundary; bindings keep their
+    // stable Device address and resume on the next successful sample.
+    for(auto& d:g.found)if(d.device&&(!d.present||!d.connected)){
+        std::vector<std::string> log;inject::device_gone(d.dev,log);print(log);
+        if(d.connected)std::printf("wheel input: %s lost\n",d.name.c_str());
+        d.connected=false;d.state={};d.previous={};
+        d.device->Unacquire();d.device->Release();d.device=nullptr;
+        g.open.erase(std::remove(g.open.begin(),g.open.end(),&d),g.open.end());
+    }
+}
+void bind_present_devices(bool initial){
+    const auto hwnd=static_cast<HWND>(xbox_runtime::native_window().hwnd);
+    for(const auto& e:g.section.bound){
+        if(unavailable_reason(e.action))continue;
+        Device* d=by_dev(e.binding.dev);
+        if(!d||!d->present){
+            if(initial)std::printf("controls: %s: device %s (%s) is not connected\n",e.action.c_str(),e.binding.dev.c_str(),e.binding.name.c_str());
+            continue;
+        }
+        if(!open(*d,hwnd)){if(initial)std::printf("controls: %s: cannot open %s\n",e.action.c_str(),d->name.c_str());continue;}
+        const auto existing=std::find_if(g.bound.begin(),g.bound.end(),[&](const Bound& b){return b.action==e.action;});
+        if(existing==g.bound.end())g.bound.push_back({e.action,e.binding,d});
+    }
+}
 
 // ---- the one-time import of the OutRun2006Tweaks [DirectInput] keys into [Controls]
 LegacyControls legacy_controls(const Ini& ini){
@@ -148,6 +198,7 @@ DeviceIdentity identity(const Device* d){return d?DeviceIdentity{d->dev,d->prod,
 Device* auto_wheel(){
     Device* best=nullptr;
     for(auto& d:g.found){
+        if(!d.present)continue;
         if(d.type==DI8DEVTYPE_GAMEPAD||d.axes==0)continue;
         if(!best||(d.ffb&&!best->ffb)||(d.ffb==best->ffb&&d.axes>best->axes))best=&d;
     }
@@ -206,28 +257,12 @@ void report(){
 // Enumerates the controllers, imports pending legacy bindings, opens every bound device, arms test injection.
 void start(){
     g.started=true;g.start=std::chrono::steady_clock::now();
-    const auto hwnd=static_cast<HWND>(xbox_runtime::native_window().hwnd);
     if(FAILED(DirectInput8Create(GetModuleHandleW(nullptr),DIRECTINPUT_VERSION,IID_IDirectInput8W,reinterpret_cast<void**>(&g.input),nullptr))||!g.input){
         std::printf("wheel input: DirectInput8Create failed\n");return;}
-    g.input->EnumDevices(DI8DEVCLASS_GAMECTRL,collect,&g.found,DIEDFL_ATTACHEDONLY);
-    for(auto& d:g.found){
-        IDirectInputDevice8W* x=nullptr;
-        if(SUCCEEDED(g.input->CreateDevice(d.guid,&x,nullptr))&&x){
-            DIDEVCAPS caps{};caps.dwSize=sizeof caps;
-            if(SUCCEEDED(x->GetCapabilities(&caps))){d.axes=caps.dwAxes;d.buttons=caps.dwButtons;d.povs=caps.dwPOVs;d.ffb=(caps.dwFlags&DIDC_FORCEFEEDBACK)!=0;}
-            x->Release();
-        }
-        std::printf("wheel input: found dev=%s prod=%s \"%s\" type %02lX axes %lu buttons %lu hats %lu%s\n",d.dev.c_str(),d.prod.c_str(),d.name.c_str(),
-            d.type,d.axes,d.buttons,d.povs,d.ffb?" force-feedback":"");
-    }
+    scan_devices();
+    g.next_scan=g.start+std::chrono::seconds(2);
     if(g.import_pending&&import_legacy_bindings()){g.import_pending=false;report();}   // canonical: reported at configure
-    for(const auto& e:g.section.bound){
-        if(unavailable_reason(e.action))continue;
-        Device* d=by_dev(e.binding.dev);
-        if(!d){std::printf("controls: %s: device %s (%s) is not connected\n",e.action.c_str(),e.binding.dev.c_str(),e.binding.name.c_str());continue;}
-        if(!open(*d,hwnd)){std::printf("controls: %s: cannot open %s\n",e.action.c_str(),d->name.c_str());continue;}
-        g.bound.push_back({e.action,e.binding,d});
-    }
+    bind_present_devices(true);
     print(inject::init(g.section,false));   // this build sends no force
 }
 
@@ -310,6 +345,10 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     out.pc_input_layer=true;
     if(!g.configured)return;
     if(!g.started)start();
+    if(g.input&&std::chrono::steady_clock::now()>=g.next_scan){
+        scan_devices();bind_present_devices(false);
+        g.next_scan=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    }
     const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
     const bool race=mode==16u||mode==18u;
     // Outside the race the menus read these edges, not the PC layer: the original default menu keys (61E678:
