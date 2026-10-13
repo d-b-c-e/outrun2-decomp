@@ -174,6 +174,76 @@ ints.
     a reconstruction of these functions first, is the open choice.
 - **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
   decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
+## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
+
+- **Setup:** one bounded run per mode with the same exe (6547538, `ui1`), muted, in the perf copy. Window
+  2560x1440 (16:9, so the UI is 3 px per unit and spacing is 80 units), ordinary FOV. Route: OutRun Palm Beach start,
+  about 20 s of driving.
+- **Captures:**
+  - PrintWindow shots at t+30 / 40 / 50 s;
+  - the 60 fps clip, which holds the window at half scale.
+- **Method:** each element is cut from the mode-2 shot and searched for in the mode-1 shot. The search covers ±400 px
+  across and ±6 px down, by minimum mean absolute difference. For each HUD element the best match scores at least
+  1.8 times better than the best position more than 8 px away. The car moves with the scene, so its control match
+  is weaker at t+50: 16.6 against 19.7.
+- **Displacement, measured at t+40 and t+50 (both agree):**
+
+  | Element | Mode 2 x (px) | Moved | Mode 1 x (px) |
+  |---|---|---|---|
+  | Total Time label + timer | 470 | −240 | 230 |
+  | position map | 476 | −240 | 236 |
+  | speedometer dial | 480 | −240 | 240 |
+  | km/h | 876 | −240 | 636 |
+  | gear row | 516 | −240 | 276 |
+  | Score label | 1630 | +240 | 1870 |
+  | Score bar (to its end) | 1850..2050 | +240 | 2090..2290 |
+  | centre Time | 1050 | 0 | 1050 |
+  | player car (control) | 1020 | 0 | 1020 |
+
+  - −240 / +240 px is the expected 80 units at 3 px per unit, with no vertical change.
+- **Clipping:**
+  - **Normal HUD:** every moved element is fully drawn. None reaches a window edge; the extremes are 230 px on the
+    left and 2290 px on the right.
+  - **New in mode 1: a "1P" banner in the start camera:**
+    - Red "1P" at x 2251..2348, y 180..240.
+    - A grey bar runs from about 2320 px to the window's right edge (2560), where the window cuts it off.
+    - It holds that position through the countdown camera (every clip frame from the camera cut to the HUD's
+      arrival) and is gone once the race HUD is up.
+    - In mode 2 it appears in no frame of the same phase. That fits an element that sits past the 4:3 right edge
+      (643.7..676 units if unshifted). Mode 2's 4:3 viewport hides it, and mode 1's full-screen extension shows it. A
+      +80 shift alone would have left it on screen in mode 2.
+    - **Source trace (sana GO 40933 a; static, no code change):**
+      - **Owner:** the START display. GAD_PUB display 4998C0, mode 13, calls 499A30 (`gad_start_499a30`,
+        `race_end_modes.cpp`).
+      - **When it runs:** only with 43F860 = [780260], the console flag that the SUMO_FE init sets. That holds in
+        this build's frontend races.
+      - **What it draws:** the player-list animation 0x490001 at (0, 0), layer 4. Its frame is the START frame
+        count minus 50, capped at 5 per player; the player count 8367F0 comes from 456D60, which is 1 offline.
+      - **Single player:** the frame stops at 5, and the function returns before the per-player icons
+        (`players <= 1`). The player list's "1P" row is left where frame 5 puts it, just past the 640 edge.
+      - **Spacing:** the draw is queued outside NaviPub_Disp, with `ui_spacing_scope()` off, so it is unshifted.
+        That is consistent with the measured position.
+    - **Tweaks (code reading, no run):**
+      - No `hooks_uiscaling.cpp` site touches 499A30.
+      - Its replacement for draw_sprite_custom places every sprite at scaleY·x plus the 4:3 offset
+        (`hooks_uiscaling.cpp`, the KeepCentered / OnlineArcade branch), and nothing clips to the 4:3 area.
+      - So Tweaks' modes 1 and 2 should both draw this "1P" at x 2251 at 2560x1440. Vanilla stretches 640 to the
+        screen edge, which keeps it off screen.
+      - In the decomp, mode 1 matches that reading, and mode 2's 4:3 viewport hides it, as vanilla does.
+    - **Not confirmed:**
+      - frame 5's layer positions in 0x490001 (no sprani dump was made);
+      - a Tweaks frame of the start camera.
+- **Limits:**
+  - one route, one run per mode, one aspect;
+  - not exercised:
+    - time attack (sectors, rank, REV, ghost gap, goal banners);
+    - C2C (missions, bubbles, scores);
+    - rivals, LAN, records, the heart meter;
+  - no performance or frame-time reading.
+- **Evidence:** the project hub's `artifacts/outrun-perf-20261011/ui-scaling-20261012/` holds:
+  - shots, logs and the 1P crop;
+  - the two measuring scripts, `hud_shift.py` and `red_bbox.py`.
+
 ## Scope map: Tweaks' sites -> the decomp (first pass, 2026-10-12)
 
 - **Method:** every `create_mid` / `create_inline` site in `hooks_uiscaling.cpp` (107 sites). Each is matched to the

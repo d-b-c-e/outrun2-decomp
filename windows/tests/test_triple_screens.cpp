@@ -44,6 +44,8 @@ int main(){
         CHECK(parse_ui_scaling_mode(" 2 ",note)==2u&&note.empty());
         CHECK(parse_ui_scaling_mode("0\r",note)==0u&&note.empty());
         CHECK(parse_ui_scaling_mode("1",note)==1u&&note.find("is partial")!=std::string::npos);
+        CHECK(note.find("time attack, rank")!=std::string::npos&&note.find("Not yet: C2C")!=std::string::npos&&
+              note.find("race route only")!=std::string::npos);
         CHECK(parse_ui_scaling_mode("3",note)==2u&&note=="UIScalingMode = 3 refused (0, 1 or 2); 2 (keep centred) applies");
         CHECK(parse_ui_scaling_mode("02",note)==2u&&note.find("refused")!=std::string::npos);
         auto rect=[](unsigned mode,bool wide,float span,bool on,double aspect){
