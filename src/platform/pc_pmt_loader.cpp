@@ -1,6 +1,7 @@
 #include "platform/pc_pmt_loader.hpp"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -27,12 +28,33 @@ std::uint32_t pmt_xxh32(const std::uint8_t* p,std::size_t len,std::uint32_t seed
 }
 namespace {
 struct Replacement {
-    bool enabled{};std::filesystem::path root;
+    bool scene{},ui{},any_folder{};std::filesystem::path root;
     std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
     std::map<std::string,int> folders;                   // lower-case first components of those paths
-    PmtTextureReplacementStats stats;
-    std::map<std::string,PmtTextureReplacementBank> banks;
+    // TextureMatchAnyFolder: lower-case "<hash>_<w>x<h>.dds" (index prefix dropped) -> its files anywhere in the pack,
+    // and the answer once decided: the file to use, or empty when the files differ (ambiguous).
+    std::map<std::string,std::vector<std::filesystem::path>> by_name;
+    std::map<std::string,std::filesystem::path> resolved;
+    PmtTextureReplacementStats stats,ui_stats;           // scene (PMT) banks, sprite (XST) banks
+    std::map<std::string,PmtTextureReplacementBank> banks,ui_banks;
 };
+// A pack file name without Tweaks' index prefix: "12_ab12cd34_64x64.dds" -> "ab12cd34_64x64.dds". Only a run of
+// digits followed by a second underscore is a prefix ("12345678_64x64.dds" has none).
+std::string without_index(const std::string& name){
+    const auto u=name.find('_');
+    if(u==std::string::npos||u==0||name.find('_',u+1)==std::string::npos)return name;
+    for(std::size_t k=0;k<u;++k)if(!std::isdigit(static_cast<unsigned char>(name[k])))return name;
+    return name.substr(u+1);
+}
+// Tweaks' FxtHashRemappings: sprites the FXT mod edits in the game files, looked up by the vanilla file's hash (when
+// the size matches too), so a pack made from vanilla dumps still applies.
+struct FxtRemap { std::uint32_t from,to,width,height; };
+constexpr FxtRemap FxtRemaps[]{
+    {0x8F1D69D3u,0x1F77CB88u,128,128},                                                        // spr_sprani_etc_cvt_Exst
+    {0x8F663222u,0x4AFC1BEDu,512,512},{0x469F516Du,0xF043316Bu,1024,512},{0x86325B15u,0x8B52FEECu,1024,512}, // spr_sprani_CLAR_RANK_Exst
+    {0x1025284Eu,0xC4A2937Bu,1024,1024},{0xFDC4E73Bu,0x39229D64u,1024,1024},                  // spr_sprani_game_cvt_Exst
+    {0x50D487A9u,0xACF61D7Cu,1024,512},{0x2F7DFED1u,0x31C58963u,512,256},{0x678170B1u,0x4DC09A74u,1024,1024}, // spr_sprani_sumo_fe_cvt_Exst
+    {0x698EEA48u,0x2DA43E41u,1024,1024}};                                                     // spr_sprani_selector_cvt_Exst
 Replacement& replacement(){static Replacement r;return r;}
 std::string lower(std::string s){for(auto& ch:s)ch=char(std::tolower(static_cast<unsigned char>(ch)));return s;}
 // A replacement file read whole, refused above 128 MB (a 4096x4096 A8R8G8B8 chain is 90 MB).
@@ -67,21 +89,81 @@ bool replacement_usable(const std::vector<std::uint8_t>& f,bool cube){
             need+=block?std::uint64_t(std::max(1u,(w+3)/4))*std::max(1u,(h+3)/4)*block:std::uint64_t(w)*h*4u;
     return need<=f.size();
 }
-// The replacement DDS of a bank texture, if the pack has a usable one (Tweaks' search order: the first name present).
-bool find_replacement(const std::string& pack,std::uint32_t index,const std::uint8_t* data,std::size_t size,bool cube,std::vector<std::uint8_t>& out){
+// An A8B8G8R8 (or X8B8G8R8) file as the A8R8G8B8 the device reads: R and B swapped in every texel and the masks
+// rewritten, as Tweaks' loader converts D3DFMT_A8B8G8R8. About half of the owner's UI pack is stored this way.
+void abgr_to_argb(std::vector<std::uint8_t>& f){
+    if(f.size()<0x80u)return;
+    auto u=[&](std::size_t o){std::uint32_t v;std::memcpy(&v,f.data()+o,4);return v;};
+    if((u(80)&4u)||u(88)!=32u||u(92)!=0xffu||u(96)!=0xff00u||u(100)!=0xff0000u)return;
+    for(std::size_t k=0x80;k+4<=f.size();k+=4)std::swap(f[k],f[k+2]);
+    const std::uint32_t r=0xff0000u,b=0xffu;std::memcpy(f.data()+92,&r,4);std::memcpy(f.data()+100,&b,4);
+}
+// TextureMatchAnyFolder: the one file to use for a same-name match elsewhere in the pack, decided once per name. Several
+// files are compared by size, then byte for byte; any difference (or a file that cannot be read) makes the name
+// ambiguous (empty path).
+std::filesystem::path any_folder_file(Replacement& r,const std::string& name){
+    if(const auto it=r.resolved.find(name);it!=r.resolved.end())return it->second;
+    const auto& list=r.by_name.at(name);
+    std::filesystem::path pick=list.front();
+    if(list.size()>1){
+        std::error_code e;const auto n=std::filesystem::file_size(list.front(),e);
+        std::vector<std::uint8_t> first,other;
+        bool same=!e&&read_replacement(list.front(),first);
+        for(std::size_t k=1;same&&k<list.size();++k){
+            const auto m=std::filesystem::file_size(list[k],e);
+            same=!e&&m==n&&read_replacement(list[k],other)&&other==first;
+        }
+        if(!same)pick.clear();
+    }
+    return r.resolved[name]=pick;
+}
+// The replacement DDS of a bank texture, if the pack has a usable one (Tweaks' search order: the first name present;
+// then, with TextureMatchAnyFolder, a same-name file in another folder). `other`: it came from another folder.
+bool find_replacement(bool ui,const std::string& pack,std::uint32_t index,const std::uint8_t* data,std::size_t size,bool cube,std::vector<std::uint8_t>& out,
+    bool& other){
+    other=false;
     auto& r=replacement();
     if(size<0x80||std::memcmp(data,"DDS ",4)!=0)return false;
     std::uint32_t height,width;std::memcpy(&height,data+12,4);std::memcpy(&width,data+16,4);
-    char name[64];std::snprintf(name,sizeof name,"%X_%ux%u.dds",pmt_xxh32(data,size),width,height);
+    auto hash=pmt_xxh32(data,size);
+    for(const auto& f:FxtRemaps)if(f.from==hash&&f.width==width&&f.height==height){hash=f.to;break;}
+    char name[64];std::snprintf(name,sizeof name,"%X_%ux%u.dds",hash,width,height);
     const std::string idx=std::to_string(index)+"_"+name,stem=lower(pack);
-    auto& bank=r.banks[pack];if(!bank.looked)bank.folder=r.folders.count(stem)!=0;
-    ++r.stats.looked;++bank.looked;
+    auto& stats=ui?r.ui_stats:r.stats;
+    auto& bank=(ui?r.ui_banks:r.banks)[pack];if(!bank.looked)bank.folder=r.folders.count(stem)!=0;
+    ++stats.looked;++bank.looked;
     for(const std::string& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))}){
         const auto it=r.files.find(key);if(it==r.files.end())continue;
-        if(read_replacement(it->second,out)&&replacement_usable(out,cube))return true;
-        ++r.stats.failed;++bank.failed;out.clear();return false;
+        if(read_replacement(it->second,out)){abgr_to_argb(out);if(replacement_usable(out,cube))return true;}
+        ++stats.failed;++bank.failed;out.clear();return false;
     }
-    return false;
+    if(!r.any_folder)return false;
+    const auto key=lower(std::string(name));
+    if(!r.by_name.count(key))return false;
+    const auto file=any_folder_file(r,key);
+    if(file.empty()){++stats.ambiguous;++bank.ambiguous;return false;}
+    if(read_replacement(file,out)){abgr_to_argb(out);if(replacement_usable(out,cube)){other=true;return true;}}
+    ++stats.failed;++bank.failed;out.clear();return false;
+}
+// The texture of request q, created from the pack's replacement when it has a usable one (the same request, only the
+// file differs, as Tweaks does), else from q. A replacement the device does not create leaves the stock texture.
+std::uint32_t create_from_pack(PcD3D9Device& device,bool ui,const std::string& pack,std::uint32_t index,const PcTextureFileRequest& q,
+    bool& replaced){
+    replaced=false;std::vector<std::uint8_t> swap;
+    const auto start=std::chrono::steady_clock::now();
+    auto& r=replacement();
+    auto spent=[&]{auto& m=ui?r.ui_banks:r.banks;
+        if(const auto it=m.find(pack);it!=m.end())it->second.seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();};
+    bool other=false;
+    if(find_replacement(ui,pack,index,q.data,q.size,q.cube,swap,other)){
+        auto alt=q;alt.data=swap.data();alt.size=std::uint32_t(swap.size());
+        const auto handle=device.create_texture_from_file(alt);
+        auto& stats=ui?r.ui_stats:r.stats;auto& bank=(ui?r.ui_banks:r.banks)[pack];
+        spent();
+        if(handle){++stats.replaced;++bank.replaced;if(other){++stats.other;++bank.other;}replaced=true;return handle;}
+        ++stats.failed;++bank.failed;
+    }else spent();
+    return device.create_texture_from_file(q);
 }
 using driving::Bytes;
 const std::uint8_t* video_bytes(const PcPmtResources& r,std::uint32_t source,std::uint32_t length){
@@ -151,9 +233,10 @@ void pmt_textures_begin_42e850(PcPmtResources& r,PcPmtLoadCursor& c){
     c.texture_record_957be0=r.texture_records_04;
     c.texture_95b22c=0;
 }
-void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){
-    auto& r=replacement();r=Replacement{};r.enabled=enabled;
-    if(!enabled)return;
+void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){texture_replacement_configure(enabled,false,load_folder);}
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder){
+    auto& r=replacement();r=Replacement{};r.scene=scene;r.ui=ui;r.any_folder=any_folder;
+    if(!scene&&!ui)return;
     std::error_code e;r.root=std::filesystem::u8path(load_folder);
     for(std::filesystem::recursive_directory_iterator it(r.root,e),end;!e&&it!=end;it.increment(e)){
         if(!it->is_regular_file(e))continue;
@@ -162,12 +245,24 @@ void pmt_texture_replacement_configure(bool enabled,const std::string& load_fold
         const auto key=lower(std::string(rel.begin(),rel.end()));
         if(const auto slash=key.find('/');slash!=std::string::npos)r.folders.emplace(key.substr(0,slash),0);
         r.files.emplace(key,it->path());
+        if(any_folder){const auto slash=key.find_last_of('/');r.by_name[without_index(slash==std::string::npos?key:key.substr(slash+1))].push_back(it->path());}
     }
-    r.stats.files=std::uint32_t(r.files.size());
-    std::printf("texture replacement: %u scene textures indexed under %s\n",r.stats.files,load_folder.c_str());
+    const auto files=std::uint32_t(r.files.size());
+    if(scene)r.stats.files=files;
+    if(ui)r.ui_stats.files=files;
+    std::printf("texture replacement: %u files indexed under %s (scene %s, UI %s)\n",files,load_folder.c_str(),
+        scene?"on":"off",ui?"on":"off");
 }
 const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
 const std::map<std::string,PmtTextureReplacementBank>& pmt_texture_replacement_banks(){return replacement().banks;}
+bool ui_texture_replacement_enabled(){return replacement().ui;}
+std::uint32_t ui_texture_replacement_create(PcD3D9Device& device,const std::string& pack,std::uint32_t index,const PcTextureFileRequest& q,
+    bool& replaced){
+    if(!replacement().ui||pack.empty()){replaced=false;return device.create_texture_from_file(q);}
+    return create_from_pack(device,true,pack,index,q,replaced);
+}
+const PmtTextureReplacementStats& ui_texture_replacement_stats(){return replacement().ui_stats;}
+const std::map<std::string,PmtTextureReplacementBank>& ui_texture_replacement_banks(){return replacement().ui_banks;}
 bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device& device){
     auto s=r.view();
     const auto count=s.u32(8);
@@ -184,15 +279,9 @@ bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device&
     q.width=q.height=0xffffffffu;q.usage=0;q.format=0;q.pool=1;q.filter=1;q.colour_key=0;
     if(caps2){q.cube=true;q.mip_levels=0xffffffffu;q.mip_filter=1;}
     else{q.cube=false;q.mip_levels=4;q.mip_filter=3;}
-    std::uint32_t handle=0;std::vector<std::uint8_t> swap;
-    if(replacement().enabled&&!r.pack_name.empty()&&find_replacement(r.pack_name,c.texture_95b22c,q.data,q.size,q.cube,swap)){
-        auto alt=q;alt.data=swap.data();alt.size=std::uint32_t(swap.size());   // the same request, the pack's file
-        handle=device.create_texture_from_file(alt);
-        auto& bank=replacement().banks[r.pack_name];
-        if(handle){++replacement().stats.replaced;++bank.replaced;}
-        else{++replacement().stats.failed;++bank.failed;}   // not created: the stock texture
-    }
-    if(!handle)handle=device.create_texture_from_file(q);
+    bool replaced=false;
+    const auto handle=replacement().scene&&!r.pack_name.empty()?create_from_pack(device,false,r.pack_name,c.texture_95b22c,q,replaced)
+                                                                :device.create_texture_from_file(q);
     s.put32(slot,handle);
     c.texture_record_957be0+=0x14;
     ++c.texture_95b22c;

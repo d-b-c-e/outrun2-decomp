@@ -442,15 +442,19 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // bumper views) so far geometry stops z-fighting; the lens flare keeps 0.05. Off when absent.
     if(settings.flag("Graphics","FixZBufferPrecision",false)){
         outrun::platform::fix_znear()=true;std::printf("settings: z-buffer precision fix (race camera near plane by view)\n");}
-    // [Graphics] SceneTextureReplacement / TextureBaseFolder, the Tweaks keys: stage, car and object textures replaced
-    // from <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Off when absent; the folder defaults to
-    // "textures". A path that leaves the game folder is refused.
-    {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false);
+    // [Graphics] SceneTextureReplacement / UITextureReplacement / TextureBaseFolder, the Tweaks keys: stage, car and
+    // object textures, and the menu and HUD sprite textures (the pack's spr_*_xst folders), replaced from
+    // <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Each off when absent; the folder defaults to
+    // "textures". A path that leaves the game folder is refused. TextureMatchAnyFolder (not a Tweaks key, off when
+    // absent): a texture with no file under Tweaks' names takes an unambiguous same-name file from another pack folder.
+    {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false),ui=settings.flag("Graphics","UITextureReplacement",false);
+        const bool any=settings.flag("Graphics","TextureMatchAnyFolder",false);
         std::string base=settings.text("Graphics","TextureBaseFolder","textures");
         if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
-            if(on)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
+            if(on||ui)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
             base="textures";}
-        outrun::platform::pmt_texture_replacement_configure(on,folder+"/"+base+"/load");}
+        outrun::platform::texture_replacement_configure(on,ui,folder+"/"+base+"/load",any);
+        if(any&&(on||ui))std::printf("settings: [Graphics] TextureMatchAnyFolder: same-name files from other pack folders when unambiguous\n");}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
     if(playback){
@@ -497,16 +501,22 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::desktop_panel_shutdown();
     outrun::desktop::telemetry_shutdown();
     outrun::desktop::ffb_shutdown();
-    if(const auto& t=outrun::platform::pmt_texture_replacement_stats();t.files){
-        std::printf("texture replacement: %u replaced of %u looked up (%u kept stock: unreadable, unusable or not created)\n",
-            t.replaced,t.looked,t.failed);
-        // Banks the pack covers, one line each; the others named once (a stage variant the pack lacks shows up here).
+    // Texture replacement summaries, scene then UI: totals, the banks the pack covers one line each, the others named once
+    // (a stage variant the pack lacks shows up here).
+    for(const bool ui:{false,true}){
+        const auto& t=ui?outrun::platform::ui_texture_replacement_stats():outrun::platform::pmt_texture_replacement_stats();
+        if(!t.files)continue;
+        const char* kind=ui?"UI texture replacement":"texture replacement";
+        std::printf("%s: %u replaced of %u looked up (%u kept stock: unreadable, unusable or not created)\n",kind,t.replaced,t.looked,t.failed);
+        if(t.other||t.ambiguous)std::printf("%s: %u of those from other pack folders (TextureMatchAnyFolder), %u kept stock as ambiguous\n",
+            kind,t.other,t.ambiguous);
         std::string others;unsigned uncovered=0;
-        for(const auto& [bank,b]:outrun::platform::pmt_texture_replacement_banks()){
-            if(b.folder){std::printf("texture replacement: %s %u of %u replaced (%u kept stock)\n",bank.c_str(),b.replaced,b.looked,b.failed);continue;}
+        for(const auto& [bank,b]:ui?outrun::platform::ui_texture_replacement_banks():outrun::platform::pmt_texture_replacement_banks()){
+            if(b.folder||b.other){std::printf("%s: %s %u of %u replaced (%u from other folders, %u ambiguous, %u kept stock, %.2f s in the pack)\n",
+                kind,bank.c_str(),b.replaced,b.looked,b.other,b.ambiguous,b.failed,b.seconds);continue;}
             ++uncovered;if(others.size()<400)others+=(others.empty()?"":", ")+bank;
         }
-        if(uncovered)std::printf("texture replacement: %u banks without a pack folder: %s%s\n",uncovered,others.c_str(),others.size()>=400?", ...":"");
+        if(uncovered)std::printf("%s: %u banks without a pack folder: %s%s\n",kind,uncovered,others.c_str(),others.size()>=400?", ...":"");
     }
     if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
         // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).

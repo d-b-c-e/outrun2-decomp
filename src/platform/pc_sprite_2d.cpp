@@ -1,4 +1,5 @@
 #include "platform/pc_sprite_2d.hpp"
+#include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_screen.hpp"
 #include "driving/pc_d3dx.hpp"
 #include "driving/pc_x87.hpp"
@@ -90,6 +91,17 @@ struct Ctx {
         const auto index=token&0xffffu;
         if(index>=b.textures.size())throw Fault{0x42a052u,token};      // the PC reads past its texture array
         return b.textures[index];
+    }
+    // UITextureReplacement (not PC code): the stock size of bank texture `token` when `tex` is that texture and was
+    // created from a pack; the size the tables' texel coordinates refer to. False for stock textures (w/h unchanged).
+    bool stock_size(std::uint32_t token,std::uint32_t tex,std::uint32_t& w,std::uint32_t& h)const{
+        const auto bank=(token>>16)&0xffffu,index=token&0xffffu;
+        if(!tex||bank>=PcSpriteBankCount)return false;
+        const auto& b=s.banks[bank];
+        if(index>=b.textures.size()||index>=b.stock_sizes.size()||b.textures[index]!=tex)return false;
+        const auto& z=b.stock_sizes[index];
+        if(!z[0]||!z[1])return false;
+        w=z[0];h=z[1];return true;
     }
 };
 // ------------------------------------------------------------------ producers
@@ -290,6 +302,7 @@ void size_42ddf0(Ctx& c,std::uint32_t token,float& w,float& h){
     const auto tex=c.texture_42a030(token);
     std::uint32_t tw=0,th=0;
     if(!tex||!c.d||!c.d->texture_level_size(tex,0,tw,th))throw Fault{0x42de2bu,token};   // the PC calls through the texture object
+    c.stock_size(token,tex,tw,th);   // a pack replacement: the footage UVs of the stock texture (the same atlas area)
     w=x87_float(fild_u(tw));h=x87_float(fild_u(th));
 }
 // 428BD0: footage record of a layer.
@@ -590,6 +603,7 @@ void quad_42be60(Ctx& c,std::uint32_t rec,std::array<std::uint8_t,4*0x1c>& v){
     put(2,X87(x87_float(X87(wcx_f)*sx)),y23);
     put(3,X87(ncx)*sx,y23);
     X87 iw,ih;
+    c.stock_size(c.n32(rec),tex,W,H);   // a pack replacement: UVs over the stock texels (the same atlas area)
     if(flags&0x400u){iw=X87(1.0f);ih=X87(1.0f);}
     else{
         X87 a=X87(std::int32_t(W));if(std::int32_t(W)<0)a=a+X87(4294967296.0f);iw=X87(1.0f)/a;
@@ -640,6 +654,10 @@ void image_42a0a0(Ctx& c,PcD3DXSprite* sprite,std::uint32_t rec){
     const auto flags=c.n32(rec+0x34);
     std::uint32_t W=0,H=0;
     if(!c.d->texture_level_size(tex,0,W,H))throw Fault{0x42a116u,tex};
+    // UITextureReplacement: everything below is computed over the stock texels, then the source rectangle is moved
+    // onto the replacement and the scale reduced by the same ratio, so the sprite covers the stock area on screen.
+    const std::uint32_t PW=W,PH=H;
+    const bool replaced=c.stock_size(c.n32(rec),tex,W,H)&&(W!=PW||H!=PH);
     const std::int32_t left=std::int32_t(c.n32(rec+4)),top=std::int32_t(c.n32(rec+8));
     std::int32_t right=std::int32_t(c.n32(rec+0xc)),bottom=std::int32_t(c.n32(rec+0x10));
     if(left==0&&right==0)right=std::int32_t(W);
@@ -662,11 +680,21 @@ void image_42a0a0(Ctx& c,PcD3DXSprite* sprite,std::uint32_t rec){
     if(e&2u)ty=ty+X87(rh)*X87(sy_rec);
     const X87 TX=(e&1u)?X87(rw)*X87(sx)+X87(tx):X87(tx);
     const X87 k94(s.screen_740c94),k98(s.screen_740c98);
-    const float scal[2]{x87_float(k94*ssx),x87_float(k98*X87(sy))};
+    float scal[2]{x87_float(k94*ssx),x87_float(k98*X87(sy))};
     const float trans[2]{x87_float(k94*TX),x87_float(k98*ty)};
+    std::int32_t source[4]{rect[0],rect[1],rect[2],rect[3]};
+    if(replaced){
+        // Edges rounded to the replacement's texels; each scale takes the exact ratio of the two extents.
+        const double fx=double(PW)/double(W),fy=double(PH)/double(H);
+        source[0]=std::int32_t(std::lround(rect[0]*fx));source[2]=std::int32_t(std::lround(rect[2]*fx));
+        source[1]=std::int32_t(std::lround(rect[1]*fy));source[3]=std::int32_t(std::lround(rect[3]*fy));
+        const std::int32_t sw=source[2]-source[0],sh=source[3]-source[1];
+        if(sw)scal[0]=float(double(scal[0])*double(rw)/double(sw));
+        if(sh)scal[1]=float(double(scal[1])*double(rh)/double(sh));
+    }
     const auto m=pc_d3dx_transformation_2d(scal,fbits(c.n32(rec+0x30)),trans);
     sprite->set_transform(m.data());
-    sprite->draw(tex,rect,nullptr,nullptr,c.n32(rec+0x2c));
+    sprite->draw(tex,source,nullptr,nullptr,c.n32(rec+0x2c));
     ++s.draws;
 }
 }
@@ -968,7 +996,14 @@ std::size_t dds_bytes(const std::uint8_t* p,std::size_t n){
     return 128+total;
 }
 }
-bool pc_sprite_bank_load_xst(PcSpriteBank& b,PcD3D9Device& device,const std::vector<std::uint8_t>& d,std::string& error){
+std::string pc_sprite_xst_pack_name(const char* path){
+    if(!path)return {};
+    std::string p(path);
+    if(const auto slash=p.find_last_of("\\/");slash!=std::string::npos)p=p.substr(slash+1);
+    if(const auto dot=p.find_last_of('.');dot!=std::string::npos)p=p.substr(0,dot);
+    return p;
+}
+bool pc_sprite_bank_load_xst(PcSpriteBank& b,PcD3D9Device& device,const std::vector<std::uint8_t>& d,std::string& error,const std::string& pack){
     if(d.size()<40){error="XST too small";return false;}
     const auto meta=rd32(d.data()),pixels=rd32(d.data()+4);
     if(std::uint64_t(meta)+pixels+8u!=d.size()||meta<32){error="XST sections";return false;}
@@ -982,17 +1017,24 @@ bool pc_sprite_bank_load_xst(PcSpriteBank& b,PcD3D9Device& device,const std::vec
     const std::size_t table=0xcu+std::size_t(rd32(b.header.data()+4));
     if(table+std::size_t(count)*0x14u>meta){error="XST entry table";return false;}
     const std::size_t pixels_at=8u+meta;
-    b.textures.clear();
+    b.textures.clear();b.stock_sizes.clear();
+    // UITextureReplacement: Tweaks names a pack file by the count of textures the XST created before it (its
+    // CurrentTextureIdx, which entries without a texture do not advance), then by hash and stock size alone.
+    const bool ui=!pack.empty()&&ui_texture_replacement_enabled();
+    std::uint32_t created=0;
     for(std::uint32_t k=0;k<count;++k){
         const auto* e=b.header.data()+table+std::size_t(k)*0x14u;
         const auto offset=rd32(e+4),size=rd32(e+0x10);const std::uint8_t type=e[0xd];
-        if(type==0u||size==0u){b.textures.push_back(0u);continue;}
+        if(type==0u||size==0u){b.textures.push_back(0u);b.stock_sizes.push_back({});continue;}
         if(std::uint64_t(offset)+size>pixels){error="XST texture "+std::to_string(k)+" outside the pixel section";return false;}
         if(!dds_bytes(d.data()+pixels_at+offset,size)){error="XST texture "+std::to_string(k)+" DDS";return false;}
         PcTextureFileRequest q{};
         q.data=d.data()+pixels_at+offset;q.size=size;
         q.width=q.height=0xffffffffu;q.mip_levels=1;q.usage=0;q.format=0;q.pool=1;q.filter=1;q.mip_filter=1;q.colour_key=0;
-        b.textures.push_back(device.create_texture_from_file(q));
+        bool replaced=false;
+        b.textures.push_back(ui?ui_texture_replacement_create(device,pack,created,q,replaced):device.create_texture_from_file(q));
+        b.stock_sizes.push_back(replaced?std::array<std::uint32_t,2>{rd32(q.data+16),rd32(q.data+12)}:std::array<std::uint32_t,2>{});
+        ++created;
     }
     b.state=2;return true;
 }

@@ -50,13 +50,22 @@ struct PcSpriteBank {
     std::vector<std::uint8_t> header;        // [+0x04]: XST header and tables (offsets relative to it)
     std::vector<std::uint32_t> textures;     // [+0x08]: device texture objects
     std::vector<std::uint8_t> animation;     // 9568B8[bank] image at PcSpraniAnimationBase(bank)
+    // Per texture (not PC state): the stock DDS width/height when the texture was created from a UI replacement
+    // pack, {0, 0} for a stock texture. The XST image tables and SPRANI frames address the stock texels; the
+    // draws below map them onto the replacement (Tweaks rescales put_sprite_ex / put_sprite_ex2 records for this).
+    std::vector<std::array<std::uint32_t,2>> stock_sizes;
 };
 // Loaders (the resource system's result, not a PC transliteration of the
 // async loader): XST = the inflated spr_*.sz file (two size words, the
 // 32-byte header {0, meta size, texture count, 0, group count, group offset,
 // image count, image offset}, tables, DDS payloads). Textures are created on
 // the device from the DDS payloads (D3DX defaults, as the PMT textures).
-bool pc_sprite_bank_load_xst(PcSpriteBank&,PcD3D9Device&,const std::vector<std::uint8_t>& inflated,std::string& error);
+// `pack`: the XST file stem (spr_etc_xst), the bank's UITextureReplacement
+// folder (pc_pmt_loader.hpp); empty, or UI replacement off: stock textures.
+bool pc_sprite_bank_load_xst(PcSpriteBank&,PcD3D9Device&,const std::vector<std::uint8_t>& inflated,std::string& error,
+                             const std::string& pack={});
+// The stem of an XST path ("sprite/spr_etc_xst.sz" -> "spr_etc_xst"): the replacement folder Tweaks names.
+std::string pc_sprite_xst_pack_name(const char* path);
 // ani_*.sz inflated (size word + data): 429AC0 relocation (48BDD0/48BD40)
 // and 429B00 (bank << 16 into each footage frame texture word).
 bool pc_sprite_bank_load_animation(PcSpriteBank&,std::uint32_t bank,const std::vector<std::uint8_t>& inflated,std::string& error);
