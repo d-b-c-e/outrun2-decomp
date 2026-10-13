@@ -421,6 +421,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // stops the hoof clop loop 0x8D (pc_screen.hpp).
     outrun::platform::g_pc_fix_pegasus_clopping=settings.flag("Bugfixes","FixPegasusClopping",true);
     if(!outrun::platform::g_pc_fix_pegasus_clopping)std::printf("settings: Pegasus clopping fix off (the PC's own single stop)\n");
+    // [Bugfixes] HideOnlineSigninText, the Tweaks key (off unless set true, as in its INI): no sign-in status box or text
+    // and no SIGN-IN help-bar button on the menus (pc_screen.hpp).
+    outrun::platform::g_pc_hide_online_signin_text=settings.flag("Bugfixes","HideOnlineSigninText",false);
+    if(outrun::platform::g_pc_hide_online_signin_text)std::printf("settings: online sign-in text hidden\n");
     // [Graphics] UseHiDefCharacters, the Tweaks key (on unless set false, as there): the hi-def driver and heroine
     // character sets in gameplay (pc_screen.hpp).
     outrun::platform::g_pc_use_hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
@@ -435,6 +439,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::platform::g_pc_disable_countdown_timer=settings.flag("Misc","DisableCountdownTimer",false);
     std::printf("settings: countdown timer %s\n",outrun::platform::g_pc_disable_countdown_timer?
         "DISABLED ([Misc] DisableCountdownTimer = true: the race clock stands still; not stock rules)":"on (stock rules)");
+    // [Misc] ShowOutRunMilesOnMenu, the Tweaks key (on unless set false, as there): the menu's "Not Signed In" status
+    // also shows the license's OutRun Miles (pc_screen.hpp).
+    outrun::platform::g_pc_show_outrun_miles_on_menu=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
+    if(!outrun::platform::g_pc_show_outrun_miles_on_menu)std::printf("settings: OutRun Miles on the menu off\n");
     // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md; 2, keep centred, by default here until Tweaks'
     // 1 is checked in game): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp); 1
     // spaces the HUD to the edges (partial: the note says which parts).

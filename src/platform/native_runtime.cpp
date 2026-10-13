@@ -16,6 +16,7 @@
 #include "platform/frontend_vehicle_data.hpp"
 #include "platform/frontend_stack.hpp"
 #include "platform/frontend_ui_resources.hpp"
+#include "platform/pc_screen.hpp"   // HideOnlineSigninText, ShowOutRunMilesOnMenu
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1442,7 +1443,13 @@ driving::PcUiNotifyServices native_state2_ui_services(
         const std::string* fmt=st.frontend_text?st.frontend_text->get(text):nullptr;
         if(pc!=0x42cdd0u||!w.font||!fmt){outrun::driving::service_hole("native_state2_ui_services","draw (42CDD0 text)");return;}
         std::string out=*fmt;   // printf: %s takes the 830C20 name (7D68BC set), %d the argument
-        if(const auto at=out.find("%s");at!=std::string::npos)out.replace(at,2,g.alternate?native_network_string(arg):std::string());
+        // ShowOutRunMilesOnMenu (pc_screen.hpp): 4413E2, the not signed in status, prints Tweaks' "%s - %s %d" with
+        // string 0x21D and the active license's Miles instead (the original line when the table lacks 0x21D).
+        const std::string* miles_label=st.frontend_text->get(0x21du);
+        if(pc_show_outrun_miles_4413e2(g_pc_show_outrun_miles_on_menu,g.alternate!=0u,text)&&miles_label){
+            float miles;std::memcpy(&miles,st.frontend_profiles.active.data()+0x24u,4);
+            out=pc_outrun_miles_status(*fmt,*miles_label,miles);
+        }else if(const auto at=out.find("%s");at!=std::string::npos)out.replace(at,2,g.alternate?native_network_string(arg):std::string());
         else if(const auto d=out.find("%d");d!=std::string::npos)out.replace(d,2,std::to_string(std::int32_t(arg)));
         w.style.mode=g.mode;w.style.color=g.color;
         w.cursor.x=g.x;w.cursor.y=g.y;w.cursor.origin_x=g.x;
@@ -2004,10 +2011,13 @@ void native_event36_state2_call(NativeEventFunction36State& state,
                 FrontendUiResources ui{state.frontend_sprites};
                 ui.motion_step=state.frontend_ui_motion_step;
                 ui.effect_user=state.frontend_effect_user;ui.effect_4249f0=state.frontend_effect;
+                // HideOnlineSigninText (pc_screen.hpp): the 443256 jump skips the 4400D3 box's open and commit.
                 const driving::PcObjectUiOpenServices open{&ui,
-                    [](void* p,std::uint32_t,std::uint32_t pc,driving::Bytes o,std::size_t off){
+                    [](void* p,std::uint32_t site,std::uint32_t pc,driving::Bytes o,std::size_t off){
+                        if(pc_signin_box_call_skipped(g_pc_hide_online_signin_text,site))return;
                         std::uint32_t r{};(void)static_cast<FrontendUiResources*>(p)->call(pc,o.sub(off,0xa0u),nullptr,0,r);},
-                    [](void* p,std::uint32_t,std::uint32_t pc,driving::Bytes o,std::size_t off,const std::array<std::uint32_t,11>& a){
+                    [](void* p,std::uint32_t site,std::uint32_t pc,driving::Bytes o,std::size_t off,const std::array<std::uint32_t,11>& a){
+                        if(pc_signin_box_call_skipped(g_pc_hide_online_signin_text,site))return;
                         std::uint32_t r{};(void)static_cast<FrontendUiResources*>(p)->call(pc,o.sub(off,0xa0u),a.data(),a.size(),r);}};
                 driving::object_ui_state_update_443110(
                     object,state.frontend_ui_globals,native_state2_ui_services(state),open);

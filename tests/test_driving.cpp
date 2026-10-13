@@ -1472,6 +1472,25 @@ int main(){try{
     // Inactive block still normalizes/ticks but does not enter either setup body.
     eraw81.fill(0);e81.put8(0u,0u);e81.put32(0x408u,0u);for(unsigned i=0;i<4u;++i){e81.put32(0x18u+i*4u,0x297u);e81.put32(0x40cu+i*0xa0u+8u,0xffffffffu);}g81.alternate=0u;t81={};embedded_slots_tick_446cf0(e81,g81,sv81);
     require(t81.n==0u&&t81.finalized==0u,"r081 inactive suppresses setup");for(unsigned i=0;i<4u;++i)require(e81.u32(0x18u+i*4u)==0x298u,"r081 normal marker normalization");
+
+    // Tweaks' HideOnlineSigninText (skip_caption 0x298): both bodies leave a slot whose +18 caption is SIGN-IN as it
+    // is: no 465250 reset (its live handle kept), no configure or finalize, the primary flag kept.
+    require(sv81.skip_caption==0xffffffffu,"r081 skip_caption off by default");
+    PcEmbeddedSlotsServices446cf0 hide81=sv81;hide81.skip_caption=0x298u;
+    eraw81.fill(0);e81.put32(0x408u,1u);e81.put32(0x08u+0x20u+2u*4u,0x04u);e81.put32(0x18u+0x20u+2u*4u,0x298u);e81.put8(3u,1u);
+    e81.put32(0x40cu+2u*0xa0u+8u,0x1234u);e81.put32(0x40cu+2u*0xa0u+0x2cu,0x5a5au);
+    t81={};embedded_slot_open_primary_446a80(e81,2u,hide81);embedded_slot_open_secondary_446b20(e81,2u,hide81);
+    require(t81.n==0u&&t81.finalized==0u&&e81.u8(3u)==1u&&e81.u32(0x40cu+2u*0xa0u+8u)==0x1234u&&e81.u32(0x40cu+2u*0xa0u+0x2cu)==0x5a5au,
+            "r081 skip_caption leaves the SIGN-IN slot untouched");
+    // The caption row is the one at the current depth (+18 + [+408] * 20 + slot * 4); another caption opens as before.
+    e81.put32(0x18u+0x20u+2u*4u,0x297u);e81.put32(0x40cu+2u*0xa0u+8u,0xffffffffu);t81={};embedded_slot_open_primary_446a80(e81,2u,hide81);
+    require(t81.n==1u&&t81.finalized==1u&&t81.effect[0]==0x002c013bu&&e81.u8(3u)==0u,"r081 skip_caption: other captions open");
+    // The owner loop: the marker normalization (not signed in: 0x297 to 0x298) runs first, then that slot is left.
+    eraw81.fill(0);e81.put8(0u,1u);e81.put32(0x408u,0u);
+    for(unsigned i=0;i<4u;++i){e81.put32(0x08u+i*4u,keys81[i]);e81.put32(0x18u+i*4u,i==2u?0x297u:0x100u+i);e81.put32(0x40cu+i*0xa0u+8u,0xffffffffu);e81.put8(1u+i,1u);}
+    g81.alternate=0u;t81={};embedded_slots_tick_446cf0(e81,g81,hide81);
+    require(t81.n==3u&&t81.finalized==3u&&t81.slot[0]==0u&&t81.slot[1]==1u&&t81.slot[2]==3u,"r081 skip_caption in the owner loop");
+    require(e81.u32(0x18u+2u*4u)==0x298u&&e81.u8(3u)==1u&&e81.u8(1u)==0u&&e81.u8(2u)==0u&&e81.u8(4u)==0u,"r081 skip_caption keeps only the SIGN-IN flag");
     }
     // r082 third mandatory state-2 child: feature/history gate at 0x445810.
     {

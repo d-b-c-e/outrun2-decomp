@@ -198,6 +198,12 @@ target_include_directories(test_pegasus_sound PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_pegasus_sound PRIVATE cxx_std_17)
 target_compile_options(test_pegasus_sound PRIVATE /W4 /WX)
 add_test(NAME pegasus_sound COMMAND test_pegasus_sound)
+# HideOnlineSigninText and ShowOutRunMilesOnMenu (src/platform/pc_screen.hpp): the exact sites and the status text.
+add_executable(test_signin_text tests/test_signin_text.cpp)
+target_include_directories(test_signin_text PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_signin_text PRIVATE cxx_std_17)
+target_compile_options(test_signin_text PRIVATE /W4 /WX)
+add_test(NAME signin_text COMMAND test_signin_text)
 # The companion's device-free stand-in game (tests/session_companion/test_companion.ps1): the real intake and recorder,
 # synthetic rows, closed only by its close file. Not a ctest: the companion test needs the managed finalizer built.
 add_executable(session_game_fixture tests/session_companion/session_game_fixture.cpp source/ordinary_recording.cpp source/session_request.cpp source/startup_state.cpp

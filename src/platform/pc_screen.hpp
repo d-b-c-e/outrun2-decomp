@@ -3,6 +3,7 @@
 // game draws. 320 is the PC's 4:3 screen (6281C8 / 5DA2D4); the widescreen
 // option (Y) sets 240*16/9 so the screen-bound visibility tests (4F02D0) keep
 // objects until they leave the wider view.
+#include <cstdint>
 #include <string>
 namespace outrun::platform {
 inline float g_pc_view_half_width=320.0f;
@@ -49,6 +50,32 @@ inline bool g_pc_fix_pegasus_clopping=true;
 inline int pc_pegasus_sound_off_44bcc0(bool fix,unsigned out[2]){
     out[0]=0x808cu;if(!fix)return 1;
     out[1]=0x808du;return 2;
+}
+// [Bugfixes] HideOnlineSigninText (the Tweaks key, off by default there since its b3c1825 and here; hooks_bugfixes.cpp;
+// Tweaks' code default is still true, its shipped INI sets false): the remnants of the online service on the menus.
+// - 443256 (JNE to JMP): 443110 never opens the 4400D3 sign-in status box at +C48 (pc_signin_box_call_skipped,
+//   native_runtime.cpp). The status text 441370 then returns at its first test (+C50 stays -1: 44327C is the only
+//   open of +C48), which is what Tweaks' RET at 441370 does.
+// - 446510 (a help-bar slot caption; frontend_slot_captions_446a50) and 446A80 / 446B20 (its icon; the r081 slot open
+//   through skip_caption) do nothing for a slot whose caption is 664 (pc_hidden_signin_caption).
+inline bool g_pc_hide_online_signin_text=false;
+// 443110's calls that the 443256 jump skips: the 4400D3 box's 465860 open at 44327C and its 465970 commit at 443286.
+inline bool pc_signin_box_call_skipped(bool hide,std::uint32_t site){return hide&&(site==0x44327cu||site==0x443286u);}
+// The help-bar caption Tweaks' 446510 / 446A80 / 446B20 detours leave out: 664 (0x298, "SIGN-IN", the caption 446CF0
+// keeps while not signed in; 0x297 "FRIENDS" is not hidden), or 0xFFFFFFFF (none) without the fix.
+inline std::uint32_t pc_hidden_signin_caption(bool hide){return hide?0x298u:0xffffffffu;}
+// [Misc] ShowOutRunMilesOnMenu (the Tweaks key, on by default there and here; hooks_misc.cpp): 441370's not signed in
+// status (4413E2: 42CDD0 with string 0x474, "Not Signed In") prints Tweaks' "%s - %s %d" instead: that string, string
+// 0x21D ("OutRun Miles:") and the active license's Miles (7C2404, +24 of 7C23E0; the float the showroom reads)
+// truncated to an int (native_runtime.cpp native_state2_ui_services). The signed in branch (4413CE) is unchanged.
+inline bool g_pc_show_outrun_miles_on_menu=true;
+// True for the 42CDD0 call Tweaks replaces: the not signed in branch (7D68BC clear) drawing string 0x474.
+inline bool pc_show_outrun_miles_4413e2(bool show,bool alternate,std::uint32_t text){return show&&!alternate&&text==0x474u;}
+// Tweaks' "%s - %s %d" of the status, the label and (int) of the Miles (cvttss2si: the integer indefinite when the
+// float is out of range or NaN).
+inline std::string pc_outrun_miles_status(const std::string& status,const std::string& label,float miles){
+    const std::int32_t n=(miles>-2147483904.0f&&miles<2147483648.0f)?std::int32_t(miles):std::int32_t(0x80000000u);
+    return status+" - "+label+" "+std::to_string(n);
 }
 // [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
 // and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),

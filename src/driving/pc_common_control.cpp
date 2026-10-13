@@ -5454,6 +5454,16 @@ void r081_embedded_slot_open(Bytes embedded,std::uint32_t slot,std::uint32_t pc_
     embedded.check(child_off,0xa0u);
     Bytes child=embedded.sub(child_off,0xa0u);
 
+    // Tweaks' detours read the caption at +18 + [+408] * 20 + slot * 4 and return before the original body for it.
+    if(services.skip_caption!=0xffffffffu){
+        const auto caption_depth=std::size_t(embedded.u32(0x0408u));
+        if(caption_depth>(std::numeric_limits<std::size_t>::max()-0x18u)/0x20u)
+            throw std::out_of_range("r081 embedded depth overflow");
+        const auto caption_off=0x18u+caption_depth*0x20u+std::size_t(slot)*4u;
+        embedded.check(caption_off,4u);
+        if(embedded.u32(caption_off)==services.skip_caption)return;
+    }
+
     // Both original bodies call 0x465250 before looking up the current entry.
     ui_resource_reset_465250(child,services.ui_services);
 

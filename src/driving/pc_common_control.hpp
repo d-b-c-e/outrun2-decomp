@@ -2031,6 +2031,9 @@ struct PcEmbeddedSlotsServices446cf0 {
     PcUiResourceTickServices4659f0 tick_services{};
     PcEmbeddedUiConfigureR081 configure_ui{};
     PcEmbeddedUiFinalizeR081 finalize_ui{};
+    // Tweaks' HideOnlineSigninText detours of 446A80 / 446B20 (the platform sets 0x298): both return at once for a slot
+    // whose caption (the +18 row 446510 draws) is this id. 0xFFFFFFFF, the default, is the original.
+    std::uint32_t skip_caption{0xffffffffu};
 };
 // PC 0x00446A80..0x00446B12. The callback pc_entry distinguishes this
 // primary layout from 0x446B20 so an eventual 0x465860 backend can preserve

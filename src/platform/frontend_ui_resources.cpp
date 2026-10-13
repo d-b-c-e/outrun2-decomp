@@ -1,6 +1,7 @@
 #include "platform/frontend_ui_resources.hpp"
 #include "platform/title_owner.hpp"
 #include "platform/pc_address_view.hpp"
+#include "platform/pc_screen.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -23,7 +24,7 @@ driving::PcUiResourceTickServices4659f0 FrontendUiResources::ticks(){
         std::uint32_t ignored{};static_cast<FrontendUiResources*>(p)->call(pc,r,nullptr,0,ignored);}};
 }
 driving::PcEmbeddedSlotsServices446cf0 FrontendUiResources::embedded_slots(){
-    return {this,notify(),ticks(),
+    driving::PcEmbeddedSlotsServices446cf0 s{this,notify(),ticks(),
         [](void* p,unsigned pc,driving::Bytes child,unsigned token,unsigned,unsigned x,unsigned y){
             auto& ui=*static_cast<FrontendUiResources*>(p);
             if(pc!=0x446a80&&pc!=0x446b20&&pc!=0x446c50){ui.missing_pc=pc;return;}
@@ -32,6 +33,9 @@ driving::PcEmbeddedSlotsServices446cf0 FrontendUiResources::embedded_slots(){
             unsigned result{};ui.call(0x465860,child,args,11,result);
         },[](void* p,unsigned pc,driving::Bytes child){unsigned result{};auto& ui=*static_cast<FrontendUiResources*>(p);
             if(!ui.missing_pc)ui.call(pc,child,nullptr,0,result);}};
+    // HideOnlineSigninText (pc_screen.hpp): Tweaks' 446A80 / 446B20 detours leave the SIGN-IN slot as it is.
+    s.skip_caption=pc_hidden_signin_caption(g_pc_hide_online_signin_text);
+    return s;
 }
 bool FrontendUiResources::input_feedback(driving::Bytes root,unsigned key,std::int32_t argument){
     if(root.size()<0x21c){missing_pc=0x440ed0;return false;}
@@ -88,6 +92,8 @@ bool frontend_slot_captions_446a50(driving::Bytes embedded,const FrontendFontPac
     auto cvtt=[](float f){return (f>-2147483904.0f&&f<2147483648.0f)?std::int32_t(f):std::int32_t(0x80000000u);};
     for(std::uint32_t i=0;i<4u;++i){
         const std::uint32_t row=(i+embedded.u32(0x408u)*8u)*4u;
+        // HideOnlineSigninText (pc_screen.hpp): Tweaks' 446510 detour draws nothing for the SIGN-IN caption.
+        if(embedded.u32(row+0x18u)==pc_hidden_signin_caption(g_pc_hide_online_signin_text))continue;
         if(embedded.u32(row+8u)==0xffffffffu||embedded.u32(row+0x18u)==0xffffffffu)continue;
         if(!fonts||fonts->fonts[9].token!=9u||!table)return false;
         std::uint32_t xb,yb,off;
