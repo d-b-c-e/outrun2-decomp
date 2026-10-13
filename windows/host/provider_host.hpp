@@ -71,10 +71,14 @@ public:
     // it lives in the worker's shared state, so a worker that outlives the host keeps it alive too (D1).
     // RecorderType must be lazy: no worker or write begins before the first push. Construction may still throw before
     // this host can stop it. The fake recorder, the real P21 recorder and NoCapture all satisfy this contract.
+    // `controls_reads`: the highest controls schema this host's Core applies (STD-037 item 4; read_profile). 1, the
+    // default, is the DLL ABI's and every existing caller's. A consumer whose readers all opt in passes 2; without it the
+    // in-process Core refuses a Schema 2 section although the consumer's own readers apply it (calibration 9a run1).
     ProviderHost(std::wstring folder, std::string nonce, IDirectInput8W* input, const std::string& profile, bool latched,
         std::unique_ptr<RecorderType> recorder, dbce::shim::Capability capability = {}, HWND window = nullptr,
         std::int64_t freshness_us = 100'000,
-        std::function<std::shared_ptr<dbce::shim::Provider>(const std::shared_ptr<dbce::shim::DInputProvider>&)> front = {})
+        std::function<std::shared_ptr<dbce::shim::Provider>(const std::shared_ptr<dbce::shim::DInputProvider>&)> front = {},
+        int controls_reads = 1)
         : folder_(std::move(folder)), nonce_(std::move(nonce)), input_(std::this_thread::get_id()),
           recorder_(std::move(recorder)),
           w_(std::make_shared<WorkerState>()),latched_(latched) {
@@ -84,7 +88,7 @@ public:
         cfg.fresh_us = freshness_us;   // ordinary 100 ms bound; fixture wrapper explicitly supplies its own value
         if (front) { w_->front = front(w_->provider); if (!w_->front) throw std::invalid_argument("front provider refused"); }
         w_->core = std::make_shared<dbce::shim::Core>(w_->front ? *w_->front : static_cast<dbce::shim::Provider&>(*w_->provider), cfg);
-        w_->core->set_profile(dbce::shim::read_profile(profile));
+        w_->core->set_profile(dbce::shim::read_profile(profile, controls_reads));
         report_ = CreateFileW((folder_ + L"\\host-shutdown.json").c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         auto s = w_;
         worker_ = std::thread([s] {

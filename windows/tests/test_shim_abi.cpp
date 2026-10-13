@@ -126,6 +126,27 @@ void test_path_unavailable() {
     }
 }
 
+// The ABI reads controls schema 1 (STD-037 item 4; the host's default): a Schema 2 profile opens and applies nothing,
+// with the reason in the start report.
+void test_schema2_refused() {
+    const auto dir = scratch() / "schema2"; std::filesystem::create_directories(dir);
+    const std::string two = "[Controls]\nSchema = 2\nProfile = Rig\nRevision = r2\nTransmission = Sequential\n"
+        "steer = axis 0 dev=" + W + " prod=" + WP + " range=0..65535 rest=32768 travel=+1 cal=4000..24000..60000\n";
+    char why[256] = {}; void* h = nullptr; std::size_t slot = 0; auto* in = wheel_input(slot);
+    check(dbce_shim_open_with_input(in, dir.wstring().c_str(), "abinonce1", two.data(), int32_t(two.size()), nullptr, nullptr, &h, why, 256) == DBCE_SHIM_OK && h,
+          std::string("schema 2 open: ") + why);
+    dbce_shim_frame f{}; f.struct_size = sizeof f;
+    for (int n = 0; n < 20; ++n) {
+        check(dbce_shim_tick(h, &f) == DBCE_SHIM_OK && f.action[idx("steer")].status == uint8_t(dbce::shim::Status::Unbound), "a Schema 2 steer stays unbound");
+        Sleep(1);
+    }
+    char report[512] = {};
+    check(dbce_shim_start_report(h, report, sizeof report, nullptr) == DBCE_SHIM_OK &&
+          std::string(report).find("Schema 2 is not supported (this mod reads 1)") != std::string::npos, std::string("the ABI reads schema 1: ") + report);
+    char stopped[512] = {};
+    check(dbce_shim_stop(h, stopped, sizeof stopped, nullptr) == DBCE_SHIM_OK && std::string(stopped) == "resolved", "the refused open stops resolved");
+}
+
 std::vector<std::string> sample_lines(const std::filesystem::path& source) {
     std::vector<std::string> rows; std::istringstream in(read_text(source)); std::string line;
     while (std::getline(in, line)) if (line.find("\"kind\":\"sample\"") != std::string::npos) rows.push_back(line);
@@ -302,7 +323,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--capture-child") return capture_child(std::filesystem::path(argv[2]), false);
     if (argc == 3 && std::string(argv[1]) == "--latched-capture-child") return capture_child(std::filesystem::path(argv[2]), true);
     try {
-        test_layout(); test_refusals(); test_lifecycle(); test_path_unavailable(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
+        test_layout(); test_refusals(); test_lifecycle(); test_path_unavailable(); test_schema2_refused(); test_open2_refusals(); test_latched(); test_capture(scratch() / "capture-run"); test_latched_capture(scratch() / "latched-capture-run");
         if (argc == 2) test_dll(std::filesystem::path(argv[1]).wstring());
     } catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
     std::error_code ec; std::filesystem::remove_all(scratch(), ec);

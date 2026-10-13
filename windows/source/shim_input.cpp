@@ -136,7 +136,7 @@ template<class Host> void resolved_report(const Host& host,StartReports& r){
 
 // The journal identity (host/journal_identity.hpp, shared with dbce_shim.dll).
 std::shared_ptr<const c::JournalIdentity> identity(){
-    return h::journal_identity(*g.host,g.plan.nonce,g.profile,CoreVersion,AdapterVersion);
+    return h::journal_identity(*g.host,g.plan.nonce,g.profile,CoreVersion,AdapterVersion,ControlsReads);
 }
 
 void start(){
@@ -154,7 +154,7 @@ void start(){
             capture.context="OutRunDesktop latched consumed replay run; devices.json carries the device table and caps";
         }
         g.host=std::make_unique<h::ProviderHost<ShimRecorder>>(g.plan.run_root,g.plan.nonce,input,g.profile,true,
-            std::make_unique<ShimRecorder>(capture),outrun_capability(),hwnd);
+            std::make_unique<ShimRecorder>(capture),outrun_capability(),hwnd,100'000,nullptr,ControlsReads);   // Core reads as our readers (STD-037 item 4)
     }catch(const std::exception& e){std::printf("input shim: host refused: %s\n",e.what());return;}
     g.adapter=std::make_unique<Adapter>(g.transmission);
     (void)g.host->tick();   // the first frame: the start report follows the device checks
@@ -461,7 +461,8 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         }
         try{
             o.host=std::make_unique<h::ProviderHost<OrdinaryRecorder>>(std::filesystem::u8path(o.folder).wstring(),"ordinary-desktop",input,o.profile,false,
-                std::make_unique<OrdinaryRecorder>(o.rec),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd),100'000,front);
+                std::make_unique<OrdinaryRecorder>(o.rec),outrun_capability(),static_cast<HWND>(xbox_runtime::native_window().hwnd),100'000,front,
+                ControlsReads);   // Core reads as our readers (STD-037 item 4)
         }catch(const std::exception& e){
             o.bridge.reset();std::printf("input shim: host refused: %s\n",e.what());std::fflush(stdout);
             o.rec.fail(std::string("the shared input shim did not start: ")+e.what());o.rec.publish_status();return;}

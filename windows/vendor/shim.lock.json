@@ -2,15 +2,15 @@
   "schema": "dbce.vendor-lock@1",
   "source": "d-b-c-e/dbce-wheel-mod-toolkit",
   "path": "native/shim",
-  "commit": "fbd41ab929219ed67bb7a8fa3244901425e402f7",
+  "commit": "d26776a785028ec868ee9f942836257ca78db4b4",
   "files": {
     "docs/CONTROL-JOURNAL.md": "0df2a76e5bed64d070abfcc3f7a28123667ae139",
     "docs/INPUT-SHIM.md": "b30c079104a086f0aaf6326591dcf698d5a899c5",
     "host/control_journal.hpp": "cbf22b36675719aae0b4b0f25c7baf6861e45bb9",
     "host/control_snapshot.hpp": "e282931da5e389f1b4ff70ca05cd63cd92e36139",
     "host/host_lifecycle.hpp": "09856c8e8209cf68f11bc28ae9f6b95c1bf352ff",
-    "host/journal_identity.hpp": "ce0d32040a0181d79ce3088800ea9282444dee05",
-    "host/provider_host.hpp": "38e281829141e470627384e422bf8d4b7d04fcb1",
+    "host/journal_identity.hpp": "8c66190a45c0f18e184f463397f10d79c748c53e",
+    "host/provider_host.hpp": "d75de4bdf10c9d125b7a31b779bc80c4a4594a56",
     "host/recorder/capture.hpp": "d6336d5373949618b417768e2dcec0bf9e4bc0a3",
     "host/recorder/frame_channels.hpp": "9d6b20ce5fe2d265fcf81f306827fbfc38992d8c",
     "host/recorder/frame_recorder.hpp": "e0a046dfe77c54d882bfba89cfe2487462562cfe",
@@ -31,7 +31,8 @@
     "tests/shim_fake_com.hpp": "d764a3dda797dee03ec90fa8ad19d0e633097c1d",
     "tests/shim_fake_provider.hpp": "6447f2913ba5c085fda0c64dace0beeb0ca31a1b",
     "tests/test_dinput_provider.cpp": "12a030a2e3766943174e17eabd556ed9c97d4ce0",
+    "tests/test_provider_host.cpp": "4efc7cd11cb8b6e87a0b67eee531093dabde689c",
     "tests/test_shim.cpp": "7c29e16077ffc469f02bf3a0443535824724b8ec",
-    "tests/test_shim_abi.cpp": "4cbf4fe5469f905f881fc452aa4da6fbb45060d4"
+    "tests/test_shim_abi.cpp": "069c60800fd9ffeaaf0cc2061b7cfca5c8c7ecc8"
   }
 }

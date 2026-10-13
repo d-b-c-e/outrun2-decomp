@@ -15,14 +15,17 @@ inline std::uint64_t process_start_time() {
     return (std::uint64_t(a.dwHighDateTime) << 32) | a.dwLowDateTime;
 }
 
+// `controls_reads` as the host's (ProviderHost): only the file hash and the revision are taken, which a refusing read
+// also sets, but the identity reads the profile as the Core it describes.
 template <class Host>
 std::shared_ptr<const control::JournalIdentity> journal_identity(const Host& host, const std::string& nonce, const std::string& profile,
-                                                                  const char* core_version, const char* adapter_version) {
+                                                                  const char* core_version, const char* adapter_version,
+                                                                  int controls_reads = 1) {
     auto id = std::make_shared<control::JournalIdentity>();
     id->id.process = GetCurrentProcessId();
     id->id.process_start = process_start_time();
     for (std::size_t i = 0; i < id->id.nonce.size() && i < nonce.size(); ++i) id->id.nonce[i] = std::uint8_t(nonce[i]);
-    const auto parsed = read_profile(profile);
+    const auto parsed = read_profile(profile, controls_reads);
     id->id.profile = parsed.file_hash;             // read_profile hashes the very bytes it parsed
     id->latched = true; id->nonce_text = nonce;
     id->executable_known = false; id->build_known = false;   // the identity builder (by handle, shared with the observer) is next

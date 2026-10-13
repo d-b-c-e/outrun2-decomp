@@ -248,6 +248,16 @@ target_compile_options(test_shim_abi PRIVATE /W4 /WX)
 target_link_libraries(test_shim_abi PRIVATE dinput8 dxguid bcrypt)
 add_dependencies(test_shim_abi dbce_shim)
 add_test(NAME shim_abi COMMAND test_shim_abi $<TARGET_FILE:dbce_shim>)
+# The vendored host test (tests/test_provider_host.cpp): the real ProviderHost over fake COM with a Schema 2 profile,
+# at controls_reads 2 (ordinary and latched values Core applies, as shim_input passes ControlsReads) and refused at the
+# default (STD-037 item 4; calibration 9a run1).
+add_executable(test_provider_host tests/test_provider_host.cpp shim/core.cpp shim/parse.cpp shim/dinput_provider.cpp)
+target_include_directories(test_provider_host PRIVATE shim host host/recorder vendor/session tests vendor/controls)
+target_compile_features(test_provider_host PRIVATE cxx_std_17)
+target_compile_definitions(test_provider_host PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_provider_host PRIVATE /W4 /WX)
+target_link_libraries(test_provider_host PRIVATE dinput8 dxguid bcrypt)
+add_test(NAME provider_host COMMAND test_provider_host)
 
 # The test fence (source/test_fence), slice 2b: a temporary game tree, the real game-free writers (options, profiles,
 # the EXE setup, the log), success and fault paths, the complete game-tree inventory compared before and after.
