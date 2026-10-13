@@ -443,6 +443,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // also shows the license's OutRun Miles (pc_screen.hpp).
     outrun::platform::g_pc_show_outrun_miles_on_menu=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     if(!outrun::platform::g_pc_show_outrun_miles_on_menu)std::printf("settings: OutRun Miles on the menu off\n");
+    // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
+    // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).
+    outrun::platform::g_pc_default_manual_transmission=settings.flag("Misc","DefaultManualTransmission",false);
+    if(outrun::platform::g_pc_default_manual_transmission)std::printf("settings: the transmission menu starts on Manual\n");
     // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md; 2, keep centred, by default here until Tweaks'
     // 1 is checked in game): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp); 1
     // spaces the HUD to the edges (partial: the note says which parts).

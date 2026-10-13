@@ -4,7 +4,9 @@
 // option (Y) sets 240*16/9 so the screen-bound visibility tests (4F02D0) keep
 // objects until they leave the wider view.
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 namespace outrun::platform {
 inline float g_pc_view_half_width=320.0f;
@@ -109,6 +111,21 @@ inline PcLetterboxBars pc_letterbox_bars(std::int32_t w,std::int32_t h){
     const long right=std::lround(float(ox)+float(content));
     return {std::int32_t(ox),right<long(w)?std::int32_t(right):w,w};
 }
+// [Misc] DefaultManualTransmission (the Tweaks key, off by default there and here; hooks_misc.cpp): the transmission
+// menu starts on Manual. Tweaks keeps the key in [Controls]; here that section is the ini-controls-1 contract, where
+// any other key is an invalid binding (dbce_controls.hpp parseSection), so it lives in [Misc].
+inline bool g_pc_default_manual_transmission=false;
+// The transmission owner (key 16, 0x1F4 bytes; frontend_transmission.cpp): its carousel at +34 keeps the previous index
+// at +E4 (carousel +B0) and the current at +E8 (+B4); 4DD250's carousel init zeroes both (Automatic).
+inline constexpr std::size_t PcTransmissionPrevious=0xe4u,PcTransmissionCurrent=0xe8u;
+// After 4DD250, as Tweaks' detour: +E4 = 0 (Automatic) and +E8 = 1 (Manual). Off, or a short object: nothing.
+inline void pc_default_manual_transmission_4dd250(bool on,std::uint8_t* object,std::size_t size){
+    if(!on||!object||size<PcTransmissionCurrent+4u)return;
+    const std::uint32_t previous=0u,current=1u;
+    std::memcpy(object+PcTransmissionPrevious,&previous,4);std::memcpy(object+PcTransmissionCurrent,&current,4);
+}
+// 4DD4A0's confirmation (action 0): the byte at +E8 into 830374 (48B170), 0 Automatic, 1 Manual.
+inline std::uint8_t pc_transmission_confirmed_4dd4a0(const std::uint8_t* object){return object[PcTransmissionCurrent];}
 // [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
 // and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),
 // and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;

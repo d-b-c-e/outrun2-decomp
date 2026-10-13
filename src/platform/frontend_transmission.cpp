@@ -1,4 +1,5 @@
 #include "platform/frontend_transmission.hpp"
+#include "platform/pc_screen.hpp"   // DefaultManualTransmission
 namespace outrun::platform {
 using driving::Bytes;
 namespace {
@@ -44,6 +45,8 @@ bool frontend_transmission_init_4dd250(FrontendTransmission& c,FrontendTransmiss
     if(!frontend_carousel_init_51b7b0(w,Table5cd868,0,4,api))return fail(c,s,api.missing);
     w.put32(0xb8,10);                                            // 51BE10(10): 0..0x15 accepted
     driving::object_transition_config_440f70(s.root,1,0x1e,7,s.transition);
+    // DefaultManualTransmission (pc_screen.hpp): Tweaks' detour after 4DD250 selects Manual.
+    pc_default_manual_transmission_4dd250(g_pc_default_manual_transmission,c.object.data(),c.object.size());
     return true;
 }
 bool frontend_transmission_control_4dd4a0(FrontendTransmission& c,FrontendTransmissionServices& s,unsigned& result){
@@ -63,7 +66,7 @@ bool frontend_transmission_control_4dd4a0(FrontendTransmission& c,FrontendTransm
         [](void* p,unsigned key,int arg){auto& x=*static_cast<FrontendTransmissionServices*>(p);return x.ui.input_feedback(x.root,key,arg);},action))
         return fail(c,s,s.ui.missing_pc?s.ui.missing_pc:0x48f5f0);
     switch(action){
-    case 0:b.put8(0x1ed,1);b.put8(0x1ec,1);s.transmission_830374=b.u8(0xe8);return leave_4dd300(c,s); // 48B170
+    case 0:b.put8(0x1ed,1);b.put8(0x1ec,1);s.transmission_830374=pc_transmission_confirmed_4dd4a0(c.object.data());return leave_4dd300(c,s); // 48B170
     case 1:b.put8(0x1ed,1);b.put8(0x1ec,0);return leave_4dd300(c,s);
     case 3:if(!frontend_carousel_move(w,Table5cd868,false,api))return fail(c,s,api.missing);return true;     // 51BBA0
     case 5:if(!frontend_carousel_move(w,Table5cd868,true,api))return fail(c,s,api.missing);return true;      // 51BB10
