@@ -52,9 +52,9 @@ namespace {
 // The race clock and matrix leaves must stay on the translated CPU that calls
 // them, retaining the x87 return and the guest matrix stack's pointer/depth.
 const TranslatedModule* request_clock_module(){
-    static const std::array<TranslatedFunction,6> functions=[](){
-        constexpr std::array<std::uint32_t,5> pcs{0x4af500u,0x409f90u,0x40a7d0u,0x40a170u,0x40a010u};
-        std::array<TranslatedFunction,6> found{};
+    static const std::array<TranslatedFunction,5> functions=[](){
+        constexpr std::array<std::uint32_t,4> pcs{0x4af500u,0x409f90u,0x40a170u,0x40a010u};
+        std::array<TranslatedFunction,5> found{};
         for(std::size_t i=0;i<pcs.size();++i){
             const auto* f=network_functions;
             while(f->pc&&f->pc!=pcs[i])++f;
@@ -326,6 +326,10 @@ struct Run {
                 for(std::int32_t i=0;i<n;++i)if(m().u32(base+std::uint32_t(i)*0x78u+4u)==a[0]){v=m().u32(base+std::uint32_t(i)*0x78u+8u);break;}}
             rt.stage_key_635f2c=std::int32_t(a[0]);rt.stage_value_635f30=std::int32_t(v);return v;}
         // ---- START / scene owner words ----
+        case 0x40a7d0u:{ // D3DXVec3TransformCoord(out, in, current): the guest import thunk is not mapped here.
+            const auto p=driving::pc_matrix_point(matrices,{m().f32(a[1]),m().f32(a[1]+4u),m().f32(a[1]+8u)});
+            m().putf(a[0],p.x);m().putf(a[0]+4u,p.y);m().putf(a[0]+8u,p.z);
+            routed(pc);return a[0];}
         case 0x456d60u:routed(pc);return c.race.car_world.commrace_7de418[0];
         case 0x499ba0u:routed(pc);return m().u8(0x8367c0u+std::uint32_t(std::int32_t(std::int8_t(a[0]))));
         case 0x4b00e0u:case 0x4b00d0u:   // [8421C0] == 5 / != 0 (as the race manager binding)
