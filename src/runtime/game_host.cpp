@@ -873,6 +873,17 @@ void event_invoke(void* user,std::uint32_t callback,std::uint32_t work,std::uint
 #endif
     if(s.pc_scene&&s.runtime){
         auto& scene=*s.pc_scene;
+        // OR2_MATRIX_TRACE: an event callback that leaves the renderer's matrix stack
+        // changed, or sets a new renderer error (a swallowed failure), is reported.
+        struct MatrixScope{
+            pf::PcSceneRenderer& scene;std::uint32_t mode,callback,event;
+            std::int32_t depth=scene.matrices().depth;std::ptrdiff_t offset=scene.matrices().current_offset;
+            std::string error=outrun::driving::pc_matrix_trace_enabled()?scene.last_error:std::string();
+            ~MatrixScope(){
+                if(!outrun::driving::pc_matrix_trace_enabled())return;
+                const char* note=scene.last_error!=error?scene.last_error.c_str():nullptr;
+                outrun::driving::pc_matrix_trace_scope("event",scene.frames,mode,callback,event,depth,offset,scene.matrices(),note);}
+        } mx_scope{scene,s.runtime->mode_state.current,callback,event_id};
         const pf::NativeEnvironmentHook environment=[&scene](outrun::driving::Bytes v,outrun::driving::Bytes c,
             const std::function<void(outrun::driving::PcEnvironmentFrame&,const outrun::driving::CourseCollisionTables&,
                                      outrun::driving::PcEnvironmentBlendContext&)>& fn){scene.with_environment(v,c,fn);};

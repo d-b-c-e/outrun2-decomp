@@ -41,6 +41,10 @@ std::uint32_t bulk_call(PcRaceMemory& m,const PcRaceService& service,const PcRac
     if(st.calls[k.pc]==0u)std::fprintf(stderr,"[bulk] first call %06X (translated fallback: to port)\n",k.pc);   // once per address
     ++st.calls[k.pc];
     const std::vector<std::uint32_t> args(k.args.begin(),k.args.begin()+std::min<std::size_t>(k.argc,k.args.size()));
+    // OR2_MATRIX_TRACE: a translated entry that returns with the stack changed.
+    struct MatrixScope{const driving::PcMatrixStack* s;std::uint32_t pc;std::int32_t depth;std::ptrdiff_t offset;
+        ~MatrixScope(){if(s)driving::pc_matrix_trace_scope("bulk",0u,0u,pc,0u,depth,offset,*s);}}
+        mx_scope{matrices,k.pc,matrices?matrices->depth:0,matrices?matrices->current_offset:0};
     try{return translated_call_list(m,service,module,k.pc,TranslatedRegisters{k.eax,k.ecx,0,0,0,0},args);}
     catch(...){
         if(std::getenv("OR2_BULK_DEBUG")&&st.faults[k.pc]==0u)std::fprintf(stderr,"[bulk] %06X faulted\n",k.pc);

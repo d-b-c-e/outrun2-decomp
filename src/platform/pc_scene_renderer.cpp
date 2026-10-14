@@ -17,6 +17,14 @@
 #include <stdexcept>
 namespace outrun::platform {
 using driving::Bytes;
+namespace {
+// OR2_MATRIX_TRACE: a display callback or leaf that leaves the stack changed.
+struct MatrixTraceScope {
+    const char* scope;const driving::PcMatrixStack& s;const std::uint32_t& frame;const std::uint32_t& mode;
+    std::uint32_t pc,event;std::int32_t depth=s.depth;std::ptrdiff_t offset=s.current_offset;
+    ~MatrixTraceScope(){driving::pc_matrix_trace_scope(scope,frame,mode,pc,event,depth,offset,s);}
+};
+}
 PcSceneRenderer::PcSceneRenderer(PcD3D9Device& device):device_(device),matrix_arena_(64u*64u),
     matrices_{Bytes(matrix_arena_.data(),matrix_arena_.size()),0,0,64}{
     flush_=std::make_unique<PcFlushContext>(PcFlushContext{device_,globals_,
@@ -229,6 +237,7 @@ void PcSceneRenderer::camera_reset_4857c0(){
     if((blend.owner_flags_79fb4e&3u)==2u){
         if(!autoscene_work_799ca0||!events_||events_->slots[6].work_token==0u){++camera_unanswered;last_error="4857C0 needs the active AUTOSCENE work 799CA0";return;}
         std::memcpy(&blend.owner_mode_799ca0_1c,autoscene_work_799ca0+0x1c,4);}
+    const auto depth=matrices_.depth;const auto offset=matrices_.current_offset;
     try{
         driving::race_camera_save_4833e0(camera,0);
         camera.put8(0x34a,0x1a);   // 49A650(0x16A, 1) / 49A650(0x16B, 1) are RET entries
@@ -238,7 +247,11 @@ void PcSceneRenderer::camera_reset_4857c0(){
         // (the goal view of the requested mode) sets them before any draw.
         driving::PcCameraDevice d;
         driving::camera_project_484bd0(camera,matrices_,d,screen_,blend);
-    }catch(const std::exception& e){++camera_unanswered;last_error=std::string("4857C0 failed: ")+e.what();}
+    }catch(const std::exception& e){
+        ++camera_unanswered;last_error=std::string("4857C0 failed: ")+e.what();
+        driving::pc_matrix_trace_scope("camera",frames,current_mode_,0x4857c0u,0u,depth,offset,matrices_,last_error.c_str());
+        matrices_.depth=depth;matrices_.current_offset=offset;
+    }
 }
 bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,std::uint32_t mode_78026c,
                              std::uint32_t race_mode_780258){
@@ -284,9 +297,14 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
                     driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view);
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
+            const auto depth=matrices_.depth;const auto offset=matrices_.current_offset;
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
             catch(const std::exception& e){
-                ++camera_unanswered;last_error=std::string("485FE0 failed (view ")+std::to_string(camera.u8(0x34a))+"): "+e.what();return true;}
+                ++camera_unanswered;last_error=std::string("485FE0 failed (view ")+std::to_string(camera.u8(0x34a))+"): "+e.what();
+                // The next frame's callbacks share this stack: drop the nesting the failed control left.
+                driving::pc_matrix_trace_scope("camera",frames,mode_78026c,callback,385u,depth,offset,matrices_,last_error.c_str());
+                matrices_.depth=depth;matrices_.current_offset=offset;
+                return true;}
             if(!answered){
                 ++camera_unanswered;last_error="485FE0 debug camera or race mode without inputs: mode "+std::to_string(mode_78026c)+" (view "+std::to_string(camera.u8(0x34a))+", +94/+98/+9C "+std::to_string(camera.u32(0x94))+"/"+std::to_string(camera.u32(0x98))+"/"+std::to_string(camera.u32(0x9c))+")";return true;}
             ++camera_controls;
@@ -556,6 +574,7 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
             struct Timer{PcSceneRenderer& r;std::uint32_t pc;std::chrono::steady_clock::time_point t0;
                 ~Timer(){if(r.profile)r.profile(0u,pc,std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-t0).count()));}};
             const Timer timer{r,callback,r.profile?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{}};
+            const MatrixTraceScope mx_scope{"display",r.matrices_,r.frames,r.current_mode_,callback,event};
             try{
             if(r.race_area_display&&r.race_area_display(callback,work,event)){}   // race AREA/SKY hook (events 390/391)
             else if(callback==0x405830u)r.flush_alpha();
@@ -585,6 +604,7 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
         if(pc==0x49f4d0u){if(!display_select_car())++unported_displays[pc];return;}   // 449050 end: the car-select car over the 2D layer
         if(pc==0x414340u&&cube_debug)std::fprintf(stderr,"[cube] frame %u depth %d offset %td\n",frames,matrices_.depth,matrices_.current_offset);
         const auto t0=profile?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+        const MatrixTraceScope mx_scope{"leaf",matrices_,frames,current_mode_,pc,0u};
         try{if(!(leaf_hook&&leaf_hook(pc,arg)))++unported_leaves[pc];}
         catch(const std::exception& e){char label[48];std::snprintf(label,sizeof label,"leaf %08x layer %u: ",pc,frame_.layer_7d25f0);
             throw std::runtime_error(label+std::string(e.what()));}
@@ -593,7 +613,9 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
     sv.mode_84a318=mode_84a318;
     if(fix_znear())sv.scene_effect_projection=[this](bool begin){scene_effect_projection(begin);};
     if(layer_callback)for(std::uint32_t k=0;k<frame_.layers.size();++k)frame_.layers[k].callback=layer_callback(k);
-    try{frame_render_449050(*flush_,frame_,in,sv);}
+    const auto mx_depth=matrices_.depth;const auto mx_offset=matrices_.current_offset;
+    try{frame_render_449050(*flush_,frame_,in,sv);
+        driving::pc_matrix_trace_scope("frame",frames,mode_78026c,0x449050u,0u,mx_depth,mx_offset,matrices_);}
     catch(const std::exception& e){throw std::runtime_error("frame "+std::to_string(frames)+
         " mode "+std::to_string(mode_78026c)+" layer "+std::to_string(frame_.layer_7d25f0)+
         " matrix offset "+std::to_string(matrices_.current_offset)+" depth "+std::to_string(matrices_.depth)+
