@@ -760,7 +760,11 @@ struct Run {
             FrontendUiResources ui{st.frontend_sprites};ui.motion_step=st.frontend_ui_motion_step;
             ui.effect_user=st.frontend_effect_user;ui.effect_4249f0=st.frontend_effect;
             std::uint32_t value{};
-            if(!ui.call(pc,bytes,k.args.data(),std::min<std::size_t>(k.argc,k.args.size()),value)||ui.missing_pc)
+            // Translated external calls expose a 12-word stack window, not the
+            // callee's arity. Use the resource method's actual stack arguments.
+            const std::size_t arity=pc==0x465860u?11u:
+                                    (pc==0x465310u||pc==0x4653c0u)?4u:0u;
+            if(k.argc<arity||!ui.call(pc,bytes,k.args.data(),arity,value)||ui.missing_pc)
                 missing(ui.missing_pc?ui.missing_pc:pc,"sprite resource service");
             routed(pc);return value;}
         if(bulk_translated(pc)&&ctx){routed(pc);return bulk_call(m(),ctx->service,k,&matrices,&c.event_function36.pc_crt_random_state,request_clock_module());}

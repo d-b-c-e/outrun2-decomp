@@ -180,9 +180,10 @@ int main(int argc,char** argv){
             auto& traffic=native_race_traffic(request);
             float translated_time=0.f;
             std::memcpy(&translated_time,traffic.requests_7f9460.data()+0x180u,sizeof translated_time);
-            require(request_control&&traffic.latched&&traffic.fault==0x004659f0u&&
+            require(request_control&&traffic.routed.count(0x004659f0u)!=0u&&
+                    (!traffic.latched||traffic.fault!=0x004659f0u)&&
                     std::isfinite(translated_time)&&translated_time>0.f,
-                    "variant-5 request control uses the x87 clock before the fixture's absent sprite service");
+                    "variant-5 request control uses the x87 clock and routes the sprite resource tick");
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;
