@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <utility>
 #include <vector>
 using namespace outrun::platform;
@@ -123,7 +124,8 @@ int main(int argc,char** argv){
         require(game.course_runtime.active_count_7d33c4==CourseCvtRecordCount&&game.course_runtime.max_depth_7d33c0==4&&game.course_runtime.selected_index==0,"real 15-record course tree rebuilt");
         require(game.course_runtime.selected_copy_active&&game.course_matrix_ready,"selected course and matrix retained");
         if(retail_root){
-            NativeRuntimeContext request{};
+            auto request_storage=std::make_unique<NativeRuntimeContext>();
+            auto& request=*request_storage;
             request.game_mode.course_assets=&real;
             request.game_mode.course_retail=&retail;
             request.start_mode.frontend_prepare.event_config_7f94c4[0]=1;
@@ -155,7 +157,8 @@ int main(int argc,char** argv){
                     loaded.course_runtime.matrix_7d3190==matrix&&loaded.course_work==work,
                     "second phase-3 call keeps selected course and provider storage without rereading");
         }
-        NativeRuntimeContext unready{};
+        auto unready_storage=std::make_unique<NativeRuntimeContext>();
+        auto& unready=*unready_storage;
         unready.game_mode.course_assets=&real;
         unready.start_mode.frontend_prepare.event_config_7f94c4[0]=1;
         put32(native_race_traffic(unready).requests_7f9460,0x98u,3u);
