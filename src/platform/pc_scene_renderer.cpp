@@ -585,13 +585,19 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
         if(pc==0x49f4d0u){if(!display_select_car())++unported_displays[pc];return;}   // 449050 end: the car-select car over the 2D layer
         if(pc==0x414340u&&cube_debug)std::fprintf(stderr,"[cube] frame %u depth %d offset %td\n",frames,matrices_.depth,matrices_.current_offset);
         const auto t0=profile?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        if(!(leaf_hook&&leaf_hook(pc,arg)))++unported_leaves[pc];
+        try{if(!(leaf_hook&&leaf_hook(pc,arg)))++unported_leaves[pc];}
+        catch(const std::exception& e){char label[48];std::snprintf(label,sizeof label,"leaf %08x layer %u: ",pc,frame_.layer_7d25f0);
+            throw std::runtime_error(label+std::string(e.what()));}
         if(profile)profile(1u,pc,std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-t0).count()));},events,scene_,
         environment_.lights_899b98.data()+0x140,display,tables};
     sv.mode_84a318=mode_84a318;
     if(fix_znear())sv.scene_effect_projection=[this](bool begin){scene_effect_projection(begin);};
     if(layer_callback)for(std::uint32_t k=0;k<frame_.layers.size();++k)frame_.layers[k].callback=layer_callback(k);
-    frame_render_449050(*flush_,frame_,in,sv);
+    try{frame_render_449050(*flush_,frame_,in,sv);}
+    catch(const std::exception& e){throw std::runtime_error("frame "+std::to_string(frames)+
+        " mode "+std::to_string(mode_78026c)+" layer "+std::to_string(frame_.layer_7d25f0)+
+        " matrix offset "+std::to_string(matrices_.current_offset)+" depth "+std::to_string(matrices_.depth)+
+        ": "+e.what());}
     ++frames;
 }
 }
