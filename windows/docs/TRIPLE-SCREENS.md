@@ -11,6 +11,13 @@ Status 2026-10-12:
 - steps 1 and 2 (the selector, the unstretched 16:9 frame, the planar span) are in integration and checked at the rig;
 - step 4 is a default-off spike, not yet run in the game (see "The spike as built" below).
 
+Four-display follow-up, 2026-10-14: a muted disposable-copy run of the primary-centered RacingRow adapter, with the
+three 2560x1440 racing displays and a 1920x1080 dashboard above, observed a 7680x1440 client on the racing row in all
+199 visible-window samples, zero dashboard intersections, and a rendered active planar race. The candidate, placement
+samples, frame burst, and exact-copy restoration are in the project hub's `artifacts/outrun-racing-row-20261014`.
+This qualifies window placement and race follow-through on that topology, not three angle-correct rendered views or a
+physical wheel/display acceptance.
+
 ## What the mod does (the parity floor)
 
 - `Screens = Off` and `Screens = Surround` (its default) leave the window as before. On a Surround desktop, Windows

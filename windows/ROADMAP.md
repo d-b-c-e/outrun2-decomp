@@ -42,8 +42,10 @@ go upstream as small pull requests (first: `tweaks-exe`).
    (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
    into three viewports, each with its clip correction from the toolkit rig math. First rig pictures 2026-10-12: three
    projections with the side sky. Open: culling for the union of the three frusta, the F6 selector, the owner's
-   physical check. The primary-centered RacingRow source adapter now admits the three-monitor row with a fourth
-   dashboard wholly above or below it; this four-display topology still needs an observed game run.
+   physical check. The primary-centered RacingRow adapter admits the three-monitor row with a fourth dashboard wholly
+   above or below it. The 2026-10-14 muted private-copy run on the current four-display layout placed the client exactly
+   on the 7680x1440 racing row in 199/199 visible samples, with no dashboard intersection, and rendered an active planar
+   race (`dbce-project-mgmt/artifacts/outrun-racing-row-20261014`). This does not qualify three angled views.
 4. 🟡 **Force feedback**: the force model of the Tweaks fork
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
