@@ -49,13 +49,19 @@ extern const TranslatedFunction network_cars_functions[];
 extern const TranslatedCodeData network_cars_code_data[];
 extern const TranslatedFunction network_functions[];
 namespace {
-// 4AF500 is the PC race-clock getter (`fld [842110]`): its x87 return must
-// stay on the same translated CPU as the C2C request manager that calls it.
+// The race clock and matrix leaves must stay on the translated CPU that calls
+// them, retaining the x87 return and the guest matrix stack's pointer/depth.
 const TranslatedModule* request_clock_module(){
-    static const std::array<TranslatedFunction,2> functions=[](){
-        for(const auto* f=network_functions;f->pc;++f)
-            if(f->pc==0x4af500u)return std::array<TranslatedFunction,2>{*f,{0,nullptr}};
-        throw std::logic_error("translated 4AF500 race clock getter is missing");}();
+    static const std::array<TranslatedFunction,6> functions=[](){
+        constexpr std::array<std::uint32_t,5> pcs{0x4af500u,0x409f90u,0x40a7d0u,0x40a170u,0x40a010u};
+        std::array<TranslatedFunction,6> found{};
+        for(std::size_t i=0;i<pcs.size();++i){
+            const auto* f=network_functions;
+            while(f->pc&&f->pc!=pcs[i])++f;
+            if(!f->pc)throw std::logic_error("translated request leaf is missing");
+            found[i]=*f;
+        }
+        return found;}();
     static const TranslatedModule module{functions.data(),nullptr,{}};
     return &module;
 }
