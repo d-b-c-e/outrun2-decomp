@@ -173,14 +173,21 @@ int main(){
         CHECK(std::fabs(triple_physical_fov_y(d,16./9.)*180./3.14159265358979323846-33.6)<0.05);
         CHECK(std::fabs(2.*std::atan(std::tan(triple_physical_fov_y(d,16./9.)/2.)*16./9.)*180./3.14159265358979323846-56.4)<0.05);
     }
-    // The span: the owner's "Sim Racing" layout (three 2560x1440 at x = -2560, 0, 2560) in any order.
-    const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440},r{2560,0,5120,1440};
+    // Separate spans only the toolkit's primary-centered racing row; a dashboard above/below it is not in its band.
+    const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440,true},r{2560,0,5120,1440};
+    const ScreenRect dashboard{314,-1080,2234,0},below{0,1440,1920,2520};
     ScreenRect out{};
+    std::string reason;
     CHECK(triple_span_from_monitors({l,c,r},out)&&same(out,{-2560,0,5120,1440}));
     out={};CHECK(triple_span_from_monitors({c,r,l},out)&&same(out,{-2560,0,5120,1440}));
     out={};CHECK(triple_span_from_monitors({r,l,c},out)&&same(out,{-2560,0,5120,1440}));
-    CHECK(triple_span_from_monitors({{0,0,1920,1080},{1920,0,3840,1080},{3840,0,5760,1080}},out)&&same(out,{0,0,5760,1080}));
-    // Refused: a gap, an overlap, a different width, a different height or top, two or four monitors, an empty one.
+    out={};CHECK(triple_span_from_monitors({l,c,r,dashboard},out,&reason)&&same(out,{-2560,0,5120,1440})&&
+                 reason.find("primary in the center")!=std::string::npos);
+    out={};CHECK(triple_span_from_monitors({dashboard,r,l,c},out)&&same(out,{-2560,0,5120,1440})); // primary enumerated last
+    out={};CHECK(triple_span_from_monitors({l,below,c,r},out)&&same(out,{-2560,0,5120,1440}));
+    CHECK(triple_span_from_monitors({{0,0,1920,1080},{1920,0,3840,1080,true},{3840,0,5760,1080}},out)&&
+          same(out,{0,0,5760,1080}));
+    // Refused: a gap, overlap, unequal or same-band extra display, missing side or primary, or Surround's wide primary.
     const ScreenRect before{9,9,9,9};
     out=before;CHECK(!triple_span_from_monitors({l,c,{2568,0,5128,1440}},out)&&same(out,before));
     CHECK(!triple_span_from_monitors({l,c,{2552,0,5112,1440}},out));
@@ -188,11 +195,20 @@ int main(){
     CHECK(!triple_span_from_monitors({l,c,{2560,0,5120,1600}},out));
     CHECK(!triple_span_from_monitors({l,c,{2560,100,5120,1540}},out));
     CHECK(!triple_span_from_monitors({l,c},out));
-    CHECK(!triple_span_from_monitors({l,c,r,{5120,0,7680,1440}},out));
+    CHECK(!triple_span_from_monitors({l,c,r,{5120,0,7680,1440}},out,&reason)&&
+          reason.find("shares the racing row's band")!=std::string::npos);
+    CHECK(!triple_span_from_monitors({l,c,r,{314,-1080,2234,1}},out,&reason)&&
+          reason.find("shares the racing row's band")!=std::string::npos); // dashboard crosses the row boundary
+    CHECK(!triple_span_from_monitors({{0,0,2560,1440,true},r,{5120,0,7680,1440}},out,&reason)&&
+          reason.find("the left")!=std::string::npos); // physical primary at the end is not a row center
+    CHECK(!triple_span_from_monitors({l,{0,0,2560,1440},r},out,&reason)&&reason=="no primary display");
+    CHECK(!triple_span_from_monitors({l,{0,0,2560,1440,true},{2560,0,5120,1440,true}},out,&reason)&&
+          reason=="more than one primary display");
     CHECK(!triple_span_from_monitors({},out));
     CHECK(!triple_span_from_monitors({{0,0,0,0},{0,0,0,0},{0,0,0,0}},out));
-    CHECK(!triple_span_from_monitors({{0,0,7680,1440}},out));   // Surround: one display
-    CHECK(std::string(triple_span_refusal({l,c}))=="not exactly three monitors");
+    CHECK(!triple_span_from_monitors({{0,0,7680,1440,true}},out,&reason)&&
+          reason.find("at least 4:1 wide")!=std::string::npos); // Surround is the single-window path
+    CHECK(!triple_span_from_monitors({{0,0,7680,1440,true},dashboard},out));
     // The display fit: never a stretch. 16:9 fills; wider gets centred columns (a three-monitor span: exactly the centre
     // monitor; an ultrawide); taller gets centred rows (16:10); 4:3 frames (the setup screen) likewise.
     CHECK(fit_is(2560,1440,1280,720,0,0,2560,1440));

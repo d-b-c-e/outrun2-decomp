@@ -66,10 +66,13 @@ bool triple_fixture_corrections(const float* projection,float* out){
     for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
     return true;
 }
-BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM list){
+struct MonitorScan { std::vector<outrun::desktop::ScreenRect> rects; bool failed{}; };
+BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM state){
+    auto& scan=*reinterpret_cast<MonitorScan*>(state);
     MONITORINFO i{};i.cbSize=sizeof i;
-    if(GetMonitorInfoW(h,&i))reinterpret_cast<std::vector<outrun::desktop::ScreenRect>*>(list)->push_back(
-        {i.rcMonitor.left,i.rcMonitor.top,i.rcMonitor.right,i.rcMonitor.bottom});
+    if(!GetMonitorInfoW(h,&i)){scan.failed=true;return FALSE;}
+    scan.rects.push_back({i.rcMonitor.left,i.rcMonitor.top,i.rcMonitor.right,i.rcMonitor.bottom,
+                          (i.dwFlags&MONITORINFOF_PRIMARY)!=0});
     return TRUE;
 }
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
@@ -102,15 +105,19 @@ NativeWindow& native_window(){
         MONITORINFO m{};m.cbSize=sizeof m;
         GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m);
         RECT r=m.rcMonitor;
-        // Separate monitors (STD-015): the window over three equal side-by-side monitors, in physical pixels (the process
-        // is per-monitor DPI aware; the left monitor's x is negative). No display mode or layout is ever changed.
+        // Separate monitors (STD-015): the primary-centered racing row in physical pixels (the process is per-monitor
+        // DPI aware; the left monitor's x is negative). A dashboard outside the row is ignored. No mode/layout changes.
         bool separate_span=false;   // Separate monitors found its three-monitor span
         if(triple==td::TripleScreens::separate){
-            std::vector<td::ScreenRect> monitors;EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&monitors));
-            td::ScreenRect span{};
-            if(td::triple_span_from_monitors(monitors,span)){r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";separate_span=true;}
-            else span_note=std::string("refused: ")+td::triple_span_refusal(monitors)+" ("+std::to_string(monitors.size())+
-                           " found); the primary monitor";
+            MonitorScan scan{};
+            const bool enumerated=EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&scan))!=FALSE;
+            td::ScreenRect span{};std::string reason;
+            if(enumerated&&!scan.failed&&td::triple_span_from_monitors(scan.rects,span,&reason)){
+                r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";separate_span=true;
+            }else{
+                if(!enumerated||scan.failed)reason="Windows did not report all monitors";
+                span_note="refused: "+reason+" ("+std::to_string(scan.rects.size())+" found); the primary monitor";
+            }
         }
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);

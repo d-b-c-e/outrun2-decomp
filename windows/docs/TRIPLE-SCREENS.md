@@ -15,9 +15,11 @@ Status 2026-10-12:
 
 - `Screens = Off` and `Screens = Surround` (its default) leave the window as before. On a Surround desktop, Windows
   reports one display (e.g. 7680x1440), so the game is already one wide view.
-- `Screens = Separate monitors`: one borderless window over three equal side-by-side monitors (no gap or overlap; the
-  pure `TripleSpanFromMonitors` over `EnumDisplayMonitors`), with the game resolution set to the span. Anything else
-  logs why and stays on the primary monitor.
+- `Screens = Separate monitors`: one borderless window over the three equal, touching monitors centered on the Windows
+  primary, with the game resolution set to that row's span. The pure `triple_span_from_monitors` adapter uses the
+  vendored toolkit RacingRow selector over `EnumDisplayMonitors` rectangles and primary flags. A dashboard wholly
+  above or below the row is ignored. An extra display in the row's band, an incomplete row, or ambiguous primary
+  logs why and stays on the primary monitor. The Surround and Off window paths are unchanged.
 - Both wide modes are **planar**: one wide frustum, the same picture as the game's own Surround mode (toolkit
   `engine-routes.md` section 3). Menus stay 4:3 in the centre with `UILetterboxing = 1`.
 
@@ -48,8 +50,9 @@ Status 2026-10-12:
 1. **Selector and window.** No rendering change.
    - `[Triple] Screens = Off | Surround | Separate monitors` (case-insensitive; "Separate" accepted). Default Off
      until step 4 is qualified. Surround then changes nothing on a single display.
-   - Port `TripleSpanFromMonitors` as a pure function with a unit test: three equal monitors in any order, a gap, an
-     overlap, unequal sizes or heights, two monitors, four monitors.
+   - Use the toolkit RacingRow selector through a pure `triple_span_from_monitors` adapter. Unit fixtures cover three
+     equal monitors in any order, a fourth dashboard above or below, gaps, overlap, unequal sizes or heights, missing
+     or duplicate primary, a same-band fourth display, and a wide Surround primary.
    - `native_window` takes the span when Separate is chosen and the window is borderless. Otherwise it uses the
      primary monitor and logs why.
    - A status line at start: mode, span or reason, and "next start" when changed in game.

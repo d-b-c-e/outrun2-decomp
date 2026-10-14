@@ -3,7 +3,7 @@
 // (windows/tests/test_triple_screens.cpp); window_desktop.cpp feeds them the INI text and EnumDisplayMonitors.
 // Design and review: windows/docs/TRIPLE-SCREENS.md.
 #include "triple_rig.hpp"
-#include <algorithm>
+#include "../vendor/display/dbce_racing_row.hpp"
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -30,19 +30,18 @@ inline std::optional<TripleScreens> parse_triple_screens(std::string_view text){
     if(s=="separate monitors"||s=="separate")return TripleScreens::separate;
     return std::nullopt;
 }
-struct ScreenRect { long left{},top{},right{},bottom{}; };
-// Separate monitors (STD-015): the rectangle over exactly three monitors of equal size side by side with no gap or
-// overlap, in any enumeration order; anything else (including Surround, which Windows reports as one display) gives
-// false. The Tweaks fork's TripleSpanFromMonitors (dbce-mods-outrun-2006 src/triple_span.hpp, f4e9f01), same rule.
-inline bool triple_span_from_monitors(std::vector<ScreenRect> r,ScreenRect& out){
-    if(r.size()!=3)return false;
-    std::sort(r.begin(),r.end(),[](const ScreenRect& a,const ScreenRect& b){return a.left<b.left;});
-    for(std::size_t i=0;i<r.size();++i){
-        if(r[i].right<=r[i].left||r[i].bottom<=r[i].top)return false;
-        if(r[i].top!=r[0].top||r[i].bottom!=r[0].bottom||r[i].right-r[i].left!=r[0].right-r[0].left)return false;
-        if(i&&r[i].left!=r[i-1].right)return false;
-    }
-    out={r[0].left,r[0].top,r[2].right,r[0].bottom};
+struct ScreenRect { long left{},top{},right{},bottom{}; bool primary{}; };
+// Separate monitors (STD-015): use the toolkit's primary-centered racing row. A dashboard above or below it is
+// ignored; an extra display in its band, a missing side or an ambiguous/missing primary refuses the span. This adapter
+// never accepts the toolkit's Surround kind: that remains the existing single-window path.
+inline bool triple_span_from_monitors(const std::vector<ScreenRect>& r,ScreenRect& out,std::string* reason=nullptr){
+    std::vector<dbce::display::MonitorRect> monitors;
+    monitors.reserve(r.size());
+    for(const auto& m:r)monitors.push_back({int(m.left),int(m.top),int(m.right-m.left),int(m.bottom-m.top),m.primary});
+    const auto row=dbce::display::select_racing_row(monitors,4.0);
+    if(reason)*reason=row.reason;
+    if(row.kind!=dbce::display::RacingRowKind::Separate)return false;
+    out={row.x,row.y,row.x+row.width,row.y+row.height};
     return true;
 }
 // The planar span's aspect (pc_screen.hpp g_pc_wide_aspect): the window's width / height when the selector is not Off
@@ -157,9 +156,4 @@ struct TripleStatus {
     std::string projection_note;   // why Angled was not applied ("" when it was, or when Planar was asked for)
 };
 const TripleStatus& triple_screens_status();   // window_desktop.cpp
-// Why triple_span_from_monitors refused, for the log line.
-inline const char* triple_span_refusal(const std::vector<ScreenRect>& r){
-    if(r.size()!=3)return "not exactly three monitors";
-    return "the three monitors are not equal and side by side without gap or overlap";
-}
 }

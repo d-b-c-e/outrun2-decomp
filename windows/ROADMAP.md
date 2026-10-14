@@ -42,7 +42,8 @@ go upstream as small pull requests (first: `tweaks-exe`).
    (STD-007/015/019/022) is a default-off spike (`OR2_TRIPLE_VIEWS=1`): one game render replicated by a geometry shader
    into three viewports, each with its clip correction from the toolkit rig math. First rig pictures 2026-10-12: three
    projections with the side sky. Open: culling for the union of the three frusta, the F6 selector, the owner's
-   physical check.
+   physical check. The primary-centered RacingRow source adapter now admits the three-monitor row with a fourth
+   dashboard wholly above or below it; this four-display topology still needs an observed game run.
 4. 🟡 **Force feedback**: the force model of the Tweaks fork
    (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
    car state in the decomp's own structures instead of game-memory hooks;
@@ -138,7 +139,7 @@ needed in a native build.
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
 | | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); ordinary DirectInput rescans every two seconds and reopens the saved instance GUID, built but not checked at the rig |
-| | DefaultManualTransmission | 🟡 | off by default as in Tweaks: after 4DD250 (frontend_transmission_init_4dd250, an exact reconstruction) the transmission owner's +E4 = 0 / +E8 = 1, the carousel's (+34) previous / current index, as Tweaks' detour, so confirming stores Manual in 830374; off leaves every byte as 4DD250 left it (tests/test_default_transmission.cpp). `[Misc] DefaultManualTransmission`: Tweaks' `[Controls]` here is the ini-controls-1 section, where an unknown key is an invalid binding (dbce_controls.hpp). F6 Controls and Wheelkit's Controls page offer it as "Manual transmission by default" (the next start). Not yet seen in game |
+| | DefaultManualTransmission | 🟡 | off by default as in Tweaks: after 4DD250 (frontend_transmission_init_4dd250, an exact reconstruction) the transmission owner's +E4 = 0 / +E8 = 1, the carousel's (+34) previous / current index, as Tweaks' detour, so confirming stores Manual in 830374; off leaves every byte as 4DD250 left it (tests/test_default_transmission.cpp). `[Misc] DefaultManualTransmission`: Tweaks' `[Controls]` here is the ini-controls-1 section, where an unknown key is an invalid binding (dbce_controls.hpp). F6 Controls and Wheelkit's Controls page offer it as "Manual transmission by default" (the next start). The 2026-10-14 observed A/B in hub `artifacts/outrun-transmission-default-20261014` showed AUTOMATIC with the setting off and MANUAL with it on; manual shifting and physical feel remain unqualified. |
 | | HudToggleKey | ⬜ | needs a desktop key outside the recorded and consumed input |
 | | Vibration\*, ImpulseVibration\* | ⬜ | gamepad rumble / trigger motors |
 | DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | canonical `[Controls]` (`ini-controls-1`); the Tweaks keys are imported once with Tweaks' scaling |
