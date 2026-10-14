@@ -4,18 +4,22 @@
 #include "desktop_settings.hpp"
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 namespace player=outrun::desktop::ffb::player;
 namespace shadow=outrun::desktop::ffb::shadow;
 namespace producer=outrun::desktop::ffb::producer2;
 namespace {
 int checks{};
-void check(bool ok,const char* what){++checks;if(!ok)throw std::runtime_error(what);}
+void check(bool ok,const std::string& what){++checks;if(!ok)throw std::runtime_error(what);}
 outrun::desktop::Ini ini(const std::string& body){outrun::desktop::Ini i;i.load_text(body,"fixture.ini");return i;}
 template<class T> void put(std::array<std::uint8_t,0xd52>& car,std::size_t off,T value){
     std::memcpy(car.data()+off,&value,sizeof value);
@@ -72,6 +76,29 @@ void test_selection(){
     check(s.model==player::Model::Producer2&&s.strengths.steering_percent==0&&s.strengths.shift_percent==100,
           "inclusive 0..100 bounds accepted");
 }
+void test_gain_save_roundtrip(){
+    char dir[MAX_PATH];check(GetTempPathA(MAX_PATH,dir)>0,"temporary settings folder");
+    const std::string path=std::string(dir)+"outrun_selected_gains_"+std::to_string(GetCurrentProcessId())+".ini";
+    const std::string original="[FFB]\r\nModel = outrun-producer@2\r\nFFBGlobalStrength = 0.80\r\n"
+        "[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n"
+        "[Controls]\r\nSchema = 1\r\nsteer = \r\n";
+    {std::ofstream file(path,std::ios::binary|std::ios::trunc);file<<original;check(bool(file),"write selected settings fixture");}
+    std::string error;
+    check(outrun::desktop::write_key(path,"FFBProducer2","SteeringStrengthPercent","40",error),
+          "save independent selected steering percent: "+error);
+    check(outrun::desktop::write_key(path,"FFBProducer2","ShiftStrengthPercent","80",error),
+          "save independent selected shift percent: "+error);
+    outrun::desktop::Ini saved;check(saved.load(path),"reload saved selected settings");
+    const auto choice=player::select(saved);
+    check(choice.model==player::Model::Producer2&&choice.strengths.steering_percent==40&&
+          choice.strengths.shift_percent==80,"saved integer gains select independently on the next start");
+    check(saved.text("FFB","FFBGlobalStrength")=="0.80"&&saved.text("Controls","Schema")=="1"&&
+          saved.text("Controls","steer").empty(),"selected edits preserve legacy and controls settings");
+    std::ifstream file(path,std::ios::binary);std::stringstream bytes;bytes<<file.rdbuf();
+    check(bytes.str().find("SteeringStrengthPercent = 40\r\nShiftStrengthPercent = 80\r\n")!=std::string::npos,
+          "selected keys remain plain integer percentages in their own section");
+    file.close();std::remove(path.c_str());
+}
 void test_fake_sink(){
     const auto choose=[](int steering,int shift){
         return player::select(ini("[FFB]\nModel = outrun-producer@2\n[FFBProducer2]\nSteeringStrengthPercent = "+
@@ -126,7 +153,7 @@ void test_fake_sink(){
 }
 }
 int main(){
-    try{test_selection();test_fake_sink();}
+    try{test_selection();test_gain_save_roundtrip();test_fake_sink();}
     catch(const std::exception& e){std::cerr<<"ffb player model: FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"ffb player model: "<<checks<<" checks passed, software fake sink only\n";
 }

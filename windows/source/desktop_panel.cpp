@@ -34,6 +34,7 @@ struct Panel {
     bool configured{},latched{},input{},backend{},was_open{},playback{};
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
     ffb::player::Model player_model{ffb::player::Model::Legacy};
+    ffb::producer2::Strengths applied_strengths{};
     std::string model_refusal;
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
@@ -58,6 +59,7 @@ struct Values {
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
+    int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
@@ -131,8 +133,20 @@ void page_ffb(bool advanced){
     dbce::panel::Text("Stop FFB and F8 turn the output off now and at the next start.");
     if(p.player_model!=ffb::player::Model::Legacy){
         if(p.player_model==ffb::player::Model::Producer2){
-            dbce::panel::Status("Player model","outrun-producer@2 selected; steering and shift strengths come from [FFBProducer2]");
-            dbce::panel::Text("The legacy FFB sliders do not tune this model; edit its strengths in the ini file.");
+            dbce::panel::Status("Player model","outrun-producer@2 selected; the legacy FFB sliders do not tune it");
+            const auto active="steering "+std::to_string(p.applied_strengths.steering_percent)+"%, shift "+
+                std::to_string(p.applied_strengths.shift_percent)+"%";
+            dbce::panel::Status("Model in this session",active.c_str());
+            {const int before=v.selected_steering;
+             if(dbce::panel::Percent("Steering strength",&v.selected_steering,0,100,50,
+                 "Scales the selected model's provisional speed-and-steer centering estimate. Saved for the next game start."))
+                 keep(&v.selected_steering,before,[&]{return save("FFBProducer2","SteeringStrengthPercent",std::to_string(v.selected_steering));});}
+            {const int before=v.selected_shift;
+             if(dbce::panel::Percent("Shift strength",&v.selected_shift,0,100,50,
+                 "Scales the selected model's gear-change cue independently of steering. Saved for the next game start."))
+                 keep(&v.selected_shift,before,[&]{return save("FFBProducer2","ShiftStrengthPercent",std::to_string(v.selected_shift));});}
+            if(v.selected_steering!=p.applied_strengths.steering_percent||v.selected_shift!=p.applied_strengths.shift_percent)
+                dbce::panel::Text("The saved strengths apply at the next game start; this session keeps the strengths shown above.");
         }else{
             const auto state="settings refused: "+p.model_refusal+"; correct the model settings before force can run";
             dbce::panel::Status("Player model",state.c_str(),dbce::panel::Tone::Warning);
@@ -356,7 +370,8 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
     p=Panel{};
     p.latched=latched;p.playback=playback;
-    {const auto selected=ffb::player::select(settings);p.player_model=selected.model;p.model_refusal=selected.refusal;}
+    {const auto selected=ffb::player::select(settings);p.player_model=selected.model;
+     p.applied_strengths=selected.strengths;p.model_refusal=selected.refusal;}
     p.ini=settings.path();
     const auto slash=p.ini.find_last_of("\\/");
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
@@ -364,6 +379,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.name="OutRun 2006 desktop (decomp)";
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
+    v.selected_steering=p.applied_strengths.steering_percent;
+    v.selected_shift=p.applied_strengths.shift_percent;
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
     v.projection=v.projection_start=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
