@@ -256,9 +256,12 @@ void page_cameras(bool advanced){
     }
     if(v.triple!=int(st.mode)||v.projection!=v.projection_start)dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
-    static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
+    // As Wheelkit's Display page words it (sana 90841): 0 is the plain presentation mode, not the least-lag choice.
+    static const char* const latency[]{"0 (plain)","1 (fewer)","2 (default)","3 (more)"};
     const int before=v.latency;
-    if(dbce::panel::Choice("Frame latency",latency,4,&v.latency,"Frames the swap chain may queue; fewer is less input lag, more is smoother."))
+    if(dbce::panel::Choice("Frame latency",latency,4,&v.latency,
+           "Frames that may wait for the display: 1 queues fewer (the least input lag), 2 is the default, 3 allows more; "
+           "0 uses the plain presentation mode."))
         keep(&v.latency,before,[&]{return save("Window","FrameLatency",std::to_string(v.latency));});
     // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
     // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
