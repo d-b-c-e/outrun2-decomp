@@ -17,17 +17,29 @@ int main(int argc,char** argv){
         [](void* p,bool f){static_cast<Context*>(p)->focus=f;return true;}};
     std::array<std::uint8_t,PcKeyboardBytes> data;data.fill(0xa5);Bytes b(data.data(),data.size());
     unsigned repeat{},result{};CHECK(keyboard_construct_468e40(b,repeat));CHECK(repeat==12);CHECK(b.u32(0x700)==0xa5a5a5a5);
-    CHECK(keyboard_init_468880(b,ui,services));CHECK(ctx.focus&&services.selected==0);CHECK(b.u32(0xec)==1);
+    CHECK(keyboard_init_468880(b,ui,services));CHECK(ctx.focus&&services.selected==0&&!services.ready_seen&&!services.accepted);CHECK(b.u32(0xec)==1);
     keyboard_limits_468780(b,1,16);CHECK(keyboard_name_468710(b,"OR2C2C"));
     CHECK(keyboard_position_4687c0(b,ui,0,60));
     CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(result==0&&pool.used(12)==1);
     for(unsigned i=0;i<60;++i)pool.tick();
-    CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(pool.used(12)==2);
+    CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(pool.used(12)==2&&services.ready_seen);
     // Every cursor position resolves a real authored ETC animation.
     for(unsigned flags:{0u,2u})for(unsigned cell=0;cell<44;++cell)for(unsigned dir=0;dir<4;++dir){
         b.put32(0x708,flags);services.selected=cell;CHECK(keyboard_move_468c00(b,ui,services,dir));
         CHECK(services.selected<44);const auto* sprite=pool.get(b.u32(0x55c));CHECK(sprite);
         std::vector<GameUiDraw> draws;CHECK(game_ui_scene_frame_draws(pack,sprite->token&0xffff,0,draws,&error));
+    }
+    // A passive route can reach Done from every authored selection without
+    // mutating the keyboard's choice just to calculate the path.
+    for(unsigned flags:{0u,2u})for(unsigned cell=0;cell<44;++cell){
+        b.put32(0x708,flags);services.selected=cell;
+        const auto path=keyboard_path_to_done(cell,flags!=0);
+        CHECK(services.selected==cell&&path.size()<=43);
+        for(char step:path){
+            const auto dir=std::string("LURD").find(step);CHECK(dir<4);
+            CHECK(keyboard_move_468c00(b,ui,services,unsigned(dir)));
+        }
+        CHECK(services.selected==43);
     }
     b.put32(0x708,0);ctx.input=0;
     for(unsigned alphabet=1;alphabet<=5;++alphabet){
@@ -49,8 +61,10 @@ int main(int argc,char** argv){
     ctx.input=-1;CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(result==0);
     for(unsigned i=0;i<60;++i)pool.tick();
     CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(result==1&&!ctx.focus&&pool.used(12)==0);
+    CHECK(services.accepted);
     CHECK(keyboard_init_468880(b,ui,services));keyboard_limits_468780(b,1,16);
-    CHECK(keyboard_finish_469030(b,ui,services,true));CHECK(!b.u8(0x6fc));
+    CHECK(!services.accepted&&!services.ready_seen);
+    CHECK(keyboard_finish_469030(b,ui,services,true));CHECK(!b.u8(0x6fc)&&services.accepted);
     CHECK(keyboard_finish_469030(b,ui,services,false));for(unsigned i=0;i<60;++i)pool.tick();
     CHECK(keyboard_tick_469130(b,ui,services,result));CHECK(result==2&&!ctx.focus);
     CHECK(!keyboard_name_468710(b,std::string(257,'x')));

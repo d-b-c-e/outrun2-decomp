@@ -13,6 +13,7 @@
 #include "display_fit.hpp"
 #include "renderer.hpp"
 #include "platform/native_runtime.hpp"
+#include "platform/frontend_keyboard.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/runtime_input.hpp"
 #include <atomic>
@@ -30,6 +31,62 @@
 #include <string>
 namespace outrun::desktop {
 namespace {
+// Opt-in, passive ordinary-play route observation. One complete TSV line per
+// transition (plus the first snapshot); no input, owner state or UI mutation.
+struct FrontendRouteTrace {
+    HANDLE file{INVALID_HANDLE_VALUE};
+    std::string previous;
+    unsigned long long sequence{};
+    bool initialized{},failed{};
+    ~FrontendRouteTrace(){if(file!=INVALID_HANDLE_VALUE)CloseHandle(file);}
+    void observe(const platform::NativeRuntimeContext* rt){
+        if(!rt||failed)return;
+        const char* path=std::getenv("OR2_FRONTEND_STATE_TRACE");
+        if(!path||!*path)return;
+        if(!initialized){
+            initialized=true;
+            file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,
+                             FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
+            if(file==INVALID_HANDLE_VALUE){failed=true;std::printf("frontend route trace: CREATE_NEW failed (%lu)\n",GetLastError());return;}
+            constexpr char header[]="seq\tpid\trun\tms\tmode\tstartStage\teditorState\titem\tfocused\tready\taccepted\tselected\tnameLen\tdoneMoves\tsaves\tloaded\n";
+            DWORD written=0;
+            if(!WriteFile(file,header,DWORD(sizeof header-1),&written,nullptr)||written!=sizeof header-1){failed=true;return;}
+        }
+        auto* owner=rt->event_function36.license_owners;
+        int state=-1,item=-1,selected=-1,name_len=0,focused=0,ready=0,accepted=0;
+        std::string moves="-";
+        if(owner){
+            const auto editor=driving::Bytes(owner->storage(24),owner->size(24));
+            state=int(editor.u32(0x38));item=int(editor.u32(0x3c));
+            if(const auto* widget=owner->widgets(24)){
+                const auto& keyboard=widget->keyboard_state();
+                focused=int(keyboard.focused);ready=int(keyboard.ready_seen);accepted=int(keyboard.accepted);
+                selected=int(keyboard.selected);
+                if(keyboard.focused){
+                    const auto bytes=editor.sub(0xa78,platform::PcKeyboardBytes);
+                    name_len=int(platform::keyboard_name_468770(bytes).size());
+                    if(keyboard.ready_seen){moves=platform::keyboard_path_to_done(keyboard.selected,(bytes.u32(0x708)&2u)!=0u);}
+                }
+            }
+        }
+        const std::string snapshot=std::to_string(rt->mode_state.current)+'\t'+
+            std::to_string(rt->start_mode.stage)+'\t'+std::to_string(state)+'\t'+std::to_string(item)+'\t'+
+            std::to_string(focused)+'\t'+std::to_string(ready)+'\t'+std::to_string(accepted)+'\t'+
+            std::to_string(selected)+'\t'+std::to_string(name_len)+'\t'+moves+'\t'+
+            std::to_string(owner?owner->save_calls():0u)+'\t'+
+            std::to_string(rt->event_function36.frontend_profiles.loaded_count);
+        if(sequence&&snapshot==previous)return;
+        previous=snapshot;
+        const char* run=std::getenv("OR2_FRONTEND_RUN_ID");
+        const std::string line=std::to_string(++sequence)+'\t'+std::to_string(GetCurrentProcessId())+'\t'+
+            (run&&*run?run:"-")+'\t'+std::to_string(GetTickCount64())+'\t'+snapshot+'\n';
+        DWORD written=0;
+        if(!WriteFile(file,line.data(),DWORD(line.size()),&written,nullptr)||written!=line.size()){
+            failed=true;std::printf("frontend route trace: WriteFile failed (%lu)\n",GetLastError());
+        }
+    }
+};
+FrontendRouteTrace route_trace;
 struct Panel {
     bool configured{},latched{},input{},backend{},was_open{},playback{};
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
@@ -429,6 +486,7 @@ void desktop_panel_neutral_input(platform::NativeInputState& out){
 namespace {
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(p.inner)p.inner(out,rt);
+    if(!p.latched&&!p.playback)route_trace.observe(rt);
     // UILetterboxing: the race state for the present overlay (78026C, and START's stage 8367A8).
     if(rt)lb.in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
     const bool open=desktop_panel_open();

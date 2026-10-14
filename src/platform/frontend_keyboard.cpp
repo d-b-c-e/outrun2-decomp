@@ -2,6 +2,7 @@
 #include "frontend_keyboard.hpp"
 #include "title_owner.hpp"
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace outrun::platform {
@@ -106,7 +107,7 @@ bool keyboard_position_4687c0(Bytes b,FrontendUiResources& ui,float x,float y){
 bool keyboard_init_468880(Bytes b,FrontendUiResources& ui,FrontendKeyboardServices& s){
     if(b.size()<PcKeyboardBytes||!s.focus||s.focused)return false;
     b.put8(0x6fc,0);b.put32(0xec,1);for(unsigned i=0;i<257;++i)b.put8(0x5f4+i,0);
-    s.selected=0;for(auto o:{0x6f6u,0x6f8u,0x6fau})b.put16(o,0);
+    s.selected=0;s.ready_seen=false;s.accepted=false;for(auto o:{0x6f6u,0x6f8u,0x6fau})b.put16(o,0);
     Calls c{b,ui};const float x=b.f32(0x34),y=b.f32(0x38);
     c.configure(0x4c,0x2c0110,0,20,3,x,y);c(0x465970,0x4c);
     for(unsigned i=1;i<=5;++i)c.configure(0xf0+i*0xa0,0x2c0110,19+i,19+i,0,x,y);
@@ -138,7 +139,28 @@ bool keyboard_suspend_468f20(Bytes b,FrontendUiResources& ui,FrontendKeyboardSer
 bool keyboard_finish_469030(Bytes b,FrontendUiResources& ui,FrontendKeyboardServices& s,bool accept){
     if(accept&&std::uint32_t(b.i16(0x6f8))>keyboard_name_468770(b).size())return true;
     b.put32(4,83);b.put32(0x700,accept?1:2);
-    return exit_animation(b,ui)&&sound(s,accept?64:0);
+    const bool ok=exit_animation(b,ui)&&sound(s,accept?64:0);
+    if(ok&&accept)s.accepted=true;
+    return ok;
+}
+std::string keyboard_path_to_done(unsigned selected,bool alternate){
+    if(selected>=44)return {};
+    std::array<int,44> previous,direction;
+    previous.fill(-1);direction.fill(-1);
+    std::array<unsigned,44> queue{};unsigned first=0,last=0;
+    queue[last++]=selected;previous[selected]=int(selected);
+    while(first<last&&previous[43]<0){
+        const unsigned from=queue[first++];
+        for(unsigned dir=0;dir<4;++dir){
+            const unsigned to=next_cell(from,dir,alternate);
+            if(to>=44||previous[to]>=0)continue;
+            previous[to]=int(from);direction[to]=int(dir);queue[last++]=to;
+        }
+    }
+    if(previous[43]<0)return {};
+    std::string path;
+    for(unsigned cell=43;cell!=selected;cell=unsigned(previous[cell]))path.push_back("LURD"[direction[cell]]);
+    std::reverse(path.begin(),path.end());return path;
 }
 bool keyboard_tick_469130(Bytes b,FrontendUiResources& ui,FrontendKeyboardServices& s,unsigned& result){
     result=0;if(b.size()<PcKeyboardBytes)return false;Calls c{b,ui};
@@ -147,6 +169,7 @@ bool keyboard_tick_469130(Bytes b,FrontendUiResources& ui,FrontendKeyboardServic
         c(0x465970,0x4b0);c(0x4659f0,0x4b0);
     }
     c(0x4659f0,0x4c);if(!c(0x4652e0,0x4c))return c.ok;
+    s.ready_seen=true;
     if(b.u8(0x6fc)){if(!keyboard_suspend_468f20(b,ui,s))return false;result=b.u32(0x700);return true;}
     if(b.u32(0x55c)==~0u)c(0x465970,0x554);
     c(0x4659f0,0x554);

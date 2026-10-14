@@ -14,7 +14,12 @@ struct FrontendKeyboardServices {
     bool (*focus)(void*,bool acquire){};
     std::uint32_t selected{}; // PC 7F9420, shared by navigation and pointer input
     bool focused{};          // native counterpart of active keyboard 95AF38
+    bool ready_seen{};       // passive route diagnostic: a tick passed the opening animation
+    bool accepted{};         // passive route diagnostic: Done accepted a non-short name
 };
+// Read-only shortest path through the retail keyboard navigation table.
+// L/U/R/D are native D-pad directions; empty means already at Done or no path.
+std::string keyboard_path_to_done(unsigned selected,bool alternate);
 bool keyboard_construct_468e40(driving::Bytes,std::uint32_t& repeat);
 std::string keyboard_name_468770(driving::Bytes);
 bool keyboard_name_468710(driving::Bytes,std::string_view);
