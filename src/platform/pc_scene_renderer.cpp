@@ -248,10 +248,10 @@ void PcSceneRenderer::camera_reset_4857c0(){
         driving::PcCameraDevice d;
         driving::camera_project_484bd0(camera,matrices_,d,screen_,blend);
     }catch(const std::exception& e){
+        const auto left=matrices_;matrices_.depth=depth;matrices_.current_offset=offset;   // before anything that may allocate
         ++camera_unanswered;last_error=std::string("4857C0 failed: ")+e.what();
         if(camera_first_error.empty())camera_first_error="frame "+std::to_string(frames)+" mode "+std::to_string(current_mode_)+": "+last_error;
-        driving::pc_matrix_trace_scope("camera",frames,current_mode_,0x4857c0u,0u,depth,offset,matrices_,last_error.c_str());
-        matrices_.depth=depth;matrices_.current_offset=offset;
+        try{driving::pc_matrix_trace_scope("camera",frames,current_mode_,0x4857c0u,0u,depth,offset,left,last_error.c_str());}catch(...){}
     }
 }
 bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,std::uint32_t mode_78026c,
@@ -301,11 +301,12 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             const auto depth=matrices_.depth;const auto offset=matrices_.current_offset;
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
             catch(const std::exception& e){
+                // The next frame's callbacks share this stack: drop the nesting the failed control
+                // left before anything that may allocate.
+                const auto left=matrices_;matrices_.depth=depth;matrices_.current_offset=offset;
                 ++camera_unanswered;last_error=std::string("485FE0 failed (view ")+std::to_string(camera.u8(0x34a))+"): "+e.what();
                 if(camera_first_error.empty())camera_first_error="frame "+std::to_string(frames)+" mode "+std::to_string(mode_78026c)+": "+last_error;
-                // The next frame's callbacks share this stack: drop the nesting the failed control left.
-                driving::pc_matrix_trace_scope("camera",frames,mode_78026c,callback,385u,depth,offset,matrices_,last_error.c_str());
-                matrices_.depth=depth;matrices_.current_offset=offset;
+                try{driving::pc_matrix_trace_scope("camera",frames,mode_78026c,callback,385u,depth,offset,left,last_error.c_str());}catch(...){}
                 return true;}
             // 485FE0 returns false only from its mode guard, before any push: no nesting to restore.
             if(!answered){
