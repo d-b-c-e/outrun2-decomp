@@ -1,5 +1,6 @@
 #include "driving/pc_wrecker.hpp"
 #include "driving/pc_common_control.hpp"
+#include "platform/scripted_recovery_probe.hpp"
 #include "support/course_world_fixture.hpp"
 #include <array>
 #include <cstring>
@@ -46,6 +47,30 @@ std::array<std::uint8_t,16> place(std::uint32_t type,std::int16_t length,std::ui
 }
 int main(){
     try{
+        {
+            using outrun::platform::ScriptedRecoveryProbe;
+            using outrun::platform::scripted_recovery_requested;
+            using outrun::platform::scripted_recovery_shadow_admitted;
+            check(!scripted_recovery_requested(nullptr)&&!scripted_recovery_requested("1")&&
+                  !scripted_recovery_requested("delayed-once-extra")&&scripted_recovery_requested("delayed-once"),
+                  "scripted recovery requires the exact developer opt-in");
+            bool admitted=true;
+            outrun::platform::NativeCarProducerObserver observer{nullptr,
+                +[](void*,const outrun::platform::NativeCarProducerObservation&){},&admitted};
+            check(scripted_recovery_shadow_admitted(observer),"live ordinary shadow was not admitted");
+            admitted=false;
+            check(!scripted_recovery_shadow_admitted(observer),"detached shadow kept scripted admission");
+            admitted=true;
+            observer.observe=nullptr;
+            check(!scripted_recovery_shadow_admitted(observer),"observer-less shadow kept scripted admission");
+            ScriptedRecoveryProbe probe{};
+            for(unsigned k=0;k<150;++k)check(!probe.take(true),"scripted recovery fired early");
+            check(!probe.take(false)&&probe.eligible_calls==0u,"scripted recovery kept a broken admission streak");
+            for(unsigned k=0;k<ScriptedRecoveryProbe::ReadyCalls-1u;++k)
+                check(!probe.take(true),"scripted recovery fired before 300 eligible calls");
+            check(probe.take(true)&&probe.attempted,"scripted recovery did not latch before the call");
+            check(!probe.take(true)&&!probe.take(false),"scripted recovery retried after its one attempt");
+        }
         {
             AdvanceFixture f;auto p=place(0,10,8);auto c=f.context();check(pc_advance_on_road_place(bytes(p),1,c),"primary crossing rejected");auto b=bytes(p);
             check(b.u32(0)==1&&b.i16(8)==0&&b.u8(0xa)==2,"primary crossing state");check(bytes(f.cache).u32(0)==0x1111&&bytes(f.cache).u32(4)==3,"primary cache side effect");

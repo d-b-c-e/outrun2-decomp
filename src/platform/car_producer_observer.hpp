@@ -15,6 +15,9 @@ struct NativeCarProducerObservation {
 struct NativeCarProducerObserver {
     void* user{};
     void (*observe)(void* user,const NativeCarProducerObservation&){};
+    // Points at the ordinary shadow's live admission flag, so detaching its
+    // writer revokes a runtime context's copied observer without another tick.
+    const bool* ordinary_shadow_admitted{};
 };
 inline bool game_steer_written(std::int32_t mode,std::int16_t stale_counter) noexcept {
     return mode==16&&stale_counter<=120;

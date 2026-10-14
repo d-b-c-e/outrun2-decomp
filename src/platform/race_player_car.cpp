@@ -28,6 +28,10 @@
 #include "driving/pc_collision.hpp"
 #include "platform/race_traffic_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
+#if defined(OR2_DEV_SCRIPTED_RECOVERY)
+#include "platform/scripted_recovery_probe.hpp"
+#include <cstdlib>
+#endif
 #include <cstring>
 #include <cstdio>
 #include <stdexcept>
@@ -529,6 +533,46 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
         for(std::size_t o:{0x28au,0x37eu,0x288u,0x37cu,0x470u,0x564u})f.W.put16(o,std::uint16_t(snap.i16(o)));
     }
     ++w.frames;
+#if defined(OR2_DEV_SCRIPTED_RECOVERY)
+    // One developer-only request on the admitted ordinary software shadow.
+    // The real PlWrecker callback advances continuity; ordinary car calls
+    // then own the delayed countdown and immediate snap.
+    static ScriptedRecoveryProbe scripted_probe{};
+    static const bool scripted_requested=scripted_recovery_requested(std::getenv("OR2_DEV_SCRIPTED_RECOVERY"));
+    const bool scripted_eligible=scripted_requested&&direct_dispatch&&!f.failed&&c.mode_state.current==16u&&
+        c.event_state.pause_depth==0u&&s.producer_active&&s.race_inits!=0u&&
+        scripted_recovery_shadow_admitted(c.car_producer_observer)&&
+        !s.producer_recovery_pending&&f.e.i16(0xd68)==0&&
+        fresh_car_producer(direct_dispatch,s.producer_active,s.race_inits,true,f.steer_written,f.e.u32(4));
+    if(scripted_probe.take(scripted_eligible)){
+        std::printf("SCRIPTED player recovery attempted phase=2 frame=%u generation=%u attempt=%llu\n",
+            c.frame_state.frame_counter_95af0c,s.race_inits,static_cast<unsigned long long>(s.producer_attempt+1u));
+        std::fflush(stdout);
+        try{
+            driving::CourseWorldQuery query{f.tables,matrices,s.race_prediction};
+            driving::PcRoadInfoContext road{f.tables,matrices,f.area_yaw()};
+            auto route=f.route();
+            driving::PcCourseAdvanceContext advance{f.ends,f.stages,f.stage_cache(),route,0u,0u,
+                c.race.area_state_7d2e80>9u};
+            driving::PcDispMatrixContext display{matrices,1.f,c.race.camera_override.scene_82e7d4};
+            driving::PcPlWreckerContext ctx{advance,road,query,display,&s,mark_player_recovery};
+            const auto before=s.producer_continuity;
+            driving::pc_pl_wrecker(f.e,f.W,f.P,f.W.sub(0x258,4u*0xf4u),2,ctx);
+            if(s.producer_continuity==before||!s.producer_recovery_pending){
+                f.fail(0x00504900u,"scripted phase2 returned without a pending recovery notice");
+                std::printf("SCRIPTED player recovery failed: no pending continuity notice\n");
+            }else std::printf("SCRIPTED player recovery succeeded phase=2 continuity=%u pending=1\n",
+                s.producer_continuity);
+        }catch(const std::exception& ex){
+            f.fail(0x00504900u,ex.what());
+            std::printf("SCRIPTED player recovery failed: %s\n",ex.what());
+        }catch(...){
+            f.fail(0x00504900u,"scripted phase2 unknown exception");
+            std::printf("SCRIPTED player recovery failed: unknown exception\n");
+        }
+        std::fflush(stdout);
+    }
+#endif
     const bool succeeded=!f.failed;
     ++s.producer_attempt;
     // Observation is outside the game-control exception path. A faulty optional

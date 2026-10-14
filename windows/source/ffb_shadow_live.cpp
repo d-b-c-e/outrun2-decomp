@@ -14,7 +14,7 @@ struct Live {
     HANDLE file{INVALID_HANDLE_VALUE};
     std::unique_ptr<ffb::shadow::Core> core;
     xbox_runtime::InputFilter inner{};
-    bool panel_open{},failure_logged{};
+    bool panel_open{},failure_logged{},ordinary_admitted{};
 } live;
 bool write(const std::string& bytes){
     if(live.file==INVALID_HANDLE_VALUE||bytes.size()>MAXDWORD)return false;
@@ -29,6 +29,7 @@ void close_trace(){
 void note_failure(){
     if(live.failure_logged)return;
     live.failure_logged=true;
+    live.ordinary_admitted=false;
     close_trace();
     std::printf("ffb shadow: optional trace detached after observer or file failure\n");std::fflush(stdout);
 }
@@ -63,6 +64,7 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
 }
 }
 bool ffb_shadow_configure(const std::wstring& path,bool ordinary_allowed){
+    live.ordinary_admitted=false;
     if(path.empty())return false;
     if(!ordinary_allowed){std::printf("ffb shadow: refused during recording\n");return false;}
     if(!std::filesystem::path(path).is_absolute()){
@@ -75,7 +77,8 @@ bool ffb_shadow_configure(const std::wstring& path,bool ordinary_allowed){
     }
     try{live.core=std::make_unique<ffb::shadow::Core>(write);}
     catch(...){close_trace();return false;}
-    xbox_runtime::car_producer_observer()={nullptr,observe};
+    live.ordinary_admitted=true;
+    xbox_runtime::car_producer_observer()={nullptr,observe,&live.ordinary_admitted};
     std::printf("ffb shadow: producer@2 software trace armed (no wheel output)\n");std::fflush(stdout);
     return true;
 }
@@ -85,6 +88,7 @@ void ffb_shadow_wrap_input_filter(){
     live.inner=current;current=filter;
 }
 void ffb_shadow_shutdown(){
+    live.ordinary_admitted=false;
     xbox_runtime::car_producer_observer()={};
     if(live.core)live.core->stop();live.core.reset();
     close_trace();
