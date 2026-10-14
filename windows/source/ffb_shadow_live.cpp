@@ -19,12 +19,17 @@ struct Live {
 bool write(const std::string& bytes){
     if(live.file==INVALID_HANDLE_VALUE||bytes.size()>MAXDWORD)return false;
     DWORD n=0;
-    return WriteFile(live.file,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size()&&FlushFileBuffers(live.file);
+    return WriteFile(live.file,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size();
+}
+void close_trace(){
+    if(live.file==INVALID_HANDLE_VALUE)return;
+    (void)FlushFileBuffers(live.file); // once at detach/shutdown, never on the game tick
+    CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;
 }
 void note_failure(){
     if(live.failure_logged)return;
     live.failure_logged=true;
-    if(live.file!=INVALID_HANDLE_VALUE){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;}
+    close_trace();
     std::printf("ffb shadow: optional trace detached after observer or file failure\n");std::fflush(stdout);
 }
 void observe(void*,const platform::NativeCarProducerObservation& o){
@@ -50,7 +55,7 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
             g.update_index=rt->frame_state.update_index_8a8cdc;
         }
         g.panel_open=live.panel_open;
-        live.core->before_tick(g);
+        live.core->before_frame(g);
         if(!live.core->active())note_failure();
     }
     if(live.inner)live.inner(out,rt);
@@ -65,10 +70,10 @@ bool ffb_shadow_configure(const std::wstring& path,bool ordinary_allowed){
     live.file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(live.file==INVALID_HANDLE_VALUE){std::printf("ffb shadow: trace create-new failed (%lu)\n",GetLastError());return false;}
     if(!write(ffb::shadow::Core::header())){
-        std::printf("ffb shadow: trace header write failed\n");CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;return false;
+        std::printf("ffb shadow: trace header write failed\n");close_trace();return false;
     }
     try{live.core=std::make_unique<ffb::shadow::Core>(write);}
-    catch(...){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;return false;}
+    catch(...){close_trace();return false;}
     xbox_runtime::car_producer_observer()={nullptr,observe};
     std::printf("ffb shadow: producer@2 software trace armed (no wheel output)\n");std::fflush(stdout);
     return true;
@@ -81,6 +86,6 @@ void ffb_shadow_wrap_input_filter(){
 void ffb_shadow_shutdown(){
     xbox_runtime::car_producer_observer()={};
     if(live.core)live.core->stop();live.core.reset();
-    if(live.file!=INVALID_HANDLE_VALUE){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;}
+    close_trace();
 }
 }

@@ -24,15 +24,15 @@ class Core {
 public:
     explicit Core(std::function<bool(const std::string&)> write);
     static std::string header();
-    void before_tick(const Gate& gate) noexcept;
+    void before_frame(const Gate& gate) noexcept;
     void observe(const Sample& sample) noexcept;
     void stop() noexcept;
     bool active()const{return active_;}
 private:
-    bool write_row(const Gate& gate,const char* gate_reason,const producer2::Row& row) noexcept;
-    void neutral(const Gate& gate,const char* why);
+    bool write_row(const Gate& gate,const char* origin,const char* gate_reason,const producer2::Row& row) noexcept;
+    void neutral(const Gate& gate,const char* origin,const char* why);
     void mode(std::uint32_t current);
-    void generation(const Gate& gate);
+    void generation(const Gate& gate,const char* origin);
     std::function<bool(const std::string&)> write_;
     producer2::Stream stream_;
     std::uint32_t epoch_{},generation_{};

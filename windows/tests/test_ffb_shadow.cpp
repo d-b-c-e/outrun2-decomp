@@ -22,7 +22,7 @@ void throws(void*,const platform::NativeCarProducerObservation&){throw std::runt
 int main(){
     try{
         require(Core::header().find("seam=just-completed-car-control")!=std::string::npos,"truthful seam");
-        require(Core::header().find("frame_counter,update_index,gate,state")!=std::string::npos,"native tick columns");
+        require(Core::header().find("origin,frame_counter,update_index,gate,state")!=std::string::npos,"origin and native tick columns");
         require(platform::game_steer_written(16,120)&&!platform::game_steer_written(16,121)&&
                 !platform::game_steer_written(13,0),"same-mode and D50 steering write gate");
         require(platform::fresh_car_producer(true,true,1,true,true,0),"direct successful GamePlCar fresh");
@@ -35,7 +35,7 @@ int main(){
         Core core([&](const std::string& row){rows.push_back(row);return true;});
         Gate g{};g.mode=16;g.generation=1;g.car_active=true;g.frame_counter=10;g.update_index=0;g.attempt=1;
         Sample s{};s.car=car.data();s.car_bytes=car.size();s.producer_fresh=true;
-        auto step=[&]{s.gate=g;core.before_tick(g);core.observe(s);};
+        auto step=[&]{s.gate=g;core.before_frame(g);core.observe(s);};
         step();require(rows.size()==1&&contains(rows,"fresh,1,new-epoch-or-car"),"first direct sample primes");
         g.update_index=1;g.attempt=2;step();
         require(rows.size()==2&&contains(rows,"10,1,fresh,2,none"),"next native tick computes");
@@ -44,13 +44,13 @@ int main(){
         require(rows.size()==3&&contains(rows,"unproven-producer,0,outside-game"),"nested call resets once");
         g.update_index=1;g.attempt=4;s.producer_fresh=true;step();
         require(rows.size()==4&&contains(rows,"11,1,fresh,1,new-epoch-or-car"),"direct resume primes");
-        g.frame_counter=12;g.update_index=0;g.attempt=4;g.panel_open=true;core.before_tick(g);
-        require(rows.size()==5&&contains(rows,"panel-open,0,outside-game"),"F6 neutral without game callback");
+        g.frame_counter=12;g.update_index=0;g.attempt=4;g.panel_open=true;core.before_frame(g);
+        require(rows.size()==5&&contains(rows,"frame,12,0,panel-open,0,outside-game"),"F6 frame neutral without game callback");
         s.gate=g;core.observe(s);require(rows.size()==5,"F6 cannot revive a fresh-looking neutral steer");
         g.update_index=1;g.attempt=5;g.panel_open=false;step();
         require(rows.size()==6&&contains(rows,"12,1,fresh,1,new-epoch-or-car"),"F6 close primes");
-        g.frame_counter=13;g.update_index=0;g.paused=true;core.before_tick(g);
-        require(rows.size()==7&&contains(rows,"pause,0,outside-game"),"pause neutral without mode change or callback");
+        g.frame_counter=13;g.update_index=0;g.paused=true;core.before_frame(g);
+        require(rows.size()==7&&contains(rows,"frame,13,0,pause,0,outside-game"),"pause frame neutral without mode change or callback");
         g.update_index=1;g.attempt=6;g.paused=false;step();
         require(rows.size()==8&&contains(rows,"13,1,fresh,1,new-epoch-or-car"),"unpause primes");
         g.attempt=7;step();require(rows.size()==9&&contains(rows,"duplicate-tick,0,outside-game"),"duplicate pair resets");
@@ -58,7 +58,7 @@ int main(){
         g.frame_counter=14;g.update_index=0;g.attempt=9;step();
         require(rows.size()==10&&contains(rows,"14,0,fresh,1,new-epoch-or-car"),"following tick primes");
         g.frame_counter=15;g.generation=2;g.attempt=1;step();
-        require(rows.size()==12&&contains(rows,"15,0,new-car,0,outside-game")&&
+        require(rows.size()==12&&contains(rows,"frame,15,0,new-car,0,outside-game")&&
                 contains(rows,"15,0,fresh,1,new-epoch-or-car"),"new car neutral then primes");
 
         bool gameplay_success=true;platform::NativeCarProducerObserver observer{nullptr,throws};
@@ -67,9 +67,9 @@ int main(){
         require(gameplay_success&&observer.observe==nullptr,"throwing observer detaches without gameplay fault");
         int writes=0;
         Core failing([&](const std::string&){return ++writes<2;});
-        g.frame_counter=20;g.update_index=0;g.attempt=1;failing.before_tick(g);s.gate=g;failing.observe(s);
+        g.frame_counter=20;g.update_index=0;g.attempt=1;failing.before_frame(g);s.gate=g;failing.observe(s);
         require(failing.active(),"initial row written");
-        g.update_index=1;g.attempt=2;failing.before_tick(g);s.gate=g;failing.observe(s);
+        g.update_index=1;g.attempt=2;failing.before_frame(g);s.gate=g;failing.observe(s);
         require(!failing.active(),"writer failure detaches only shadow");
         failing.observe(s);require(writes==2,"detached writer never retried");
         std::printf("ffb shadow %d checks passed\n",checks);return 0;
