@@ -4,6 +4,7 @@
 #include "platform/sprite_2d_runtime.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/pc_scene_renderer.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_manager_runtime.hpp"
 #include "platform/race_traffic_runtime.hpp"
@@ -400,7 +401,9 @@ bool native_race_hud_event_invoke(NativeRuntimeContext& c,std::uint32_t callback
             HeartUser hu{&c,&o,&st,&s,renderer};s.heart_user=&hu;s.heart=heart_run;
             const auto depth=st.depth;const auto offset=st.current_offset;
             bool ok=false;
-            if(callback==0x4bc9e0u){ok=navi_pub_init_4bc9e0(s);++o.navi_inits;o.navi_initialized=ok;o.navi_init_failed=!ok;}
+            if(callback==0x4bc9e0u){
+                ok=navi_pub_init_4bc9e0(s);++o.navi_inits;o.navi_initialized=ok;o.navi_init_failed=!ok;
+                g_pc_hud_toggle_requests.store(0u);}   // [Misc] HudToggleKey: a press before this race changes nothing (pc_screen.hpp)
             else if(callback==0x4bcc40u){ok=navi_pub_control_4bcc40(s);++o.navi_controls;}
             else{ok=navi_pub_destroy_4b8df0(s);++o.navi_destroys;o.navi_initialized=false;}
             if(!ok){note(o,s.missing?s.missing:callback);if(s.fault)++o.unmapped[s.fault];st.depth=depth;st.current_offset=offset;}
@@ -499,6 +502,10 @@ bool native_race_hud_display(NativeRuntimeContext& c,PcSceneRenderer& r,std::uin
                 tr.object_draws.clear();
             }
             HeartUser hu{&c,&o,&st,&s,&r};s.heart_user=&hu;s.heart=heart_run;
+            // [Misc] HudToggleKey (pc_screen.hpp): the toggles posted since the last display, flipped as Tweaks flips them.
+            if(const auto requests=g_pc_hud_toggle_requests.exchange(0u)){
+                auto* flag=o.navi.g842800.data()+(PcNaviDisplayFlag-0x842800u);
+                std::uint32_t v;std::memcpy(&v,flag,4);v=pc_hud_toggle_apply(v,requests);std::memcpy(flag,&v,4);}
             const bool ok=navi_pub_display_4beb00(s);
             if(!ok){note(o,s.missing?s.missing:0x4beb00u);if(s.fault)++o.unmapped[s.fault];st.depth=depth;st.current_offset=offset;}
             // The draws issued before a missing callee are executed; the rest of the display is what it stops.

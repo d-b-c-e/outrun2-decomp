@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_sett
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
@@ -242,6 +242,12 @@ target_include_directories(test_default_transmission PRIVATE ${PROJECT_SOURCE_DI
 target_compile_features(test_default_transmission PRIVATE cxx_std_17)
 target_compile_options(test_default_transmission PRIVATE /W4 /WX)
 add_test(NAME default_transmission COMMAND test_default_transmission)
+# [Misc] HudToggleKey (source/hud_toggle.hpp, src/platform/pc_screen.hpp): key names, release edge, policy, the flip.
+add_executable(test_hud_toggle tests/test_hud_toggle.cpp)
+target_include_directories(test_hud_toggle PRIVATE source ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_hud_toggle PRIVATE cxx_std_17)
+target_compile_options(test_hud_toggle PRIVATE /W4 /WX)
+add_test(NAME hud_toggle COMMAND test_hud_toggle)
 # AutoDetectResolution (src/enhancements/video.hpp): an unset options.ini resolution takes the display's height.
 add_executable(test_auto_resolution tests/test_auto_resolution.cpp)
 target_include_directories(test_auto_resolution PRIVATE ${PROJECT_SOURCE_DIR}/src)

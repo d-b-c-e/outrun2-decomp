@@ -3,6 +3,7 @@
 // game draws. 320 is the PC's 4:3 screen (6281C8 / 5DA2D4); the widescreen
 // option (Y) sets 240*16/9 so the screen-bound visibility tests (4F02D0) keep
 // objects until they leave the wider view.
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -126,6 +127,20 @@ inline void pc_default_manual_transmission_4dd250(bool on,std::uint8_t* object,s
 }
 // 4DD4A0's confirmation (action 0): the byte at +E8 into 830374 (48B170), 0 Automatic, 1 Manual.
 inline std::uint8_t pc_transmission_confirmed_4dd4a0(const std::uint8_t* object){return object[PcTransmissionCurrent];}
+// [Misc] HudToggleKey (the Tweaks key, unset by default there and here; hooks_input.cpp HudToggleUpdate): each release
+// of the key flips NaviPub_Disp's display flag 8447F8 (Tweaks' 4447F8 above the image base), which the game sets to 1
+// at the race HUD's init (4BC9E0) and to 0 at the race end (4B8E20); NaviPub_Disp (4BEB00) draws nothing while it is 0.
+// The desktop posts each toggle here (windows/source/hud_toggle.hpp). The race HUD applies them on the game thread just
+// before NaviPub_Disp and drops any posted before its init, so a press outside a race changes nothing (in Tweaks the
+// next init sets the flag again). Nothing posts in a recording, playback or test process: the flag stays the game's.
+inline std::atomic<std::uint32_t> g_pc_hud_toggle_requests{0};
+inline constexpr std::uint32_t PcNaviDisplayFlag=0x8447f8u;
+// Tweaks' flip, once per request: 0 becomes 1, any other value 0.
+inline std::uint32_t pc_hud_toggle_apply(std::uint32_t flag,std::uint32_t requests){
+    if(requests==0u)return flag;
+    flag=flag==0u?1u:0u;
+    return (requests-1u)%2u?(flag==0u?1u:0u):flag;
+}
 // [Graphics] UseHiDefCharacters (the Tweaks key, on by default there and here; hooks_graphics.cpp): Alberto, Jennifer
 // and Clarissa in their hi-def character sets during gameplay (race_robots.hpp race_robot_hidef_driver / _passenger),
 // and Clarissa's CHR_DR_GH00(_USA).bin read from Media\ when it exists (the Chr\ copies lack the hair animations;

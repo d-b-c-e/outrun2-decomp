@@ -188,6 +188,11 @@ add_executable(test_c2c_goal_sequence tests/test_c2c_goal_sequence.cpp)
 target_link_libraries(test_c2c_goal_sequence PRIVATE outrun_native_runtime)
 add_test(NAME c2c_goal_sequence COMMAND test_c2c_goal_sequence)
 set_tests_properties(c2c_goal_sequence PROPERTIES SKIP_RETURN_CODE 77)
+# [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
+# compiled-in globals only, no game files.
+add_executable(test_hud_toggle_navi tests/test_hud_toggle_navi.cpp)
+target_link_libraries(test_hud_toggle_navi PRIVATE outrun_native_runtime)
+add_test(NAME hud_toggle_navi COMMAND test_hud_toggle_navi)
 # The runtime.log race-view diagnostic (header only; no game files).
 add_executable(test_race_view_note tests/test_race_view_note.cpp)
 target_include_directories(test_race_view_note PRIVATE src)
