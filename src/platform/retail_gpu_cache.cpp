@@ -5,6 +5,8 @@
 #include "platform/frontend_text.hpp"
 #include "platform/frontend_images.hpp"
 #include "platform/embedded_exe_data.hpp"
+#include "platform/frontend_preview_pack.hpp"
+#include "platform/pc_pmt_loader.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -38,10 +40,12 @@ std::uint32_t crc(const std::vector<std::uint8_t>& v){return crc(v.data(),v.size
 std::uint32_t dds_format(std::uint32_t fourcc){if(fourcc==0x31545844u)return 1u;if(fourcc==0x33545844u)return 2u;if(fourcc==0x35545844u)return 3u;return 0u;}
 std::size_t bc_level_bytes(std::uint32_t w,std::uint32_t h,std::uint32_t fmt){return std::size_t(std::max(1u,(w+3u)/4u))*std::max(1u,(h+3u)/4u)*(fmt==1u?8u:16u);}
 
-struct DdsEntry{std::uint32_t source{},width{},height{},format{};std::vector<std::uint8_t> payload;};
+// dds_begin..dds_end: the whole DDS file in the XST (header and level), the bytes replacement names hash.
+struct DdsEntry{std::uint32_t source{},width{},height{},format{};std::vector<std::uint8_t> payload;std::size_t dds_begin{},dds_end{};};
+struct HdTexture{std::uint32_t width{},height{};std::vector<std::uint8_t> rgba;};   // a replaced loading texture
 bool scan_dds(const std::vector<std::uint8_t>& raw,std::uint32_t expected,std::vector<DdsEntry>& out,std::string* error){
     std::vector<std::size_t> starts;for(std::size_t i=0;i+4<=raw.size();++i)if(std::memcmp(raw.data()+i,"DDS ",4)==0){starts.push_back(i);i+=3;}if(starts.size()!=expected){fail(error,"unexpected SprAni DDS count");return false;}out.clear();
-    for(std::size_t n=0;n<starts.size();++n){const auto s=starts[n];if(s+128>raw.size()||rd32(raw.data()+s+4)!=124u){fail(error,"invalid SprAni DDS header");return false;}const auto h=rd32(raw.data()+s+12),w=rd32(raw.data()+s+16),fmt=dds_format(rd32(raw.data()+s+84));if(!fmt){fail(error,"unsupported SprAni DDS format");return false;}const auto count=bc_level_bytes(w,h,fmt),end=s+128u+count,next=n+1<starts.size()?starts[n+1]:raw.size();if(end!=next){fail(error,"SprAni DDS pages are not contiguous top-level images");return false;}DdsEntry e{};e.source=static_cast<std::uint32_t>(n);e.width=w;e.height=h;e.format=fmt;e.payload.assign(raw.data()+s+128,raw.data()+end);out.push_back(std::move(e));}return true;
+    for(std::size_t n=0;n<starts.size();++n){const auto s=starts[n];if(s+128>raw.size()||rd32(raw.data()+s+4)!=124u){fail(error,"invalid SprAni DDS header");return false;}const auto h=rd32(raw.data()+s+12),w=rd32(raw.data()+s+16),fmt=dds_format(rd32(raw.data()+s+84));if(!fmt){fail(error,"unsupported SprAni DDS format");return false;}const auto count=bc_level_bytes(w,h,fmt),end=s+128u+count,next=n+1<starts.size()?starts[n+1]:raw.size();if(end!=next){fail(error,"SprAni DDS pages are not contiguous top-level images");return false;}DdsEntry e{};e.source=static_cast<std::uint32_t>(n);e.width=w;e.height=h;e.format=fmt;e.payload.assign(raw.data()+s+128,raw.data()+end);e.dds_begin=s;e.dds_end=end;out.push_back(std::move(e));}return true;
 }
 
 bool build_fonts(RetailAssetStore& store,std::vector<std::uint8_t>& out,std::string* error){
@@ -83,10 +87,33 @@ bool decode_frontend_scenes(const std::vector<std::uint8_t>& ani,const std::vect
 bool build_frontend(RetailAssetStore& store,bool loading,std::vector<std::uint8_t>& bytes,std::string* error){
     const char* xst=loading?"Sprite/spr_SPRANI_LOADING_CVT_Exst.sz":"Sprite/spr_SPRANI_SUMO_FE_CVT_Exst.sz";const char* ani_path=loading?"Sprani/ani_SPRANI_LOADING_CVT.sz":"Sprani/ani_SPRANI_SUMO_FE_CVT.sz";const std::uint32_t source_tex=loading?5u:129u;std::vector<std::uint8_t> xc,ac,x,a;if(!retail_asset_read_relative(store,xst,xc,MaxCacheBytes,error)||!retail_asset_read_relative(store,ani_path,ac,MaxCacheBytes,error)||!retail_asset_read_relative_inflated(store,xst,x,MaxCacheBytes,error)||!retail_asset_read_relative_inflated(store,ani_path,a,MaxCacheBytes,error))return false;std::vector<DdsEntry> entries;if(!scan_dds(x,source_tex,entries,error))return false;
     std::vector<std::uint32_t> tokens;if(loading){for(std::uint32_t i=0;i<9;++i)tokens.push_back(0x002f0000u|i);}else{if(a.size()<8||rd32(a.data())+4u!=a.size()){fail(error,"SUMO_FE wrapper invalid");return false;}const auto*d=a.data()+4;const auto table=rd32(d);const auto count=table/4u-1u;for(std::uint32_t i=0;i<count;++i){const auto p=rd32(d+i*4u);if(p+20<=a.size()-4u)tokens.push_back(0x00440000u|i);}}
-    std::vector<FScene> scenes;std::uint32_t source_scenes=0;if(!decode_frontend_scenes(a,tokens,true,scenes,source_scenes,error))return false;std::vector<std::uint32_t> used;for(const auto&s:scenes)for(const auto&d:s.draws)if(std::find(used.begin(),used.end(),d.source)==used.end())used.push_back(d.source);if(!loading){used.clear();for(std::uint32_t i=0;i<source_tex;++i)used.push_back(i);}for(auto i:used)if(i>=entries.size()){fail(error,"SprAni draw texture outside XST");return false;}std::size_t draws=0;for(const auto&s:scenes)draws+=s.draws.size();const std::size_t tro=FepHeader,sro=tro+used.size()*FepTexRec,dro=sro+scenes.size()*FepSceneRec,po=dro+draws*FepDrawRec;std::size_t tex_end=po;for(auto i:used)tex_end+=entries[i].payload.size();const auto animation=std::vector<std::uint8_t>(a.begin()+4,a.end());const std::size_t size=tex_end+animation.size();if(size>24u*1024u*1024u){fail(error,"generated frontend cache exceeds limit");return false;}bytes.assign(size,0);std::memcpy(bytes.data(),loading?"OR2LDP2\0":"OR2FEP6\0",8);put32(bytes,8,loading?2u:6u);put32(bytes,12,224u);put32(bytes,16,static_cast<std::uint32_t>(used.size()));put32(bytes,20,32u);put32(bytes,24,static_cast<std::uint32_t>(scenes.size()));put32(bytes,28,24u);put32(bytes,32,static_cast<std::uint32_t>(draws));put32(bytes,36,64u);put32(bytes,40,static_cast<std::uint32_t>(tro));put32(bytes,44,static_cast<std::uint32_t>(sro));put32(bytes,48,static_cast<std::uint32_t>(dro));put32(bytes,52,static_cast<std::uint32_t>(po));put32(bytes,56,static_cast<std::uint32_t>(size));put32(bytes,60,source_tex);put32(bytes,64,source_scenes);put32(bytes,68,static_cast<std::uint32_t>(xc.size()));put32(bytes,72,static_cast<std::uint32_t>(x.size()));put32(bytes,76,static_cast<std::uint32_t>(ac.size()));put32(bytes,80,static_cast<std::uint32_t>(a.size()));put32(bytes,84,static_cast<std::uint32_t>(tex_end));put32(bytes,88,static_cast<std::uint32_t>(animation.size()));put32(bytes,92,crc(animation));
-    std::size_t running=po;for(std::size_t n=0;n<used.size();++n){const auto& e=entries[used[n]];const auto o=tro+n*32u;put32(bytes,o,e.source);put32(bytes,o+4,e.width);put32(bytes,o+8,e.height);put32(bytes,o+12,e.format);put32(bytes,o+16,static_cast<std::uint32_t>(running));put32(bytes,o+20,static_cast<std::uint32_t>(e.payload.size()));put32(bytes,o+24,crc(e.payload));running+=e.payload.size();}
+    std::vector<FScene> scenes;std::uint32_t source_scenes=0;if(!decode_frontend_scenes(a,tokens,true,scenes,source_scenes,error))return false;std::vector<std::uint32_t> used;for(const auto&s:scenes)for(const auto&d:s.draws)if(std::find(used.begin(),used.end(),d.source)==used.end())used.push_back(d.source);if(!loading){used.clear();for(std::uint32_t i=0;i<source_tex;++i)used.push_back(i);}for(auto i:used)if(i>=entries.size()){fail(error,"SprAni draw texture outside XST");return false;}std::size_t draws=0;for(const auto&s:scenes)draws+=s.draws.size();const std::size_t tro=FepHeader,sro=tro+used.size()*FepTexRec,dro=sro+scenes.size()*FepSceneRec,po=dro+draws*FepDrawRec;
+    // UITextureReplacement (configured by the Windows desktop): the START loading textures from the Tweaks pack folder
+    // of this XST, named by the stock DDS file and its XST position as the sprite banks' are. Any replaced texture makes
+    // the pack OR2LDP3 (rgba8 at the file's size, the stock size kept for the crops), within FrontendHdLoadingMaxBytes
+    // for the whole pack; with none, the bytes are the OR2LDP2 ones as before.
+    std::map<std::uint32_t,HdTexture> hd;
+    if(loading&&ui_texture_replacement_enabled()){
+        const std::string path(xst);const auto slash=path.find_last_of('/');
+        const std::string stem=path.substr(slash+1u,path.size()-slash-1u-3u);   // "spr_SPRANI_LOADING_CVT_Exst"
+        std::size_t stock=0;for(auto i:used)stock+=entries[i].payload.size();
+        const std::size_t fixed=po+stock+(a.size()-4u);
+        if(fixed<=FrontendHdLoadingMaxBytes){
+            std::size_t room=FrontendHdLoadingMaxBytes-fixed;
+            for(auto i:used){const auto& e=entries[i];
+                if(e.width>FrontendStockTextureMaxSide||e.height>FrontendStockTextureMaxSide)continue;
+                HdTexture h;
+                if(!ui_texture_replacement_rgba(stem,e.source,x.data()+e.dds_begin,e.dds_end-e.dds_begin,room+e.payload.size(),
+                    h.width,h.height,h.rgba))continue;
+                room=room+e.payload.size()-h.rgba.size();hd[i]=std::move(h);}
+        }
+    }
+    auto payload=[&](std::uint32_t i)->const std::vector<std::uint8_t>&{const auto it=hd.find(i);return it!=hd.end()?it->second.rgba:entries[i].payload;};
+    std::size_t tex_end=po;for(auto i:used)tex_end+=payload(i).size();
+    const auto animation=std::vector<std::uint8_t>(a.begin()+4,a.end());const std::size_t size=tex_end+animation.size();if(size>(hd.empty()?24u*1024u*1024u:FrontendHdLoadingMaxBytes)){fail(error,"generated frontend cache exceeds limit");return false;}bytes.assign(size,0);std::memcpy(bytes.data(),!hd.empty()?"OR2LDP3\0":loading?"OR2LDP2\0":"OR2FEP6\0",8);put32(bytes,8,!hd.empty()?3u:loading?2u:6u);put32(bytes,12,224u);put32(bytes,16,static_cast<std::uint32_t>(used.size()));put32(bytes,20,32u);put32(bytes,24,static_cast<std::uint32_t>(scenes.size()));put32(bytes,28,24u);put32(bytes,32,static_cast<std::uint32_t>(draws));put32(bytes,36,64u);put32(bytes,40,static_cast<std::uint32_t>(tro));put32(bytes,44,static_cast<std::uint32_t>(sro));put32(bytes,48,static_cast<std::uint32_t>(dro));put32(bytes,52,static_cast<std::uint32_t>(po));put32(bytes,56,static_cast<std::uint32_t>(size));put32(bytes,60,source_tex);put32(bytes,64,source_scenes);put32(bytes,68,static_cast<std::uint32_t>(xc.size()));put32(bytes,72,static_cast<std::uint32_t>(x.size()));put32(bytes,76,static_cast<std::uint32_t>(ac.size()));put32(bytes,80,static_cast<std::uint32_t>(a.size()));put32(bytes,84,static_cast<std::uint32_t>(tex_end));put32(bytes,88,static_cast<std::uint32_t>(animation.size()));put32(bytes,92,crc(animation));
+    std::size_t running=po;for(std::size_t n=0;n<used.size();++n){const auto& e=entries[used[n]];const auto o=tro+n*32u;const auto it=hd.find(used[n]);const auto& p=payload(used[n]);put32(bytes,o,e.source);put32(bytes,o+4,it!=hd.end()?it->second.width:e.width);put32(bytes,o+8,it!=hd.end()?it->second.height:e.height);put32(bytes,o+12,it!=hd.end()?std::uint32_t(MeshPreviewTextureFormat::rgba8):e.format);put32(bytes,o+16,static_cast<std::uint32_t>(running));put32(bytes,o+20,static_cast<std::uint32_t>(p.size()));put32(bytes,o+24,crc(p));if(it!=hd.end())put32(bytes,o+28,(e.width<<16u)|e.height);running+=p.size();}
     std::size_t first=0,di=0;for(std::size_t si=0;si<scenes.size();++si){const auto& s=scenes[si];const auto o=sro+si*24u;put32(bytes,o,s.token);put32(bytes,o+4,s.width);put32(bytes,o+8,s.height);put32(bytes,o+12,static_cast<std::uint32_t>(first));put32(bytes,o+16,static_cast<std::uint32_t>(s.draws.size()));for(std::size_t li=0;li<s.draws.size();++li,++di){const auto&d=s.draws[li];const auto q=dro+di*64u;put32(bytes,q,d.source);for(unsigned c=0;c<4;++c)put32(bytes,q+4+c*4,d.crop[c]);for(unsigned c=0;c<8;++c)putf(bytes,q+20+c*4,d.corners[c]);put32(bytes,q+52,static_cast<std::uint32_t>(li));}first+=s.draws.size();}
-    running=po;for(auto i:used){const auto&e=entries[i];std::memcpy(bytes.data()+running,e.payload.data(),e.payload.size());running+=e.payload.size();}std::memcpy(bytes.data()+tex_end,animation.data(),animation.size());return true;
+    running=po;for(auto i:used){const auto&p=payload(i);std::memcpy(bytes.data()+running,p.data(),p.size());running+=p.size();}std::memcpy(bytes.data()+tex_end,animation.data(),animation.size());return true;
 }
 
 }

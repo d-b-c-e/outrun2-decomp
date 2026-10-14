@@ -55,6 +55,13 @@ const std::map<std::string,PmtTextureReplacementBank>& pmt_texture_replacement_b
 // `replaced` is true only for a created replacement. Counted per bank as the scene textures are.
 bool ui_texture_replacement_enabled();
 std::uint32_t ui_texture_replacement_create(PcD3D9Device&,const std::string& pack,std::uint32_t index,const PcTextureFileRequest&,bool& replaced);
+// The same replacement for a texture drawn outside the PC device (the START loading picture of the preview presenter):
+// the same lookup, names, read and checks for the stock DDS file `stock`, then the file's top level decoded to RGBA8
+// (R,G,B,A) by the device reader (pc_d3dx_texture_from_file, one level). Counted per bank as the sprite banks are.
+// False, with `rgba` empty, when UI replacement is off, the pack has no usable file, it does not decode, or its
+// RGBA8 size exceeds `max_bytes` (the caller keeps the stock texture).
+bool ui_texture_replacement_rgba(const std::string& pack,std::uint32_t index,const std::uint8_t* stock,std::size_t size,
+    std::size_t max_bytes,std::uint32_t& width,std::uint32_t& height,std::vector<std::uint8_t>& rgba);
 const PmtTextureReplacementStats& ui_texture_replacement_stats();
 const std::map<std::string,PmtTextureReplacementBank>& ui_texture_replacement_banks();
 std::uint32_t pmt_xxh32(const std::uint8_t* data,std::size_t size,std::uint32_t seed=0);

@@ -15,7 +15,13 @@ struct FrontendPreviewTexture {
     std::uint32_t height{};
     MeshPreviewTextureFormat format{MeshPreviewTextureFormat::bc1};
     std::vector<std::uint8_t> bytes;
+    // Texel space of the draws' crops, 0 = width/height. Set to the stock size for a replaced texture of an OR2LDP3
+    // START loading pack (UITextureReplacement): its crops and UVs stay in the stock texels, as the sprite banks'.
+    std::uint32_t uv_width{};
+    std::uint32_t uv_height{};
 };
+inline std::uint32_t frontend_uv_width(const FrontendPreviewTexture& t){return t.uv_width?t.uv_width:t.width;}
+inline std::uint32_t frontend_uv_height(const FrontendPreviewTexture& t){return t.uv_height?t.uv_height:t.height;}
 
 struct FrontendPreviewDraw {
     std::uint32_t source_texture{};
@@ -53,6 +59,12 @@ struct FrontendPreviewPack {
 };
 
 constexpr std::uint32_t FrontendPreviewPackVersion=3u;
+// OR2LDP3 (version 3): OR2LDP2 whose texture records may hold a replaced texture as rgba8 at its file size (a side up to
+// the replacement reader's 16384), with the stock size (a side up to 2048, as the BC records) packed in the record's
+// last word as (width << 16) | height. Built only when UITextureReplacement replaced at least one loading texture.
+constexpr std::size_t FrontendHdLoadingMaxBytes=128u*1024u*1024u;   // the replacement reader's file bound
+constexpr std::uint32_t FrontendHdTextureMaxSide=16384u;
+constexpr std::uint32_t FrontendStockTextureMaxSide=2048u;
 constexpr std::size_t FrontendPreviewPackHeaderSize=224u;
 constexpr std::size_t FrontendPreviewPackRecordSize=32u;
 constexpr std::size_t FrontendPreviewSceneRecordSize=24u;

@@ -38,6 +38,9 @@ enum class MeshPreviewTextureFormat : std::uint32_t {
     bc1=1u,
     bc2=2u,
     bc3=3u,
+    // R,G,B,A texels: only the replaced (UITextureReplacement) textures of an OR2LDP3 START loading pack.
+    // Mesh preview packs still accept bc1..bc3 only.
+    rgba8=4u,
 };
 
 struct MeshPreviewTexture {

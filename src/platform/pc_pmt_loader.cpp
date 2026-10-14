@@ -1,4 +1,5 @@
 #include "platform/pc_pmt_loader.hpp"
+#include "platform/pc_dds.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -276,6 +277,36 @@ std::uint32_t ui_texture_replacement_create(PcD3D9Device& device,const std::stri
     bool& replaced){
     if(!replacement().ui||pack.empty()){replaced=false;return device.create_texture_from_file(q);}
     return create_from_pack(device,true,pack,index,q,replaced);
+}
+bool ui_texture_replacement_rgba(const std::string& pack,std::uint32_t index,const std::uint8_t* stock,std::size_t size,
+    std::size_t max_bytes,std::uint32_t& width,std::uint32_t& height,std::vector<std::uint8_t>& rgba){
+    rgba.clear();width=height=0;
+    auto& r=replacement();
+    if(!r.ui||pack.empty())return false;
+    const auto start=std::chrono::steady_clock::now();
+    std::vector<std::uint8_t> file;bool other=false;
+    const bool found=find_replacement(true,pack,index,stock,size,false,file,other);
+    auto& bank=r.ui_banks[pack];
+    if(found){
+        // The device reader's own decode (one level, the size from the file, as the sprite banks' request).
+        PcTextureFileRequest q{};
+        q.data=file.data();q.size=std::uint32_t(file.size());
+        q.width=q.height=0xffffffffu;q.mip_levels=1;q.usage=0;q.format=0;q.pool=1;q.filter=1;q.mip_filter=1;q.colour_key=0;
+        PcDdsTexture t{};std::string error;
+        if(pc_d3dx_texture_from_file(q,t,error)&&!t.faces.empty()&&!t.faces[0].empty()){
+            const auto& top=t.faces[0][0];
+            if(top.width>=1u&&top.height>=1u&&std::size_t(top.width)*top.height*4u<=max_bytes){
+                auto texels=pc_dds_rgba(t,0,0);
+                if(texels.size()==std::size_t(top.width)*top.height*4u){
+                    rgba=std::move(texels);width=top.width;height=top.height;
+                    ++r.ui_stats.replaced;++bank.replaced;if(other){++r.ui_stats.other;++bank.other;}
+                }
+            }
+        }
+        if(rgba.empty()){++r.ui_stats.failed;++bank.failed;}
+    }
+    bank.seconds+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+    return !rgba.empty();
 }
 const PmtTextureReplacementStats& ui_texture_replacement_stats(){return replacement().ui_stats;}
 const std::map<std::string,PmtTextureReplacementBank>& ui_texture_replacement_banks(){return replacement().ui_banks;}
