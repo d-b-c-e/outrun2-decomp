@@ -215,9 +215,15 @@ def main():
                            common_file.is_file() and common_file.stat().st_size > 0, 15)
             receipt["saveWitness"] = {str(p): {"bytes": p.stat().st_size, "sha256": sha(p)} for p in (license_file, common_file)}
             persist()
-            # The license owner exits through its own animation. Only then use
-            # native Enter to continue the original frontend, bounded to four.
-            wait_for("editor-exit", lambda r: r["editorState"] in (0, -1) or r["mode"] == 16, 15)
+            # The completed editor remains at state 7 in the retained owner
+            # storage even after its save result is consumed. The save/files
+            # above, not a reset to state 0, are the completion witness.
+            if row["editorState"] != 7: raise StageError("editor-complete: no completed editor state")
+            stage("editor-complete", row)
+            # Give the original frontend's exit animation the same bounded
+            # interval as the proven ordinary route before menu confirms.
+            time.sleep(5)
+            stage("post-save-animation", trace.poll())
         else:
             row = wait_for("existing-license-loaded", lambda r: r["loaded"] >= 1, 20)
             receipt["saveWitness"] = {str(p): {"bytes": p.stat().st_size, "sha256": baseline_save[p.name]}
@@ -227,7 +233,7 @@ def main():
         for attempt in range(4):
             if row["mode"] == 16 or (row["mode"] == 13 and row["startStage"] >= 60): break
             key("enter")
-            try: row = wait_for(f"race-menu-{attempt+1}", lambda r: r["mode"] == 16 or (r["mode"] == 13 and r["startStage"] >= 60), 2)
+            try: row = wait_for(f"race-menu-{attempt+1}", lambda r: r["mode"] == 16 or (r["mode"] == 13 and r["startStage"] >= 60), 2.5)
             except StageError as error:
                 if "timeout" not in str(error): raise
                 row = trace.poll()
