@@ -19,8 +19,10 @@ import run_perf as base
 
 FIELDS = ("seq", "pid", "run", "ms", "mode", "startStage", "editorState", "item",
           "focused", "ready", "accepted", "selected", "nameLen", "doneMoves", "saves", "loaded")
-PREFIX = ((6.0, "enter"), (9.0, "enter"), (11.0, "down"), (11.5, "down"),
-          (12.0, "down"), (12.8, "enter"))
+# Only the title transition is timed. Once the editor opens, all license
+# navigation uses observed state; the old 11-12.8 s Down/Enter sequence can
+# otherwise select Done and save an unnamed profile before the keyboard opens.
+PREFIX = ((6.0, "enter"), (9.0, "enter"))
 
 
 class StageError(Exception):
@@ -170,7 +172,8 @@ def main():
                     if proc.poll() is not None: raise StageError("title-prefix: game exited")
                     time.sleep(.02)
                 key(name, .12)
-            row = wait_for("editor-open", lambda r: r["editorState"] in (1, 2), 20)
+            row = wait_for("editor-open", lambda r: (r["editorState"] == 1 and r["item"] == 0) or
+                           (r["editorState"] == 2 and r["focused"] == 1), 20)
             if row["editorState"] == 1:
                 key("enter")
             row = wait_for("keyboard-ready", lambda r: r["editorState"] == 2 and r["focused"] == 1 and r["ready"] == 1, 15)
