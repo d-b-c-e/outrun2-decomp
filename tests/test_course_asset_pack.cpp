@@ -225,8 +225,11 @@ int main(int argc,char** argv){
             {   // 482140 in GAME ([78026C] 0x10): +18C += [5B0320] (2pi/30), 449470 wraps it to [-pi,pi]
                 // (argument slot, then fld) and 449360's translated fsin stores +190. The phases cross
                 // pi, need two subtractions, cross -pi, or are NaN (both loops skipped).
+                // [78026C] is the AREA view's snapshot of mode_state.current (race_area_runtime.cpp:676),
+                // refreshed only when that view rebuilds (live: every frame), so rebuild it after each change.
                 const auto mode=request.mode_state.current;
                 request.mode_state.current=0x10u;
+                (void)native_race_area_memory(request,nullptr,true);
                 auto& block=traffic.requests_7f9460;
                 const std::uint32_t step_bits=0x3e567750u;   // [5B0320]
                 float step;std::memcpy(&step,&step_bits,4u);
@@ -250,6 +253,7 @@ int main(int argc,char** argv){
                             "GAME request control wraps its oscillator phase (449470) and stores its x87 sine (449360)");
                 }
                 request.mode_state.current=mode;
+                (void)native_race_area_memory(request,nullptr,true);
             }
             {   // GamePlCar (4A8330) on the loaded course without driving data: 502C90 fails after the
                 // parent's 409EF0 push and the gated children then skip its 40A010. Every failed frame
