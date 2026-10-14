@@ -749,6 +749,10 @@ add_test(NAME owned_driving_parameters COMMAND test_driving_data_pack ${OR2_EXTE
 add_test(NAME owned_vehicle_drivetrain COMMAND test_pc_vehicle_control ${OR2_EXTERNAL_DATA}/or2_driving_data.bin)
 add_test(NAME owned_course_descriptors COMMAND test_course_asset_pack
   ${OR2_EXTERNAL_DATA}/or2_course_assets.bin ${OR2_EXTERNAL_DATA}/or2_loader_assets.bin)
+if(EXISTS "${OR2_PC_ASSET_ROOT}/Scripts/bin/Request_Course_SP.bin")
+  add_test(NAME owned_request_course_phase COMMAND test_course_asset_pack "${OR2_PC_ASSET_ROOT}")
+  set_tests_properties(owned_request_course_phase PROPERTIES LABELS "owned-assets;request-course")
+endif()
 add_test(NAME owned_race_routes COMMAND test_race_asset_pack
   ${OR2_EXTERNAL_DATA}/or2_races.bin ${OR2_EXTERNAL_DATA}/or2_course_assets.bin
   ${OR2_EXTERNAL_DATA}/or2_loader_assets.bin ${OR2_EXTERNAL_DATA}/or2_race_assignment.bin)

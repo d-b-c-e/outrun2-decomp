@@ -1,7 +1,12 @@
 #include "platform/native_runtime.hpp"
+#include "platform/race_traffic_runtime.hpp"
+#include "platform/embedded_exe_data.hpp"
+#include "system/exe_image.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <utility>
 #include <vector>
 using namespace outrun::platform;
 namespace {
@@ -78,7 +83,20 @@ int main(int argc,char** argv){
     require(!parse_course_asset_pack(bad.data(),bad.size(),pack,&error),"out-of-range course descriptor rejected");
     if(argc>=2){
         CourseAssetPack real{};
-        require(load_course_asset_pack_file(argv[1],real,&error),"generated OR2CRS3 loads");
+        RetailAssetStore retail{};
+        const bool retail_root=std::filesystem::is_directory(argv[1]);
+        if(retail_root){
+            require(retail_asset_store_open(retail,argv[1],&error),"owned retail root opens");
+            std::vector<std::uint8_t> image,csc,serialized;
+            std::string exe_path;
+            ExeSource found{};
+            require(exe_image_find_source(argv[1],image,exe_path,&found,&error),"owned EXE image verifies");
+            exe_image_install(std::move(image));
+            require(retail_asset_read_relative(retail,"Scripts/bin/csc_data_cvt.bin",csc,CourseCvtBlobBytes,&error)&&
+                    build_course_asset_pack(csc,serialized,&error)&&
+                    parse_course_asset_pack(serialized.data(),serialized.size(),real,&error),
+                    "owned EXE and course data produce OR2CRS3");
+        }else require(load_course_asset_pack_file(argv[1],real,&error),"generated OR2CRS3 loads");
         require(real.descriptors.primary_count==66u&&real.descriptors.secondary_count==77u&&real.course_blob.size()==1820u,"generated course inventory");
         const auto& world=real.descriptors.storage[35u];
         require(real.descriptors.world_resource_fields_present&&
@@ -104,6 +122,47 @@ int main(int argc,char** argv){
         require(game.course_provider_loaded&&game.course_loader_phase==3u&&game.course_load.force_sync_7d2d8c==1u,"course provider reaches synchronous phase 3");
         require(game.course_runtime.active_count_7d33c4==CourseCvtRecordCount&&game.course_runtime.max_depth_7d33c0==4&&game.course_runtime.selected_index==0,"real 15-record course tree rebuilt");
         require(game.course_runtime.selected_copy_active&&game.course_matrix_ready,"selected course and matrix retained");
+        if(retail_root){
+            NativeRuntimeContext request{};
+            request.game_mode.course_assets=&real;
+            request.game_mode.course_retail=&retail;
+            request.start_mode.frontend_prepare.event_config_7f94c4[0]=1;
+            std::uint32_t request_result=0;
+            require(native_start_owned_call(request,0x0046c2f0u,nullptr,0u,request_result)&&request_result==1u,
+                    "first request loader call reads the owned course");
+            auto& loaded=request.game_mode;
+            require(loaded.course_read_calls==1u&&loaded.course_provider_loaded&&loaded.course_matrix_ready&&
+                    loaded.course_runtime.active_count_7d33c4>0&&loaded.course_runtime.selected_copy_active,
+                    "first request loader call selects course and matrix");
+            const auto selected=loaded.course_runtime.selected_7d30a8;
+            const auto matrix=loaded.course_runtime.matrix_7d3190;
+            const auto work=loaded.course_work;
+            const auto reads=loaded.course_read_calls;
+            const auto success=loaded.course_load_success;
+            std::uint32_t primary_before=0u;
+            require(native_start_owned_call(request,0x0044c2d0u,nullptr,0u,primary_before)&&primary_before!=0u,
+                    "scene owner reads the first selected primary descriptor");
+            request_result=0;
+            require(native_start_owned_call(request,0x0046c2f0u,nullptr,0u,request_result)&&request_result==1u,
+                    "second phase-3 request loader call remains ready");
+            std::uint32_t primary_after=0u;
+            require(native_start_owned_call(request,0x0044c2d0u,nullptr,0u,primary_after)&&
+                    primary_after==primary_before,
+                    "scene owner still reads the selected descriptor after phase 3");
+            require(loaded.course_read_calls==reads&&loaded.course_load_success==success&&
+                    loaded.course_provider_loaded&&loaded.course_matrix_ready&&
+                    loaded.course_runtime.selected_copy_active&&loaded.course_runtime.selected_7d30a8==selected&&
+                    loaded.course_runtime.matrix_7d3190==matrix&&loaded.course_work==work,
+                    "second phase-3 call keeps selected course and provider storage without rereading");
+        }
+        NativeRuntimeContext unready{};
+        unready.game_mode.course_assets=&real;
+        unready.start_mode.frontend_prepare.event_config_7f94c4[0]=1;
+        put32(native_race_traffic(unready).requests_7f9460,0x98u,3u);
+        std::uint32_t unready_result=1u;
+        require(native_start_owned_call(unready,0x0046c2f0u,nullptr,0u,unready_result)&&unready_result==0u&&
+                unready.game_mode.course_read_calls==0u,
+                "phase-3 state without an earlier ready course fails closed");
         NativeRuntimeContext start{};
         start.mode_descriptors[13u]={0u,0x0049db20u,0x0049dd40u,0x00499d80u};
         LoaderAssetPack start_resources{};
