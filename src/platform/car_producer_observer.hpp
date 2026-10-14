@@ -7,10 +7,10 @@ namespace outrun::platform {
 struct NativeCarProducerObservation {
     const std::uint8_t* car{};
     std::size_t car_bytes{};
-    std::uint32_t mode{},car_generation{};
+    std::uint32_t mode{},car_generation{},continuity{};
     std::uint64_t attempt{};
     std::uint32_t frame_counter{},update_index{};
-    bool producer_fresh{},direct{},car_active{};
+    bool producer_fresh{},direct{},car_active{},recovery_pending{};
 };
 struct NativeCarProducerObserver {
     void* user{};

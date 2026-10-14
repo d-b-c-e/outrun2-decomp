@@ -45,6 +45,8 @@ struct FrontendCarSelect {
     std::uint32_t race_inits{},race_displays{},race_dests{};
     std::uint64_t producer_attempt{}; // actual GamePlCar calls, including nested/failed calls
     bool producer_active{};           // successful 4A6ED0 until 49F4E0
+    std::uint32_t producer_continuity{}; // successful in-place player tow/snap count; not race_inits
+    bool producer_recovery_pending{};    // delayed tow countdown until the immediate snap
     std::uint32_t shadow_unported{},envmap_unported{};   // 46BA20/46BB20 without a renderer / 46BBC0 (not ported)
     // Car shadow volumes 46BA20 / 46BB20 on the renderer (pc, car work);
     // false when the renderer could not serve them.

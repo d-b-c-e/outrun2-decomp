@@ -218,14 +218,14 @@ bool native_car_event_invoke(NativeRuntimeContext& c,std::uint32_t callback,cons
         // with one entry, the dword [5C3604] as its position/offset words.
         {auto& h=c.race.car_world.progress_680bd0;h=driving::PcStageProgressHistory{};h.count=in.flag_680bd0;
          h.position[0]=std::uint16_t(in.global_841b50);h.offset[0]=std::uint16_t(in.global_841b50>>16);}
-        if(!ok){s.producer_active=false;s.producer_attempt=0;latch(c,0x4a6ed0);}
-        else{++s.race_inits;s.producer_active=true;s.producer_attempt=0;}
+        if(!ok){s.producer_active=false;s.producer_attempt=0;s.producer_recovery_pending=false;latch(c,0x4a6ed0);}
+        else{++s.race_inits;s.producer_active=true;s.producer_attempt=0;s.producer_recovery_pending=false;}
         return true;
     }
     if(callback==0x49f4e0u){                                                  // GamePlCar dest: 49A650 (RET), 46BB20
         if(!(s.shadow_service&&s.shadow_service(0x46bb20u,Bytes(s.car_799d18.data(),s.car_799d18.size()))))++s.shadow_unported;
         ++s.race_dests;
-        s.producer_active=false;s.producer_attempt=0;
+        s.producer_active=false;s.producer_attempt=0;s.producer_recovery_pending=false;
         return true;
     }
     if(callback==0x4874a0u){                                                  // event 7 control: camera override 82E7D8

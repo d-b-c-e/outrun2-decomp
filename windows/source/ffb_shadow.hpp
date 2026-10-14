@@ -8,9 +8,9 @@
 
 namespace outrun::desktop::ffb::shadow {
 struct Gate {
-    std::uint32_t mode{},generation{},frame_counter{},update_index{};
+    std::uint32_t mode{},generation{},continuity{},frame_counter{},update_index{};
     std::uint64_t attempt{};
-    bool car_active{},paused{},panel_open{};
+    bool car_active{},paused{},panel_open{},recovery_pending{};
 };
 struct Sample {
     Gate gate{};
@@ -33,9 +33,10 @@ private:
     void neutral(const Gate& gate,const char* origin,const char* why);
     void mode(std::uint32_t current);
     void generation(const Gate& gate,const char* origin);
+    bool recovery(const Gate& gate,const char* origin);
     std::function<bool(const std::string&)> write_;
     producer2::Stream stream_;
-    std::uint32_t epoch_{},generation_{};
+    std::uint32_t epoch_{},generation_{},continuity_{};
     std::uint32_t valid_frame_{},valid_update_{};
     bool previous_game_{},have_valid_pair_{},neutral_latched_{true},active_{true};
     bool panel_open_{},paused_{};

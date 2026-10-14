@@ -1,4 +1,5 @@
 #include "driving/pc_wrecker.hpp"
+#include "driving/pc_common_control.hpp"
 #include "support/course_world_fixture.hpp"
 #include <array>
 #include <cstring>
@@ -35,6 +36,10 @@ struct AdvanceFixture {
     }
     PcCourseAdvanceContext context(std::uint8_t limit=3,bool transition=true){return {course,stages,bytes(cache),route,0x1111,limit,transition};}
 };
+struct RecoveryNotice {unsigned calls{};bool pending{};};
+void record_recovery(void* user,bool delayed) noexcept {
+    auto& n=*static_cast<RecoveryNotice*>(user);++n.calls;n.pending=delayed;
+}
 std::array<std::uint8_t,16> place(std::uint32_t type,std::int16_t length,std::uint8_t lane,std::uint32_t old=0x2222){
     std::array<std::uint8_t,16> p{};auto b=bytes(p);b.put32(0,type);b.puti(4,type?101:0);b.put16(8,std::uint16_t(length));b.put8(0xa,lane);b.put32(0xc,old);return p;
 }
@@ -81,6 +86,39 @@ int main(){
             PcRoadInfoContext road{tables,stack,{wb.f32(0x4638),wb.f32(0x463c)}};
             bool threw=false;try{pc_pl_wrecker_delayed(bytes(event),1,a,road);}catch(const std::invalid_argument&){threw=true;}
             check(threw&&event==before,"immediate PlWrecker path mutated before rejecting");
+        }
+        {
+            // The same public PlWrecker dispatch reached by GamePlCar's common-control
+            // and collision/crash call sites reports a delayed tow and its later snap.
+            AdvanceFixture f;auto advance=f.context();
+            auto world=outrun::testing::make_course_world_fixture(0,11);
+            auto tables=world.tables();auto stack=world.matrix();auto prediction=world.prediction();
+            CourseWorldQuery query{tables,stack,prediction};
+            auto wb=world.bytes();PcRoadInfoContext road{tables,stack,{wb.f32(0x4638),wb.f32(0x463c)}};
+            PcDispMatrixContext display{stack,1.0f,0};
+            RecoveryNotice notice{};
+            PcPlWreckerContext context{advance,road,query,display,&notice,record_recovery};
+            std::array<std::uint8_t,0x1100> event{};
+            std::array<std::uint8_t,0x650> work{};
+            std::array<std::uint8_t,0x1600> params{};
+            std::array<std::uint8_t,4*0xf4> wheels{};
+            auto e=bytes(event);auto w=bytes(work);auto p=bytes(params);auto wh=bytes(wheels);
+            e.put16(0x5c+8,10);p.putf(0xb48,1.0f);p.putf(0xb94,1.0f);
+            pc_pl_wrecker(e,w,p,wh,2,context);
+            check(notice.calls==1&&notice.pending&&e.i16(0xd68)==3,
+                  "delayed player tow reports pending after successful schedule");
+            wrec_pl_body_4a0c70(e,w,p,wh,context);
+            check(e.i16(0xd68)==2&&e.i16(0xd50)==0&&notice.calls==1&&notice.pending,
+                  "first countdown tick remains neutral and pending");
+            wrec_pl_body_4a0c70(e,w,p,wh,context);
+            check(e.i16(0xd68)==1&&notice.calls==1&&notice.pending,
+                  "second countdown tick has no premature snap");
+            wrec_pl_body_4a0c70(e,w,p,wh,context);
+            check(e.i16(0xd68)==0&&notice.calls==2&&!notice.pending,
+                  "production countdown snaps through immediate dispatch and clears pending");
+            bool threw=false;
+            try{pc_pl_wrecker(Bytes(nullptr,0),w,p,wh,1,context);}catch(const std::exception&){threw=true;}
+            check(threw&&notice.calls==2,"failed recovery cannot advance continuity");
         }
         std::cout<<"r022 wrecker host tests passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}

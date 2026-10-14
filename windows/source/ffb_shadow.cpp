@@ -6,9 +6,9 @@ Core::Core(std::function<bool(const std::string&)> write):write_(std::move(write
 std::string Core::header(){
     const auto base=producer2::trace_header();
     const auto line=base.find('\n');
-    return std::string("# ")+producer2::TraceId+",model="+producer2::ModelId+
+    return std::string("# dbce.outrun-producer-ffb-shadow-trace@3,model=")+producer2::ModelId+
         ",output=software-only,seam=just-completed-car-control\n"
-        "origin,frame_counter,update_index,gate,"+base.substr(line+1);
+        "origin,frame_counter,update_index,gate,continuity_token,recovery_pending,"+base.substr(line+1);
 }
 void Core::mode(std::uint32_t current) {
     const bool game=current==16u;
@@ -21,10 +21,21 @@ void Core::generation(const Gate& gate,const char* origin){
     generation_=gate.generation;
     stream_.reset();have_valid_pair_=false;
 }
+bool Core::recovery(const Gate& gate,const char* origin){
+    if(continuity_!=gate.continuity){
+        continuity_=gate.continuity;
+        neutral_latched_=false; // every successful tow/snap gets its own zero row, even after a neutral countdown
+        neutral(gate,origin,gate.recovery_pending?"recovery-pending":"recovery-snap");
+        return true; // the control call that changed continuity is never a model sample
+    }
+    if(gate.recovery_pending){neutral(gate,origin,"recovery-pending");return true;}
+    return false;
+}
 bool Core::write_row(const Gate& gate,const char* origin,const char* why,const producer2::Row& row) noexcept {
     try{
         const std::string prefix=std::string(origin)+","+std::to_string(gate.frame_counter)+","+
-            std::to_string(gate.update_index)+","+why+",";
+            std::to_string(gate.update_index)+","+why+","+std::to_string(gate.continuity)+","+
+            std::to_string(unsigned(gate.recovery_pending))+",";
         if(write_&&write_(prefix+producer2::trace_csv(row)))return true;
     }catch(...){}
     stop();return false;
@@ -41,6 +52,8 @@ void Core::before_frame(const Gate& gate) noexcept {
     if(!active_)return;
     try{
         mode(gate.mode);generation(gate,"frame");panel_open_=gate.panel_open;paused_=gate.paused;
+        if(!previous_game_||!gate.car_active)continuity_=gate.continuity;
+        else if(recovery(gate,"frame"))return;
         if(!previous_game_||paused_||panel_open_||!gate.car_active)
             neutral(gate,"frame",!previous_game_?"outside-game":paused_?"pause":panel_open_?"panel-open":"no-car");
     }catch(...){stop();}
@@ -50,6 +63,8 @@ void Core::observe(const Sample& sample) noexcept {
     try{
         const auto& g=sample.gate;
         mode(g.mode);generation(g,"control");
+        if(!previous_game_||!g.car_active)continuity_=g.continuity;
+        else if(recovery(g,"control"))return;
         if(!previous_game_||paused_||panel_open_||g.paused||g.panel_open||!g.car_active||!sample.producer_fresh){
             neutral(g,"control",!previous_game_?"outside-game":(paused_||g.paused)?"pause":
                     (panel_open_||g.panel_open)?"panel-open":!g.car_active?"no-car":"unproven-producer");

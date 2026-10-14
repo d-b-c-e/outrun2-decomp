@@ -78,6 +78,9 @@ struct PcPlWreckerContext {
     PcRoadInfoContext& road;
     CourseWorldQuery& query;
     PcDispMatrixContext& display;
+    // Optional host witness, called only after a successful tow/snap mutation.
+    void* recovery_user{};
+    void (*recovery_notice)(void*,bool delayed) noexcept{};
 };
 void pc_pl_wrecker(Bytes event,Bytes work,Bytes body_params,Bytes wheel_block,
                    std::int32_t phase,PcPlWreckerContext&);

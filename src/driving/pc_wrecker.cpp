@@ -444,6 +444,7 @@ void pc_pl_wrecker_delayed(Bytes e,std::int32_t phase,PcCourseAdvanceContext& ad
 void pc_pl_wrecker(Bytes e,Bytes w,Bytes params,Bytes wheels,std::int32_t phase,PcPlWreckerContext& ctx){
     if(phase<=1)pc_pl_wrecker_immediate(e,w,params,wheels,phase,ctx.road,ctx.query,ctx.display);
     else pc_pl_wrecker_delayed(e,phase,ctx.advance,ctx.road);
+    if(ctx.recovery_notice)ctx.recovery_notice(ctx.recovery_user,phase>1);
 }
 
 }

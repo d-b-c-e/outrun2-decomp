@@ -36,6 +36,20 @@ bool native_mission_type4_4962a0(const NativeRuntimeContext&);   // native_runti
 namespace {
 using driving::Bytes;
 using driving::CourseProbe;
+void bump_player_continuity(FrontendCarSelect& s) noexcept {
+    ++s.producer_continuity;
+    if(s.producer_continuity==0u)++s.producer_continuity;
+}
+void mark_player_recovery(void* user,bool delayed) noexcept {
+    auto& s=*static_cast<FrontendCarSelect*>(user);
+    bump_player_continuity(s);
+    s.producer_recovery_pending=delayed;
+}
+void mark_shared_player_work_recovery(void* user,bool delayed) noexcept {
+    // A traffic-car crash can use the player's body/wheel work. Its delayed
+    // branch changes only the traffic event; an immediate tow mutates that work.
+    if(!delayed)bump_player_continuity(*static_cast<FrontendCarSelect*>(user));
+}
 // Running resistance constants 6AE4E4..6AE4F8 (.data, no writer).
 constexpr driving::RunningResistanceTuning RaceRunningResistance{0.0225f,0.2f,1.0f,0.9f,0.175f,0.175f};
 struct Frame {
@@ -208,7 +222,7 @@ void common_service(void* user,std::uint32_t pc){
         advance.transition_allowed=c.race.area_state_7d2e80>9u;                 // 44BE50(0)
         driving::PcAssCompulsiveMoveContext ass{advance,road,c.race.area_state_7d2e80>9u,c.race.area_state_7d2e88==20u};
         driving::PcDispMatrixContext display{m,1.f,c.race.camera_override.scene_82e7d4};
-        driving::PcPlWreckerContext wrecker{advance,road,query,display};
+        driving::PcPlWreckerContext wrecker{advance,road,query,display,&c.event_function36.car_select,mark_player_recovery};
         driving::PcCalcPlBody2Context ctx{ass,road,f.stages,wrecker};
         driving::calc_pl_body_2nd_4a7ec0(e,W,P,f.wheels,W.sub(0x258,4*0xf4),ctx);return;}
     case 0x00519830u:{                                                          // ColiCar
@@ -219,7 +233,7 @@ void common_service(void* user,std::uint32_t pc){
         bk.mode4_course_gate=e.u32(0x5c);bk.gate_4957f0=c.start_mode.selection_active_836374;bk.gate_48b310=c.start_mode.flag_830394!=0u;
         bk.gate_495490=w.gate_8361b4!=0u;
         driving::PcDispMatrixContext display{m,1.f,c.race.camera_override.scene_82e7d4};
-        driving::PcPlWreckerContext wrecker{advance,road,query,display};
+        driving::PcPlWreckerContext wrecker{advance,road,query,display,&c.event_function36.car_select,mark_player_recovery};
         driving::PcCrashWreckerContext crash_wrecker{W,P,W.sub(0x258,4*0xf4),&wrecker};
         driving::PcWallControllerContext wall{f.tables,{f.surface_codes(0),f.surface_codes(1),f.surface_codes(2),f.surface_codes(3)},x.view(0x5e0de0u,16u),
             driving::WallReboundContext{driving::WallResponseContext{f.stages,x.view(0x5e0f20u,0x5e1fa0u-0x5e0f20u),x.view(0x5e1fa0u,0x5e302cu-0x5e1fa0u),
@@ -461,7 +475,7 @@ bool race_car_crash_entry(NativeRuntimeContext& c,driving::PcMatrixStack& m,Byte
         auto route=f.route();
         driving::PcCourseAdvanceContext advance{f.ends,f.stages,f.stage_cache(),route,0u,0u,false};
         driving::PcDispMatrixContext display{m,1.f,c.race.camera_override.scene_82e7d4};
-        driving::PcPlWreckerContext wrecker{advance,road,query,display};
+        driving::PcPlWreckerContext wrecker{advance,road,query,display,&s,mark_shared_player_work_recovery};
         driving::PcCrashWreckerContext crash_wrecker{W,P,W.sub(0x258,4*0xf4),&wrecker};
         const driving::PcCrashEntryContext entry{x.crash,f.stages,x.view(0x5c2570u,0x5c2f80u-0x5c2570u),feedback,&crash_wrecker};
         if(pc==0x4a6ea0u)driving::pc_start_crash(e,state,reverse,tow,entry);
@@ -521,10 +535,10 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
     // callback is detached; it can neither latch a game fault nor change input.
     if(c.car_producer_observer.observe){
         const NativeCarProducerObservation o{
-            s.car_799d18.data(),s.car_799d18.size(),c.mode_state.current,s.race_inits,s.producer_attempt,
+            s.car_799d18.data(),s.car_799d18.size(),c.mode_state.current,s.race_inits,s.producer_continuity,s.producer_attempt,
             c.frame_state.frame_counter_95af0c,c.frame_state.update_index_8a8cdc,
             fresh_car_producer(direct_dispatch,s.producer_active,s.race_inits,succeeded,f.steer_written,f.e.u32(4)),
-            direct_dispatch,s.producer_active};
+            direct_dispatch,s.producer_active,s.producer_recovery_pending};
         notify_car_producer(c.car_producer_observer,o);
     }
     return succeeded;

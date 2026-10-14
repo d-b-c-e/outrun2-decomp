@@ -35,9 +35,9 @@ void note_failure(){
 void observe(void*,const platform::NativeCarProducerObservation& o){
     if(!live.core||!live.core->active())return;
     ffb::shadow::Gate g{};
-    g.mode=o.mode;g.generation=o.car_generation;g.attempt=o.attempt;
+    g.mode=o.mode;g.generation=o.car_generation;g.continuity=o.continuity;g.attempt=o.attempt;
     g.frame_counter=o.frame_counter;g.update_index=o.update_index;
-    g.car_active=o.car_active;g.panel_open=live.panel_open;
+    g.car_active=o.car_active;g.panel_open=live.panel_open;g.recovery_pending=o.recovery_pending;
     ffb::shadow::Sample sample{};sample.gate=g;sample.producer_fresh=o.producer_fresh;
     sample.car=o.car;sample.car_bytes=o.car_bytes;
     live.core->observe(sample);
@@ -50,7 +50,8 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
         if(rt){
             const auto& car=rt->event_function36.car_select;
             g.mode=rt->mode_state.current;g.paused=rt->event_state.pause_depth>0u;
-            g.generation=car.race_inits;g.attempt=car.producer_attempt;g.car_active=car.producer_active;
+            g.generation=car.race_inits;g.continuity=car.producer_continuity;g.attempt=car.producer_attempt;
+            g.car_active=car.producer_active;g.recovery_pending=car.producer_recovery_pending;
             g.frame_counter=rt->frame_state.frame_counter_95af0c;
             g.update_index=rt->frame_state.update_index_8a8cdc;
         }
