@@ -62,7 +62,32 @@ const TranslatedModule* request_clock_module(){
             found[i]=*f;
         }
         return found;}();
-    static const TranslatedModule module{functions.data(),nullptr,{}};
+    static const TranslatedModule module=[](){
+        TranslatedModule result{functions.data(),nullptr,{}};
+        result.special=[](or2x86::Cpu& cpu,std::uint32_t pc){
+            // 4FAF3F discards 449940's ST0 immediately. Other callers remain unowned.
+            if(pc!=0x449940u||or2x86::ld32(cpu,cpu.esp)!=0x4faf44u)return false;
+            auto& memory=*static_cast<PcRaceMemory*>(cpu.mem_user);
+            float sx,sy;
+            const auto sx_bits=or2x86::ld32(cpu,cpu.esp+4u),sy_bits=or2x86::ld32(cpu,cpu.esp+8u);
+            std::memcpy(&sx,&sx_bits,4u);std::memcpy(&sy,&sy_bits,4u);
+            const auto input=memory.bytes(or2x86::ld32(cpu,cpu.esp+12u),12u);
+            const auto matrix=memory.bytes(or2x86::ld32(cpu,0x89b564u),64u);
+            const auto p=driving::pc_transform_point(matrix,{input.f32(0u),input.f32(4u),input.f32(8u)});
+            const auto out=or2x86::ld32(cpu,cpu.esp+16u);
+            if(1.1920928955078125e-7f>std::fabs(p.z)){
+                memory.putf(out,0.f);memory.putf(out+4u,0.f);memory.putf(out+8u,0.f);
+            }else{
+                const float inv=1.0f/(0.0f-p.z);
+                memory.putf(out,(inv*sx)*p.x);
+                memory.putf(out+4u,p.y*(inv*sy));
+                memory.putf(out+8u,p.z);
+            }
+            cpu.fpu.push(or2x86::xv(0.f)); // the matched caller's next instruction pops ST0
+            translated_return(cpu,cpu.eax,0u);
+            return true;
+        };
+        return result;}();
     return &module;
 }
 // Synthetic PC addresses of the racer setup tables ([80FB00] / [80FB1C] / [80FB20] / [80FB30]).
