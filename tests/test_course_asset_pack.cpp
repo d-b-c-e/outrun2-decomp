@@ -4,6 +4,7 @@
 #include "platform/embedded_exe_data.hpp"
 #include "system/exe_image.hpp"
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -175,9 +176,13 @@ int main(int argc,char** argv){
             outrun::driving::Bytes request_bytes(request_stack.data(),request_stack.size());
             for(std::size_t i=0;i<16u;++i)request_bytes.put32(i*4u,(i%5u)==0u?0x3f800000u:0u);
             outrun::driving::PcMatrixStack request_matrices{request_bytes,0,0,16};
-            require(native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&
-                    !native_race_traffic(request).latched,
-                    "variant-5 request control calls the translated x87 race clock getter");
+            const bool request_control=native_race_requests_event(request,0x0046c200u,0u,request_matrices);
+            auto& traffic=native_race_traffic(request);
+            float translated_time=0.f;
+            std::memcpy(&translated_time,traffic.requests_7f9460.data()+0x180u,sizeof translated_time);
+            require(request_control&&traffic.latched&&traffic.fault==0x004659f0u&&
+                    std::isfinite(translated_time)&&translated_time>0.f,
+                    "variant-5 request control uses the x87 clock before the fixture's absent sprite service");
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;
