@@ -84,7 +84,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
         const unsigned scan=(unsigned(l)>>16)&0xffu;
         if(scan)outrun::desktop::desktop_keys()[scan|((unsigned(l)>>24)&1u?0x80u:0u)]=message==WM_KEYDOWN||message==WM_SYSKEYDOWN?0x80u:0u;
     }
-    if(message==WM_KILLFOCUS)outrun::desktop::desktop_keys().fill(0);
+    if(message==WM_KILLFOCUS)outrun::desktop::desktop_keys_clear();
     if(message==WM_SETCURSOR&&borderless&&LOWORD(l)==HTCLIENT){SetCursor(nullptr);return TRUE;}
     return DefWindowProcW(hwnd,message,w,l);
 }

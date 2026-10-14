@@ -44,6 +44,32 @@ int main(){
         check(!e.step(true,false)&&e.step(false,false),"after that, a press and release toggles");
         check(!e.step(false,true)&&!e.step(true,false)&&!e.step(false,false),"held at the moment it unblocks: waits for that release");
         check(!e.step(true,false)&&e.step(false,false),"then toggles again");}
+    // Blocked by a counted clear of the window's keyboard (desktop_keys_clear), not by the foreground window: keys posted
+    // to the game's window count whether or not it is in front (sana 89823).
+    {   std::uint32_t seen=0;
+        check(!hud_toggle_blocked(false,0u,seen)&&hud_toggle_blocked(true,0u,seen),"the open panel blocks; nothing else at a steady count");
+        check(hud_toggle_blocked(false,1u,seen)&&seen==1u&&!hud_toggle_blocked(false,1u,seen),"a clear blocks the one check that sees it");}
+    {   // Held, then a focus loss clears it: the poll sees the key up, but that is not its release.
+        HudToggleEdge e;std::uint32_t seen=0,clears=0;
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen)),"held");
+        ++clears;
+        check(!e.step(false,hud_toggle_blocked(false,clears,seen)),"focus loss clears every key: no toggle");
+        check(!e.step(false,hud_toggle_blocked(false,clears,seen)),"the next poll, key up: the wait ends");
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen))&&e.step(false,hud_toggle_blocked(false,clears,seen)),"the next real press and release toggles");}
+    {   // A focus loss, then the focus back and the key down again before the next poll: still not a press of its own.
+        HudToggleEdge e;std::uint32_t seen=0,clears=0;
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen)),"held");
+        ++clears;   // cleared, refocused and pressed again between two polls
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen)),"down again across a clear: blocked, waits for the release");
+        check(!e.step(false,hud_toggle_blocked(false,clears,seen)),"that release does not toggle");
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen))&&e.step(false,hud_toggle_blocked(false,clears,seen)),"the press after it does");}
+    {   // The F6 panel: blocked while open; its closing clear blocks one more check; then presses count again.
+        HudToggleEdge e;std::uint32_t seen=0,clears=0;
+        check(!e.step(true,hud_toggle_blocked(true,clears,seen))&&!e.step(false,hud_toggle_blocked(true,clears,seen)),"pressed and released with the panel open: nothing");
+        ++clears;   // the panel closed: its filter clears the keyboard
+        check(!e.step(false,hud_toggle_blocked(false,clears,seen)),"the close's clear: nothing");
+        check(!e.step(false,hud_toggle_blocked(false,clears,seen)),"the next poll, key up: the wait ends");
+        check(!e.step(true,hud_toggle_blocked(false,clears,seen))&&e.step(false,hud_toggle_blocked(false,clears,seen)),"after the panel: a press and release toggles");}
     // Policy: only ordinary play that is not recording; never a test, playback or recording process.
     check(hud_toggle_allowed(false,false)&&!hud_toggle_allowed(true,false)&&!hud_toggle_allowed(false,true)&&!hud_toggle_allowed(true,true),
         "the toggle posts only in ordinary play without a recording");

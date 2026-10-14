@@ -73,8 +73,17 @@ inline HudToggleKey parse_hud_toggle_key(std::string_view text,ScanOfChar scan_o
     }
     return k;
 }
-// Tweaks' edge: the toggle is on the key's release. While blocked (the F6 panel open, the window not in front), and
-// after it until the key is released, nothing toggles: a key held into or out of the panel is not a press.
+// Blocked: the F6 panel is open (it takes the keys), or the window's keyboard was cleared since the last check
+// (desktop_keys_clear: a focus loss, or the panel opening or closing, releases every key at once, which is not a release
+// of the HUD key, even if the key is down again by the next check). `seen` keeps the clear count of the last check. The window need not be in front: only keys delivered to the game's own window count, so a key typed in
+// another program never reaches it (Tweaks reads the global key state).
+inline bool hud_toggle_blocked(bool panel_open,std::uint32_t clears,std::uint32_t& seen){
+    const bool cleared=clears!=seen;
+    seen=clears;
+    return panel_open||cleared;
+}
+// Tweaks' edge: the toggle is on the key's release. While blocked, and after it until the key is released, nothing
+// toggles: a key held into or out of the panel, or across a focus loss, is not a press.
 struct HudToggleEdge {
     bool prev{},wait{};
     bool step(bool down,bool blocked){

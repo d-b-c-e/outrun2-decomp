@@ -14,6 +14,7 @@ struct State {
     bool configured{};
     std::vector<unsigned> keys;
     HudToggleEdge edge;
+    std::uint32_t clears{};   // desktop_key_clears() at the last check
     xbox_runtime::InputFilter inner{};
 } h;
 // Letters and digits by the layout, as Tweaks' VK: never extended keys, so the plain scan code is the key.
@@ -22,8 +23,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     if(h.inner)h.inner(out,rt);
     bool down=false;
     for(const unsigned key:h.keys)down=down||desktop_key(key);
-    void* const window=xbox_runtime::native_window().hwnd;
-    const bool blocked=desktop_panel_open()||!window||GetForegroundWindow()!=static_cast<HWND>(window);
+    const bool blocked=hud_toggle_blocked(desktop_panel_open(),desktop_key_clears(),h.clears);
     if(h.edge.step(down,blocked))platform::g_pc_hud_toggle_requests.fetch_add(1u);
 }
 }
@@ -39,7 +39,7 @@ void hud_toggle_configure(const Ini& settings,bool test_or_playback,bool recordi
             "the game sets it, so no tape holds a toggled HUD\n",text.c_str());
         return;
     }
-    h.keys=key.keys;h.configured=true;
+    h.keys=key.keys;h.clears=desktop_key_clears();h.configured=true;
     std::printf("settings: [Misc] HudToggleKey = %.32s: each release shows or hides the race HUD; the key still reaches the game\n",text.c_str());
 }
 void hud_toggle_wrap_input_filter(){

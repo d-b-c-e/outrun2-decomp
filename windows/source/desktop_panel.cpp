@@ -493,7 +493,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     // UILetterboxing: the race state for the present overlay (78026C, and START's stage 8367A8).
     if(rt)lb.in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
     const bool open=desktop_panel_open();
-    if(open!=p.was_open){desktop_keys().fill(0);p.was_open=open;}
+    if(open!=p.was_open){desktop_keys_clear();p.was_open=open;}
     if(open)desktop_panel_neutral_input(out);
 }
 }
