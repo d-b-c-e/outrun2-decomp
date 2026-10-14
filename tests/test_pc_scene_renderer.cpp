@@ -8,6 +8,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <string>
 using namespace outrun;
 namespace {
 unsigned checks=0;
@@ -46,6 +48,19 @@ int main(int argc,char** argv){
     // 40EC70 cleared the back buffer with 89BD5C (0 here): opaque black.
     const auto& rgba=device.rgba();
     require(rgba[0]==0&&rgba[3]==0,"448DB0 clear through the D3D9 form");
+    {   // A START (mode 13) camera control that faults inside 484810, after its push: reported,
+        // and the shared matrix stack returns to its entry depth and pointer for the next callbacks.
+        driving::Bytes cb(car.data(),car.size());
+        cb.putf(0x2c8,1.f);cb.putf(0x2ec,std::numeric_limits<float>::infinity());
+        r.race_camera_inputs=[](driving::PcRaceCameraInputs& in){in.timer_8367bc=0x12cu;return true;};
+        auto& mx=r.matrices();
+        const auto depth=mx.depth;const auto offset=mx.current_offset;const auto unanswered=r.camera_unanswered;
+        for(unsigned frame=0;frame<3u;++frame)
+            require(r.invoke(0x485fe0u,0,385,13,5)&&r.camera_unanswered==unanswered+frame+1u&&
+                    r.last_error.find("Z rotation")!=std::string::npos&&mx.depth==depth&&mx.current_offset==offset,
+                    "failed START camera control restores the renderer matrix stack");
+        cb.putf(0x2c8,0.f);cb.putf(0x2ec,0.f);r.race_camera_inputs=nullptr;
+    }
     if(argc>1){
         // Retail F50 through the owner: banks, CAMERA 385 init/control, event 8
         // display 49F500 -> 46C140 at layer 8.

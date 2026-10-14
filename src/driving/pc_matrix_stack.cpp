@@ -3,10 +3,14 @@
 #include "driving/pc_x87_f24.hpp"
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 namespace outrun::driving {
 namespace {
 std::int32_t step(std::int32_t n,std::uint32_t delta){
@@ -27,6 +31,28 @@ Bytes slot(const PcMatrixStack& s,std::ptrdiff_t offset){
 }
 }
 Bytes PcMatrixStack::current() const {return slot(*this,current_offset);}
+bool pc_matrix_trace_enabled(){static const bool on=std::getenv("OR2_MATRIX_TRACE")!=nullptr;return on;}
+void pc_matrix_trace_scope(const char* scope,std::uint32_t frame,std::uint32_t mode,std::uint32_t pc,std::uint32_t event,
+                           std::int32_t depth0,std::ptrdiff_t offset0,const PcMatrixStack& s,const char* note){
+    if(!pc_matrix_trace_enabled())return;
+    const bool moved=s.depth!=depth0||s.current_offset!=offset0;
+    const bool noted=note&&*note;
+    if(!moved&&!noted)return;
+    static unsigned lines=0;
+    static std::string last_note;
+    static std::map<std::pair<std::string,std::uint32_t>,unsigned> repeats;
+    if(!moved&&last_note==note)return;   // the same swallowed error again: once
+    if(moved&&++repeats[{scope,pc}]>4u)return;   // a per-frame producer: its first four
+    if(lines>=96u)return;
+    ++lines;
+    if(noted)last_note=note;
+    // Within capacity the pointer is depth slots above the arena base unless an
+    // overflow/underflow already separated them.
+    const bool desync=s.depth>=0&&s.depth<s.capacity&&s.current_offset!=std::ptrdiff_t(s.depth)*64;
+    std::fprintf(stderr,"[mx] %s frame %u mode %u pc %06X event %u depth %d->%d offset %td->%td%s%s%s\n",
+        scope,frame,mode,pc,event,depth0,s.depth,offset0,s.current_offset,desync?" desync":"",
+        note&&*note?" note: ":"",note&&*note?note:"");
+}
 CourseProbe pc_normalize_vector_40ef00(CourseProbe v){
     X87 sum=X87(v.x)*v.x;
     sum+=X87(v.y)*v.y;

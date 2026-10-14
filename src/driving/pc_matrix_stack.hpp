@@ -31,6 +31,12 @@ CourseProbe pc_normalize_vector_40ef00(CourseProbe); // D3DX29 generic path
 long double pc_unit_vector_40eeb0(CourseProbe&); // original x87 length + in-place normalization
 CourseProbe pc_inverse_point(Bytes,const CourseProbe&);
 CourseProbe pc_transform_point(Bytes,const CourseProbe&);
+// OR2_MATRIX_TRACE (diagnostic, off by default): one stderr line for a scope
+// that left the stack's depth or pointer changed, or that carries a note (a
+// swallowed error); at most 96 lines per process. pc is the callback/leaf.
+bool pc_matrix_trace_enabled();
+void pc_matrix_trace_scope(const char* scope,std::uint32_t frame,std::uint32_t mode,std::uint32_t pc,std::uint32_t event,
+                           std::int32_t depth0,std::ptrdiff_t offset0,const PcMatrixStack& s,const char* note=nullptr);
 }
 namespace outrun::driving {
 void pc_matrix_identity(PcMatrixStack&); // 0x40A020

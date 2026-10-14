@@ -185,6 +185,16 @@ int main(int argc,char** argv){
                     !traffic.latched&&
                     std::isfinite(translated_time)&&translated_time>0.f,
                     "variant-5 request control routes the x87 clock, sprite tick, and voice pump");
+            // The live control runs once per frame on the renderer's stack (event 0x190):
+            // every frame must return the caller's depth and pointer unchanged.
+            require(request_matrices.depth==0&&request_matrices.current_offset==0,
+                    "variant-5 request control leaves the caller's matrix stack balanced");
+            for(unsigned frame=0;frame<4u;++frame){
+                request.race.clock.time_842110+=1.f/60.f;
+                require(native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&!traffic.latched&&
+                        request_matrices.depth==0&&request_matrices.current_offset==0,
+                        "repeated variant-5 request control keeps the matrix stack balanced");
+            }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;
