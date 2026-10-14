@@ -5,7 +5,10 @@
 #include "display_fit.hpp"
 #include "platform/ui_spacing.hpp"
 #include "platform/c2c_ui_spacing.hpp"
+#include "platform/race_translated.hpp"
+#include "platform/pc_screen.hpp"
 #include "driving/pc_camera.hpp"
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -15,6 +18,7 @@
 using namespace outrun::desktop;
 using outrun::xbox_runtime::display_fit;
 using outrun::xbox_runtime::planar_width;
+namespace outrun::platform { extern const TranslatedFunction bulk_functions[]; }
 static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"triple screens line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 static bool same(const ScreenRect& a,const ScreenRect& b){return a.left==b.left&&a.top==b.top&&a.right==b.right&&a.bottom==b.bottom;}
@@ -118,6 +122,41 @@ int main(){
             k=before;CHECK(!shift_c2c_translated_ui_call(k,s.ret+1u,span_hud)&&k.args==before.args);
             k=before;k.argc=s.x_arg;CHECK(!shift_c2c_translated_ui_call(k,s.ret,span_hud)&&k.args==before.args);
         }
+    }
+    // Execute an actual generated C2C caller through translated_call's external dispatcher.
+    // Keep the module to this function: bulk's unrelated code-data ranges require the retail EXE.
+    {   using namespace outrun::platform;
+        const TranslatedFunction* entry=bulk_functions;
+        while(entry->fn&&entry->pc!=0x4fc830u)++entry;
+        CHECK(entry->fn!=nullptr);
+        const TranslatedFunction functions[]={{0x4fc830u,entry->fn},{0u,nullptr}};
+        const TranslatedPops pops[]={{0x465860u,0x2cu},{0x4653c0u,0x10u},{0u,0u}};
+        TranslatedModule module{};module.functions=functions;module.pops=pops;
+        const float saved_spacing=g_pc_ui_spacing;
+        auto run=[&](float spacing){
+            std::array<std::uint8_t,0x6000> object{};
+            PcRaceMemory memory;memory.map(0x2000000u,object.data(),object.size());
+            std::vector<PcRaceCall> calls;
+            const PcRaceService service=[&](const PcRaceCall& call){calls.push_back(call);return 0u;};
+            g_pc_ui_spacing=spacing;
+            (void)translated_call(memory,service,module,0x4fc830u,0x2000000u,{0u});
+            return calls;
+        };
+        const auto plain=run(0.f),spaced=run(80.f);
+        g_pc_ui_spacing=saved_spacing;
+        CHECK(plain.size()==7u&&spaced.size()==plain.size());
+        const float x_before[]{170.f,170.f,-500.f},x_after[]{250.f,250.f,-420.f};
+        for(unsigned i=0;i<plain.size();++i){
+            const auto& a=plain[i];const auto& b=spaced[i];
+            CHECK(a.pc==b.pc&&a.eax==b.eax&&a.ecx==b.ecx&&a.argc==b.argc);
+            if(i<3u){
+                CHECK(a.pc==0x465860u);
+                float x=0;std::memcpy(&x,&a.args[5],sizeof x);CHECK(x==x_before[i]);
+                std::memcpy(&x,&b.args[5],sizeof x);CHECK(x==x_after[i]);
+            }
+            for(unsigned arg=0;arg<a.args.size();++arg)if(i>=3u||arg!=5u)CHECK(a.args[arg]==b.args[arg]);
+        }
+        CHECK(plain[5].pc==0x4653c0u); // 4FC971 is not a Tweaks hook; it remains bit-identical.
     }
     // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
     // only in a normal process with the borderless window over a span, each refusal named.
