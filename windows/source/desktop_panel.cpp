@@ -48,7 +48,7 @@ struct FrontendRouteTrace {
             file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,
                              FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
             if(file==INVALID_HANDLE_VALUE){failed=true;std::printf("frontend route trace: CREATE_NEW failed (%lu)\n",GetLastError());return;}
-            constexpr char header[]="seq\tpid\trun\tms\tmode\tstartStage\teditorState\titem\tfocused\tready\taccepted\tselected\tnameLen\tdoneMoves\tsaves\tloaded\n";
+            constexpr char header[]="seq\tpid\trun\tms\tmode\tstartStage\teditorState\titem\tfocused\tready\taccepted\tselected\tnameLen\tdoneMoves\tsaves\tloaded\tchildState\tmenuIndex\tchoiceResult\n";
             DWORD written=0;
             if(!WriteFile(file,header,DWORD(sizeof header-1),&written,nullptr)||written!=sizeof header-1){failed=true;return;}
         }
@@ -74,7 +74,10 @@ struct FrontendRouteTrace {
             std::to_string(focused)+'\t'+std::to_string(ready)+'\t'+std::to_string(accepted)+'\t'+
             std::to_string(selected)+'\t'+std::to_string(name_len)+'\t'+moves+'\t'+
             std::to_string(owner?owner->save_calls():0u)+'\t'+
-            std::to_string(rt->event_function36.frontend_profiles.loaded_count);
+            std::to_string(rt->event_function36.frontend_profiles.loaded_count)+'\t'+
+            std::to_string(rt->event_function36.state2_selector_child_state)+'\t'+
+            std::to_string(rt->event_function36.frontend_menu_index)+'\t'+
+            std::to_string(rt->event_function36.state2_selector_last_result);
         if(sequence&&snapshot==previous)return;
         previous=snapshot;
         const char* run=std::getenv("OR2_FRONTEND_RUN_ID");

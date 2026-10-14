@@ -18,7 +18,8 @@ import time
 import run_perf as base
 
 FIELDS = ("seq", "pid", "run", "ms", "mode", "startStage", "editorState", "item",
-          "focused", "ready", "accepted", "selected", "nameLen", "doneMoves", "saves", "loaded")
+          "focused", "ready", "accepted", "selected", "nameLen", "doneMoves", "saves", "loaded",
+          "childState", "menuIndex", "choiceResult")
 # Only the title transition is timed. Once the editor opens, all license
 # navigation uses observed state; the old 11-12.8 s Down/Enter sequence can
 # otherwise select Done and save an unnamed profile before the keyboard opens.
@@ -54,7 +55,8 @@ class RouteTrace:
             try:
                 seq, pid = int(row["seq"]), int(row["pid"])
                 for key in ("ms", "mode", "startStage", "editorState", "item", "focused", "ready",
-                            "accepted", "selected", "nameLen", "saves", "loaded"):
+                            "accepted", "selected", "nameLen", "saves", "loaded", "childState",
+                            "menuIndex", "choiceResult"):
                     row[key] = int(row[key])
             except ValueError as error:
                 raise StageError("frontend trace has a noninteger field") from error
@@ -220,25 +222,30 @@ def main():
             # above, not a reset to state 0, are the completion witness.
             if row["editorState"] != 7: raise StageError("editor-complete: no completed editor state")
             stage("editor-complete", row)
-            # Give the original frontend's exit animation the same bounded
-            # interval as the proven ordinary route before menu confirms.
-            time.sleep(5)
-            stage("post-save-animation", trace.poll())
         else:
             row = wait_for("existing-license-loaded", lambda r: r["loaded"] >= 1, 20)
             receipt["saveWitness"] = {str(p): {"bytes": p.stat().st_size, "sha256": baseline_save[p.name]}
                                       for p in (license_file, common_file)}
             persist()
-        row = trace.last
-        for attempt in range(4):
-            if row["mode"] == 16 or (row["mode"] == 13 and row["startStage"] >= 60): break
+        # Fixed-choice key 2 defaults to cursor 0, which opens C2C categories
+        # and missions. The original successful route moved Right first. Gate
+        # that selection on the active child and its observed cursor.
+        row = wait_for("first-choice", lambda r: r["childState"] in (1, 2), 15)
+        if row["childState"] == 1:
             key("enter")
-            try: row = wait_for(f"race-menu-{attempt+1}", lambda r: r["mode"] == 16 or (r["mode"] == 13 and r["startStage"] >= 60), 2.5)
-            except StageError as error:
-                if "timeout" not in str(error): raise
-                row = trace.poll()
-        if row["mode"] != 16 and not (row["mode"] == 13 and row["startStage"] >= 60):
-            raise StageError(f"race-entry: no observed transition after four native confirms; last={row}")
+            row = wait_for("second-choice", lambda r: r["childState"] == 2, 12)
+        if row["menuIndex"] not in (0, 1): raise StageError(f"second-choice: unexpected cursor {row['menuIndex']}")
+        if row["menuIndex"] == 0:
+            key("right")
+            row = wait_for("outrun-cursor", lambda r: r["childState"] == 2 and r["menuIndex"] == 1, 4)
+        key("enter")
+        row = wait_for("outrun-choice", lambda r: r["childState"] in (36, 58, 59), 12)
+        if row["childState"] != 36: raise StageError(f"outrun-choice: wrong mode child {row['childState']}")
+        for target, label in ((10, "car"), (16, "transmission"), (4, "music")):
+            key("enter")
+            row = wait_for(f"{label}-choice", lambda r, target=target: r["childState"] == target, 12)
+        key("enter")
+        row = wait_for("start-entry", lambda r: r["mode"] in (13, 16), 15)
         row = wait_for("race-game", lambda r: r["mode"] == 16, 45)
         stage("race-entry", row)
         race_time = time.monotonic()

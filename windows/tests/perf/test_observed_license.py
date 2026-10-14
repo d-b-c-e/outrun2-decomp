@@ -6,7 +6,7 @@ from run_observed_license import FIELDS, RouteTrace, StageError
 
 
 def row(seq, pid=123, run="fresh"):
-    values = [seq, pid, run, 500 + seq, 32, 0, 2, 0, 1, 1, 0, 0, 11, "DDRR", 0, 0]
+    values = [seq, pid, run, 500 + seq, 32, 0, 2, 0, 1, 1, 0, 0, 11, "DDRR", 0, 0, 2, 1, 0]
     return "\t".join(map(str, values)) + "\n"
 
 
