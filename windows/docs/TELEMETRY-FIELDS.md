@@ -16,3 +16,5 @@ This review uses the clean `d480104` integration source, the Tweaks fork's 76-by
 | Game mode, race state, timestamp and vibration | Runtime mode drives shared `gameMode`; existing `telemetry_in_gameplay` covers START/GAME/pause/GOAL/TIMEUP and Forza `IsRaceOn`. `GetTickCount` supplies packet milliseconds. Shared vibration fields are zero because this decomp has no pad-rumble producer. | Mode transitions and packet counts are in the retained listener; vibration zero means unavailable, not no road effects. |
 
 The FFB adapter separately reads car +0x1D0 and +0x264/+0x268 under steering/lateral-force names (`ffb_outrun.cpp:20,77-84`). The same producer mismatch may affect its force model, but this telemetry slice does not alter or retune FFB. Its own source audit and physical qualification are separate.
+
+The next bounded HUD/packet and F6 interaction evidence gate is [TELEMETRY-QUALIFICATION.md](TELEMETRY-QUALIFICATION.md). It separates local packet validation from receiver-screen and physical-output acceptance.

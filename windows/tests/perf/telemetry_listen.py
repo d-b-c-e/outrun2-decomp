@@ -4,7 +4,8 @@ optionally, polls the named shared-memory block, until a stop file appears or th
 
     py -3 -B telemetry_listen.py --port 18765 --shm OutRun2006Telemetry-test --seconds 150 --out <folder> [--stop <file>]
 
-Writes packets.tsv (receive time, length, IsRaceOn, Speed m/s, Gear, Accel, Brake, RPM, sentinel), shared.tsv and
+Writes packets.tsv (receive time, length, IsRaceOn, game packet ms, Speed m/s, Gear, Accel, Brake, signed Steer,
+local AccX, RPM, sentinel), shared.tsv and
 summary.json (counts per length, IsRaceOn transitions, maxima, the shared block's last values).
 """
 import argparse, json, mmap, pathlib, socket, struct, sys, time
@@ -18,10 +19,13 @@ def decode(p):
     """Horizon 324: dash at 244; FM7 311: dash at 232 (Speed +12, Accel +71, Brake +72, Gear +75)."""
     dash = 244 if len(p) == 324 else 232 if len(p) == 311 else None
     if dash is None: return None
-    race_on, = struct.unpack_from("<i", p, 0)
+    race_on, packet_ms = struct.unpack_from("<iI", p, 0)
     rpm, = struct.unpack_from("<f", p, 16)
+    acc_x, = struct.unpack_from("<f", p, 20)
     speed, = struct.unpack_from("<f", p, dash + 12)
-    return dict(raceOn=race_on, speed=speed, gear=p[dash + 75], accel=p[dash + 71], brake=p[dash + 72], rpm=rpm,
+    steer, = struct.unpack_from("<b", p, dash + 76)
+    return dict(raceOn=race_on, packetMs=packet_ms, speed=speed, gear=p[dash + 75], accel=p[dash + 71],
+                brake=p[dash + 72], steer=steer, accX=acc_x, rpm=rpm,
                 sentinel=chr(p[323]) if len(p) == 324 else "")
 
 
@@ -41,7 +45,7 @@ def main():
     lengths, transitions, last_on, maxima, n = {}, [], None, dict(speed=0.0, rpm=0.0, gear=0, accel=0, brake=0), 0
     shared_last, shared_n, next_shm = None, 0, t0
     with open(o.out / "packets.tsv", "w", encoding="utf-8") as pf, open(o.out / "shared.tsv", "w", encoding="utf-8") as sf:
-        pf.write("t\tlength\traceOn\tspeed\tgear\taccel\tbrake\trpm\tsentinel\n")
+        pf.write("t\tlength\traceOn\tpacketMs\tspeed\tgear\taccel\tbrake\tsteer\taccX\trpm\tsentinel\n")
         sf.write("t\t" + "\t".join(SHM_FIELDS) + "\n")
         while time.time() < end and not (o.stop and o.stop.exists()):
             try:
@@ -52,7 +56,9 @@ def main():
                 if d:
                     if d["raceOn"] != last_on: transitions.append(dict(t=t, raceOn=d["raceOn"])); last_on = d["raceOn"]
                     for k in maxima: maxima[k] = max(maxima[k], d[k])
-                    pf.write("%s\t%d\t%d\t%.3f\t%d\t%d\t%d\t%.0f\t%s\n" % (t, len(p), d["raceOn"], d["speed"], d["gear"], d["accel"], d["brake"], d["rpm"], d["sentinel"]))
+                    pf.write("%s\t%d\t%d\t%d\t%.3f\t%d\t%d\t%d\t%d\t%.6f\t%.0f\t%s\n" %
+                             (t, len(p), d["raceOn"], d["packetMs"], d["speed"], d["gear"], d["accel"],
+                              d["brake"], d["steer"], d["accX"], d["rpm"], d["sentinel"]))
             except socket.timeout:
                 pass
             if shm and time.time() >= next_shm:
@@ -61,7 +67,7 @@ def main():
                 if v[0] == 1:
                     shared_n += 1; shared_last = dict(zip(SHM_FIELDS, v))
                     sf.write("%.3f\t" % (time.time() - t0) + "\t".join("%g" % x for x in v) + "\n")
-    summary = dict(packets=n, lengths={str(k): v for k, v in sorted(lengths.items())}, raceOnTransitions=transitions, maxima=maxima,
+    summary = dict(packets=n, startedEpochSeconds=t0, lengths={str(k): v for k, v in sorted(lengths.items())}, raceOnTransitions=transitions, maxima=maxima,
                    sharedSamples=shared_n, sharedLast=shared_last, seconds=round(time.time() - t0, 1))
     (o.out / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))
