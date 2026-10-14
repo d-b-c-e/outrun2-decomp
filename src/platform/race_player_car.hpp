@@ -15,6 +15,7 @@
 #include "driving/pc_matrix_stack.hpp"
 #include "driving/pc_collision.hpp"
 #include "driving/pc_common_control.hpp"
+#include "driving/pc_road_mu.hpp"
 #include "platform/race_input.hpp"
 #include <array>
 #include <cstdint>
@@ -65,6 +66,11 @@ struct RaceCarWorld {
 // One GamePlCar_Ctrl frame on c's car/work. Returns false (and records the
 // failing PC entry) when a child rejected its inputs.
 bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,bool direct_dispatch);
+// GetRoadMu 500B30's road service for the player car (DrivingControl 502C90): while
+// the C2C request manager is active (55A930: [7F94C0] != 0) each wheel's Mu is
+// 46C450 -> 4FC390 on the manager 7F9460, from its road Mu +764C (481250 sets 1.0).
+// The context points into c's request manager block.
+driving::RoadMuSource race_player_road_mu(NativeRuntimeContext& c);
 // EXE crash tables 5E08E8 / 5E0988 (4A2400 AdvanceCrashState), shared with the traffic cars.
 const driving::PcCrashTables& race_crash_tables();
 // 4A6EA0 (pc) / 4A2270 crash entry over another car's event (traffic cars).
