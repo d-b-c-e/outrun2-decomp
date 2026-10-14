@@ -123,6 +123,7 @@ def main():
     start = time.monotonic()
     trace = None
     window_time = None
+    last_key_at = None
 
     def persist():
         (out / "route.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
@@ -143,7 +144,13 @@ def main():
         raise StageError(f"{name}: timeout after {limit:g}s; last={trace.last}")
 
     def key(name, hold=.20):
+        nonlocal last_key_at
         if proc.poll() is not None: raise StageError(f"key-{name}: game exited")
+        # The observed menu accepted the original half-second spaced actions;
+        # a second immediate Enter on the name keyboard did not register.
+        if last_key_at is not None:
+            time.sleep(max(0.0, .5 - (time.monotonic() - last_key_at)))
+        last_key_at = time.monotonic()
         posted = round(time.monotonic() - start, 3)
         base.post_key(hwnd, name, False)
         try: time.sleep(hold)
