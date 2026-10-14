@@ -39,33 +39,33 @@ TelemetrySettings telemetry_settings(const Ini& settings,const char* env_off,con
 TelemetryCar telemetry_car(const std::uint8_t* car,std::size_t bytes){
     TelemetryCar c;
     if(!car||bytes<0x26cu)return c;
-    c.flags_4=at<std::uint32_t>(car,0x4);c.state_8=at<std::uint32_t>(car,0x8);c.impact_178=at<float>(car,0x178);
-    c.speed_1c4=at<float>(car,0x1c4);c.steer_1d0=at<float>(car,0x1d0);c.prev_gear_1d8=at<std::uint32_t>(car,0x1d8);
+    c.flags_4=at<std::uint32_t>(car,0x4);c.state_8=at<std::uint32_t>(car,0x8);c.prior_speed_178=at<float>(car,0x178);
+    c.speed_1c4=at<float>(car,0x1c4);c.speed_delta_1d0=at<float>(car,0x1d0);c.prev_gear_1d8=at<std::uint32_t>(car,0x1d8);
     c.hud_kmh_1f8=at<float>(car,0x1f8);c.gear_208=at<std::uint32_t>(car,0x208);
     for(unsigned i=0;i<4;++i)c.surface_24c[i]=at<std::uint32_t>(car,0x24c+i*4u);
-    c.lateral_264=at<float>(car,0x264);c.lateral_268=at<float>(car,0x268);
+    c.edge_distance_264=at<float>(car,0x264);c.edge_distance_268=at<float>(car,0x268);
     return c;
 }
 
 bool telemetry_in_gameplay(std::uint32_t mode){return mode==13u||mode==16u||mode==18u||mode==19u||mode==20u;}
 
-int telemetry_packet(const TelemetryCar& c,bool race_on,std::uint8_t accel,std::uint8_t brake,std::uint32_t ms,
+int telemetry_packet(const TelemetryCar& c,bool race_on,std::int32_t consumed_steer,std::uint8_t accel,std::uint8_t brake,std::uint32_t ms,
                      dbce::forza::Layout layout,std::uint8_t* out,int size){
     if(!std::isfinite(c.hud_kmh_1f8)||c.hud_kmh_1f8<0.0f)return 0;   // the HUD's km/h base (4BCF10 draws it x1 or x0.6215)
     dbce::forza::Sled s{};dbce::forza::Dash d{};
     s.isRaceOn=race_on?1:0;s.timestampMs=ms;s.engineMaxRpm=TelemetryMaxRpm;s.engineIdleRpm=TelemetryIdleRpm;
-    // The mod's synthesis: a gear ratio times the normalised speed (+0x1C4, about 0..2) across idle..max.
+    // The mod's synthesis: a gear ratio times the normalized speed (+0x1C4, about 0..2) across idle..max.
     static constexpr float Ratios[7]{0.0f,3.5f,2.1f,1.4f,1.0f,0.8f,0.65f};
     const std::uint32_t g=c.gear_208;
     const float ratio=g>0u&&g<7u?Ratios[g]:1.0f;
     const float norm=std::clamp(finite(c.speed_1c4)/2.0f,0.0f,1.0f);
     s.currentEngineRpm=std::clamp(TelemetryIdleRpm+norm*ratio*(TelemetryMaxRpm-TelemetryIdleRpm),TelemetryIdleRpm,TelemetryMaxRpm);
-    s.accX=finite(finite(c.lateral_264)+finite(c.lateral_268));   // two finite terms can still overflow (romi 27774)
-    bool rough=false;for(const auto f:c.surface_24c)rough=rough||f>1u;     // sand, gravel, grass...: the mod's rumble
+    // Car +0x264/+0x268 are signed distances to road edges, not lateral acceleration. Leave accX unavailable (zero).
+    bool rough=false;for(const auto f:c.surface_24c)rough=rough||f>1u;     // inherited Tweaks road-result heuristic; taxonomy unqualified
     if(rough)for(auto& r:s.surfaceRumble)r=1.0f;
     d.speed=c.hud_kmh_1f8/3.6f;
     d.gear=std::uint8_t(std::clamp<std::uint32_t>(g==0u?1u:g,1u,10u));
-    d.steer=dbce::forza::steer11(finite(c.steer_1d0));
+    d.steer=std::int8_t(std::clamp(consumed_steer,-127,127));
     d.accel=accel;d.brake=brake;
     return dbce::forza::build(layout,s,d,out,size,std::uint8_t('R'));
 }
@@ -79,7 +79,10 @@ int telemetry_parked_packet(std::uint32_t ms,dbce::forza::Layout layout,std::uin
 
 void telemetry_shared(const TelemetryCar& c,std::uint32_t mode,bool gameplay,std::uint32_t packet_id,OutRun2006TelemetryData& o){
     o.version=1;o.packetId=packet_id;
-    o.speed=c.speed_1c4;o.steeringAngle=c.steer_1d0;o.lateralG1=c.lateral_264;o.lateralG2=c.lateral_268;o.impactForce=c.impact_178;
+    // Version 1 copies the Tweaks fork's raw offsets byte for byte. Its legacy field names are semantically wrong:
+    // +0x1D0 is speed delta, +0x264/+0x268 are road-edge distances, and +0x178 is prior speed.
+    o.speed=c.speed_1c4;o.steeringAngle=c.speed_delta_1d0;o.lateralG1=c.edge_distance_264;
+    o.lateralG2=c.edge_distance_268;o.impactForce=c.prior_speed_178;
     o.gear=c.gear_208;o.prevGear=c.prev_gear_1d8;o.stateFlags=c.state_8;o.carFlags=c.flags_4;
     for(unsigned i=0;i<4;++i)o.surfaceType[i]=c.surface_24c[i];
     o.vibrationLeft=0.0f;o.vibrationRight=0.0f;

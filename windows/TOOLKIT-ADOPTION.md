@@ -15,7 +15,7 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-006 | Camera step sizes are settings | pending | |
 | STD-007 | Triple screens in one wide window | pending | Per-panel projection planned (ROADMAP step 3). |
 | STD-008 | Display changes: game applies once | unchecked | |
-| STD-009 | Dashboard telemetry matches the HUD | pending | |
+| STD-009 | Dashboard telemetry matches the HUD | partial | The speed source is the HUD's +0x1F8 base and the packet byte fixture checks km/h to m/s; no attended numeric HUD/receiver comparison. See `docs/TELEMETRY-FIELDS.md`. |
 | STD-010 | Install the latest build for testing | unchecked | |
 | STD-011 | Work lands on main | adopted | Reviewed branches merge to `main` of the fork. |
 | STD-012 | Reproduce the route and preserve original signals | pending | Upstream has `autoplay.txt` / `replay.txt` pad scripts; no tick or state contract yet. |

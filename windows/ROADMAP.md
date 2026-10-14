@@ -67,7 +67,12 @@ go upstream as small pull requests (first: `tweaks-exe`).
    - 2026-10-12: SimHub logged valid OutRun data on port 8000 during a shim run.
    - The owner confirmed reception on the wheel's screen through SimHub, forwarded to Pit House (hub
      `docs/2026-10-12-session-release-progress.md`, 20:16).
-   - Per-field accuracy is not yet checked.
+   - Per-field accuracy is not yet fully qualified against the live HUD and receiver.
+   - Source/retained-capture review (2026-10-13): HUD speed, gears and GAME-consumed input channels have traced
+     producers; Forza steering now uses the consumed channel and unsupported lateral acceleration is zero. The
+     shared-memory v1 raw-offset ABI stays byte-compatible, with its misleading steering/lateral/impact labels
+     documented. RPM is synthetic; surface classification and physical receiver interpretation remain unqualified.
+     See `docs/TELEMETRY-FIELDS.md`. Reception alone remains short of field acceptance.
 6. ⬜ **Tweaks parity** (table below) and the original game's limits the
    decomp can lift, e.g. steering quantised to -127..127 in 453860.
    - Fine steering: source finding (2026-10-13, deferred by sana 61131), nothing built.

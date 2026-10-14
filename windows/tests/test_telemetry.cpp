@@ -18,47 +18,54 @@ template<class T> T rd(const std::uint8_t* p,std::size_t off){T v;std::memcpy(&v
 template<class T> void wr(std::vector<std::uint8_t>& b,std::size_t off,T v){std::memcpy(b.data()+off,&v,sizeof v);}
 
 TelemetryCar sample(){
-    TelemetryCar c;c.hud_kmh_1f8=180.0f;c.speed_1c4=0.4f;c.gear_208=4;c.steer_1d0=-0.5f;c.lateral_264=0.25f;c.lateral_268=0.5f;
+    TelemetryCar c;c.hud_kmh_1f8=180.0f;c.speed_1c4=0.4f;c.gear_208=4;
+    c.speed_delta_1d0=-0.5f;c.prior_speed_178=0.39f;c.edge_distance_264=0.25f;c.edge_distance_268=0.5f;
     return c;
 }
 
 void test_packets(){
     std::uint8_t b[400];
-    const int h=telemetry_packet(sample(),true,200,30,1234,fz::FORZA_HORIZON_324,b,sizeof b);
+    const int h=telemetry_packet(sample(),true,-64,200,30,1234,fz::FORZA_HORIZON_324,b,sizeof b);
     check(h==324,"Horizon: 324 bytes");
     check(rd<std::int32_t>(b,0)==1&&rd<std::uint32_t>(b,4)==1234u,"IsRaceOn 1, timestamp");
     check(rd<float>(b,8)==TelemetryMaxRpm&&rd<float>(b,12)==TelemetryIdleRpm,"engine constants at 8 / 12");
     check(std::fabs(rd<float>(b,16)-(900.0f+0.2f*1.0f*7600.0f))<0.01f,"RPM: the mod's synthesis (gear 4 ratio 1.0, speed 0.4/2)");
-    check(std::fabs(rd<float>(b,20)-0.75f)<1e-6f,"accX = the two lateral terms");
+    check(rd<float>(b,20)==0.0f,"accX unavailable: road-edge distances are not lateral acceleration");
     check(std::fabs(rd<float>(b,256)-50.0f)<1e-4f,"Speed@256 = HUD 180 km/h / 3.6 (STD-009)");
     check(b[315]==200&&b[316]==30&&b[319]==4,"Accel@315, Brake@316, Gear@319");
-    check(std::int8_t(b[320])==fz::steer11(-0.5f),"Steer@320");
+    check(std::int8_t(b[320])==-64,"Steer@320 is consumed steering, not speed delta");
     check(b[323]=='R',"the mod sentinel in the trailing byte");
     for(int i=232;i<244;++i)check(b[i]==0,"the Horizon insert stays zero");
-    const int f=telemetry_packet(sample(),true,200,30,1234,fz::FORZA_FM7_DASH_311,b,sizeof b);
-    check(f==311&&std::fabs(rd<float>(b,244)-50.0f)<1e-4f&&b[307]==4,"FM7 Dash: 311 bytes, Speed@244, Gear@307 (the mod's layout)");
+    const int f=telemetry_packet(sample(),true,64,200,30,1234,fz::FORZA_FM7_DASH_311,b,sizeof b);
+    check(f==311&&std::fabs(rd<float>(b,244)-50.0f)<1e-4f&&b[307]==4&&std::int8_t(b[308])==64,
+          "FM7 Dash: 311 bytes, Speed@244, Gear@307, consumed Steer@308");
 }
 
 void test_edges(){
     std::uint8_t b[400];
     auto c=sample();
-    c.hud_kmh_1f8=NAN;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"NaN HUD speed: no packet, not a zero");
-    c.hud_kmh_1f8=-1.0f;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"negative HUD speed: no packet");
-    c.hud_kmh_1f8=INFINITY;check(telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"infinite HUD speed: no packet");
-    c=sample();c.gear_208=0;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    c.hud_kmh_1f8=NAN;check(telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"NaN HUD speed: no packet, not a zero");
+    c.hud_kmh_1f8=-1.0f;check(telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"negative HUD speed: no packet");
+    c.hud_kmh_1f8=INFINITY;check(telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b)==0,"infinite HUD speed: no packet");
+    c=sample();c.gear_208=0;telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
     check(b[319]==1,"gear 0 is sent as 1 (Forza shows 0 as reverse)");
-    c.gear_208=12;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);check(b[319]==10,"gear clamped to 10");
-    c=sample();c.speed_1c4=5.0f;c.gear_208=1;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    c.gear_208=12;telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);check(b[319]==10,"gear clamped to 10");
+    c=sample();c.speed_1c4=5.0f;c.gear_208=1;telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
     check(rd<float>(b,16)==TelemetryMaxRpm,"RPM clamped to the maximum");
-    c=sample();c.steer_1d0=NAN;c.lateral_264=NAN;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
-    check(b[320]==0&&std::isfinite(rd<float>(b,20)),"non-finite steering / lateral become 0, never NaN in the packet");
-    c=sample();c.lateral_264=3.0e38f;c.lateral_268=3.0e38f;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
-    check(std::isfinite(rd<float>(b,20)),"two large lateral terms: the sum is sanitized too (romi 27774)");
-    c=sample();c.surface_24c[2]=4;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    c=sample();c.speed_delta_1d0=NAN;c.edge_distance_264=NAN;c.edge_distance_268=3.0e38f;
+    telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(b[320]==0&&rd<float>(b,20)==0.0f,"neutral consumed steering and unavailable accX reject speed delta and edge distances");
+    telemetry_packet(c,true,127,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(std::int8_t(b[320])==127&&rd<float>(b,20)==0.0f,"positive consumed steering ignores nonfinite legacy fields");
+    telemetry_packet(c,true,-127,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(std::int8_t(b[320])==-127,"negative consumed steering ignores nonfinite legacy fields");
+    telemetry_packet(c,true,500,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(std::int8_t(b[320])==127,"consumed steering clamps to the Forza signed byte range");
+    c=sample();c.surface_24c[2]=4;telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
     bool all=true;for(int i=0;i<4;++i)all=all&&rd<float>(b,148+i*4)==1.0f;check(all,"rough surface: SurfaceRumble 1 on all wheels@148");
-    c=sample();c.surface_24c[0]=1;telemetry_packet(c,true,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
-    check(rd<float>(b,148)==0.0f,"asphalt (1): no rumble");
-    check(telemetry_packet(sample(),true,0,0,0,fz::FORZA_HORIZON_324,b,100)==0,"a short buffer: nothing");
+    c=sample();c.surface_24c[0]=1;telemetry_packet(c,true,0,0,0,0,fz::FORZA_HORIZON_324,b,sizeof b);
+    check(rd<float>(b,148)==0.0f,"road-result 1: inherited heuristic has no rumble");
+    check(telemetry_packet(sample(),true,0,0,0,0,fz::FORZA_HORIZON_324,b,100)==0,"a short buffer: nothing");
     const int p=telemetry_parked_packet(77,fz::FORZA_HORIZON_324,b,sizeof b);
     check(p==324&&rd<std::int32_t>(b,0)==0&&rd<float>(b,8)==TelemetryMaxRpm&&b[319]==1&&rd<float>(b,256)==0.0f,
           "parked: IsRaceOn 0, the same engine constants, gear 1, speed 0");
@@ -71,8 +78,8 @@ void test_car_and_modes(){
     for(unsigned i=0;i<4;++i)wr<std::uint32_t>(car,0x24c+i*4,i+1);
     wr<float>(car,0x264,0.5f);wr<float>(car,0x268,-0.25f);
     const auto c=telemetry_car(car.data(),car.size());
-    check(c.flags_4==0x11u&&c.state_8==0x22u&&c.impact_178==3.0f&&c.speed_1c4==0.7f&&c.steer_1d0==0.1f&&c.prev_gear_1d8==2u,"car fields 4..1D8");
-    check(c.hud_kmh_1f8==123.0f&&c.gear_208==3u&&c.surface_24c[3]==4u&&c.lateral_264==0.5f&&c.lateral_268==-0.25f,"car fields 1F8..268");
+    check(c.flags_4==0x11u&&c.state_8==0x22u&&c.prior_speed_178==3.0f&&c.speed_1c4==0.7f&&c.speed_delta_1d0==0.1f&&c.prev_gear_1d8==2u,"car fields 4..1D8 keep their actual producer meanings");
+    check(c.hud_kmh_1f8==123.0f&&c.gear_208==3u&&c.surface_24c[3]==4u&&c.edge_distance_264==0.5f&&c.edge_distance_268==-0.25f,"car fields 1F8..268 keep the edge distances");
     check(telemetry_car(car.data(),0x200).gear_208==0u,"a short car buffer reads nothing");
     for(const std::uint32_t m:{13u,16u,18u,19u,20u})check(telemetry_in_gameplay(m),"gameplay mode "+std::to_string(m));
     for(const std::uint32_t m:{0u,3u,32u,17u})check(!telemetry_in_gameplay(m),"not gameplay "+std::to_string(m));
@@ -82,6 +89,8 @@ void test_car_and_modes(){
           "shared block: version, packetId, speed@8, gear@28, prevGear@32");
     check(rd<std::uint32_t>(b,36)==0x22u&&rd<std::uint32_t>(b,40)==0x11u&&rd<std::uint32_t>(b,44)==1u&&rd<std::uint32_t>(b,68)==16u&&b[72]==1,
           "shared block: stateFlags@36, carFlags@40, surface@44, gameMode@68, isInGameplay@72");
+    check(rd<float>(b,12)==0.1f&&rd<float>(b,16)==0.5f&&rd<float>(b,20)==-0.25f&&rd<float>(b,24)==3.0f,
+          "v1 raw-offset ABI stays exact although its steering/lateral/impact labels are misleading");
 }
 
 void test_settings(){

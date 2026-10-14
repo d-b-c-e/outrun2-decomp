@@ -31,7 +31,7 @@ void send(const std::uint8_t* p,int n){
     if(t.sock==INVALID_SOCKET||n<=0)return;
     if(sendto(t.sock,reinterpret_cast<const char*>(p),n,0,reinterpret_cast<const sockaddr*>(&t.to),sizeof t.to)==n)++t.sent;else ++t.failed;
 }
-void frame(const platform::NativeInputState& in,const platform::NativeRuntimeContext* rt){
+void frame(const platform::NativeRuntimeContext* rt){
     const std::uint32_t mode=rt?rt->mode_state.current:0u;
     const bool gameplay=rt&&telemetry_in_gameplay(mode);
     TelemetryCar car;
@@ -40,18 +40,20 @@ void frame(const platform::NativeInputState& in,const platform::NativeRuntimeCon
     std::uint8_t buf[dbce::forza::FORZA_HORIZON_324];
     const auto ms=std::uint32_t(GetTickCount());
     if(gameplay){
-        // In the race the values the game consumed (7D6810: whichever device drives); before it, the devices' own.
-        const bool race=mode==16u||mode==18u;
+        // GAME's 7D6810 values are what the game consumed, whichever device drove. START and the pause menu clear
+        // car input (operation_input_49fad0); goal/time-up have no qualified consumed input, so report neutral.
+        const bool race=mode==16u;
         const auto& a=rt->race.car_world.analog_7d6810.current;
-        const std::uint8_t accel=race?byte(a[1]):byte(in.accelerator),brake=race?byte(a[2]):byte(in.brake);
-        const int n=telemetry_packet(car,true,accel,brake,ms,t.s.layout,buf,int(sizeof buf));
+        const std::int32_t steer=race?a[0]:0;
+        const std::uint8_t accel=race?byte(a[1]):0,brake=race?byte(a[2]):0;
+        const int n=telemetry_packet(car,true,steer,accel,brake,ms,t.s.layout,buf,int(sizeof buf));
         if(n)send(buf,n);
         else{++t.skipped;if(!t.hud_bad_logged){t.hud_bad_logged=true;std::printf("telemetry: invalid HUD speed; packet skipped, not reported as zero\n");std::fflush(stdout);}}
     }else if((t.ticks++%6u)==0u)send(buf,telemetry_parked_packet(ms,t.s.layout,buf,int(sizeof buf)));   // about 10 Hz
 }
 void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(t.inner)t.inner(out,rt);
-    if(t.on)frame(out,rt);
+    if(t.on)frame(rt);
 }
 }
 

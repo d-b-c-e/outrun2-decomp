@@ -28,7 +28,7 @@ TelemetrySettings telemetry_settings(const Ini& settings,const char* env_off,con
 
 // The car (event 8, car_select.car_799d18: the PC's EVWORK_CAR) fields the mod reads.
 struct TelemetryCar {
-    float speed_1c4{},steer_1d0{},hud_kmh_1f8{},impact_178{},lateral_264{},lateral_268{};
+    float speed_1c4{},speed_delta_1d0{},hud_kmh_1f8{},prior_speed_178{},edge_distance_264{},edge_distance_268{};
     std::uint32_t flags_4{},state_8{},prev_gear_1d8{},gear_208{};
     std::uint32_t surface_24c[4]{};
 };
@@ -37,9 +37,10 @@ TelemetryCar telemetry_car(const std::uint8_t* car,std::size_t bytes);   // zero
 bool telemetry_in_gameplay(std::uint32_t mode);
 // One race packet. Speed follows the HUD (STD-009: +0x1F8 km/h / 3.6); a non-finite or negative HUD value sends nothing
 // (returns 0), never a confident zero. RPM is synthesised as the mod does (OutRun has none). Gear 0 is sent as 1
-// (Forza shows 0 as reverse). accel / brake 0..255: the values the race consumed (7D6810), so a brake light follows
-// what drives the car whichever device it is.
-int telemetry_packet(const TelemetryCar&,bool race_on,std::uint8_t accel,std::uint8_t brake,std::uint32_t ms,
+// (Forza shows 0 as reverse). Steering is the game's consumed 7D6810 channel 0 (-127..127), not car +0x1D0
+// (speed delta). Accel / brake 0..255 are consumed 7D6810 channels 1/2 in GAME; all three inputs are neutral outside
+// GAME. Physical lateral acceleration is unavailable, so Forza accX stays zero rather than using road-edge distances.
+int telemetry_packet(const TelemetryCar&,bool race_on,std::int32_t consumed_steer,std::uint8_t accel,std::uint8_t brake,std::uint32_t ms,
                      dbce::forza::Layout,std::uint8_t* out,int size);
 // Outside gameplay: IsRaceOn 0, the same engine constants, gear 1 (a fully zero packet can wedge SimHub).
 int telemetry_parked_packet(std::uint32_t ms,dbce::forza::Layout,std::uint8_t* out,int size);

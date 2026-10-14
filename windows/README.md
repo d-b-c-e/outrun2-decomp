@@ -86,12 +86,15 @@ without a change (top gear, automatic transmission).
   GOAL and TIMEUP, and a parked packet (IsRaceOn 0, the same engine constants) at about 10 Hz in the menus. The
   layout is Forza Horizon's 324 bytes (SimHub: a Forza Horizon 5 game on that port); `Layout = FM7` sends the
   311-byte FM7 Dash of the OutRun 2006 mod instead.
-- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM is synthesised from
-  speed and gear as the mod does, since OutRun has none. Accelerator and brake are what the race consumed, whichever
-  device drives.
+- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM is synthesized from
+  speed and gear as the mod does, since OutRun has none. In GAME, steering, accelerator and brake are the game's
+  consumed 7D6810 channels, whichever device drives. START/pause/goal/time-up inputs are neutral. Forza's lateral
+  acceleration stays zero (unavailable): the previously used car +0x264/+0x268 fields are road-edge distances.
 - The mod's 76-byte shared-memory block (`OutRun2006TelemetryData`, version 1) under `SharedMemName`
   (`OutRun2006Telemetry`; `none` turns it off), for its SimHub plugin. The decomp has no pad rumble, so the two
-  vibration fields stay 0.
+  vibration fields stay 0. Version 1 preserves the mod's raw-offset bytes, including legacy names that are misleading:
+  `steeringAngle` is speed delta, `lateralG1/2` are road-edge distances, and `impactForce` is prior speed. Consumers
+  must not treat those three fields as physical steering, lateral acceleration or impacts. See [the field review](docs/TELEMETRY-FIELDS.md).
 - `Enabled = false` (or the mod's `Enable = false`) turns it off. A latched test process never sends. `OR2_TELEMETRY=0`
   turns it off for unattended runs (`tests/perf/run_perf.py` sets it unless a run asks otherwise), and
   `OR2_TELEMETRY_PORT=N` sends to another port for a test's own listener. `runtime.log` names the layout and port at
