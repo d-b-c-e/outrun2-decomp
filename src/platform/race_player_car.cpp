@@ -411,7 +411,9 @@ void game_service(void* user,std::uint32_t pc){
         {const auto mode=f.game_mode();const auto stale_counter=e.i16(0xd50);
          driving::operation_input_49fad0(e,{mode,f.volume(0),f.volume(1),f.volume(2)});
          f.steer_written=game_steer_written(mode,stale_counter);return;}
-    case 0x0049fb70u:driving::control_timeup_braking_49fb70(e,W,P,race_time_44fe40(c.race.manager.state));return;   // 44FE40: race manager time 7D394C
+    case 0x0049fb70u:                                                           // 44FE40: race manager time 7D394C
+        w.timeup_44fe40=race_time_44fe40(c.race.manager.state);
+        driving::control_timeup_braking_49fb70(e,W,P,w.timeup_44fe40);return;
     case 0x004a4d20u:{
         driving::PcCheckSlipStreamInputs in{};in.network_session_active=c.start_mode.manager_state_7f94c0!=0u;
         // Events 9..31: the rival/traffic car works of the race manager block 7815A0 (stride 10F0).
@@ -556,6 +558,16 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
     try{driving::game_pl_car_ctrl_4a8330(f.e,f.parent,f.parent_state,{&f,game_service});}
     catch(const std::exception& ex){f.fail(0x4a8330u,ex.what());}
     w.stage_base_841fa4=f.parent_state.stage_denominator_base;
+    if(!f.failed)++w.completed_frames;
+    if(c.mode_state.current==0x10u){                                            // GAME: the start hold's transitions
+        const std::int32_t hold=(f.e.u32(4)&8u)?1:0;
+        if(hold!=w.last_hold){
+            if(w.hold_transition_count<w.hold_transitions.size())
+                w.hold_transitions[w.hold_transition_count]={c.frame_state.frame_counter_95af0c,c.game_mode.start_countdown,
+                    std::uint8_t(hold),c.start_mode.game_flag_780248,f.e.f32(0x1c4)};
+            ++w.hold_transition_count;w.last_hold=hold;
+        }
+    }
     if(!f.failed&&(f.e.u32(4)&0x800000u)){
         // 4A86B2..4A8703: six wheel words from the snapshot taken after 43CC20.
         const Bytes snap(f.snapshot.data(),f.snapshot.size());
