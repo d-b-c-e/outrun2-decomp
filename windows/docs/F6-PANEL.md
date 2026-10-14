@@ -1,99 +1,20 @@
 # F6 panel for the desktop build
 
-Status 2026-10-12:
-- Step 1 in code (c18a8d0) and seen in game, muted: hub `artifacts/outrun-f6-help-20261012`, the Help page at the
-  title and in the race, no closed-panel cost visible.
-- Step 3 in code: a neutral input sample while open, held keys cleared on open and close, the FFB gates zeroing in
-  the same tick, and test_panel_input.
-- Step 2 (the pages) next.
+Status at `codex/outrun-wheel-parity` `6777eb3` (2026-10-13): the native toolkit panel is integrated with OutRun's own D3D11 present path. Help, Controls, FFB, Cameras, and Telemetry are in source and were all rendered in muted disposable-copy runs. This is a source/render checkpoint, not acceptance of physical force, settings interaction, projected triples, or every telemetry field.
 
-Targets: STD-030 (the panel comes first), STD-004 (the standard shape: Simple / Advanced, the page names and order,
-F8 stops FFB), STD-017 (empty pages hidden), STD-022 (the triple selector), STD-023 (frame-rate readout), and the
-owner's ask for clean options consistent with F6 and Wheelkit. No new UI framework: the toolkit's own native panel.
-Force output stays Off by default, and the panel probes no hardware.
+## Implemented behavior
 
-## What exists
+- `windows/source/desktop_panel.cpp` uses the vendored `windows/vendor/native/panel` and ImGui code. It draws on the game's D3D11 renderer, calls `NoteFrame` each frame, and attaches the panel input hook to the game window. F6 toggles the panel; F8 and the header Stop FFB command call `ffb_stop_output`. The panel is disabled in playback processes, which show only the playback badge.
+- While F6 is open, `desktop_panel_wrap_input_filter` supplies a neutral game-input sample and clears held desktop keys on open/close. `test_panel_input` covers the input hook. The retained visual runs posted keys to the game window and opened pages through the dev channel; they did not exercise normal keyboard/mouse settings changes.
+- Every currently enabled page has content. Controls shows the Native/Shim input status, Wheelkit profile, steering sensitivity/dead zone, and the next-start manual-transmission choice. Bindings remain in Wheelkit.
+- FFB shows status, Strength, the Tweaks-derived advanced effect settings, invert, and the next-start `[FFB] Output` choice when the add-on is present or already selected. That choice never starts/stops output in the current session. Stop FFB/F8 stops the current output and tries to save `Output = none` for the next start; a failed save is reported. The force path is default-off and has no owner-attended physical qualification.
+- Cameras offers Off / Surround / Separate monitors, with the current-view status, and the separate experimental projection choice when triples are selected. The planar span is the Tweaks-parity behavior. The projected-view path remains default-off and is not qualified as three independently rendered, angle-correct views. Advanced choices include frame latency, letterboxing, and resolution from the display; changes save for the next start.
+- Telemetry offers On/Off and, under Advanced, Horizon 324-byte or FM7 311-byte layout. Source defaults to On/Horizon. Changes save for the next start. The earlier stream reached SimHub and the owner's wheel screen, but the `6777eb3` field correction has not had a live receiver/HUD comparison; see [the field review](TELEMETRY-FIELDS.md).
+- A page change uses the one-key `write_key` path to `OutRunDesktop.ini`, rolls back the displayed choice if saving fails, and says it applies at the next game start. A latched test process saves nothing. `[Panel]` view, scale, and page are panel-owned settings. The write path has unit coverage; an ordinary keyboard/mouse save through the panel has not been observed in game.
 
-- **Toolkit** `native/panel` (Dear ImGui, vendored MIT):
-  - `dbce_panel.h/.cpp`: the frame, the standard widgets and the pages in the standard order. The mod draws each
-    page body; [Panel] View / Scale / Page are kept in the mod's ini. On a three-screen span the panel sits on the
-    centre screen.
-  - `dbce_panel_input.h/.cpp`: a thread-local WH_GETMESSAGE hook on the game window's thread. F6 toggles, F8 stops
-    FFB, Esc closes. While open, keyboard, mouse and raw input go to the panel. No window-procedure change.
-  - `dbce_frame_stats.hpp`: STD-023.
-  - `dbce_overlay_d3d11.*`: a DXGI Present hook for injected mods. **Not used here**: the decomp owns its renderer.
-- **The OutRun 2006 mod's panel** (`dbce-mods-outrun-2006` `src/overlay/wheel_settings.cpp`) is the option and label
-  reference. Its pages are Setup, Controls, FFB, Cameras, Telemetry and Help. On the FFB page: Strength, then
-  Centering, Damping, Cornering load, Grip loss, Weight transfer, Wall impact, Gear shift, Road texture, Tire slip,
-  Engine idle, the lateral noise floor and Invert force, all on the mod's own [FFB] keys, which the decomp already reads
-  (`ffb_settings`).
-- **The decomp's keys** (the file Wheelkit reads, `OutRunDesktop.ini`):
-  - [Controls] (Wheelkit's, STD-033), [Wheel] SteeringSensitivity / SteeringDeadZone;
-  - [FFB] (the mod's names, plus Output = none | wheel);
-  - [Telemetry] Enabled / Port / Layout;
-  - [Window] FrameLatency / WindowedBorderless, [Graphics] / [Bugfixes] (the Tweaks keys);
-  - [Triple] Screens (zero's triples step 1).
+## Retained evidence and limits
 
-## Proposal (small reviewed commits; a first picture at the rig before polish, spike-first)
-
-1. **Vendor and a first frame.**
-   - Copy `native/panel` (panel, input, frame stats) and `native/third_party/imgui` (core plus `imgui_impl_dx11`)
-     byte-exact into `windows/vendor/panel` and `windows/vendor/imgui`: pinned hashes in a README, `-text`.
-   - `windows/source/desktop_panel.{hpp,cpp}`: its own ImGui context and DX11 backend. Each frame it runs the same
-     sequence the toolkit overlay runs (Prepare / BuildFonts, NewFrame, DrainInput, Draw, Render), restoring the
-     render targets. NoteFrame and PollDev run on every frame, open or closed.
-   - The **draw slot** is zero's file: a function pointer in `D3D11Display::present`, called with device, context,
-     back-buffer RTV and size just before the screenshot and Present. Null means nothing happens. Drawing before the
-     screenshot lets a dev-channel screenshot show the panel.
-   - AttachInput on the game window at the first frame.
-   - Only the Help page: mod name and version, the UI scale (panel-owned), frame stats.
-   - A muted visual check through the dev channel ("open help") and a WGC capture.
-2. **Pages, each control saving at once to `OutRunDesktop.ini`** (one-key update through the existing ini writer;
-   STD-017 hides pages without controls):
-   - **Cameras**: the STD-022 selector (Off / Surround / Separate monitors), its status and "applies at next start";
-     frame rate (STD-023); FrameLatency under Advanced.
-   - **Telemetry**: On/Off, Layout (Horizon 324 default / FM7 311, the owner's open question), Port, status.
-   - **FFB**: Strength and, under Advanced, the mod's sliders with its labels and keys, plus a status row (output
-     off / waiting / open / released and why, from ffb_device).
-     - The **Output** choice is not offered in v1 (physical output is owner-attended). F8 / Stop FFB is wired, since
-       it only stops: it writes Output = none and releases the device.
-     - Changes apply to the running model **only through a quiesce first** (romi 30317). ffb_configure resets its
-       state by assignment, so a live re-read calls ffb_shutdown (PanicStop, FreeDirectInput, unload) and then
-       configures again, never ffb_configure alone. v1 may simply say "applies at next start" for anything that
-       would reopen the device.
-   - **Controls**: status only (profile, revision, applied / unsupported, steering device connected), plus steering
-     sensitivity and deadzone. Bindings stay Wheelkit's; the toolkit panel has no binding capture yet.
-3. **Input while open** (UX-03): the desktop input filter neutralises the game's input sample (pad, keyboard, wheel
-   buttons and axes) while `dbce::panel::IsOpen()`. The race keeps running, as in the mod.
-
-## Rules
-
-- **Latched (test) processes**: no saves (the fence: the game folder is read-only there); the panel opens through the
-  dev channel only. A write-audit entry (latched-skip) for the save.
-- **Hot reconfigure** of FFB: quiesce first (above). Of the triples: "next start" (zero's design).
-- **Shim backend**: with `[Input] Backend = Shim` the wheel output goes through the shim's WheelFfb bridge
-  (INPUT-SHIM.md section 6, one owner at a time): the delivery opens only after the shim hands the wheel over, and
-  forces only while the steering is live through the force handle. When the output is off with Input = Shim, the FFB
-  page gives the reason and the steering wheel as the shim reads it (`shim_input_steer`: live / open / its status,
-  epoch). The Native backend is unchanged.
-- **Cameras**: Surround and Separate monitors are one planar wide view today; the page says so and never implies
-  three angled views (romi 31510).
-- **STD-019**: drawn on the centre screen, as the toolkit already does on a span.
-
-## Files
-
-Mine:
-- new `windows/source/desktop_panel.{hpp,cpp}`;
-- `windows/vendor/panel`, `windows/vendor/imgui`;
-- `windows/CMakeLists.txt` (sources);
-- one configure call in `window_desktop.cpp` (outside zero's [Triple] block and the `native_window` body);
-- the input neutralisation in `wheel_input.cpp`;
-- `write_audit.json`.
-
-Zero's: the draw slot in `xbox/source/d3d11_display.cpp`.
-
-## Questions for review
-
-1. The FFB Output choice: hidden in v1 (as proposed), or shown disabled with "owner-attended"?
-2. Page 1 first, with a muted visual check before pages 2-3, or all pages in one review?
-3. The mod has a Setup page (profile apply, device list): is it out of scope until Wheelkit's flow is settled?
+- Hub `artifacts/outrun-f6-help-20261012/README.md`: title/race Help, frame stats, open/closed frames and unchanged INI in a muted disposable copy. The race readout showed average, 1% low and worst frame; it is a readout, not a frame-pacing acceptance result.
+- Hub `artifacts/outrun-f6-pages-20261012/README.md`: Controls, FFB, Cameras and Telemetry rendered muted after Help, with frame stats in Cameras. No save was exercised; the INI was unchanged.
+- The Shim-backend page/status check is recorded in the hub at `artifacts/outrun-candidate-ac68a6f-20261013/regression/f6-ac68a6f-run1` and summarized in [ROADMAP.md](../ROADMAP.md) step 2a. Its muted “Wheel output at the next start” and “This session” labels prove UI rendering only.
+- [TRIPLE-SCREENS.md](TRIPLE-SCREENS.md) and ROADMAP step 3 separate the rig-checked planar span from the experimental projection. Physical wheel output, a three-screen F6 interaction run, and normal keyboard/mouse saving remain open. The muted page checks do not qualify those behaviors.

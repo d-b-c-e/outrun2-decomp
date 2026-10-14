@@ -81,8 +81,10 @@ go upstream as small pull requests (first: `tweaks-exe`).
      - The physics readers of +0x202 are continuous in that i16, with 0x7f00 as full lock: pc_steering.cpp:57 and
        :78 (the 0x7000 correction), :106 (|+0x202| / 32512), pc_common_control.cpp:93, :237 and :1560.
      - The wheel arrives at 16 bits (shim record word 0x0E = lround(n*32767)).
-     - FFB (ffb_outrun.cpp:20) and telemetry (telemetry_forza.cpp:43) read the car's float +0x1D0 / +0x1D4, never
-       +0x202.
+     - The legacy FFB adapter still reads car +0x1D0/+0x1D4 as steering/rate, although those fields are speed
+       deltas; Guru's separate source audit is at hub `artifacts/outrun-ffb-source-audit-20261013`. Since `6777eb3`,
+       Forza telemetry instead takes the GAME-consumed `analog_7d6810.current[0]` channel; shared-memory v1 still
+       copies raw +0x1D0 for byte compatibility. The game writes the consumed steering channel to car +0x202.
      - step_native_gameplay (pc_vehicle_control.cpp:293, clamped -128..127) has no caller.
      - The slice: on the analog path only, +0x202 = lround(steer*0x7f00), clamped. At k/127 that equals the PC's k<<8.
        current[0] and the consumed capture stay byte-identical. A latched run forces it off, and a recorded session
