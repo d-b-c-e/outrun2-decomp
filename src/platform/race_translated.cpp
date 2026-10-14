@@ -332,7 +332,10 @@ std::uint32_t translated_call_list(PcRaceMemory& m,const PcRaceService& service,
         }
         if(d3dx_import(s,c,target))return;
         if(s.module->matrices)matrices_in(s);
-        if(s.module->special&&s.module->special(c,target)){if(s.module->matrices)matrices_out(s);return;}
+        bool handled=s.module->special&&s.module->special(c,target);
+        for(const auto* n=s.module->next;!handled&&n;n=n->next)
+            handled=n->special&&n->special(c,target);
+        if(handled){if(s.module->matrices)matrices_out(s);return;}
         PcRaceCall k{};k.pc=target;k.eax=c.eax;k.ecx=c.ecx;k.argc=std::uint32_t(k.args.size());
         for(unsigned i=0;i<k.args.size();++i)k.args[i]=translated_arg(c,i);
         // Tweaks' C2C bubble/rank hooks sit in generated bulk_tr.cpp. Match their external
