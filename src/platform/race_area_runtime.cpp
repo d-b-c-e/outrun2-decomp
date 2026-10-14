@@ -751,6 +751,9 @@ void hook_colours(NativeRuntimeContext& c,NativeRaceAreaRuntime& o,PcSceneRender
 std::uint32_t execute(NativeRaceAreaRuntime& o,Service& sv,PcSceneRenderer& r,const std::vector<PcVehicleDrawCall>& calls){
     auto& q=r.queue_context();auto& f=r.flush_context();
     std::uint32_t objects=0;
+    const auto depth=q.matrices.depth;
+    const auto offset=q.matrices.current_offset;
+    try{
     driving::pc_matrix_push(q.matrices);
     auto load=[&](const PcVehicleDrawCall& call){for(unsigned k=0;k<64;++k)q.matrices.current().put8(k,call.matrix[k]);};
     for(const auto& call:calls){
@@ -793,6 +796,12 @@ std::uint32_t execute(NativeRaceAreaRuntime& o,Service& sv,PcSceneRenderer& r,co
         }
     }
     driving::pc_matrix_pop(q.matrices);
+    }catch(...){
+        // The caller may record a failed draw list and continue with another
+        // cube face/frame. Discard this executor's unfinished matrix nesting.
+        q.matrices.depth=depth;q.matrices.current_offset=offset;
+        throw;
+    }
     o.total_draws+=std::uint32_t(calls.size());
     return objects;
 }
