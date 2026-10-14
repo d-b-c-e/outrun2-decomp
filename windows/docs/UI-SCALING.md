@@ -187,6 +187,11 @@ ints.
     `test_triple_screens` and `OutRunDesktop` passed; CTest `triple_screens` passed 1/1. Logs are in the coordination
     hub at `artifacts/outrun-c2c-ui-20261014/{configure,build,focused-test}.log`. The fixture exercises the bridge
     helper with the source-derived call table; it does not execute a real translated caller or verify rendered C2C UI.
+  - **Real-dispatch evidence, 2026-10-14 (`9479e1e`):** `test_triple_screens` rebuilt and passed CTest 1/1 with the
+    actual generated `F_4FC830` caller routed through `translated_call` and the production external dispatcher. Its
+    first three 465860 calls shift the x argument by 80 in mode 1; all other arguments and the nearby unlisted 4653C0
+    call are unchanged. Logs: `artifacts/outrun-c2c-ui-20261014/{real-dispatch-build,real-dispatch-test}.log` in the
+    coordination hub. Other translated callers and rendered C2C placement still await qualification.
 - **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
   decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
 ## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
