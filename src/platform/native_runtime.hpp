@@ -210,6 +210,7 @@ struct NativeStartModeState {
     std::uint32_t pending_1ee{};
     std::uint32_t stage3_counter{};
     std::uint32_t last_missing_service{};
+    std::uint32_t request_placement_handle_44e590{}; // stage-5 variant-5 46C380 / 4F03A0 local
 
     std::uint32_t manager_state_7f94c0{};
     std::uint32_t render_mode_754b0c{};

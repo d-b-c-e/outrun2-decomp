@@ -861,9 +861,11 @@ void native_race_area_teardown(NativeRuntimeContext& c,std::uint32_t pc,std::uin
 }
 // One AREA owner service for another module (the arcade ending's 448AD0 requests): the
 // call runs on the AREA owner's own model; a missing service throws.
-std::uint32_t native_race_area_call(NativeRuntimeContext& c,PcSceneRenderer* r,const PcRaceCall& k){
+std::uint32_t native_race_area_call(NativeRuntimeContext& c,PcSceneRenderer* r,const PcRaceCall& k,
+                                   std::uint32_t* start_local){
     auto& o=native_race_area(c);
     rebuild(c,o,r);
+    if(start_local)o.memory.map(PcRaceLocal44E590,reinterpret_cast<std::uint8_t*>(start_local),sizeof(*start_local));
     Service sv{c,o,r};
     std::array<std::uint8_t,0x40> mb{};driving::PcMatrixStack st{Bytes(mb.data(),mb.size())};
     PcRaceContext ctx{o.memory,st,[&sv](const PcRaceCall& q){return sv(q);},nullptr};

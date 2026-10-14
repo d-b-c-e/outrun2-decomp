@@ -1129,11 +1129,13 @@ std::uint32_t requests_stage_script_4829d0(NativeRuntimeContext& c,PcRaceContext
 // methods 481xxx / 482xxx / 4Fxxxx / 50xxxx with ECX = 7F9460) over the traffic module's memory
 // (its block and heap mapped there). The translated originals until the native port.
 bool native_race_requests_call(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,std::uint32_t pc,
-                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx){
+                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx,
+                               std::uint32_t* start_local){
     auto& t=native_race_traffic(c);
     if(t.latched)return false;
     bool done=false;
     const bool ok=run_traffic(c,matrices,[&](PcRaceContext& ctx){
+        if(start_local)ctx.m.map(PcRaceLocal44E590,reinterpret_cast<std::uint8_t*>(start_local),sizeof(*start_local));
         if(pc==0x46c240u){eax=requests_stage_script_4829d0(c,ctx,matrices);done=true;return;}
         if(pc==0x46c4d0u){eax=requests_resources_481590(c,ctx.m);done=true;return;}
         PcRaceCall k{};k.pc=pc;k.ecx=ecx;k.argc=std::uint32_t(args.size());

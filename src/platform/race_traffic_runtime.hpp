@@ -99,7 +99,8 @@ void native_race_requests_map(NativeRuntimeContext&,PcRaceMemory&);
 // The C2C request manager 7F9460 (variant 5): one of its entries; false when the traffic
 // module is latched or the call faulted (latched then).
 bool native_race_requests_call(NativeRuntimeContext&,driving::PcMatrixStack&,std::uint32_t pc,
-                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx=0);
+                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx=0,
+                               std::uint32_t* start_local=nullptr);
 bool native_race_network_call(NativeRuntimeContext&,driving::PcMatrixStack&,std::uint32_t pc,
                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,
                               std::uint32_t ecx=0,std::uint32_t* scratch=nullptr);
