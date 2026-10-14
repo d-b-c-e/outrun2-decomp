@@ -331,6 +331,7 @@ add_test(NAME shim_first_loop_publish_reader COMMAND ${Python3_EXECUTABLE} -I -B
     $<TARGET_FILE:control_publish>)
 add_test(NAME perf_harness COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_run_perf.py)
 add_test(NAME perf_observed_keys COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_observed_keys.py)
+add_test(NAME perf_route_gate COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf/test_route_gate.py)
     # P21g: the teardown audit of the worker-reachable shim code, and its mutations.
     add_test(NAME teardown_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR})
     add_test(NAME teardown_audit_mutations COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/teardown_audit.py ${PROJECT_SOURCE_DIR} --mutations)
