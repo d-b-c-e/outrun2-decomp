@@ -6,6 +6,7 @@
 #include "platform/frontend_profiles.hpp"
 #include "platform/vehicle_constructor_data.hpp"
 #include "driving/pc_car_services.hpp"
+#include "driving/pc_car_services_net.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/pc_address_view.hpp"
 #include "driving/pc_driving_control.hpp"
@@ -444,7 +445,7 @@ void game_service(void* user,std::uint32_t pc){
         driving::DrivingControlInputs in{};
         in.analog_channel_1=f.volume(1);in.input_inhibited=c.event_function36.title_game_state_780270!=0u;
         in.shift_up=f.pressed(0x80u)!=0u;in.shift_down=f.pressed(0x40u)!=0u;
-        in.road_mu.service_available=c.start_mode.manager_state_7f94c0!=0u;      // offline: constants 1.0 / 0.7
+        in.road_mu=race_player_road_mu(c);                                     // 500B30: manager 46C450, else 1.0 / 0.7
         in.running_resistance=RaceRunningResistance;in.reaction_blend_parameter=P.f32(0x20a8);
         driving::driving_control(e,W,P,t,in);return;}
     case 0x004a8100u:{
@@ -531,6 +532,18 @@ bool race_car_cbw_coli_wall_5041b0(NativeRuntimeContext& c,driving::PcMatrixStac
         w.rotation_5e302c=wall.rebound.response.rotation_odd;w.rotation_5e3030=wall.rebound.response.rotation_even;
         return true;
     }catch(const std::exception& ex){error=ex.what();return false;}
+}
+driving::RoadMuSource race_player_road_mu(NativeRuntimeContext& c){
+    driving::RoadMuSource source{};
+    source.service_available=c.start_mode.manager_state_7f94c0!=0u;             // 55A930: the manager's +60
+    if(source.service_available){
+        // 46C450: mov ecx,7F9460; call 4FC390. The manager block stays valid (and keeps the
+        // value its 481250 init wrote) after the traffic module latches on another service.
+        auto& requests=native_race_traffic(c).requests_7f9460;
+        source.context=requests.data()+0x764cu;
+        source.lookup=driving::pc_manager_road_mu_lookup;
+    }
+    return source;
 }
 bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,bool direct_dispatch){
     auto& s=c.event_function36.car_select;auto& w=c.race.car_world;

@@ -2,6 +2,7 @@
 #include "platform/race_traffic_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_player_car.hpp"
+#include "driving/pc_wheel_dynamics.hpp"
 #include "platform/world_source_pack.hpp"
 #include "platform/course_collision_pack.hpp"
 #include "platform/course_world_runtime.hpp"
@@ -73,6 +74,27 @@ int main(int argc,char** argv){
             "44C220 refuses a missing selected secondary descriptor");
     require(course_field_44c220(nullptr,0u,nullptr,0u,16u,invalid_field)&&invalid_field==0u,
             "44C220 out-of-range default does not dereference either descriptor");
+    {   // GetRoadMu 500B30 for the player car (DrivingControl 502C90): while 55A930 ([7F94C0]) is set,
+        // 46C450 -> 4FC390 on the C2C request manager's road Mu +764C, with the lookup bound (the
+        // trace-run-1605 fault was "road Mu service marked available without lookup").
+        auto mu_storage=std::make_unique<NativeRuntimeContext>();
+        auto& mu_runtime=*mu_storage;
+        require(!race_player_road_mu(mu_runtime).service_available,"road Mu service is off without the C2C request manager");
+        mu_runtime.start_mode.manager_state_7f94c0=1u;
+        auto& block=native_race_traffic(mu_runtime).requests_7f9460;
+        const float manager_mu=0.9f;std::memcpy(block.data()+0x764cu,&manager_mu,4u);
+        const auto source=race_player_road_mu(mu_runtime);
+        require(source.service_available&&source.lookup!=nullptr&&source.context==block.data()+0x764cu,
+                "road Mu is the request manager's +764C through 4FC390");
+        std::vector<std::uint8_t> event(0x10f0u),work(0x900u);
+        auto wheels=outrun::driving::embedded_wheels(outrun::driving::Bytes(work.data(),work.size()));
+        wheels[0].put32(0x14,2u);wheels[1].put32(0x14,4u);wheels[2].put32(0x14,2u);wheels[3].put32(0x14,4u);
+        outrun::driving::get_road_mu(outrun::driving::Bytes(event.data(),event.size()),outrun::driving::Bytes(work.data(),work.size()),source);
+        // 4FC390: surface 2 -> the manager Mu (fallback 1.0); 4 -> 0.9 <= 0.95 gives 1.5 (fallback 0.7).
+        require(wheels[0].f32(0xe8)==manager_mu&&wheels[2].f32(0xe8)==manager_mu&&
+                wheels[1].f32(0xe8)==1.5f&&wheels[3].f32(0xe8)==1.5f,
+                "player-car wheel Mu follows the request manager's 4FC390, not the fallback constants");
+    }
     auto bytes=synthetic();CourseAssetPack pack{};std::string error;
     require(parse_course_asset_pack(bytes.data(),bytes.size(),pack,&error),"valid synthetic OR2CRS3");
     require(pack.descriptors.primary_count==66u&&pack.descriptors.secondary_count==77u&&pack.course_blob.size()==CourseCvtBlobBytes&&pack.descriptors.world_resource_fields_present,"course payload inventory");
