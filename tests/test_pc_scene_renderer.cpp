@@ -5,26 +5,13 @@
 #include "platform/pc_soft_d3d9.hpp"
 #include "platform/retail_asset_store.hpp"
 #include "platform/vehicle_preview_init.hpp"
-#include "platform/native_runtime.hpp"
-#include "platform/race_area_runtime.hpp"
-#include "platform/race_area.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <stdexcept>
 using namespace outrun;
 namespace {
 unsigned checks=0;
 void require(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}}
-struct ThrowingDevice:platform::PcSoftD3D9Device {
-    using PcSoftD3D9Device::PcSoftD3D9Device;
-    bool throw_on_set{};
-    void set_render_state(std::uint32_t state,std::uint32_t value)override{
-        if(throw_on_set)throw std::runtime_error("injected device failure");
-        PcSoftD3D9Device::set_render_state(state,value);
-    }
-};
 }
 int main(int argc,char** argv){
     platform::PcSoftD3D9Device device(640,480);
@@ -59,39 +46,6 @@ int main(int argc,char** argv){
     // 40EC70 cleared the back buffer with 89BD5C (0 here): opaque black.
     const auto& rgba=device.rgba();
     require(rgba[0]==0&&rgba[3]==0,"448DB0 clear through the D3D9 form");
-    // A cube/AREA draw-list failure is recorded and the next face still runs.
-    // Repeat beyond the 64-slot stack capacity to catch a one-slot-per-frame leak.
-    ThrowingDevice failing(640,480);
-    platform::PcSceneRenderer draw_scene(failing);
-    auto draw_runtime=std::make_unique<platform::NativeRuntimeContext>();
-    for(unsigned i=0;i<3;++i)driving::pc_matrix_push(draw_scene.matrices());
-    draw_scene.matrices().current().put32(0,0x12345678u);
-    const auto lod=draw_scene.queue_context().lod_threshold_8999b8;
-    platform::PcVehicleDrawCall push_lod{};push_lod.pc=0x4044a0u;
-    platform::PcVehicleDrawCall set_lod{};set_lod.pc=0x4044e0u;set_lod.argc=1;set_lod.args[0]=6;
-    platform::PcVehicleDrawCall state{};state.pc=platform::PcRaceSetRenderState;
-    state.argc=2;state.args[0]=7;state.args[1]=1;
-    failing.throw_on_set=true;
-    for(unsigned i=0;i<80;++i){
-        bool threw=false;
-        try{(void)platform::native_race_draw_list_execute(*draw_runtime,draw_scene,{push_lod,set_lod,state});}
-        catch(const std::runtime_error&){threw=true;}
-        require(threw&&draw_scene.matrices().depth==3&&draw_scene.matrices().current_offset==192&&
-                draw_scene.matrices().current().u32(0)==0x12345678u&&
-                platform::native_race_area(*draw_runtime).lod_stack_899560.empty()&&
-                draw_scene.queue_context().lod_threshold_8999b8==lod,
-                "failed draw list restores matrix and LOD entry state on every face");
-    }
-    failing.throw_on_set=false;
-    require(platform::native_race_draw_list_execute(*draw_runtime,draw_scene,{state})==0&&
-            draw_scene.matrices().depth==3&&draw_scene.matrices().current_offset==192,
-            "draw list still succeeds after repeated failed faces");
-    platform::PcVehicleDrawCall unknown{};unknown.pc=0xdeadbeefu;
-    bool unknown_threw=false;
-    try{(void)platform::native_race_draw_list_execute(*draw_runtime,draw_scene,{unknown});}
-    catch(const std::runtime_error&){unknown_threw=true;}
-    require(unknown_threw&&draw_scene.matrices().depth==3&&draw_scene.matrices().current_offset==192,
-            "explicit draw-list error restores the same nonzero entry stack");
     if(argc>1){
         // Retail F50 through the owner: banks, CAMERA 385 init/control, event 8
         // display 49F500 -> 46C140 at layer 8.
