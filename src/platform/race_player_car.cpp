@@ -119,9 +119,10 @@ struct Frame {
     int entry_exceptions=std::uncaught_exceptions();
     ~Frame(){
         if(!failed&&std::uncaught_exceptions()<=entry_exceptions)return;
-        driving::pc_matrix_trace_scope("car",c.frame_state.frame_counter_95af0c,c.mode_state.current,w.last_error_pc,8u,
-            entry_depth,entry_offset,m,failed?w.last_error.c_str():"exception");
+        const driving::PcMatrixStack left=m;                   // restore first; the report may allocate
         m.depth=entry_depth;m.current_offset=entry_offset;
+        try{driving::pc_matrix_trace_scope("car",c.frame_state.frame_counter_95af0c,c.mode_state.current,w.last_error_pc,8u,
+            entry_depth,entry_offset,left,failed?w.last_error.c_str():"exception");}catch(...){}
     }
 };
 // EXE data tables of the wall/crash paths (embedded ranges, read-only).

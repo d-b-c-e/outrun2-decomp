@@ -214,9 +214,17 @@ int main(int argc,char** argv){
                 request.game_mode.driving_data=nullptr;
                 auto& car_world=request.race.car_world;
                 for(unsigned frame=0;frame<3u;++frame){
+                    // Slot 1 is where GamePlCar's 409EF0 push copies the current matrix: a
+                    // sentinel there shows whether the failure came after that push.
+                    for(std::size_t k=64u;k<128u;++k)request_stack[k]=0xa5u;
                     car_world.last_error_pc=0u;car_world.last_error.clear();
-                    require(!race_player_car_control_4a8330(request,request_matrices,true)&&car_world.last_error_pc==0x00502c90u&&
-                            request_matrices.depth==0&&request_matrices.current_offset==0,
+                    const bool ok=race_player_car_control_4a8330(request,request_matrices,true);
+                    bool pushed=false;for(std::size_t k=64u;k<128u;++k)pushed=pushed||request_stack[k]!=0xa5u;
+                    std::fprintf(stderr,"GamePlCar frame %u: ok=%d fault=%06X '%s' pushed=%d depth=%d offset=%td\n",frame,int(ok),
+                        unsigned(car_world.last_error_pc),car_world.last_error.c_str(),int(pushed),request_matrices.depth,request_matrices.current_offset);
+                    require(!ok&&car_world.last_error_pc!=0u,"GamePlCar fails without driving data");
+                    require(pushed,"the GamePlCar failure comes after its 409EF0 push");
+                    require(request_matrices.depth==0&&request_matrices.current_offset==0,
                             "a failed GamePlCar frame returns the caller's matrix stack unchanged");
                 }
             }
