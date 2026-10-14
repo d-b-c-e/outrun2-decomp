@@ -202,6 +202,7 @@ add_test(NAME race_view_note COMMAND test_race_view_note)
 # (OR2_RACE_MANAGER_REPLAY=<file>); run manually / under qemu on other hosts.
 add_executable(test_race_manager_replay tests/test_race_manager_replay.cpp src/platform/race_manager.cpp)
 target_link_libraries(test_race_manager_replay PRIVATE outrun_driving)
+add_test(NAME countdown_timer COMMAND test_race_manager_replay --countdown)
 add_executable(test_car_base_shadow tests/test_car_base_shadow.cpp)
 target_link_libraries(test_car_base_shadow PRIVATE outrun_native_runtime)
 add_test(NAME car_base_shadow COMMAND test_car_base_shadow)

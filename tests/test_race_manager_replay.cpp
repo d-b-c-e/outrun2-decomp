@@ -17,7 +17,7 @@ std::uint32_t u(float x){std::uint32_t v;std::memcpy(&v,&x,4);return v;}
 // Replay services: only the values the replayed paths read are scripted.
 // Any other callee reaching here means the replay setup is wrong.
 struct Replay final:RaceManagerServices{
-    std::uint32_t o3{},o4{};std::uint16_t end{};bool bad=false;
+    std::uint32_t o3{},o4{};std::uint16_t end{};bool bad=false,countdown=false;
     void no(){bad=true;}
     void pc_46fab0()override{no();}
     void pc_47dac0()override{no();}
@@ -66,9 +66,9 @@ struct Replay final:RaceManagerServices{
     void pc_476760(RaceEventWork)override{no();}
     std::uint32_t pc_456dc0(std::uint32_t,std::uint32_t&,std::uint32_t)override{no();return 0;}
     std::uint16_t pc_49b2d0()override{return 0;}
-    std::uint32_t pc_456d50()override{no();return 0;}
+    std::uint32_t pc_456d50()override{if(!countdown)no();return 0;}
     std::int32_t pc_456d40()override{no();return 0;}
-    std::uint32_t pc_456de0(std::int32_t)override{no();return 0;}
+    std::uint32_t pc_456de0(std::int32_t)override{if(!countdown)no();return 0;}
     std::uint16_t pc_43d470(std::uint32_t)override{return end;}
     void pc_4aeef0(std::uint32_t,std::uint32_t,float)override{}
     void pc_458450()override{}
@@ -84,8 +84,42 @@ struct Replay final:RaceManagerServices{
     void pc_48b3d0()override{no();}
     void pc_467e00()override{no();}
 };
+
+// Exercise the production timer with the Tweaks flag in both places that read it.
+// Keep the clock positive so this checks the countdown rule, not the unrelated
+// TIMEUP transition or saved-game service's expiry policy.
+int countdown_test(){
+    struct Case {int mode,variant;bool disable;};
+    const Case cases[]={{0x10,0,false},{0x10,0,true},
+                        {0x12,0,false},{0x12,0,true},
+                        {0x13,0,false},{0x13,0,true},
+                        {0x10,4,false},{0x10,4,true},
+                        {0,4,false},{0,4,true}};
+    unsigned failures=0;
+    for(const auto& c:cases){
+        RaceManagerState st{};RaceManagerWorld w{};Replay s;
+        std::vector<std::uint8_t> car(0x1000,0);
+        w.event_work_799b38[8]=car.data();
+        w.mode_78026c=c.mode;w.variant_780258=c.variant;
+        w.time_decrement_637911=c.disable?0:1;
+        st.time_7d394c=120;s.countdown=true;
+        for(int frame=0;frame<30;++frame)race_check_game_timer_450ac0(st,w,s);
+        const int expected=c.disable?120:90;
+        if(st.time_7d394c!=expected||st.total_frames_7d39dc!=30||
+           st.stage_frames_7d3930!=30||s.bad){
+            std::fprintf(stderr,"countdown mode=%d variant=%d disable=%d: time=%d total=%u stage=%u unexpected=%d (expected time=%d)\n",
+                c.mode,c.variant,int(c.disable),st.time_7d394c,st.total_frames_7d39dc,
+                st.stage_frames_7d3930,int(s.bad),expected);
+            ++failures;
+        }
+    }
+    std::printf("{\"routine\":\"countdown_timer\",\"cases\":%zu,\"failures\":%u}\n",
+        sizeof(cases)/sizeof(cases[0]),failures);
+    return failures?1:0;
+}
 }
 int main(int argc,char** argv){
+    if(argc==2&&std::strcmp(argv[1],"--countdown")==0)return countdown_test();
     if(argc<2){std::fprintf(stderr,"usage: %s <replay dump>\n",argv[0]);return 2;}
     std::ifstream in(argv[1],std::ios::binary);std::uint32_t head[5]{};
     if(!in.read(reinterpret_cast<char*>(head),20)||head[0]!=0x50524d52u){std::fprintf(stderr,"bad replay dump\n");return 2;}
