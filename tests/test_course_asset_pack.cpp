@@ -3,6 +3,7 @@
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_player_car.hpp"
 #include "driving/pc_wheel_dynamics.hpp"
+#include "driving/pc_x87.hpp"
 #include "platform/world_source_pack.hpp"
 #include "platform/course_collision_pack.hpp"
 #include "platform/course_world_runtime.hpp"
@@ -220,6 +221,35 @@ int main(int argc,char** argv){
                 require(native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&!traffic.latched&&
                         request_matrices.depth==0&&request_matrices.current_offset==0,
                         "repeated variant-5 request control keeps the matrix stack balanced");
+            }
+            {   // 482140 in GAME ([78026C] 0x10): +18C += [5B0320] (2pi/30), 449470 wraps it to [-pi,pi]
+                // (argument slot, then fld) and 449360's translated fsin stores +190. The phases cross
+                // pi, need two subtractions, cross -pi, or are NaN (both loops skipped).
+                const auto mode=request.mode_state.current;
+                request.mode_state.current=0x10u;
+                auto& block=traffic.requests_7f9460;
+                const std::uint32_t step_bits=0x3e567750u;   // [5B0320]
+                float step;std::memcpy(&step,&step_bits,4u);
+                for(const float phase:{0.5f,3.0f,10.0f,-3.5f,std::nanf("")}){
+                    std::memcpy(block.data()+0x18cu,&phase,4u);
+                    request.race.clock.time_842110+=1.f/60.f;
+                    constexpr float pi=3.14159274101257324f,two_pi=6.28318548202514648f;
+                    float wrapped=phase+step;
+                    while(wrapped>pi)wrapped-=two_pi;
+                    while(-pi>wrapped)wrapped+=two_pi;
+                    const float sine=outrun::driving::x87_float(outrun::driving::x87_sin(outrun::driving::X87(wrapped)));
+                    const bool ran=native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&!traffic.latched;
+                    float got_phase,got_sine;
+                    std::memcpy(&got_phase,block.data()+0x18cu,4u);std::memcpy(&got_sine,block.data()+0x190u,4u);
+                    const bool same=std::isnan(phase)?std::isnan(got_phase)&&std::isnan(got_sine):
+                        got_phase==wrapped&&got_sine==sine&&-pi<=got_phase&&got_phase<=pi;
+                    if(!ran||!same)std::fprintf(stderr,"GAME request phase %g: ran=%d latched=%d fault=%X phase %g/%g sine %g/%g\n",
+                        double(phase),int(ran),int(traffic.latched),unsigned(traffic.fault),double(got_phase),double(wrapped),
+                        double(got_sine),double(sine));
+                    require(ran&&same&&request_matrices.depth==0&&request_matrices.current_offset==0,
+                            "GAME request control wraps its oscillator phase (449470) and stores its x87 sine (449360)");
+                }
+                request.mode_state.current=mode;
             }
             {   // GamePlCar (4A8330) on the loaded course without driving data: 502C90 fails after the
                 // parent's 409EF0 push and the gated children then skip its 40A010. Every failed frame
