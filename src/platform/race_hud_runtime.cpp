@@ -552,6 +552,12 @@ std::uint32_t native_race_hud_voice_45bd30(NativeRuntimeContext& c,std::int32_t 
     drain_sounds(c,o);
     return r;
 }
+void native_race_hud_voice_pump_45bcd0(NativeRuntimeContext& c){
+    auto& o=native_race_hud(c);
+    NaviVoiceServices v;v.time_842110=c.race.clock.time_842110;v.sounds_424940=&o.pending_sounds;
+    navi_voice_pump_45bcd0(o.voice,v);
+    drain_sounds(c,o);
+}
 bool native_race_hud_mission_control(NativeRuntimeContext& c,MissionManagerServices& ms){
     auto& o=native_race_hud(c);begin(c,o);
     auto& m=c.mission;auto& st=c.event_function36;
