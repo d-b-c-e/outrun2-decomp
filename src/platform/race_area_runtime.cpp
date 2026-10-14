@@ -753,6 +753,9 @@ std::uint32_t execute(NativeRaceAreaRuntime& o,Service& sv,PcSceneRenderer& r,co
     std::uint32_t objects=0;
     const auto depth=q.matrices.depth;
     const auto offset=q.matrices.current_offset;
+    const auto lod_stack=o.lod_stack_899560;
+    const auto lod=q.lod_threshold_8999b8;
+    const auto flag_depth=q.flag_depth_8999a0;
     try{
     driving::pc_matrix_push(q.matrices);
     auto load=[&](const PcVehicleDrawCall& call){for(unsigned k=0;k<64;++k)q.matrices.current().put8(k,call.matrix[k]);};
@@ -800,6 +803,7 @@ std::uint32_t execute(NativeRaceAreaRuntime& o,Service& sv,PcSceneRenderer& r,co
         // The caller may record a failed draw list and continue with another
         // cube face/frame. Discard this executor's unfinished matrix nesting.
         q.matrices.depth=depth;q.matrices.current_offset=offset;
+        o.lod_stack_899560=lod_stack;q.lod_threshold_8999b8=lod;q.flag_depth_8999a0=flag_depth;
         throw;
     }
     o.total_draws+=std::uint32_t(calls.size());
