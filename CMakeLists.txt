@@ -175,6 +175,12 @@ target_link_libraries(test_camera_render_binding PRIVATE outrun_native_runtime)
 add_test(NAME camera_render_binding COMMAND test_camera_render_binding)
 # Its camera tables are views of the player's EXE image: without OR2_EXE it returns 77, a skip (sana 38280).
 set_tests_properties(camera_render_binding PROPERTIES SKIP_RETURN_CODE 77)
+# C2C GOAL sequencing (ROADMAP 7 / upstream #2): production mode 19 + goal camera + GAD_PUB GOAL display over
+# the EXE image's tables (OR2_EXE); source sequencing only. Skipped without the image.
+add_executable(test_c2c_goal_sequence tests/test_c2c_goal_sequence.cpp)
+target_link_libraries(test_c2c_goal_sequence PRIVATE outrun_native_runtime)
+add_test(NAME c2c_goal_sequence COMMAND test_c2c_goal_sequence)
+set_tests_properties(c2c_goal_sequence PROPERTIES SKIP_RETURN_CODE 77)
 # The runtime.log race-view diagnostic (header only; no game files).
 add_executable(test_race_view_note tests/test_race_view_note.cpp)
 target_include_directories(test_race_view_note PRIVATE src)

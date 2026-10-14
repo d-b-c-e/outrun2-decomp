@@ -107,6 +107,23 @@ go upstream as small pull requests (first: `tweaks-exe`).
        - Otherwise the PC names the call to fix.
      - A bounded synthetic entry through the native runtime harness could test the display sequencing without a drive.
        It must be labelled separately from a natural finish.
+     - Source sequencing fixture 2026-10-13 (sana 78006; `tests/test_c2c_goal_sequence.cpp`, ctest `c2c_goal_sequence`,
+       skipped without `OR2_EXE`). Setup:
+       - It runs the production mode 19 init and control, the goal camera control `camera_override_control_4874a0` and
+         the GAD_PUB GOAL display in the PC frame order. The order is 43FA20, then 43FAB0, then the display 449050, one
+         tick per display, over the EXE image's tables.
+       - The services are a recorder: mode globals as in `race_end_runtime.cpp`, chosen mission answers, and sound
+         requests that finish at once.
+       - Eight branch-distinct cases pass. In each, the rank sprite (5C2184[grade]) appears at frame 181 and the
+         countdown is cut to 0x3C at 360.
+       - GOAL then ends at frame 601, about 10 s, once the scene 3 goal camera script clears `82E7D8` (op 30, frame 600).
+         `mode19_control_49cc50` leaves only when that word is clear. Without the goal camera (the suspend branch) it
+         ends at 421, about 7 s. The exit mode is 0x21, or 0x22 with 43F860 set.
+       - A SYNTHETIC rank sprite request that fails at every display gives #2's shape: no rank, no cut, and an exit at
+         1200 frames (20 s).
+       - Scope: the transliterated sequence cannot produce #2. A faulting display service or bad data could. Real
+         sprite, sound and mission services and a natural Flagman 1 Novice finish are not qualified by this. They need
+         the diagnostic recipe above.
 
 ## Tweaks parity
 
