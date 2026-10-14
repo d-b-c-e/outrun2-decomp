@@ -177,15 +177,14 @@ def main():
             if row["editorState"] == 1:
                 key("enter")
             row = wait_for("keyboard-ready", lambda r: r["editorState"] == 2 and r["focused"] == 1 and r["ready"] == 1, 15)
-            # The retail keyboard opens blank. Enter on the selected digit uses
-            # its normal key action; require each character in the game trace.
-            for index in range(3):
+            # Existing license-name text may be prefilled by the editor. Only
+            # add a character when the observed name is blank; rapid repeated
+            # Enter on one cell can be ignored by the game's key debounce.
+            if row["nameLen"] == 0:
                 if row["selected"] == 43: raise StageError("keyboard-name: Done selected before a name")
-                old_length = row["nameLen"]
                 key("enter")
-                row = wait_for(f"keyboard-name-{index+1}",
-                               lambda r: r["editorState"] == 2 and r["nameLen"] > old_length, 4)
-            if row["nameLen"] < 3: raise StageError("keyboard-name: fewer than three observed characters")
+                row = wait_for("keyboard-name", lambda r: r["editorState"] == 2 and r["nameLen"] > 0, 4)
+            if row["nameLen"] < 1: raise StageError("keyboard-name: no observed characters")
             for _ in range(44):
                 if row["selected"] == 43: break
                 moves = row["doneMoves"]
