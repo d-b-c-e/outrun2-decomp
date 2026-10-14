@@ -216,6 +216,42 @@ int main(){
             CHECK((d.texture_bytes[0]==a||d.texture_bytes[0]==b)&&st.other==2&&st.ambiguous==0);}   // the chosen path, not compared again
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
+    // The START loading picture (ui_texture_replacement_rgba): the sprite banks' lookup for a stock DDS file, then the
+    // file's top level as R,G,B,A from the device reader, or nothing (the caller keeps the stock texture).
+    {
+        namespace fs=std::filesystem;
+        const auto dir=fs::temp_directory_path()/"or2_loading_replacement_test";fs::remove_all(dir);
+        const auto dds32=[](std::uint32_t w,std::uint32_t h,std::uint32_t r,std::uint32_t g,std::uint32_t b){
+            std::vector<std::uint8_t> f(0x80+std::size_t(w)*h*4u);
+            auto put=[&](std::size_t o,std::uint32_t v){std::memcpy(f.data()+o,&v,4);};
+            std::memcpy(f.data(),"DDS ",4);put(4,124);put(12,h);put(16,w);put(28,1);put(76,32);put(80,0x41);put(88,32);
+            put(92,r);put(96,g);put(100,b);put(104,0xff000000u);
+            for(std::size_t k=0x80;k<f.size();++k)f[k]=std::uint8_t(k*13u);
+            return f;};
+        const auto stock=dds32(4,4,0xff0000u,0xff00u,0xffu),file=dds32(8,8,0xffu,0xff00u,0xff0000u);   // A8R8G8B8; A8B8G8R8
+        char name[64];std::snprintf(name,sizeof name,"3_%X_4x4.dds",pmt_xxh32(stock.data(),stock.size()));
+        fs::create_directories(dir/"spr_loading_xst");
+        {std::ofstream o(dir/"spr_loading_xst"/name,std::ios::binary);o.write(reinterpret_cast<const char*>(file.data()),std::streamsize(file.size()));}
+        std::uint32_t w=0,h=0;std::vector<std::uint8_t> rgba;
+        // Off: not consulted.
+        texture_replacement_configure(true,false,dir.string());
+        CHECK(!ui_texture_replacement_rgba("spr_LOADING_xst",3,stock.data(),stock.size(),1u<<20,w,h,rgba)&&rgba.empty()&&w==0&&h==0);
+        CHECK(ui_texture_replacement_stats().looked==0);
+        texture_replacement_configure(false,true,dir.string());
+        // The file's size and texels: an A8B8G8R8 file's bytes are already R,G,B,A.
+        CHECK(ui_texture_replacement_rgba("spr_LOADING_xst",3,stock.data(),stock.size(),256,w,h,rgba)&&w==8&&h==8);
+        CHECK(rgba.size()==256&&std::equal(rgba.begin(),rgba.end(),file.begin()+0x80));
+        // Above the caller's byte bound: failed, nothing returned.
+        CHECK(!ui_texture_replacement_rgba("spr_LOADING_xst",3,stock.data(),stock.size(),255,w,h,rgba)&&rgba.empty()&&w==0&&h==0);
+        // Another stock texture (other bytes, so another name): no file, not failed.
+        auto other=stock;other[0x80]^=1u;
+        CHECK(!ui_texture_replacement_rgba("spr_LOADING_xst",3,other.data(),other.size(),1u<<20,w,h,rgba)&&rgba.empty());
+        const auto& st=ui_texture_replacement_stats();
+        CHECK(st.looked==3&&st.replaced==1&&st.failed==1&&pmt_texture_replacement_stats().looked==0);
+        const auto& bank=ui_texture_replacement_banks().at("spr_LOADING_xst");
+        CHECK(bank.folder&&bank.looked==3&&bank.replaced==1&&bank.failed==1);
+        pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
+    }
     std::printf("pc pmt loader: %u checks\n",checks);
     return 0;
 }

@@ -206,9 +206,11 @@ make_frontend_quad(const platform::FrontendPreviewPack& pack,
         const float crop_y=float(draw.crop[bottom?3u:1u]);
         // PC 428BD0 -> 42A3A0: u = crop x / width, v = 1 - crop y / height
         // for every SPRANI bank (SUMO_FE, START, shared); the XST DDS pages
-        // are stored bottom-up and never mirrored horizontally.
+        // are stored bottom-up and never mirrored horizontally. A replaced
+        // (UITextureReplacement) loading texture keeps the stock size as the
+        // crops' texel space.
         vertices[i].position={{x,y,0.0f}};vertices[i].normal=normal;
-        vertices[i].uv={{crop_x/float(texture->width),1.0f-crop_y/float(texture->height)}};
+        vertices[i].uv={{crop_x/float(platform::frontend_uv_width(*texture)),1.0f-crop_y/float(platform::frontend_uv_height(*texture))}};
         vertices[i].color={{1.0f,1.0f,1.0f,1.0f}};
         vertices[i].transform_index=float(FrontendTransformIndex);
     }

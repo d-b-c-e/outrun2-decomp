@@ -14,6 +14,7 @@ constexpr std::array<std::uint8_t,8> AnimatedMagic{{'O','R','2','F','E','P','5',
 constexpr std::array<std::uint8_t,8> CompleteMagic{{'O','R','2','F','E','P','6',0}};
 constexpr std::array<std::uint8_t,8> LoadingMagic{{'O','R','2','L','D','P','1',0}};
 constexpr std::array<std::uint8_t,8> AnimatedLoadingMagic{{'O','R','2','L','D','P','2',0}};
+constexpr std::array<std::uint8_t,8> HdLoadingMagic{{'O','R','2','L','D','P','3',0}};
 constexpr std::size_t MaxPackBytes=24u*1024u*1024u;
 void fail(std::string* error,const char* message){if(error)*error=message;}
 std::uint32_t u32(const std::uint8_t* p){return std::uint32_t(p[0])|(std::uint32_t(p[1])<<8u)|(std::uint32_t(p[2])<<16u)|(std::uint32_t(p[3])<<24u);}
@@ -45,8 +46,10 @@ const FrontendPreviewScene* find_frontend_preview_scene(
 bool parse_frontend_preview_pack(const std::uint8_t* data,std::size_t size,
                                  FrontendPreviewPack& pack,std::string* error){
     if(error)error->clear();
-    if((!data&&size!=0u)||size<FrontendPreviewPackHeaderSize||size>MaxPackBytes){fail(error,"frontend pack size outside bounds");return false;}
-    const bool animated_loading=std::memcmp(data,AnimatedLoadingMagic.data(),AnimatedLoadingMagic.size())==0;
+    if((!data&&size!=0u)||size<FrontendPreviewPackHeaderSize){fail(error,"frontend pack size outside bounds");return false;}
+    const bool hd_loading=std::memcmp(data,HdLoadingMagic.data(),HdLoadingMagic.size())==0;
+    if(size>(hd_loading?FrontendHdLoadingMaxBytes:MaxPackBytes)){fail(error,"frontend pack size outside bounds");return false;}
+    const bool animated_loading=hd_loading||std::memcmp(data,AnimatedLoadingMagic.data(),AnimatedLoadingMagic.size())==0;
     const bool complete=std::memcmp(data,CompleteMagic.data(),CompleteMagic.size())==0;
     const bool animated=complete||animated_loading||std::memcmp(data,AnimatedMagic.data(),AnimatedMagic.size())==0;
     const bool full=animated||std::memcmp(data,FullMagic.data(),FullMagic.size())==0;
@@ -60,7 +63,7 @@ bool parse_frontend_preview_pack(const std::uint8_t* data,std::size_t size,
     const auto source_texture_count=loading?5u:FrontendPreviewSourceTextureCount;
     const auto source_scene_count=loading?9u:FrontendPreviewSourceSceneCount;
     const auto animation_offset=u32(data+84u),animation_bytes=u32(data+88u);
-    if(u32(data+8u)!=(complete?6u:animated_loading?2u:loading?1u:animated?5u:full?4u:FrontendPreviewPackVersion)||u32(data+12u)!=FrontendPreviewPackHeaderSize||
+    if(u32(data+8u)!=(complete?6u:hd_loading?3u:animated_loading?2u:loading?1u:animated?5u:full?4u:FrontendPreviewPackVersion)||u32(data+12u)!=FrontendPreviewPackHeaderSize||
        texture_count==0u||texture_count>source_texture_count||
        (!full&&!loading&&texture_count!=FrontendPreviewPackExpectedTextures)||
        texture_record_size!=FrontendPreviewPackRecordSize||
@@ -96,14 +99,21 @@ bool parse_frontend_preview_pack(const std::uint8_t* data,std::size_t size,
     for(std::size_t i=0;i<texture_count;++i){
         const auto* record=data+texture_record_offset+i*FrontendPreviewPackRecordSize;
         const auto source_index=u32(record),width=u32(record+4u),height=u32(record+8u),format=u32(record+12u);
-        const auto offset=u32(record+16u),bytes=u32(record+20u),expected_crc=u32(record+24u);
-        const auto expected_bytes=bc_bytes(width,height,format);
+        const auto offset=u32(record+16u),bytes=u32(record+20u),expected_crc=u32(record+24u),last=u32(record+28u);
+        // OR2LDP3 only: a replaced texture, rgba8 at its file size, with its stock size in the last word.
+        const bool hd=hd_loading&&format==std::uint32_t(MeshPreviewTextureFormat::rgba8);
+        const std::uint32_t uv_width=hd?last>>16u:width,uv_height=hd?last&0xffffu:height;
+        const std::size_t expected_bytes=hd?
+            (width==0u||height==0u||width>FrontendHdTextureMaxSide||height>FrontendHdTextureMaxSide?0u:std::size_t(width)*height*4u):
+            bc_bytes(width,height,format);
         if(source_index>=source_texture_count||
            (!full&&!loading&&source_index!=FrontendPreviewSourceIndices[i])||
            find_texture(next,source_index)||offset!=running||expected_bytes==0u||
-           bytes!=expected_bytes||bytes>size-running||u32(record+28u)!=0u||crc32(data+offset,bytes)!=expected_crc){fail(error,"frontend texture record mismatch");return false;}
+           bytes!=expected_bytes||bytes>size-running||(hd?(uv_width==0u||uv_height==0u||uv_width>FrontendStockTextureMaxSide||
+           uv_height>FrontendStockTextureMaxSide):last!=0u)||crc32(data+offset,bytes)!=expected_crc){fail(error,"frontend texture record mismatch");return false;}
         FrontendPreviewTexture texture{};texture.source_index=source_index;texture.width=width;texture.height=height;
         texture.format=static_cast<MeshPreviewTextureFormat>(format);texture.bytes.assign(data+offset,data+offset+bytes);
+        if(hd){texture.uv_width=uv_width;texture.uv_height=uv_height;}
         next.textures.push_back(std::move(texture));running+=bytes;
     }
     next.scenes.reserve(scene_count);std::uint32_t expected_first_draw=0u;
@@ -134,7 +144,7 @@ bool parse_frontend_preview_pack(const std::uint8_t* data,std::size_t size,
         const auto* texture=find_texture(next,draw.source_texture);
         const auto local_order=static_cast<std::uint32_t>(i)-next.scenes[scene_index].first_draw;
         if(!texture||draw.crop[0]>=draw.crop[2]||draw.crop[1]>=draw.crop[3]||
-           draw.crop[2]>texture->width||draw.crop[3]>texture->height||draw.layer_order!=local_order||
+           draw.crop[2]>frontend_uv_width(*texture)||draw.crop[3]>frontend_uv_height(*texture)||draw.layer_order!=local_order||
            draw.frame_index!=0u||u32(record+60u)!=0u){fail(error,"frontend draw record mismatch");return false;}
         for(const auto& corner:draw.corners)for(float value:corner)
             // Full archive includes long off-canvas text strips (retail max
@@ -182,7 +192,8 @@ bool make_frontend_animation_view(const FrontendPreviewPack& source,
     next.textures.resize(source.source_texture_count);
     for(const auto& texture:source.textures){
         auto& slot=next.textures[texture.source_index];
-        slot.width=texture.width;slot.height=texture.height;
+        // Crops are in the stock texel space (a replaced OR2LDP3 texture keeps it), so animated crops are bounded the same.
+        slot.width=frontend_uv_width(texture);slot.height=frontend_uv_height(texture);
         slot.format=texture.format;
     }
     for(const auto& scene:source.scenes){
