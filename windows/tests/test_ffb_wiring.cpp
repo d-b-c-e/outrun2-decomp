@@ -185,7 +185,9 @@ int main(){
         tick();sent=forces();check(sent.back()==0,"F6 close primes before force");
         tick();sent=forces();check(sent.back()!=0,"force resumes only after F6 prime");
         outrun::desktop::ffb_front_check()=[](void*){return false;};
+        const auto unfocused_first=rt->frame_state.frame_counter_95af0c+1u;
         for(int i=0;i<3;++i)gated_tick("every unfocused tick stays zero with producer callbacks present");
+        const auto unfocused_last=rt->frame_state.frame_counter_95af0c;
         outrun::desktop::ffb_front_check()=[](void*){return true;};
         tick();sent=forces();check(sent.back()==0,"focus return first tick stays zero");
         tick();sent=forces();check(sent.back()==0,"focus return primes before force");
@@ -211,10 +213,64 @@ int main(){
         check(header.find("model=outrun-producer@2,output=selected-request")!=std::string::npos&&
               header.find("steering_percent=25,shift_percent=75")!=std::string::npos,
               "retained trace pins selected model and both gains");
+        std::string line;int unfocused_computed=0;
+        while(std::getline(trace,line)){
+            unsigned frame=0,update=0,continuity=0,pending=0,state=0;
+            if(std::sscanf(line.c_str(),"control,%u,%u,%*[^,],%u,%u,%u",&frame,&update,&continuity,&pending,&state)==5&&
+               frame>=unfocused_first&&frame<=unfocused_last&&state==2)++unfocused_computed;
+        }
+        check(unfocused_computed>0,"software model computes while unfocused but fake delivery stays zero");
         trace.close();DeleteFileA(trace_name.c_str());
         outrun::xbox_runtime::input_filter()=nullptr;
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
     }
+    // Software requests must advance with no physical output even when this process is not foreground. Output=none
+    // and a wheel request refused by process mute both leave the fake native DLL entirely unloaded.
+    const auto software_only=[&](const char* suffix,const char* output,const char* mute){
+        outrun::xbox_runtime::input_filter()=nullptr;
+        _putenv_s("DBCE_FFB_MUTE",mute);
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        outrun::desktop::ffb_front_check()=[](void*){return false;};
+        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
+        const int before=attaches();
+        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = "+output+
+            "\r\n[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n"),false,{});
+        check(!outrun::desktop::ffb_output_running(),"software-only selected model has no live native delivery");
+        const auto trace_name=folder()+"\\software-"+suffix+".csv";
+        const std::wstring trace_path(trace_name.begin(),trace_name.end());
+        check(outrun::desktop::ffb_shadow_configure(trace_path,true),"software-only selected trace shares observer");
+        outrun::desktop::ffb_wrap_input_filter();outrun::desktop::ffb_shadow_wrap_input_filter();
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        auto& state=rt->event_function36.car_select;
+        state.race_inits=1;state.producer_active=true;
+        auto& car=state.car_799d18;
+        const auto put=[&](std::size_t at,const auto& v){std::memcpy(car.data()+at,&v,sizeof v);};
+        put(0x202,std::int16_t(16384));put(0x1f8,72.0f);put(0x208,std::uint32_t(2));
+        for(std::uint64_t attempt=1;attempt<=5;++attempt){
+            ++rt->frame_state.frame_counter_95af0c;
+            outrun::platform::NativeInputState in{};outrun::xbox_runtime::input_filter()(in,rt.get());
+            outrun::platform::NativeCarProducerObservation o{};
+            o.car=car.data();o.car_bytes=car.size();o.mode=16;o.car_generation=1;o.attempt=attempt;
+            o.frame_counter=rt->frame_state.frame_counter_95af0c;
+            o.car_active=o.producer_fresh=o.direct=true;state.producer_attempt=attempt;
+            outrun::platform::notify_car_producer(outrun::xbox_runtime::car_producer_observer(),o);
+        }
+        outrun::desktop::ffb_shadow_shutdown();outrun::desktop::ffb_shutdown();
+        outrun::xbox_runtime::input_filter()=nullptr;
+        std::ifstream trace(trace_name,std::ios::binary);std::string line;int primed=0,computed=0;
+        while(std::getline(trace,line)){
+            if(line.find(",fresh,0,0,1,new-epoch-or-car,")!=std::string::npos)++primed;
+            if(line.find(",fresh,0,0,2,none,")!=std::string::npos)++computed;
+        }
+        check(primed>=1&&computed>=1,"unfocused selected software stream primes then computes");
+        check(attaches()==before&&env(L"FAKE_WHEELFFB_CALLS").empty()&&
+              GetModuleHandleW(L"WheelFfb.dll")==nullptr,"software-only request never loads or calls fake native");
+        trace.close();DeleteFileA(trace_name.c_str());
+    };
+    software_only("none","none","");
+    software_only("muted","wheel","1");
+    _putenv_s("DBCE_FFB_MUTE","");
     // The shim backend (INPUT-SHIM.md section 6): the library loads and its delivery waits, but it never opens the wheel
     // until the shim hands it over (ffb_set_shim_owner, from the shim's WheelFfb bridge): race ticks with a force, the
     // steering live and the fake accepting this very wheel reach no device call (no unattended exclusive open).

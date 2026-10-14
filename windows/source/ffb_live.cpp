@@ -27,7 +27,10 @@ struct Row:ffb::Sink {
 };
 struct Live {
     bool on{};
-    bool selected{},row_ready{},selected_gate_open{};
+    bool selected{},row_ready{},delivery_gate_open{};
+    bool last_model_gate{},last_front{};
+    int last_output_gate{-1};
+    unsigned gate_notes{};
     std::int32_t selected_intent{};
     std::unique_ptr<ffb::LegacyForce> model;
     std::FILE* trace{};
@@ -123,13 +126,29 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     if(!f.on)return;
     if(f.selected){
         const bool race=rt&&rt->mode_state.current==16u&&rt->event_state.pause_depth==0u;
-        const bool allowed=race&&!desktop_panel_open()&&ffb_front_check()(xbox_runtime::native_window().hwnd);
-        if(!allowed||!f.row_ready||!f.selected_gate_open)ffb_shadow_invalidate_selected();
-        // A callback can arrive after a gated filter tick. Never consume that cached request on gate reopening;
-        // the first callback after reopening must prime a fresh producer stream.
-        if(!allowed||!f.selected_gate_open){f.row_ready=false;f.selected_intent=0;}
-        const auto intent=allowed&&f.row_ready?f.selected_intent:0;
-        f.selected_gate_open=allowed;
+        const bool model_gate=race&&!desktop_panel_open();
+        const bool front=ffb_front_check()(xbox_runtime::native_window().hwnd);
+        // The software producer is useful with Output=none or MUTE. Foreground eligibility belongs to the physical
+        // delivery path; a lost foreground must not reset every software request in a muted ordinary witness.
+        const bool delivery_gate=f.output&&model_gate&&front;
+        const int output_gate=!f.output?0:!front?1:2; // disabled, not-front, passing-to-Delivery
+        if(f.last_output_gate!=output_gate||f.last_model_gate!=model_gate||f.last_front!=front){
+            if(f.gate_notes<32u){
+                std::printf("ffb: selected gates model=%s output=%s front=%u rowReady=%u requested=%u phase=%s%s%s\n",
+                    model_gate?"eligible":"closed",output_gate==0?"disabled":output_gate==1?"not-front":"passing-to-Delivery",
+                    unsigned(front),unsigned(f.row_ready),unsigned(f.requested),ffbdev::phase_name(f.delivery.phase()),
+                    f.off.empty()?"":" reason=",f.off.c_str());std::fflush(stdout);
+            }else if(f.gate_notes==32u){std::printf("ffb: selected gate transitions suppressed after 32 notes\n");std::fflush(stdout);}
+            ++f.gate_notes;f.last_output_gate=output_gate;f.last_model_gate=model_gate;f.last_front=front;
+        }
+        if(!model_gate||!f.row_ready)ffb_shadow_invalidate_selected();
+        // The model may have kept computing while the delivery gate was closed. On reopening, discard its cached
+        // request and reset once; only a new post-reopen direct callback may prime the delivery stream.
+        if(delivery_gate&&!f.delivery_gate_open){
+            ffb_shadow_invalidate_selected();f.row_ready=false;f.selected_intent=0;
+        }
+        const auto intent=delivery_gate&&f.row_ready?f.selected_intent:0;
+        f.delivery_gate_open=delivery_gate;
         f.row_ready=false;f.selected_intent=0;
         if(f.output)deliver(race,intent);
         return;
