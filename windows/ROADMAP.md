@@ -121,7 +121,8 @@ go upstream as small pull requests (first: `tweaks-exe`).
          ends at 421, about 7 s. The exit mode is 0x21, or 0x22 with 43F860 set.
        - A SYNTHETIC rank sprite request that fails at every display gives #2's shape: no rank, no cut, and an exit at
          1200 frames (20 s).
-       - Scope: the transliterated sequence cannot produce #2. A faulting display service or bad data could. Real
+       - Scope: these cases did not reproduce #2 with the modeled service responses. A faulting display service,
+         different service timing or bad data could still cause it. Real
          sprite, sound and mission services and a natural Flagman 1 Novice finish are not qualified by this. They need
          the diagnostic recipe above.
 
