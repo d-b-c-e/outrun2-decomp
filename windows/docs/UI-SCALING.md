@@ -1,4 +1,4 @@
-# UI scaling for the desktop build (design note, for review; no code yet)
+# UI scaling for the desktop build (implementation and visual qualification note)
 
 Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADMAP: to do).
 
@@ -155,7 +155,7 @@ Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe ar
 - **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
   and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
   the visual check (step 4).
-## Step 2c: the remaining C2C sites (the hand-reconstructed ones built; the translated ones and 481A40 not)
+## Step 2c: the remaining C2C sites (hand-reconstructed and translated positions built; 481A40 not ported)
 
 From objdump of OR2006C2C.exe around each site; "R" is right by the spacing, unrounded for floats and rounded for
 ints.
@@ -176,10 +176,13 @@ ints.
   - **Built:** x 176 ([5B02A4]) plus the HUD shift in the open (460A21) and reopen (460FBC) stores, and in their
     translations (Tweaks writes the moved xmm0 over the pushed 176). The bobbing centre 7F8BBC also moves (460D40).
 - **GF speech bubbles, rank emoji, rank text: translated code** (`bulk_tr.cpp` `F_4fc830`, `F_4fc9a0`, `F_4fcd40`,
-  `F_4fd4e0`, `F_4fe760`; 16 sites).
-  - Floats at [esp] or [esp+4] at instruction boundaries.
-  - An edit would sit inside generated code at those addresses, so a small address-keyed hook in the translation, or
-    a reconstruction of these functions first, is the open choice.
+  `F_4fd4e0`, `F_4fe760`; 18 Tweaks hook sites).
+  - **Built in source:** `c2c_ui_spacing.hpp` maps each hook to its external 465860/4653C0 call's return PC and x argument.
+    `race_translated.cpp` adds the mode-1 HUD shift to that float when constructing `PcRaceCall`. The exceptional
+    4FD60C hook becomes 4653C0 argument 1 after an intervening push; the other 4653C0 sites use argument 0 and the
+    465860 sites use argument 5. Unmatched return PCs and targets, and modes 0/2, keep all argument bits unchanged.
+  - `bulk_tr.cpp` is generated and remains unedited; the call-boundary mapping survives its regeneration. The focused
+    `test_triple_screens` fixture checks all 18 mappings and negative controls. C2C rendered positions await step 4.
 - **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
   decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
 ## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
@@ -284,10 +287,9 @@ ints.
 | 4BBA89 DispTempHeartNum ("-") | `request_row_4bb9e0` +A9 | hand | |
 | 4BD32E slipstream; 4BD397 / 4BD414 / 4BD472 don't-lose-GF | `scores_4bd230` +FE; `scores_4bd340` | hand | C2C |
 | 496AC7 ... 496C6A C2C speech bubbles (7) | `mission_manager_control_496a30`, mission_manager.cpp | hand | |
-| 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (16) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | an adjustment would sit at the translated instruction (its esp+0 / +4 argument) |
+| 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (18) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | source bridge in `race_translated.cpp` and the 18-site return-PC table in `c2c_ui_spacing.hpp`; generated code unchanged, visual check pending |
 | 460A21 set_icon_work (GF request bubble) | `banner_open_460970` +B1, race_traffic_heart_setup.inc | hand | the heart code lives in `race_traffic_*.inc` (a first scan of .cpp files missed it) |
 | 460D40 / 460FBC ctrl_icon_work | `banner_460ad0` +270 / +4EC, race_traffic_heart_meter.inc | hand | the function's PC extent is to be confirmed |
 | 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | inside 481A40, the C2C request manager's GOAL results (7F9460 method) | **not ported** | race_end_runtime.cpp runs it only if translated, and it is not (`EndUnported` "neither native nor translated"); nothing to map until that path is ported |
 
-- **Open before step 2:** the translated C2C bubbles (`F_4fc830` ... `F_4fe760`): an adjustment in generated code, or
-  a reconstruction first.
+- **Open:** C2C rendered positions and goal results (481A40 is not ported); the translated positional bridge is in source.

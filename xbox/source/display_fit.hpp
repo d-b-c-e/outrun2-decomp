@@ -61,8 +61,8 @@ inline unsigned parse_ui_scaling_mode(std::string_view text,std::string& note){
     if(text=="0")return 0u;
     if(text=="1"){note="UIScalingMode = 1 (Online Arcade) is partial. Spaced as Tweaks: the race HUD (NaviPub_Disp), time attack, "
                        "rank, REV, the heart number, the ghost gap, and C2C's scores, mission bubbles and GF request bubble. "
-                       "Not yet: C2C's GF speech bubbles, rank emoji and rank text (translated code) and its goal results "
-                       "(not ported). Seen in game on the race route only; time attack and C2C are unchecked";return 1u;}
+                       "C2C's GF speech bubbles and rank positions are shifted at their translated external calls. "
+                       "Not yet: C2C goal results (not ported). Seen in game on the race route only; time attack and C2C are unchecked";return 1u;}
     note="UIScalingMode = "+std::string(text.substr(0,32))+" refused (0, 1 or 2); 2 (keep centred) applies";
     return 2u;
 }

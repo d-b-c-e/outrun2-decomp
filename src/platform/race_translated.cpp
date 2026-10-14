@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <map>
 #include "platform/race_translated.hpp"
+#include "platform/c2c_ui_spacing.hpp"
 #include "platform/pc_d3d9.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/pc_sprite_2d.hpp"
 #include "driving/pc_d3dx.hpp"
 #include "driving/pc_camera.hpp"
@@ -333,6 +335,10 @@ std::uint32_t translated_call_list(PcRaceMemory& m,const PcRaceService& service,
         if(s.module->special&&s.module->special(c,target)){if(s.module->matrices)matrices_out(s);return;}
         PcRaceCall k{};k.pc=target;k.eax=c.eax;k.ecx=c.ecx;k.argc=std::uint32_t(k.args.size());
         for(unsigned i=0;i<k.args.size();++i)k.args[i]=translated_arg(c,i);
+        // Tweaks' C2C bubble/rank hooks sit in generated bulk_tr.cpp. Match their external
+        // calls by the return PC on the guest stack, so regeneration preserves this shift.
+        if(g_pc_ui_spacing>0.0f&&(target==0x465860u||target==0x4653c0u))
+            shift_c2c_translated_ui_call(k,or2x86::ld32(c,c.esp),g_pc_ui_spacing);
         const std::uint32_t eax=(*s.service)(k);
         if(s.module->matrices)matrices_out(s);
         translated_return(c,eax,pops(*s.module,target));

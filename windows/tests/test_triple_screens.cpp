@@ -4,8 +4,10 @@
 #include "triple_rig.hpp"
 #include "display_fit.hpp"
 #include "platform/ui_spacing.hpp"
+#include "platform/c2c_ui_spacing.hpp"
 #include "driving/pc_camera.hpp"
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include <cstdio>
 #include <cstdlib>
@@ -44,7 +46,7 @@ int main(){
         CHECK(parse_ui_scaling_mode(" 2 ",note)==2u&&note.empty());
         CHECK(parse_ui_scaling_mode("0\r",note)==0u&&note.empty());
         CHECK(parse_ui_scaling_mode("1",note)==1u&&note.find("is partial")!=std::string::npos);
-        CHECK(note.find("time attack, rank")!=std::string::npos&&note.find("Not yet: C2C")!=std::string::npos&&
+        CHECK(note.find("time attack, rank")!=std::string::npos&&note.find("Not yet: C2C goal results")!=std::string::npos&&
               note.find("race route only")!=std::string::npos);
         CHECK(parse_ui_scaling_mode("3",note)==2u&&note=="UIScalingMode = 3 refused (0, 1 or 2); 2 (keep centred) applies");
         CHECK(parse_ui_scaling_mode("02",note)==2u&&note.find("refused")!=std::string::npos);
@@ -80,6 +82,42 @@ int main(){
                 {const UiSpacingGuard b(UiSpacing::off);CHECK(ui_spacing_scope()==UiSpacing::off);}
                 CHECK(ui_spacing_scope()==UiSpacing::detect);}
             CHECK(ui_spacing_scope()==UiSpacing::off);}
+    }
+    // Tweaks hooks in the five translated C2C GF/rank routines reach these external calls.
+    // The return PC identifies the caller; the x slot is the argument at the callee, after
+    // any pushes between the hook and call (4FD60C is the exceptional arg 1 site).
+    {   using outrun::platform::PcRaceCall;using outrun::platform::shift_c2c_translated_ui_call;
+        struct Site {std::uint32_t ret,target;unsigned x_arg;};
+        constexpr Site sites[]{
+            {0x4fc867u,0x465860u,5u},{0x4fc899u,0x465860u,5u},{0x4fc8cbu,0x465860u,5u},
+            {0x4fca03u,0x465860u,5u},{0x4fca36u,0x465860u,5u},{0x4fca69u,0x465860u,5u},
+            {0x4fcb32u,0x465860u,5u},{0x4fcdc6u,0x4653c0u,0u},{0x4fcdefu,0x4653c0u,0u},
+            {0x4fceb5u,0x4653c0u,0u},{0x4fcedeu,0x4653c0u,0u},{0x4fcf27u,0x4653c0u,0u},
+            {0x4fcf54u,0x4653c0u,0u},{0x4fd596u,0x4653c0u,0u},{0x4fd5e1u,0x465860u,5u},
+            {0x4fd614u,0x4653c0u,1u},{0x4fd666u,0x465860u,5u},{0x4fe8b6u,0x4653c0u,0u},
+        };
+        CHECK(std::size(sites)==18u);
+        auto seed=[](std::uint32_t pc,unsigned x_arg){
+            PcRaceCall k{};k.pc=pc;k.argc=std::uint32_t(k.args.size());
+            for(unsigned i=0;i<k.args.size();++i)k.args[i]=0x7fc00000u+i; // preserve non-x payloads byte-for-byte
+            const float x=170.f;std::memcpy(&k.args[x_arg],&x,sizeof x);return k;
+        };
+        const float span_hud=float(outrun::xbox_runtime::ui_scaling_rect(1,true,48.f/9.f,16./9.).hud);
+        CHECK(std::fabs(span_hud-80.f)<1e-4f);
+        for(const auto& s:sites){
+            auto k=seed(s.target,s.x_arg),before=k;
+            CHECK(shift_c2c_translated_ui_call(k,s.ret,span_hud));
+            float shifted=0;std::memcpy(&shifted,&k.args[s.x_arg],sizeof shifted);
+            CHECK(shifted==250.f);
+            for(unsigned i=0;i<k.args.size();++i)if(i!=s.x_arg)CHECK(k.args[i]==before.args[i]);
+            k=before;k.args[s.x_arg]=0x7fc01234u;before=k;
+            CHECK(!shift_c2c_translated_ui_call(k,s.ret,0.f)&&k.args==before.args); // modes 0 / 2, including NaN payload
+            before=seed(s.target,s.x_arg);
+            k=before;k.pc=(s.target==0x465860u)?0x4653c0u:0x465860u;
+            CHECK(!shift_c2c_translated_ui_call(k,s.ret,span_hud)&&k.args==before.args);
+            k=before;CHECK(!shift_c2c_translated_ui_call(k,s.ret+1u,span_hud)&&k.args==before.args);
+            k=before;k.argc=s.x_arg;CHECK(!shift_c2c_translated_ui_call(k,s.ret,span_hud)&&k.args==before.args);
+        }
     }
     // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
     // only in a normal process with the borderless window over a span, each refusal named.
