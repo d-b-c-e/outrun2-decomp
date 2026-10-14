@@ -85,6 +85,13 @@ def _holds(state, when, changed, ref):
     return not changed or ref is None or any(state[k] != ref[k] for k in changed)
 
 
+def _press(post, sleep, key, hold):
+    """Key down, the hold, key up; the release runs even if the hold or a later callback is interrupted."""
+    post(key, False)
+    try: sleep(hold)
+    finally: post(key, True)
+
+
 def deliver(steps, post, now, sleep, reader, alive, poll=0.05):
     """Posts each step when its state holds and has settled; returns (records, error or None)."""
     recs, ref, changed_at = [], None, now()
@@ -101,7 +108,7 @@ def deliver(steps, post, now, sleep, reader, alive, poll=0.05):
                     i, s["key"], s["timeout"], s["when"], s["changed"], s["settle"], _fmt(st))
             sleep(poll)
         ref = dict(st); posted = now()
-        post(s["key"], False); sleep(s["hold"]); post(s["key"], True)
+        _press(post, sleep, s["key"], s["hold"])
         changed_at = now()   # the next step settles from the later of a state change and this release
         rec = dict(step=i, key=s["key"], posted=round(posted, 3), hold=s["hold"], state=_fmt(st))
         recs.append(rec)
@@ -118,7 +125,7 @@ def deliver(steps, post, now, sleep, reader, alive, poll=0.05):
                     # frontend); any other state means the press was taken, and is reported instead.
                     if retries and reader.state == ref:
                         retries -= 1; rec["retries"] = rec.get("retries", 0) + 1
-                        post(s["key"], False); sleep(s["hold"]); post(s["key"], True); t = now(); continue
+                        _press(post, sleep, s["key"], s["hold"]); t = now(); continue
                     return recs, "step %d (%s): no expected effect %s within %.0f s; last state: %s" % (
                         i, s["key"], s["expect"], s["expect_timeout"], _fmt(reader.state))
                 sleep(poll)

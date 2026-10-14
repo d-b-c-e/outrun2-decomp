@@ -112,6 +112,19 @@ with tempfile.TemporaryDirectory() as tmp:
     g, recs, err = run(tmp, ROUTE, plan)
     check(err is not None and "waited 5 s" in err and "mode=32" in err and not g.posts, "a missing page times out without a press")
 
+    # An interrupted hold (the harness stopped mid-press): the key is still released and the error propagates.
+    class Interrupt(Exception): pass
+    g = Game(pathlib.Path(tmp) / "interrupt.txt", [dict(p) for p in ROUTE])
+    def interrupting_sleep(dt):
+        if dt == 7.0: raise Interrupt()
+        g.sleep(dt)
+    plan = {"gated": True, "steps": [{"key": "up", "when": {"mode": 32}, "settle": 0, "hold": 7}]}
+    try:
+        rg.deliver(rg.load_gated(plan), g.post, g.now, interrupting_sleep, rg.StateReader(g.path), g.alive)
+        check(False, "an interrupted hold propagates")
+    except Interrupt: pass
+    check([(k, u) for _, k, u in g.posts] == [("up", False), ("up", True)], "an interrupted hold still releases the key (%s)" % g.posts)
+
     # Plan validation.
     for bad in ({"gated": True, "steps": [{"key": "enter", "when": {"modee": 1}}]},
                 {"gated": True, "steps": [{"key": "enter", "changed": ["x"]}]},
