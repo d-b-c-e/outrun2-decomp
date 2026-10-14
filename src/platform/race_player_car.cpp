@@ -59,6 +59,7 @@ struct Frame {
     driving::PcGamePlCarParentInputs parent{};
     driving::PcGamePlCarParentState parent_state{};
     bool failed{};
+    bool steer_written{}; // witnessed at 49FAD0, not inferred from retained +202 bytes
     void miss(std::uint32_t pc){++w.missing[pc];}
     void fail(std::uint32_t pc,const char* why){if(!failed){failed=true;w.last_error_pc=pc;w.last_error=why;}}
     Bytes stage_cache(){return Bytes(reinterpret_cast<std::uint8_t*>(&c.game_mode.course_runtime.stage_key_635f2c),8);}
@@ -372,7 +373,9 @@ void game_service(void* user,std::uint32_t pc){
     case 0x0049fad0u:
         // 4A8586..4A85A6: work velocity = E+20..28 * (1/[7162C4]), computed by the parent.
         W.putf(0x5c,f.parent_state.world_position[0]);W.putf(0x60,f.parent_state.world_position[1]);W.putf(0x64,f.parent_state.world_position[2]);
-        driving::operation_input_49fad0(e,{f.game_mode(),f.volume(0),f.volume(1),f.volume(2)});return;
+        {const auto mode=f.game_mode();const auto stale_counter=e.i16(0xd50);
+         driving::operation_input_49fad0(e,{mode,f.volume(0),f.volume(1),f.volume(2)});
+         f.steer_written=game_steer_written(mode,stale_counter);return;}
     case 0x0049fb70u:driving::control_timeup_braking_49fb70(e,W,P,race_time_44fe40(c.race.manager.state));return;   // 44FE40: race manager time 7D394C
     case 0x004a4d20u:{
         driving::PcCheckSlipStreamInputs in{};in.network_session_active=c.start_mode.manager_state_7f94c0!=0u;
@@ -495,7 +498,7 @@ bool race_car_cbw_coli_wall_5041b0(NativeRuntimeContext& c,driving::PcMatrixStac
         return true;
     }catch(const std::exception& ex){error=ex.what();return false;}
 }
-bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices){
+bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,bool direct_dispatch){
     auto& s=c.event_function36.car_select;auto& w=c.race.car_world;
     Frame f{c,w,matrices,Bytes(s.car_799d18.data(),s.car_799d18.size()),Bytes(s.body_82e7f0.data(),s.body_82e7f0.size()),
         Bytes(s.parameters.data(),s.parameters.size()),driving::embedded_wheels(Bytes(s.body_82e7f0.data(),s.body_82e7f0.size())),
@@ -512,7 +515,19 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
         for(std::size_t o:{0x28au,0x37eu,0x288u,0x37cu,0x470u,0x564u})f.W.put16(o,std::uint16_t(snap.i16(o)));
     }
     ++w.frames;
-    return !f.failed;
+    const bool succeeded=!f.failed;
+    ++s.producer_attempt;
+    // Observation is outside the game-control exception path. A faulty optional
+    // callback is detached; it can neither latch a game fault nor change input.
+    if(c.car_producer_observer.observe){
+        const NativeCarProducerObservation o{
+            s.car_799d18.data(),s.car_799d18.size(),c.mode_state.current,s.race_inits,s.producer_attempt,
+            c.frame_state.frame_counter_95af0c,c.frame_state.update_index_8a8cdc,
+            fresh_car_producer(direct_dispatch,s.producer_active,s.race_inits,succeeded,f.steer_written,f.e.u32(4)),
+            direct_dispatch,s.producer_active};
+        notify_car_producer(c.car_producer_observer,o);
+    }
+    return succeeded;
 }
 // 475720 PasPlCar_Ctrl (event 8 while the camera script's 486942 selects
 // it): race_goal_camera's transliteration over the player car (7804B0 via
@@ -537,7 +552,7 @@ bool race_player_car_pas_475720(NativeRuntimeContext& c,driving::PcMatrixStack& 
         switch(k.pc){
         case 0x4a2650u:case 0x4a4710u:common_service(&f,k.pc);return 0u;
         case 0x4a2ee0u:driving::set_old_param_buffer_4a2ee0(f.e);return 0u;
-        case 0x4a8330u:if(!race_player_car_control_4a8330(c,matrices)){
+        case 0x4a8330u:if(!race_player_car_control_4a8330(c,matrices,false)){
             if(dev_hooks().log_faults){static std::string last;if(last!=w.last_error){last=w.last_error;dev_log("4a8330: %06X %s",unsigned(w.last_error_pc),last.c_str());}}
             f.fail(0x4a8330u,"GamePlCar_Ctrl under PasPlCar");}return 0u;
         case 0x43eb60u:{                                                    // GetYPositionProg(mode, point, polygon, 0, kind)

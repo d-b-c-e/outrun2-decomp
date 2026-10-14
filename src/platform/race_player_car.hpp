@@ -64,7 +64,7 @@ struct RaceCarWorld {
 };
 // One GamePlCar_Ctrl frame on c's car/work. Returns false (and records the
 // failing PC entry) when a child rejected its inputs.
-bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices);
+bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,bool direct_dispatch);
 // EXE crash tables 5E08E8 / 5E0988 (4A2400 AdvanceCrashState), shared with the traffic cars.
 const driving::PcCrashTables& race_crash_tables();
 // 4A6EA0 (pc) / 4A2270 crash entry over another car's event (traffic cars).

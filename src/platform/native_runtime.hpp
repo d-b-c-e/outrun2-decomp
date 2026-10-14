@@ -24,6 +24,7 @@
 #include "platform/frontend_requests.hpp"
 #include "platform/object_db.hpp"
 #include "platform/frontend_car_select.hpp"
+#include "platform/car_producer_observer.hpp"
 #include "platform/frontend_transmission.hpp"
 #include "platform/frontend_music.hpp"
 #include "platform/frontend_rankings.hpp"
@@ -750,6 +751,7 @@ struct NativeRaceHudRuntime;    // race HUD owner: events 389 / 388 / 401 (race_
 struct NativeRaceEnd;           // race end modes 20/25/27/28 (race_end_runtime.hpp)
 struct NativeGhostRuntime;      // Time Attack ghost module 465F30..4687C0 (race_ghosts_runtime.hpp)
 struct NativeRuntimeContext {
+    NativeCarProducerObserver car_producer_observer{}; // null unless desktop opts in
     driving::PcEventControlState event_state{};
     std::array<driving::PcEventInitDescriptor,driving::PcEventSlotCount> event_descriptors{};
     std::array<driving::PcEventFunctionDescriptor,driving::PcEventFunctionTableCount> event_functions{};

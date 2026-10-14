@@ -4,13 +4,15 @@
 // or2_xbox_main (main.cpp) on the thread that owns the window.
 #include <cstdint>
 #include <string>
-namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
+namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; struct NativeCarProducerObserver; }
 namespace outrun::xbox_runtime {
 // Desktop builds (windows/) adjust the game input after the gamepad mapping:
 // wheel, pedals and further devices. `runtime` is null until the game runs.
 // Unset on the Xbox and in the PC test build.
 using InputFilter=void(*)(outrun::platform::NativeInputState&,const outrun::platform::NativeRuntimeContext* runtime);
 InputFilter& input_filter();
+// Optional desktop diagnostic, copied into a new runtime context before its first update.
+outrun::platform::NativeCarProducerObserver& car_producer_observer();
 // Desktop builds draw their own overlay (the F6 panel, windows/source/desktop_panel) into the back buffer just before
 // each frame is presented: the D3D11 device, its immediate context and the back buffer's render target view (void*, so
 // this header stays free of graphics headers), and the swap chain's full size. Unset on the Xbox and in the PC test build.

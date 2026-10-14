@@ -8,6 +8,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_sett
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
+    source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp
     source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
@@ -55,6 +56,12 @@ target_include_directories(test_ffb_producer2 PRIVATE source ${PROJECT_SOURCE_DI
 target_link_libraries(test_ffb_producer2 PRIVATE outrun_driving)
 target_compile_features(test_ffb_producer2 PRIVATE cxx_std_17)
 add_test(NAME ffb_producer2 COMMAND test_ffb_producer2)
+
+# The optional post-control diagnostic's gating and failure isolation, with a fake CSV writer and no game/device.
+add_executable(test_ffb_shadow tests/test_ffb_shadow.cpp source/ffb_shadow.cpp source/ffb_producer2.cpp)
+target_include_directories(test_ffb_shadow PRIVATE source ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_ffb_shadow PRIVATE cxx_std_17)
+add_test(NAME ffb_shadow COMMAND test_ffb_shadow)
 
 # F4, the delivery gates (source/ffb_device) against a fake WheelFfb library: identity, the accepted zero, recovery,
 # release and shutdown order, and silence whenever a gate is closed. No device and no DLL.

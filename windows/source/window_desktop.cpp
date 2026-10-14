@@ -7,6 +7,7 @@
 #include "d3d11_display.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
+#include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
 #include "display_fit.hpp"
 #include "renderer.hpp"
@@ -38,6 +39,7 @@
 #include <shellapi.h>
 #include <winrt/base.h>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <string>
@@ -535,12 +537,19 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // OR2_FFB_TRACE in ordinary play); no device output at all.
     outrun::desktop::ffb_configure(settings,test_like,private_home);
     outrun::desktop::ffb_wrap_input_filter();
+    // Optional producer@2 trace: ordinary, non-recording diagnostic only.
+    // Test and playback processes already cleared all OR2_ switches above.
+    if(const wchar_t* trace=_wgetenv(L"OR2_FFB_PRODUCER2_SHADOW_TRACE")){
+        if(*trace&&outrun::desktop::ffb_shadow_configure(trace,!test_like&&intake.kind!=session::Intake::Kind::Record))
+            outrun::desktop::ffb_shadow_wrap_input_filter();
+    }
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::desktop_panel_shutdown();
+    outrun::desktop::ffb_shadow_shutdown();
     outrun::desktop::telemetry_shutdown();
     outrun::desktop::ffb_shutdown();
     // Texture replacement summaries, scene then UI: totals, the banks the pack covers one line each, the others named once

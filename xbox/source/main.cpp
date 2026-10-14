@@ -47,6 +47,8 @@
 
 namespace outrun::xbox_runtime {
 InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}
+outrun::platform::NativeCarProducerObserver& car_producer_observer(){
+    static outrun::platform::NativeCarProducerObserver observer{};return observer;}
 PresentOverlay& present_overlay(){static PresentOverlay overlay=nullptr;return overlay;}
 GamepadChoice& gamepad_choice(){static GamepadChoice choice=nullptr;return choice;}
 std::string& latched_home(){static std::string home;return home;}
@@ -281,6 +283,7 @@ int or2_xbox_main(int argc,char** argv){
     // Built after the EXE image is installed: the context copies EXE-owned tables.
     auto context_owner=std::make_unique<outrun::platform::NativeRuntimeContext>();
     auto& context=*context_owner;
+    context.car_producer_observer=outrun::xbox_runtime::car_producer_observer();
     diag.runtime=&context;
 
     rt::GameData data;

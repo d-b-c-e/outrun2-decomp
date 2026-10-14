@@ -1,0 +1,86 @@
+#include "ffb_shadow_live.hpp"
+#include "ffb_shadow.hpp"
+#include "desktop_panel.hpp"
+#include "platform/native_runtime.hpp"
+#include "native_window.hpp"
+#include <windows.h>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
+
+namespace outrun::desktop {
+namespace {
+struct Live {
+    HANDLE file{INVALID_HANDLE_VALUE};
+    std::unique_ptr<ffb::shadow::Core> core;
+    xbox_runtime::InputFilter inner{};
+    bool panel_open{},failure_logged{};
+} live;
+bool write(const std::string& bytes){
+    if(live.file==INVALID_HANDLE_VALUE||bytes.size()>MAXDWORD)return false;
+    DWORD n=0;
+    return WriteFile(live.file,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size()&&FlushFileBuffers(live.file);
+}
+void note_failure(){
+    if(live.failure_logged)return;
+    live.failure_logged=true;
+    if(live.file!=INVALID_HANDLE_VALUE){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;}
+    std::printf("ffb shadow: optional trace detached after observer or file failure\n");std::fflush(stdout);
+}
+void observe(void*,const platform::NativeCarProducerObservation& o){
+    if(!live.core||!live.core->active())return;
+    ffb::shadow::Gate g{};
+    g.mode=o.mode;g.generation=o.car_generation;g.attempt=o.attempt;
+    g.frame_counter=o.frame_counter;g.update_index=o.update_index;
+    g.car_active=o.car_active;g.panel_open=live.panel_open;
+    ffb::shadow::Sample sample{};sample.gate=g;sample.producer_fresh=o.producer_fresh;
+    sample.car=o.car;sample.car_bytes=o.car_bytes;
+    live.core->observe(sample);
+    if(!live.core->active())note_failure();
+}
+void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
+    live.panel_open=desktop_panel_open();
+    if(live.core&&live.core->active()){
+        ffb::shadow::Gate g{};
+        if(rt){
+            const auto& car=rt->event_function36.car_select;
+            g.mode=rt->mode_state.current;g.paused=rt->event_state.pause_depth>0u;
+            g.generation=car.race_inits;g.attempt=car.producer_attempt;g.car_active=car.producer_active;
+            g.frame_counter=rt->frame_state.frame_counter_95af0c;
+            g.update_index=rt->frame_state.update_index_8a8cdc;
+        }
+        g.panel_open=live.panel_open;
+        live.core->before_tick(g);
+        if(!live.core->active())note_failure();
+    }
+    if(live.inner)live.inner(out,rt);
+}
+}
+bool ffb_shadow_configure(const std::wstring& path,bool ordinary_allowed){
+    if(path.empty())return false;
+    if(!ordinary_allowed){std::printf("ffb shadow: refused during recording\n");return false;}
+    if(!std::filesystem::path(path).is_absolute()){
+        std::printf("ffb shadow: refused non-absolute trace path\n");return false;
+    }
+    live.file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(live.file==INVALID_HANDLE_VALUE){std::printf("ffb shadow: trace create-new failed (%lu)\n",GetLastError());return false;}
+    if(!write(ffb::shadow::Core::header())){
+        std::printf("ffb shadow: trace header write failed\n");CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;return false;
+    }
+    try{live.core=std::make_unique<ffb::shadow::Core>(write);}
+    catch(...){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;return false;}
+    xbox_runtime::car_producer_observer()={nullptr,observe};
+    std::printf("ffb shadow: producer@2 software trace armed (no wheel output)\n");std::fflush(stdout);
+    return true;
+}
+void ffb_shadow_wrap_input_filter(){
+    if(!live.core)return;
+    auto& current=xbox_runtime::input_filter();
+    live.inner=current;current=filter;
+}
+void ffb_shadow_shutdown(){
+    xbox_runtime::car_producer_observer()={};
+    if(live.core)live.core->stop();live.core.reset();
+    if(live.file!=INVALID_HANDLE_VALUE){CloseHandle(live.file);live.file=INVALID_HANDLE_VALUE;}
+}
+}

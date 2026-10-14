@@ -1,7 +1,7 @@
 #pragma once
 // Pure, default-off software preview of outrun-producer@2. No runtime hook, configuration reader or device API.
-// A future caller must attest that this is the previous tick's car after OperationInput ran; the raw car bytes alone
-// cannot prove freshness through a respawn. The sample is taken by the input-filter chain before the next game update.
+// A caller must attest that OperationInput ran for this car on source_tick; raw car bytes alone cannot prove freshness.
+// The offline fixture samples the previous completed tick. The optional shadow samples just after car control returns.
 #include "../vendor/native/forcemodel/force_model.h"
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +15,7 @@ struct Frame {
     std::uint32_t mode{};             // GAME is 16; menu, pause and goal are neutral
     std::uint32_t race_epoch{};       // explicit lifecycle token, nonzero in GAME
     std::uint32_t car_generation{};   // changes on respawn/car replacement, nonzero when proven
-    std::uint64_t source_tick{};      // previous completed game tick, strictly consecutive
+    std::uint64_t source_tick{};      // caller-witnessed completed sample ordinal, consecutive within identity
     bool producer_fresh{};            // OperationInput ran for this car on source_tick
     const std::uint8_t* car{};
     std::size_t car_bytes{};
