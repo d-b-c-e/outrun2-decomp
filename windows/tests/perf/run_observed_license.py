@@ -232,18 +232,23 @@ def main():
         # that selection on the active child and its observed cursor.
         row = wait_for("first-choice", lambda r: r["childState"] in (1, 2), 15)
         if row["childState"] == 1:
+            time.sleep(2)  # its authored opening animation before native input
             key("enter")
             row = wait_for("second-choice", lambda r: r["childState"] == 2, 12)
         if row["menuIndex"] not in (0, 1): raise StageError(f"second-choice: unexpected cursor {row['menuIndex']}")
         if row["menuIndex"] == 0:
+            time.sleep(2)
             key("right")
             row = wait_for("outrun-cursor", lambda r: r["childState"] == 2 and r["menuIndex"] == 1, 4)
+        time.sleep(.8)
         key("enter")
         row = wait_for("outrun-choice", lambda r: r["childState"] in (36, 58, 59), 12)
         if row["childState"] != 36: raise StageError(f"outrun-choice: wrong mode child {row['childState']}")
         for target, label in ((10, "car"), (16, "transmission"), (4, "music")):
+            time.sleep(2)
             key("enter")
             row = wait_for(f"{label}-choice", lambda r, target=target: r["childState"] == target, 12)
+        time.sleep(2)
         key("enter")
         row = wait_for("start-entry", lambda r: r["mode"] in (13, 16), 15)
         row = wait_for("race-game", lambda r: r["mode"] == 16, 45)
