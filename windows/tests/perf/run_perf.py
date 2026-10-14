@@ -25,10 +25,15 @@ measured window is --seconds from there.
 --observed-keys <result>\\keys-seen.tsv (a recording session's key echo, windows/source/key_echo.hpp; sana 36438): each
 key edge is posted, then held until the game echoes it, instead of at fixed times (observed_keys.py: an echo-less
 key, a missing echo within --echo-timeout, or an echo nobody posted fails the run, every held key released).
+
+A gated plan {"gated": true, "steps": [...]} (route_gate.py; sana 110457) needs --route-state <file>: the game writes its
+route state there (OR2_ROUTE_STATE) and each press waits for the page it belongs to. A gate failure stops the keys and
+closes the game; the measured --seconds then follow the last step instead of measure_from.
 """
 import argparse, ctypes, ctypes.wintypes as wt, datetime, hashlib, json, os, pathlib, re, shutil, subprocess, sys, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import observed_keys
+import route_gate
 
 user32 = ctypes.WinDLL("user32", use_last_error=True); kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
@@ -58,8 +63,20 @@ def key_lparam(scan, extended, up):
     return v
 
 
+def load_gated(path):
+    """The steps of a gated plan (route_gate.py), or None for a timed plan; the keys are checked against KEYS."""
+    doc = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    if not (isinstance(doc, dict) and doc.get("gated")): return None
+    steps = route_gate.load_gated(doc)
+    bad = [s["key"] for s in steps if s["key"] not in KEYS]
+    if bad: raise ValueError("unknown key(s) %s" % bad)
+    return steps
+
+
 def load_keys(path):
     doc = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    if isinstance(doc, dict) and doc.get("gated"):   # timed view of a gated plan: its earliest press times
+        doc = dict(doc, steps=[dict(key=s["key"], at=float(s.get("at", 0)), hold=float(s.get("hold", 0.1))) for s in doc["steps"]])
     steps, measure_from = (doc.get("steps"), doc.get("measure_from")) if isinstance(doc, dict) else (doc, None)
     empty_savegame = bool(doc.get("requires_empty_savegame")) if isinstance(doc, dict) else False
     if not isinstance(steps, list) or not steps: raise ValueError("keys.json has no steps")
@@ -148,6 +165,7 @@ def main():
                    help="the game's key echo (a recording session's <result>\\keys-seen.tsv): each edge is held until echoed")
     a.add_argument("--echo-timeout", type=float, default=3.0, help="with --observed-keys: seconds for each echo")
     a.add_argument("--echo-gap", type=float, default=0.25, help="with --observed-keys: seconds from an echo to the next press")
+    a.add_argument("--route-state", type=pathlib.Path, help="with a gated plan: the game's route state file (OR2_ROUTE_STATE)")
     a.add_argument("--check-only", action="store_true")
     o = a.parse_args()
     game = o.game.resolve(); out = o.result.resolve(); problems = []
@@ -162,6 +180,14 @@ def main():
     # A script that starts from "create new license" needs an empty SaveGame; the harness checks, it never deletes.
     if empty_savegame and (not (game / "SaveGame").is_dir() or any((game / "SaveGame").iterdir())):
         problems.append("the key script needs an empty SaveGame folder in the test copy")
+    gated = None
+    try: gated = load_gated(o.keys)
+    except (OSError, ValueError, KeyError) as e: problems.append("gated keys: %s" % e)
+    if gated is not None:
+        if not o.route_state: problems.append("a gated plan needs --route-state")
+        elif o.route_state.exists(): problems.append("--route-state: %s exists before the launch (the game creates it)" % o.route_state)
+        if o.observed_keys: problems.append("a gated plan and --observed-keys are exclusive")
+    elif o.route_state: problems.append("--route-state needs a gated plan")
     events = []
     if o.observed_keys:
         try: events = observed_keys.events_of(steps)
@@ -178,12 +204,14 @@ def main():
         k, sep, v = kv.partition("=")
         if not sep or not re.fullmatch(r"OR2_[A-Z0-9_]+", k): problems.append("--env must be OR2_*=value: %r" % kv)
         else: env[k] = v
+    if gated is not None and o.route_state: env["OR2_ROUTE_STATE"] = str(o.route_state.resolve())
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
     if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
     lp = lease_problem(o.lease_owner)
     if lp: problems.append(lp)
     plan = dict(game=str(game), exeSha256=sha(exe) if exe.exists() else None, keys=str(o.keys), keysSha256=sha(o.keys) if o.keys.exists() else None,
                 steps=len(steps), measureFrom=measure_from, seconds=o.seconds,
+                gated=gated is not None, routeState=str(o.route_state) if o.route_state else None,
                 observedKeys=str(o.observed_keys) if o.observed_keys else None, echoTimeout=o.echo_timeout, echoGap=o.echo_gap, closeSeconds=o.close_seconds, etw=o.etw, env=o.env, windowed=o.windowed, problems=problems,
                 etwProfile=str(o.etw_profile.resolve()) if o.etw_profile else None,
                 etwProfileSha256=sha(o.etw_profile) if o.etw_profile and o.etw_profile.is_file() else None)
@@ -220,6 +248,15 @@ def main():
             receipt["observed"] = dict(events=len(events), echoed=sum(1 for r in recs if r["echo"] is not None), error=err,
                                        maxLateSeconds=round(max(late), 3) if late else None)
             if err: receipt["errors"].append("observed delivery: %s" % err); end = time.time()   # closed now, not at the fixed end (sana 36766)
+        if gated is not None:   # each press waits for its page (route_gate.py)
+            reader = route_gate.StateReader(o.route_state)
+            recs, err = route_gate.deliver(gated, lambda name, up: post_key(hwnd, name, up), lambda: time.time() - t0, time.sleep,
+                                           reader, alive=lambda: proc.poll() is None)
+            receipt["keysSent"] = recs; pending = []
+            receipt["route"] = dict(steps=len(gated), delivered=len(recs), error=err, states=reader.lines,
+                                    last=route_gate._fmt(reader.state))
+            if err: receipt["errors"].append("route gate: %s" % err); end = time.time()   # closed now
+            else: end = time.time() + o.seconds   # measured after the last step
         while time.time() < end and proc.poll() is None:
             now = time.time() - t0
             while pending and pending[0][0] <= now:
@@ -243,6 +280,7 @@ def main():
     for n, p in logs.items():
         if p.exists() and p.stat().st_mtime != before[n]: shutil.copy2(p, out / n)
         else: receipt["errors"].append("%s not written by this run" % n)
+    if gated is not None and o.route_state and o.route_state.exists(): shutil.copy2(o.route_state, out / "route-state.txt")
     prof = parse_profile((out / "OutRunXbox.log").read_text(encoding="utf-8", errors="replace")) if (out / "OutRunXbox.log").exists() else None
     receipt["profile"] = prof
     if prof is None: receipt["errors"].append("no race-mode frame profile in OutRunXbox.log (did the race start?)")

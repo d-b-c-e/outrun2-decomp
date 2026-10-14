@@ -20,6 +20,8 @@
 #include "platform/vehicle_pose_filter.hpp"
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <cerrno>
 #include <cmath>
 #include <cstdarg>
@@ -816,6 +818,32 @@ void live_log(GameHost& s){
 }
 #endif
 
+// OR2_ROUTE_STATE=<file> (test runs only; windows/tests/perf/route_gate.py): one appended line whenever the
+// frontend/race route signature changes, so a key script can wait for the page a press belongs to instead of a
+// fixed time. Read-only: mode 78026C, the state2 page key, frontend stack pushes and PC confirms, the menu cursor,
+// the START stage, GO (GAME with 8367BC <= 60, CommonPlCar's start hold released) and [780248]. At most 4000 lines.
+void route_state_note(const GameHost& s){
+    static const char* path=std::getenv("OR2_ROUTE_STATE");
+    if(!path||!*path||!s.runtime)return;
+    static std::FILE* file=std::fopen(path,"ab");
+    static std::array<std::int64_t,8> last{{-1,-1,-1,-1,-1,-1,-1,-1}};
+    static unsigned lines=0;
+    if(!file||lines>=4000u)return;
+    const auto& r=*s.runtime;const auto& f=r.event_function36;
+    const std::array<std::int64_t,8> now{{r.mode_state.current,f.state2_selector_child_state,f.frontend_stack_pushes,
+        f.frontend_menu_confirms,f.frontend_menu_index,r.start_mode.stage,
+        (r.mode_state.current==16u&&r.game_mode.start_countdown<=60)?1:0,r.start_mode.game_flag_780248}};
+    if(now==last)return;
+    last=now;++lines;
+    static const auto t0=std::chrono::steady_clock::now();
+    const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-t0).count();
+    std::fprintf(file,"route t=%lld frame=%u mode=%lld child=%lld pushes=%lld confirms=%lld index=%lld start=%lld go=%lld pause=%lld\n",
+        static_cast<long long>(ms),s.input_samples,static_cast<long long>(now[0]),static_cast<long long>(now[1]),static_cast<long long>(now[2]),
+        static_cast<long long>(now[3]),static_cast<long long>(now[4]),static_cast<long long>(now[5]),static_cast<long long>(now[6]),
+        static_cast<long long>(now[7]));
+    std::fflush(file);
+}
+
 void input_sample(void* user,pf::NativeInputState& out){
     auto& s=*static_cast<GameHost*>(user);
     if(s.runtime){const auto m=s.runtime->mode_state.current;
@@ -853,6 +881,7 @@ void input_sample(void* user,pf::NativeInputState& out){
     s.input=out;
     s.seen_buttons|=held|down;
     ++s.input_samples;
+    route_state_note(s);
     if(s.sample_status)s.sample_status(out,held,down,pad.up);
 }
 
