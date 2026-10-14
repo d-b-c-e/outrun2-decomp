@@ -49,12 +49,21 @@ extern const TranslatedFunction network_cars_functions[];
 extern const TranslatedCodeData network_cars_code_data[];
 extern const TranslatedFunction network_functions[];
 namespace {
-// The race clock and matrix leaves must stay on the translated CPU that calls
-// them, retaining the x87 return and the guest matrix stack's pointer/depth.
+// 449470: wraps a float angle into [-pi,pi] with SSE single-precision comiss loops ([6280C8] pi,
+// [5A29DC] 2pi, [5A29D8] -pi); NaN skips both loops. The same wrap as 449580's and 4494D0's tail,
+// whose ports (pc_wrecker.cpp, pc_race_camera.cpp) are file-local.
+float angle_wrap_449470(float x){
+    constexpr float pi=3.14159274101257324f,two_pi=6.28318548202514648f,minus_pi=-3.14159274101257324f;
+    if(x>pi){do x-=two_pi;while(x>pi);}
+    if(minus_pi>x){do x+=two_pi;while(minus_pi>x);}
+    return x;
+}
+// The race clock, the matrix leaves and 449360's fsin must stay on the translated CPU that
+// calls them, retaining the x87 return and the guest matrix stack's pointer/depth.
 const TranslatedModule* request_clock_module(){
-    static const std::array<TranslatedFunction,5> functions=[](){
-        constexpr std::array<std::uint32_t,4> pcs{0x4af500u,0x409f90u,0x40a170u,0x40a010u};
-        std::array<TranslatedFunction,5> found{};
+    static const std::array<TranslatedFunction,6> functions=[](){
+        constexpr std::array<std::uint32_t,5> pcs{0x4af500u,0x409f90u,0x40a170u,0x40a010u,0x449360u};
+        std::array<TranslatedFunction,6> found{};
         for(std::size_t i=0;i<pcs.size();++i){
             const auto* f=network_functions;
             while(f->pc&&f->pc!=pcs[i])++f;
@@ -65,6 +74,17 @@ const TranslatedModule* request_clock_module(){
     static const TranslatedModule module=[](){
         TranslatedModule result{functions.data(),nullptr,{}};
         result.special=[](or2x86::Cpu& cpu,std::uint32_t pc){
+            if(pc==0x449470u){   // pure (cdecl float -> ST0): any caller in this module, e.g. 482140's GAME oscillator
+                const auto bits=or2x86::ld32(cpu,cpu.esp+4u);
+                float v;std::memcpy(&v,&bits,4u);
+                const float r=angle_wrap_449470(v);
+                std::uint32_t out;std::memcpy(&out,&r,4u);
+                // 449499 / 4494B7 write the argument slot only when a loop ran (a loop always changes the value).
+                if(out!=bits)or2x86::st32(cpu,cpu.esp+4u,out);
+                cpu.fpu.push(or2x86::x87_from_f32(out));   // 4494BF fld DWORD PTR [esp+4]
+                translated_return(cpu,cpu.eax,0u);
+                return true;
+            }
             // 4FAF3F discards 449940's ST0 immediately. Other callers remain unowned.
             if(pc!=0x449940u||or2x86::ld32(cpu,cpu.esp)!=0x4faf44u)return false;
             auto& memory=*static_cast<PcRaceMemory*>(cpu.mem_user);
