@@ -183,6 +183,10 @@ ints.
     465860 sites use argument 5. Unmatched return PCs and targets, and modes 0/2, keep all argument bits unchanged.
   - `bulk_tr.cpp` is generated and remains unedited; the call-boundary mapping survives its regeneration. The focused
     `test_triple_screens` fixture checks all 18 mappings and negative controls. C2C rendered positions await step 4.
+  - **Offline evidence, 2026-10-14 (`b22673f`):** isolated VS 2022 ClangCL `OR2_XBOX=ON` Release build of
+    `test_triple_screens` and `OutRunDesktop` passed; CTest `triple_screens` passed 1/1. Logs are in the coordination
+    hub at `artifacts/outrun-c2c-ui-20261014/{configure,build,focused-test}.log`. The fixture exercises the bridge
+    helper with the source-derived call table; it does not execute a real translated caller or verify rendered C2C UI.
 - **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
   decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
 ## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
