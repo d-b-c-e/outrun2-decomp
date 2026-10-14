@@ -1,0 +1,26 @@
+# `outrun-producer@2` software preview
+
+This source-only candidate corrects the force model's input meanings. It is **not selected by OutRunDesktop**, is not in the F6 panel or `[FFB]` settings, and cannot send force to a device. The existing `outrun-legacy@1` code, trace and goldens remain unchanged. Those goldens reproduce the old Tweaks calculation with synthetic inputs; they do **not** establish tyre forces in this game's car record. The owner's installed tune is not migrated or reinterpreted.
+
+## Pin and fixed preview profile
+
+`windows/vendor/native/forcemodel/force_model.h` is byte-for-byte toolkit `native/forcemodel/force_model.h` at `fb710dffa29f707d296f1f579851e23d549a8b51`, SHA-256 `C7F3C3FF9C6D1475B88015643AFB1B515D3F6F97BCC46E1FE2082F26DED1B16F`. The adapter uses its `Model`, `Inputs` availability flags and `Shaper`. The provisional software profile fixes spring strength at `0.30`, full spring speed at `30 m/s`, and symmetric shift strength at `0.05`; damping, tyre load, texture, impact and weight transfer are off. Shaper gain is unity, with no extra fade, smoothing or ramp in this offline preview. None of these constants comes from or changes the owner's tune.
+
+## Sample contract
+
+The desktop `input_filter` runs at `xbox/source/main.cpp:246`, before the next native race update. Its car bytes are therefore the **previous completed car tick**. `race_input.cpp:73-96` computes signed steering in `analog_7d6810.current[0]` (-127..127); `race_player_car.cpp:375` passes that consumed value to `operation_input_49fad0`, and `pc_common_control.cpp:2189-98` writes it shifted left by 8 at car `+0x202` in GAME. Positive game steering produces a negative centering request through the toolkit model. The sign at a particular physical wheel is still unmeasured.
+
+`pc_common_control.cpp:1039-46` produces `+0x1F8` for the HUD; `race_hud_navi.cpp:691-704` displays that metric base unchanged or multiplied by `0.6215` for miles. The request uses `speed_mps = hud_kmh_1f8 / 3.6`. `pc_transmission.cpp:6-35` updates gear `+0x208`. A change between two valid, nonzero gears in one continuous car generation emits one `gear_shift` event. It does not fire on the first sample, a menu return, a new race or a respawn.
+
+The pure `Frame` requires an external, nonzero race epoch and car generation, a strictly consecutive source tick **within one epoch and car generation**, positive bounded `dt`, and proof that `OperationInput` ran for this car on that source tick. The source counter may restart when identity changes. The bytes alone cannot establish that proof. The game's `+0xD50 > 120` branch skips the `+0x202` write, so the adapter independently rejects that stale-steering case. A menu/pause/goal frame, invalid input, source-tick gap, new epoch or changed car generation resets gear history, model state and shaped output. A newly entered epoch or generation primes with zero output. **No live producer of the freshness or respawn tokens is wired in this slice**; that is a gate for any later runtime proposal.
+
+Only `Inputs.has_steer`, `steer`, `speed_mps` and one-tick `gear_shift` can be populated. `has_steer_rate`, `has_front_lateral_force`, `has_lateral_g`, `has_longitudinal_g`, `has_slip` and `has_drift` stay false. Texture and impact stay zero. Car `+0x1D0/+0x1D4` are speed differences, and `+0x264/+0x268` are road-edge cross-distances, so they never enter these request fields. `+0x24C..+0x258` surface words can be stale when road result 1 skips their write, so they remain unavailable too.
+
+| Raw previous-tick sample | Normalized model request |
+| --- | --- |
+| GAME, proven fresh, `+0x202 = +16384`, `+0x1F8 = 72 km/h`, gear 2, first valid sample | Prime silently; no model request or shift event. |
+| Same car and next tick, same fields | `has_steer=true`, `steer=+0.503937`, `speed_mps=20`, `gear_shift=false`; unavailable flags false. Centering model force is negative. |
+| Next tick, `+0x202 = -8192`, `+0x1F8 = 36 km/h`, gear 3 | `steer=-0.251969`, `speed_mps=10`, `gear_shift=true` for this tick; no tyre, surface or impact measurement is inferred. |
+| Menu, unproven producer, `+0xD50 > 120`, respawn generation change or source-tick gap | Zero output and reset/prime; retained car words do not become fresh measurements. |
+
+`trace_header()` and `trace_csv()` expose the versioned `dbce.outrun-producer-ffb-trace@2` software row, including the consumed `dt_seconds` so event evolution can be replayed. This is a separate trace schema; it neither rewrites the legacy trace nor writes a runtime file. The fixture `test_ffb_producer2` exercises the actual `pc_input_analog_453860`, `operation_input_49fad0` and `manual_transmission` producers, previous-tick sampling, sign, shift count, unavailable fields and neutral/reset gates. Its synthetic car record verifies source behavior; it is not a rendered/gameplay or physical wheel qualification.

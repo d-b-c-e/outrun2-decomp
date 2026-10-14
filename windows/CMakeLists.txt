@@ -47,6 +47,15 @@ target_compile_definitions(test_ffb_outrun PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN 
 target_compile_features(test_ffb_outrun PRIVATE cxx_std_17)
 add_test(NAME ffb_outrun COMMAND test_ffb_outrun ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/ffb)
 
+# Producer-semantic, software-only @2 preview. The fixture calls the game's own input and transmission producers,
+# then samples the previous completed car tick; it links no wheel/device path and changes no runtime model selection.
+add_executable(test_ffb_producer2 tests/test_ffb_producer2.cpp source/ffb_producer2.cpp
+    ${PROJECT_SOURCE_DIR}/src/platform/race_input.cpp)
+target_include_directories(test_ffb_producer2 PRIVATE source ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_ffb_producer2 PRIVATE outrun_driving)
+target_compile_features(test_ffb_producer2 PRIVATE cxx_std_17)
+add_test(NAME ffb_producer2 COMMAND test_ffb_producer2)
+
 # F4, the delivery gates (source/ffb_device) against a fake WheelFfb library: identity, the accepted zero, recovery,
 # release and shutdown order, and silence whenever a gate is closed. No device and no DLL.
 add_executable(test_ffb_delivery tests/test_ffb_delivery.cpp source/ffb_device.cpp)
