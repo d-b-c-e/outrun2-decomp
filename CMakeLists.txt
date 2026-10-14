@@ -862,8 +862,11 @@ add_test(NAME retail_gpu_cache_r153 COMMAND test_retail_gpu_cache_r153
   ${OR2_GENERATED_ASSET_ROOT}/or2_frontend_preview.bin
   ${OR2_GENERATED_ASSET_ROOT}/or2_start_loading_preview.bin)
 add_executable(test_pc_scene_renderer tests/test_pc_scene_renderer.cpp)
-target_link_libraries(test_pc_scene_renderer PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
+target_link_libraries(test_pc_scene_renderer PRIVATE outrun_native_runtime)
 add_test(NAME pc_scene_renderer COMMAND test_pc_scene_renderer)
+add_executable(test_race_area_draw_list tests/test_race_area_draw_list.cpp)
+target_link_libraries(test_race_area_draw_list PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
+add_test(NAME race_area_draw_list COMMAND test_race_area_draw_list)
 add_test(NAME pc_scene_renderer_retail COMMAND test_pc_scene_renderer
   "${OR2_PC_ASSET_ROOT}")
 
