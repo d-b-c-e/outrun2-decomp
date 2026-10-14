@@ -3,6 +3,7 @@
 #include "platform/race_area_runtime.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "system/exe_image.hpp"
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -169,6 +170,14 @@ int main(int argc,char** argv){
             require(native_start_owned_call(request,0x004f03a0u,&lane_zero,1u,placement_result)&&
                     native_race_area(request).placements[0].handle==request.start_mode.request_placement_handle_44e590,
                     "START adopts request placement into AREA lane zero");
+            request.race.clock.time_842110=123.5f;
+            std::array<std::uint8_t,0x400> request_stack{};
+            outrun::driving::Bytes request_bytes(request_stack.data(),request_stack.size());
+            for(std::size_t i=0;i<16u;++i)request_bytes.put32(i*4u,(i%5u)==0u?0x3f800000u:0u);
+            outrun::driving::PcMatrixStack request_matrices{request_bytes,0,0,16};
+            require(native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&
+                    !native_race_traffic(request).latched,
+                    "variant-5 request control calls the translated x87 race clock getter");
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;
