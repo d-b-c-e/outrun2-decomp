@@ -1,5 +1,6 @@
 #include "platform/native_runtime.hpp"
 #include "platform/race_traffic_runtime.hpp"
+#include "platform/race_area_runtime.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "system/exe_image.hpp"
 #include <cstdio>
@@ -158,6 +159,16 @@ int main(int argc,char** argv){
                     loaded.course_runtime.selected_copy_active&&loaded.course_runtime.selected_7d30a8==selected&&
                     loaded.course_runtime.matrix_7d3190==matrix&&loaded.course_work==work,
                     "second phase-3 call keeps selected course and provider storage without rereading");
+            request.game_mode.game_variant=5u;
+            std::uint32_t placement_result=1u;
+            require(native_start_owned_call(request,0x0046c380u,nullptr,0u,placement_result)&&
+                    placement_result==0u&&request.start_mode.request_placement_handle_44e590!=0u&&
+                    !native_race_traffic(request).latched,
+                    "START variant-5 request manager fills its mapped placement local");
+            std::uint32_t lane_zero=0u;
+            require(native_start_owned_call(request,0x004f03a0u,&lane_zero,1u,placement_result)&&
+                    native_race_area(request).placements[0].handle==request.start_mode.request_placement_handle_44e590,
+                    "START adopts request placement into AREA lane zero");
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;

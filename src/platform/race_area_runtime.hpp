@@ -165,7 +165,8 @@ bool native_race_area_display(NativeRuntimeContext&,PcSceneRenderer&,std::uint32
 std::uint32_t native_race_road_tables_46fc30(NativeRuntimeContext&,std::uint32_t which);
 // Course teardown services 43DE50(lane) / 44A1A0 / 4F11B0(lane) / 4F0600(lane).
 void native_race_area_teardown(NativeRuntimeContext&,std::uint32_t pc,std::uint32_t arg);
-std::uint32_t native_race_area_call(NativeRuntimeContext&,PcSceneRenderer*,const PcRaceCall&);
+std::uint32_t native_race_area_call(NativeRuntimeContext&,PcSceneRenderer*,const PcRaceCall&,
+                                   std::uint32_t* start_local=nullptr);
 std::uint32_t native_race_road_tables_46fe50(NativeRuntimeContext&,std::uint32_t which,std::uint32_t kind);
 // Read-only view of the road tables for 4A4010 GetRoadOfs / CalcOfsLeftLane.
 driving::PcRoadTableArena native_race_road_tables(NativeRuntimeContext&);

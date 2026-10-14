@@ -30,15 +30,17 @@
 namespace outrun::platform {
 // race_traffic_runtime.cpp: an entry of the C2C request manager 7F9460 (variant 5).
 bool native_race_requests_call(NativeRuntimeContext&,driving::PcMatrixStack&,std::uint32_t pc,
-                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx);
+                               std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx,
+                               std::uint32_t* start_local);
 namespace {
 // The request manager outside a race frame (START): over an identity matrix stack.
-bool requests_call(NativeRuntimeContext& c,std::uint32_t pc,std::initializer_list<std::uint32_t> args,std::uint32_t& eax){
+bool requests_call(NativeRuntimeContext& c,std::uint32_t pc,std::initializer_list<std::uint32_t> args,
+                   std::uint32_t& eax,std::uint32_t* start_local=nullptr){
     std::array<std::uint8_t,0x400> stack{};
     driving::Bytes bytes(stack.data(),stack.size());
     for(std::size_t i=0;i<16u;++i)bytes.put32(i*4u,(i%5u)==0u?0x3f800000u:0u);
     driving::PcMatrixStack matrices{bytes,0,0,16};
-    return native_race_requests_call(c,matrices,pc,args,eax,0u);
+    return native_race_requests_call(c,matrices,pc,args,eax,0u,start_local);
 }
 }
 }
@@ -3923,6 +3925,21 @@ bool native_start_owned_call(NativeRuntimeContext& context,std::uint32_t pc_entr
             if(count>1u)return false;
             if(count==1u)return requests_call(context,pc_entry,{args[0]},result);
             return requests_call(context,pc_entry,{},result);}
+        case 0x0046c380u:{
+            // PC 49DF67 passes the address of its stage-5 local to the variant-5
+            // request manager. 481650 fills that local with the placement handle.
+            if(count!=0u||context.game_mode.game_variant!=5u)return false;
+            start.request_placement_handle_44e590=0u;
+            return requests_call(context,pc_entry,{PcRaceLocal44E590},result,
+                                 &start.request_placement_handle_44e590);}
+        case 0x004f03a0u:{
+            // The next PC call adopts the same local into AREA placement lane 0.
+            if(count!=1u||!args||args[0]!=0u||context.game_mode.game_variant!=5u)return false;
+            PcRaceCall k{};k.pc=pc_entry;k.argc=2u;
+            k.args[0]=PcRaceLocal44E590;k.args[1]=0u;
+            try{result=native_race_area_call(context,nullptr,k,&start.request_placement_handle_44e590);}
+            catch(const std::exception& e){start.scene_owner_fault_reason=e.what();return false;}
+            return true;}
         case 0x0049ba80u:{
             if(count!=0u)return false;
             ++start.scene_owner_calls;
