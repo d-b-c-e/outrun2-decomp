@@ -1,6 +1,6 @@
 #pragma once
-// Explicit player-model choice and software-only request seam. The legacy model keeps its existing
-// input-filter/delivery path; producer@2 requests have no WheelFfb or native output connection.
+// Explicit player-model choice and a pure request seam for fixtures. Runtime producer@2 delivery
+// is wired separately through ffb_shadow_live and the existing gated ffbdev::Delivery.
 #include "ffb_shadow.hpp"
 #include <memory>
 #include <string>
@@ -19,7 +19,7 @@ struct Selection {
 Selection select(const Ini& settings);
 
 // A selected producer request through a caller-owned software sink. It reuses the shadow's
-// continuity/gate logic and producer2::Stream; the real wheel delivery is deliberately absent.
+// continuity/gate logic and producer2::Stream; this class itself has no device dependency.
 class SelectedRequests {
 public:
     using Sink=shadow::Core::RequestSink;

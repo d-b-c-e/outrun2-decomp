@@ -540,9 +540,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // Optional producer@2 trace: ordinary, non-recording diagnostic only.
     // Test and playback processes already cleared all OR2_ switches above.
     if(const wchar_t* trace=_wgetenv(L"OR2_FFB_PRODUCER2_SHADOW_TRACE")){
-        if(*trace&&outrun::desktop::ffb_shadow_configure(trace,!test_like&&intake.kind!=session::Intake::Kind::Record))
-            outrun::desktop::ffb_shadow_wrap_input_filter();
+        if(*trace)outrun::desktop::ffb_shadow_configure(trace,!test_like&&intake.kind!=session::Intake::Kind::Record);
     }
+    outrun::desktop::ffb_shadow_wrap_input_filter();
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open

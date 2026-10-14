@@ -5,12 +5,17 @@
 // sample, and is unloaded at ffb_shutdown. Stubs stand in for the game window, the input filter slot and the two input
 // layers' steering devices only.
 #include "ffb_live.hpp"
+#include "ffb_shadow_live.hpp"
 #include "native_window.hpp"
 #include "shim_input.hpp"
 #include "platform/runtime_input.hpp"
 #include "platform/native_runtime.hpp"
+#include "platform/car_producer_observer.hpp"
 #include <windows.h>
 #include <cstring>
+#include <cmath>
+#include <algorithm>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <cstdio>
@@ -20,6 +25,9 @@
 namespace outrun::xbox_runtime {
 InputFilter& input_filter(){static InputFilter f=nullptr;return f;}
 NativeWindow& native_window(){static NativeWindow w;return w;}
+outrun::platform::NativeCarProducerObserver& car_producer_observer(){
+    static outrun::platform::NativeCarProducerObserver o;return o;
+}
 }
 namespace outrun::desktop {
 std::string g_steer;   // what the wheel input layer reports as the connected steering device
@@ -54,14 +62,17 @@ struct Result{int attached;std::wstring calls;bool loaded_after;};
 // The game reads its switches with getenv (the CRT's copy, set at process start); _putenv_s updates that copy and the
 // process environment both.
 Result run(const std::string& body,bool latched,const char* mute){
+    outrun::xbox_runtime::input_filter()=nullptr;
     _putenv_s("DBCE_FFB_MUTE",mute?mute:"");
     _putenv_s("OR2_FFB_TRACE","");
     SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
     const int before=attaches();
     outrun::desktop::ffb_configure(ini(body),latched,latched?folder():std::string());
     outrun::desktop::ffb_wrap_input_filter();
+    outrun::desktop::ffb_shadow_wrap_input_filter();
     if(auto f=outrun::xbox_runtime::input_filter()){outrun::platform::NativeInputState in{};f(in,nullptr);}   // a menu sample
     outrun::desktop::ffb_shutdown();
+    outrun::xbox_runtime::input_filter()=nullptr;
     return {attaches()-before,env(L"FAKE_WHEELFFB_CALLS"),GetModuleHandleW(L"WheelFfb.dll")!=nullptr};
 }
 }
@@ -90,11 +101,109 @@ int main(){
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
-    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"producer selection cannot attach the unreviewed delivery wire");
+    check(r.attached==1&&r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;"&&!r.loaded_after,
+          "producer selection starts gated delivery but never opens a device outside the race");
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = none\r\n",false,nullptr);
+    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"selected software model leaves native library unloaded by default");
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,"1");
+    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"selected output obeys the process-wide mute before DLL load");
     r=run(Controls+"[FFB]\r\nModel = unrecognized\r\nOutput = wheel\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"unknown model refuses before loading the DLL");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n[FFBProducer2]\r\nSteeringStrengthPercent = 101\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"invalid producer gains refuse before loading the DLL");
+    // One native observer feeds the selected producer and its optional CSV. The fake DLL records device calls;
+    // no physical device is opened. A skipped callback must zero and re-prime before any new force.
+    {
+        outrun::xbox_runtime::input_filter()=nullptr;
+        _putenv_s("DBCE_FFB_MUTE","");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
+        outrun::desktop::ffb_front_check()=[](void*){return true;};
+        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
+        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\nFFBGlobalStrength = 0\r\n"
+            "[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n"),false,{});
+        check(outrun::desktop::ffb_output_running()&&outrun::xbox_runtime::car_producer_observer().observe,
+              "selected model starts delivery and registers the car observer");
+        const auto trace_name=folder()+"\\selected.csv";
+        const std::wstring trace_path(trace_name.begin(),trace_name.end());
+        check(outrun::desktop::ffb_shadow_configure(trace_path,true),"selected trace attaches to the same observer");
+        outrun::desktop::ffb_wrap_input_filter();
+        outrun::desktop::ffb_shadow_wrap_input_filter();
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        auto& state=rt->event_function36.car_select;
+        state.race_inits=1;state.producer_active=true;
+        auto& car=state.car_799d18;
+        const auto put=[&](std::size_t at,const auto& v){std::memcpy(car.data()+at,&v,sizeof v);};
+        put(0x202,std::int16_t(16384));put(0x1f8,72.0f);put(0x208,std::uint32_t(2));
+        const auto forces=[]{std::vector<long> v;const auto c=env(L"FAKE_WHEELFFB_CALLS");const std::wstring k=L"SetDeviceForcesXY ";
+            for(std::size_t at=c.find(k);at!=std::wstring::npos;at=c.find(k,at+1))v.push_back(std::wcstol(c.c_str()+at+k.size(),nullptr,10));return v;};
+        std::uint64_t attempt=0;
+        const auto tick=[&](bool callback=true){
+            ++rt->frame_state.frame_counter_95af0c;
+            outrun::platform::NativeInputState in{};outrun::xbox_runtime::input_filter()(in,rt.get());
+            if(callback){
+                outrun::platform::NativeCarProducerObservation o{};
+                o.car=car.data();o.car_bytes=car.size();o.mode=16;o.car_generation=1;o.continuity=state.producer_continuity;
+                o.attempt=++attempt;o.frame_counter=rt->frame_state.frame_counter_95af0c;
+                o.car_active=o.producer_fresh=o.direct=true;
+                state.producer_attempt=attempt;
+                outrun::platform::notify_car_producer(outrun::xbox_runtime::car_producer_observer(),o);
+            }
+        };
+        tick();tick();tick();
+        auto sent=forces();check(!sent.empty()&&sent.back()!=0,"primed producer reaches fake native with bounded force");
+        outrun::desktop::ffb::producer2::Stream expected({25,75});
+        outrun::desktop::ffb::producer2::Frame request{};
+        request.mode=16;request.race_epoch=1;request.car_generation=1;request.producer_fresh=true;
+        request.car=car.data();request.car_bytes=car.size();request.dt_seconds=1.0f/60.0f;
+        request.source_tick=1;expected.step(request);request.source_tick=2;
+        const auto row=expected.step(request);
+        const auto direct=std::lround(std::clamp(row.shaped_force,-1.0f,1.0f)*10000.0f);
+        check(sent.back()==direct,"selected request converts once to DirectInput units without legacy global gain");
+        tick(false);tick(false);
+        sent=forces();check(sent.back()==0,"missing callback sends zero without waiting for another valid car");
+        tick();tick();
+        sent=forces();check(sent.back()==0,"resumed callback primes at zero");
+        tick();sent=forces();check(sent.back()!=0,"fresh consecutive callback resumes force after prime");
+        state.producer_continuity=1;
+        tick();sent=forces();check(sent.back()==0,"recovery gate zeros before another car callback");
+        tick();sent=forces();check(sent.back()==0,"recovery callback neutralizes the next delivery");
+        outrun::desktop::g_panel_open=true;tick(false);
+        sent=forces();check(sent.back()==0,"F6 panel remains neutral");
+        outrun::desktop::g_panel_open=false;
+        tick();tick();sent=forces();check(sent.back()==0,"F6 close starts from a fresh prime");
+        tick();sent=forces();check(sent.back()!=0,"force resumes only after F6 prime");
+        outrun::desktop::ffb_front_check()=[](void*){return false;};
+        tick(false);sent=forces();check(sent.back()==0,"focus loss zeros held selected force");
+        outrun::desktop::ffb_front_check()=[](void*){return true;};
+        tick();tick();sent=forces();check(sent.back()==0,"focus return primes before force");
+        tick();sent=forces();check(sent.back()!=0,"focus return resumes after prime");
+        rt->mode_state.current=13;tick(false);sent=forces();check(sent.back()==0,"menu transition zeros selected force");
+        rt->mode_state.current=16;tick();tick();sent=forces();check(sent.back()==0,"menu return primes before force");
+        tick();sent=forces();check(sent.back()!=0,"menu return resumes after prime");
+        rt->event_state.pause_depth=1;tick(false);sent=forces();check(sent.back()==0,"pause zeros selected force");
+        rt->event_state.pause_depth=0;tick();tick();sent=forces();check(sent.back()==0,"unpause primes before force");
+        tick();sent=forces();check(sent.back()!=0,"unpause resumes after prime");
+        put(0x1f8,std::numeric_limits<float>::quiet_NaN());tick();tick(false);
+        sent=forces();check(sent.back()==0,"invalid producer speed zeros held force");
+        put(0x1f8,72.0f);tick();tick();sent=forces();check(sent.back()==0,"valid input after rejection primes first");
+        tick();sent=forces();check(sent.back()!=0,"valid input resumes only after prime");
+        outrun::desktop::ffb_stop_output();
+        check(!outrun::desktop::ffb_output_running()&&
+              env(L"FAKE_WHEELFFB_CALLS").find(L"PanicStop;FreeDirectInput;")!=std::wstring::npos,
+              "Stop FFB quiesces selected delivery through the existing lifecycle");
+        outrun::desktop::ffb_shadow_shutdown();outrun::desktop::ffb_shutdown();
+        check(!GetModuleHandleW(L"WheelFfb.dll")&&
+              !outrun::xbox_runtime::car_producer_observer().observe,"shutdown unloads and unregisters observer");
+        std::ifstream trace(trace_name,std::ios::binary);std::string header;std::getline(trace,header);
+        check(header.find("model=outrun-producer@2,output=selected-request")!=std::string::npos&&
+              header.find("steering_percent=25,shift_percent=75")!=std::string::npos,
+              "retained trace pins selected model and both gains");
+        trace.close();DeleteFileA(trace_name.c_str());
+        outrun::xbox_runtime::input_filter()=nullptr;
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+    }
     // The shim backend (INPUT-SHIM.md section 6): the library loads and its delivery waits, but it never opens the wheel
     // until the shim hands it over (ffb_set_shim_owner, from the shim's WheelFfb bridge): race ticks with a force, the
     // steering live and the fake accepting this very wheel reach no device call (no unattended exclusive open).

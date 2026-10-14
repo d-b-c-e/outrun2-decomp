@@ -25,6 +25,8 @@ int main(){
         require(Core::header().find("shadow-trace@3")!=std::string::npos&&
                 Core::header().find("origin,frame_counter,update_index,gate,continuity_token,recovery_pending,state")!=std::string::npos,
                 "versioned recovery columns and native tick");
+        require(Core::header({25,75}).find("steering_percent=25,shift_percent=75")!=std::string::npos,
+                "trace identifies both effective producer gains");
         require(platform::game_steer_written(16,120)&&!platform::game_steer_written(16,121)&&
                 !platform::game_steer_written(13,0),"same-mode and D50 steering write gate");
         require(platform::fresh_car_producer(true,true,1,true,true,0),"direct successful GamePlCar fresh");
@@ -113,6 +115,20 @@ int main(){
         g.update_index=1;g.attempt=2;failing.before_frame(g);s.gate=g;failing.observe(s);
         require(!failing.active(),"writer failure detaches only shadow");
         failing.observe(s);require(writes==2,"detached writer never retried");
+        int requests=0;
+        Core selected([&](const std::string&){return ++writes<3;},{},
+            [&](const Gate&,const producer::Row&){++requests;});
+        g.frame_counter=21;g.update_index=0;g.attempt=1;s.gate=g;selected.before_frame(g);selected.observe(s);
+        g.frame_counter=22;g.attempt=2;s.gate=g;selected.before_frame(g);selected.observe(s);
+        require(selected.active()&&selected.trace_failed()&&requests==2,
+                "trace failure detaches writer but preserves selected request sink");
+        g.frame_counter=23;g.attempt=3;s.gate=g;selected.before_frame(g);selected.observe(s);
+        require(requests==3&&writes==3,"selected producer continues after trace failure");
+        Core throwing([](const std::string&)->bool{throw std::runtime_error("disk fault");}, {},
+            [&](const Gate&,const producer::Row&){++requests;});
+        g.frame_counter=24;g.attempt=1;s.gate=g;throwing.before_frame(g);throwing.observe(s);
+        require(throwing.active()&&throwing.trace_failed()&&requests==4,
+                "throwing trace writer cannot detach selected request sink");
         std::printf("ffb shadow %d checks passed\n",checks);return 0;
     }catch(const std::exception& ex){std::fprintf(stderr,"ffb shadow failed: %s\n",ex.what());return 1;}
 }

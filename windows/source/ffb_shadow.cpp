@@ -4,13 +4,18 @@
 namespace outrun::desktop::ffb::shadow {
 Core::Core(std::function<bool(const std::string&)> write,const producer2::Strengths& strengths,RequestSink request_sink)
     :write_(std::move(write)),request_sink_(std::move(request_sink)),stream_(strengths){}
-std::string Core::header(){
+std::string Core::header(const producer2::Strengths& strengths,bool selected){
     const auto base=producer2::trace_header();
     const auto line=base.find('\n');
     return std::string("# dbce.outrun-producer-ffb-shadow-trace@3,model=")+producer2::ModelId+
-        ",output=software-only,seam=just-completed-car-control\n"
+        ",output="+(selected?"selected-request":"software-only")+
+        ",seam=just-completed-car-control,steering_percent="+
+        std::to_string(strengths.steering_percent)+",shift_percent="+
+        std::to_string(strengths.shift_percent)+"\n"
         "origin,frame_counter,update_index,gate,continuity_token,recovery_pending,"+base.substr(line+1);
 }
+void Core::set_writer(std::function<bool(const std::string&)> write) noexcept {write_=std::move(write);trace_failed_=false;}
+void Core::invalidate() noexcept {stream_.reset();have_valid_pair_=false;neutral_latched_=true;}
 void Core::mode(std::uint32_t current) {
     const bool game=current==16u;
     if(game&&!previous_game_){++epoch_;if(epoch_==0u)++epoch_;stream_.reset();neutral_latched_=false;have_valid_pair_=false;}
@@ -33,15 +38,18 @@ bool Core::recovery(const Gate& gate,const char* origin){
     return false;
 }
 bool Core::write_row(const Gate& gate,const char* origin,const char* why,const producer2::Row& row) noexcept {
-    try{
-        const std::string prefix=std::string(origin)+","+std::to_string(gate.frame_counter)+","+
-            std::to_string(gate.update_index)+","+why+","+std::to_string(gate.continuity)+","+
-            std::to_string(unsigned(gate.recovery_pending))+",";
-        if(write_&&write_(prefix+producer2::trace_csv(row))){
-            if(request_sink_)request_sink_(gate,row);
-            return true;
-        }
-    }catch(...){}
+    try{if(request_sink_)request_sink_(gate,row);}catch(...){stop();return false;}
+    if(write_){
+        bool written=false;
+        try{
+            const std::string prefix=std::string(origin)+","+std::to_string(gate.frame_counter)+","+
+                std::to_string(gate.update_index)+","+why+","+std::to_string(gate.continuity)+","+
+                std::to_string(unsigned(gate.recovery_pending))+",";
+            written=write_(prefix+producer2::trace_csv(row));
+        }catch(...){}
+        if(!written){write_={};trace_failed_=true;}
+    }
+    if(write_||request_sink_)return true;
     stop();return false;
 }
 void Core::neutral(const Gate& gate,const char* origin,const char* why) {

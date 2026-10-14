@@ -19,17 +19,20 @@ struct Sample {
     std::size_t car_bytes{};
 };
 
-// Core has no file, device, game or F6 dependency. A failed writer detaches it.
+// Core has no file, device, game or F6 dependency. Trace and request lifetimes are independent.
 class Core {
 public:
     using RequestSink=std::function<void(const Gate&,const producer2::Row&)>;
     explicit Core(std::function<bool(const std::string&)> write,
                   const producer2::Strengths& strengths={},RequestSink request_sink={});
-    static std::string header();
+    static std::string header(const producer2::Strengths& strengths={},bool selected=false);
+    void set_writer(std::function<bool(const std::string&)> write) noexcept;
+    void invalidate() noexcept;
     void before_frame(const Gate& gate) noexcept;
     void observe(const Sample& sample) noexcept;
     void stop() noexcept;
     bool active()const{return active_;}
+    bool trace_failed()const{return trace_failed_;}
 private:
     bool write_row(const Gate& gate,const char* origin,const char* gate_reason,const producer2::Row& row) noexcept;
     void neutral(const Gate& gate,const char* origin,const char* why);
@@ -43,5 +46,6 @@ private:
     std::uint32_t valid_frame_{},valid_update_{};
     bool previous_game_{},have_valid_pair_{},neutral_latched_{true},active_{true};
     bool panel_open_{},paused_{};
+    bool trace_failed_{};
 };
 }

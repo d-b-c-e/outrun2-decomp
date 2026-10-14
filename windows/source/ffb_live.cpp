@@ -2,6 +2,7 @@
 // the wheel when [FFB] Output = wheel (ffb_device.hpp; off by default).
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
+#include "ffb_shadow_live.hpp"
 #include "native_window.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -26,6 +27,8 @@ struct Row:ffb::Sink {
 };
 struct Live {
     bool on{};
+    bool selected{},row_ready{};
+    std::int32_t selected_intent{};
     std::unique_ptr<ffb::LegacyForce> model;
     std::FILE* trace{};
     std::string trace_path,source;
@@ -118,6 +121,15 @@ bool compute(const platform::NativeRuntimeContext* rt,std::int32_t& intent){
 void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(f.inner)f.inner(out,rt);
     if(!f.on)return;
+    if(f.selected){
+        const bool race=rt&&rt->mode_state.current==16u&&rt->event_state.pause_depth==0u;
+        const bool allowed=race&&!desktop_panel_open()&&ffb_front_check()(xbox_runtime::native_window().hwnd);
+        if(!allowed||!f.row_ready)ffb_shadow_invalidate_selected();
+        const auto intent=allowed&&f.row_ready?f.selected_intent:0;
+        f.row_ready=false;f.selected_intent=0;
+        if(f.output)deliver(race,intent);
+        return;
+    }
     std::int32_t intent=0;
     const bool race=compute(rt,intent);
     if(f.output)deliver(race,race?intent:0);
@@ -171,7 +183,21 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
         std::fflush(stdout);return;
     }
     if(choice.model==ffb::player::Model::Producer2){
-        std::printf("ffb: outrun-producer@2 selected; request path is fixture-only, wheel delivery is not connected\n");
+        const auto sink=[](const ffb::shadow::Gate&,const ffb::producer2::Row& row){
+            f.selected_intent=0;
+            if(row.state==ffb::producer2::State::Computed&&std::isfinite(row.shaped_force))
+                f.selected_intent=std::int32_t(std::lround(std::clamp(row.shaped_force,-1.0f,1.0f)*10000.0f));
+            f.row_ready=true;
+        };
+        if(!ffb_shadow_select(choice,sink)){
+            std::printf("ffb: producer observer refused; nothing computed, no output\n");std::fflush(stdout);return;
+        }
+        f.selected=f.on=true;
+        std::string notes;
+        f.output=start_output(settings,latched,notes);
+        if(!notes.empty())std::printf("ffb: %s\n",notes.c_str());
+        std::printf("ffb: outrun-producer@2 selected, steering %d%%, shift %d%%; output %s\n",
+            choice.strengths.steering_percent,choice.strengths.shift_percent,f.output?"WheelFfb (gated)":"none");
         std::fflush(stdout);return;
     }
     std::string notes,source;
@@ -242,6 +268,7 @@ void ffb_shutdown(){
     }
     std::fflush(stdout);
     f.on=false;
+    if(f.selected)ffb_shadow_shutdown();
 }
 
 FfbFrontCheck& ffb_front_check(){static FfbFrontCheck check=own_front;return check;}

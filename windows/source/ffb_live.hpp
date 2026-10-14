@@ -1,6 +1,6 @@
 #pragma once
-// OutRun force feedback, F2: the force model (ffb_outrun.hpp, "outrun-legacy@1") computed in the game as a software
-// force stream; F4: its delivery to the steering wheel (ffb_device.hpp), OFF unless [FFB] Output = wheel, never in a
+// OutRun force feedback: the default legacy model and explicit producer@2 selection. Both use the gated F4 delivery
+// (ffb_device.hpp), OFF unless [FFB] Output = wheel, never in a
 // latched process or under DBCE_FFB_MUTE, and with WheelFfb.dll not even loaded then.
 //   - Settings: [FFB] in OutRunDesktop.ini with the OutRun 2006 mod's key names (FFBSpringStrength, ...), over the
 //     mod's compiled defaults. [FFB] FFBPreset = owner-2026-10-08 starts from the owner's accepted values instead (an

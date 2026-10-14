@@ -97,7 +97,8 @@ set_target_properties(fake_wheelffb PROPERTIES OUTPUT_NAME WheelFfb RUNTIME_OUTP
 target_compile_definitions(fake_wheelffb PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(fake_wheelffb PRIVATE ole32)
 add_executable(test_ffb_wiring tests/test_ffb_wiring.cpp source/ffb_live.cpp source/ffb_settings.cpp source/ffb_outrun.cpp
-    source/ffb_device.cpp source/desktop_settings.cpp source/ffb_player_model.cpp source/ffb_shadow.cpp source/ffb_producer2.cpp)
+    source/ffb_device.cpp source/desktop_settings.cpp source/ffb_player_model.cpp source/ffb_shadow.cpp source/ffb_producer2.cpp
+    source/ffb_shadow_live.cpp)
 target_include_directories(test_ffb_wiring PRIVATE source vendor/controls vendor/wheelffb ${PROJECT_SOURCE_DIR}/xbox/source)
 target_compile_definitions(test_ffb_wiring PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_features(test_ffb_wiring PRIVATE cxx_std_17)
