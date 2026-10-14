@@ -329,6 +329,7 @@ struct Run {
             routed(pc);return native_race_attack_value(c,pc,a.data(),k.argc);
         // ---- mission manager / START selection (as the race end binding) ----
         case 0x4962a0u:routed(pc);return native_mission_type4_4962a0(c)?1u:0u;
+        case 0x48b140u:routed(pc);return (k.eax&0xffffff00u)|(c.start_mode.course_choice_655b59&0xffu); // mov al,[655B59]
         case 0x4957f0u:routed(pc);return c.start_mode.selection_active_836374?1u:0u;   // mov al,[836374]
         case 0x495b00u:routed(pc);return c.game_mode.game_variant==4u?1u:0u;
         case 0x495800u:routed(pc);return c.mission.manager.timer_836388;
