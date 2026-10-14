@@ -55,6 +55,10 @@ inline int pc_pegasus_sound_off_44bcc0(bool fix,unsigned out[2]){
     out[0]=0x808cu;if(!fix)return 1;
     out[1]=0x808du;return 2;
 }
+// [Bugfixes] FixRightSideBunkiAnimations (the Tweaks key, on by default there and here): 44F6DC sets a culling flag
+// on the mirrored right-side branch model. Tweaks skips that seven-byte store; race_area.cpp does the same when on.
+// Off retains the PC store, and the left-side path is unchanged.
+inline bool g_pc_fix_right_side_bunki_animations=true;
 // [Bugfixes] HideOnlineSigninText (the Tweaks key, off by default there since its b3c1825 and here; hooks_bugfixes.cpp;
 // Tweaks' code default is still true, its shipped INI sets false): the remnants of the online service on the menus.
 // - 443256 (JNE to JMP): 443110 never opens the 4400D3 sign-in status box at +C48 (pc_signin_box_call_skipped,

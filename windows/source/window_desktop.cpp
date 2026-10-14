@@ -445,6 +445,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // stops the hoof clop loop 0x8D (pc_screen.hpp).
     outrun::platform::g_pc_fix_pegasus_clopping=settings.flag("Bugfixes","FixPegasusClopping",true);
     if(!outrun::platform::g_pc_fix_pegasus_clopping)std::printf("settings: Pegasus clopping fix off (the PC's own single stop)\n");
+    // [Bugfixes] FixRightSideBunkiAnimations (on unless set false, as in Tweaks): omit the right-side branch model's
+    // culling-flag store at 44F6DC. Off preserves the PC's original store (pc_screen.hpp, race_area.cpp).
+    outrun::platform::g_pc_fix_right_side_bunki_animations=settings.flag("Bugfixes","FixRightSideBunkiAnimations",true);
+    if(!outrun::platform::g_pc_fix_right_side_bunki_animations)std::printf("settings: right-side bunki animation fix off (the PC's own model flag)\n");
     // [Bugfixes] HideOnlineSigninText, the Tweaks key (off unless set true, as in its INI): no sign-in status box or text
     // and no SIGN-IN help-bar button on the menus (pc_screen.hpp).
     outrun::platform::g_pc_hide_online_signin_text=settings.flag("Bugfixes","HideOnlineSigninText",false);

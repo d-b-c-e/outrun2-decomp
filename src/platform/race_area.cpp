@@ -910,7 +910,7 @@ void race_area_objects_44f190(PcRaceContext& c){
         if(flags&1u)x=m.f32(in2+0x34);
         if(flags&2u)z=m.f32(0x636bc0u);
         p.translate(x,0.f,z);
-        if(local[0]==Fm1)m.put16(obj+0x90,1);
+        if(local[0]==Fm1&&!g_pc_fix_right_side_bunki_animations)m.put16(obj+0x90,1); // 44F6DC; Tweaks NOPs this store
         m.put32(obj+0x8c,(std::uint32_t(m.u8(m.u32(m.u32(0x7d349cu)+0x20)+off+0x28))>>3)&1u);
         driving::pc_matrix_multiply_current(c.matrices,Bytes(local.data(),64));
         p.get(obj+0xa0);
