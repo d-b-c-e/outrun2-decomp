@@ -3,6 +3,7 @@
 #include "platform/race_area.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_soft_d3d9.hpp"
+#include "system/exe_image.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -20,6 +21,7 @@ struct ThrowingDevice:platform::PcSoftD3D9Device {
 };
 }
 int main(){
+    require(platform::exe_image_loaded(),"set OR2_EXE to the pinned OR2006C2C.exe before starting this test");
     auto device=std::make_unique<ThrowingDevice>(640,480);
     auto scene=std::make_unique<platform::PcSceneRenderer>(*device);
     auto runtime=std::make_unique<platform::NativeRuntimeContext>();
