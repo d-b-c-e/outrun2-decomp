@@ -10,6 +10,8 @@
 namespace outrun::desktop::ffb::producer2 {
 constexpr const char* ModelId = "outrun-producer@2";
 constexpr const char* TraceId = "dbce.outrun-producer-ffb-trace@2";
+// Independent STD-027 gains. 50 is the fixed preview reference, not a legacy-key migration.
+struct Strengths { int steering_percent{50},shift_percent{50}; };
 
 struct Frame {
     std::uint32_t mode{};             // GAME is 16; menu, pause and goal are neutral
@@ -42,6 +44,7 @@ struct Row {
 
 // A fixed preview profile. It is not the owner's Tweaks tune and cannot select physical output.
 dbce::force::ModelSettings preview_model_settings();
+dbce::force::ModelSettings model_settings(const Strengths& strengths);
 dbce::force::ShaperSettings preview_shaper_settings();
 const char* reason_name(Reason reason);
 std::string trace_header();
@@ -49,7 +52,7 @@ std::string trace_csv(const Row& row);
 
 class Stream {
 public:
-    Stream();
+    explicit Stream(const Strengths& strengths={});
     Row step(const Frame& frame);
     void reset();
 private:

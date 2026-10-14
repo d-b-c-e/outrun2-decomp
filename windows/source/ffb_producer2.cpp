@@ -9,14 +9,15 @@ template<class T> T at(const std::uint8_t* bytes,std::size_t offset){T value;std
 constexpr std::size_t MinimumCarBytes=0xd52; // +D50 is OperationInput's stale-steer gate
 }
 
-dbce::force::ModelSettings preview_model_settings(){
+dbce::force::ModelSettings model_settings(const Strengths& strengths){
     dbce::force::ModelSettings s;
-    s.spring_strength=0.30f;
+    s.spring_strength=0.30f*(float(strengths.steering_percent)/50.f);
     s.spring_full_speed_mps=30.0f;
-    s.shift_strength=0.05f;
+    s.shift_strength=0.05f*(float(strengths.shift_percent)/50.f);
     // Damping, lateral load, texture, impact and weight transfer stay unavailable/off.
     return s;
 }
+dbce::force::ModelSettings preview_model_settings(){return model_settings(Strengths{});}
 dbce::force::ShaperSettings preview_shaper_settings(){
     dbce::force::ShaperSettings s;
     s.strength=50;
@@ -63,7 +64,7 @@ std::string trace_csv(const Row& row){
     return b;
 }
 
-Stream::Stream():model_(preview_model_settings()),shaper_(preview_shaper_settings()){}
+Stream::Stream(const Strengths& strengths):model_(model_settings(strengths)),shaper_(preview_shaper_settings()){}
 void Stream::reset(){model_.reset();shaper_.reset();epoch_=generation_=gear_=0;tick_=0;armed_=false;}
 Row Stream::step(const Frame& frame){
     Row row;

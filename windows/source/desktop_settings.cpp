@@ -105,6 +105,9 @@ std::string Ini::text(const std::string& section,const std::string& key,const st
     const auto i=values_.find(lower(section)+"/"+lower(key));
     return i==values_.end()?fallback:i->second;
 }
+bool Ini::has_value(const std::string& section,const std::string& key)const{
+    return values_.count(lower(section)+"/"+lower(key))!=0;
+}
 int Ini::integer(const std::string& section,const std::string& key,int fallback)const{
     const auto v=text(section,key);if(v.empty())return fallback;
     char* end=nullptr;const long n=std::strtol(v.c_str(),&end,10);

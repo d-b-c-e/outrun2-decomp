@@ -89,6 +89,12 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel without a steer device: never attached");
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
+    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"producer selection cannot attach the unreviewed delivery wire");
+    r=run(Controls+"[FFB]\r\nModel = unrecognized\r\nOutput = wheel\r\n",false,nullptr);
+    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"unknown model refuses before loading the DLL");
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n[FFBProducer2]\r\nSteeringStrengthPercent = 101\r\n",false,nullptr);
+    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"invalid producer gains refuse before loading the DLL");
     // The shim backend (INPUT-SHIM.md section 6): the library loads and its delivery waits, but it never opens the wheel
     // until the shim hands it over (ffb_set_shim_owner, from the shim's WheelFfb bridge): race ticks with a force, the
     // steering live and the fake accepting this very wheel reach no device call (no unattended exclusive open).

@@ -1,6 +1,7 @@
 // OutRun force feedback, F2 + F4 (ffb_live.hpp): the software force stream computed in the game, and its delivery to
 // the wheel when [FFB] Output = wheel (ffb_device.hpp; off by default).
 #include "ffb_live.hpp"
+#include "ffb_player_model.hpp"
 #include "native_window.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -164,6 +165,15 @@ bool start_output(const Ini& settings,bool latched,std::string& notes){
 
 void ffb_configure(const Ini& settings,bool latched,const std::string& latched_run_folder){
     f=Live{};
+    const auto choice=ffb::player::select(settings);
+    if(choice.model==ffb::player::Model::Refused){
+        std::printf("ffb: player model settings refused (%s); nothing computed, no output\n",choice.refusal.c_str());
+        std::fflush(stdout);return;
+    }
+    if(choice.model==ffb::player::Model::Producer2){
+        std::printf("ffb: outrun-producer@2 selected; request path is fixture-only, wheel delivery is not connected\n");
+        std::fflush(stdout);return;
+    }
     std::string notes,source;
     const auto s=ffb_settings(settings,notes,source);
     std::string path;

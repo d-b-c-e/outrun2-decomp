@@ -19,6 +19,7 @@ public:
     // The section's lines as written (keys keep their case), for parsers of their own.
     std::vector<std::string> section_lines(const std::string& section)const;
     std::string text(const std::string& section,const std::string& key,const std::string& fallback={})const;
+    bool has_value(const std::string& section,const std::string& key)const;
     int integer(const std::string& section,const std::string& key,int fallback)const;
     float number(const std::string& section,const std::string& key,float fallback)const;
     bool flag(const std::string& section,const std::string& key,bool fallback)const;

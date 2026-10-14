@@ -2,7 +2,8 @@
 #include <utility>
 
 namespace outrun::desktop::ffb::shadow {
-Core::Core(std::function<bool(const std::string&)> write):write_(std::move(write)){}
+Core::Core(std::function<bool(const std::string&)> write,const producer2::Strengths& strengths,RequestSink request_sink)
+    :write_(std::move(write)),request_sink_(std::move(request_sink)),stream_(strengths){}
 std::string Core::header(){
     const auto base=producer2::trace_header();
     const auto line=base.find('\n');
@@ -36,7 +37,10 @@ bool Core::write_row(const Gate& gate,const char* origin,const char* why,const p
         const std::string prefix=std::string(origin)+","+std::to_string(gate.frame_counter)+","+
             std::to_string(gate.update_index)+","+why+","+std::to_string(gate.continuity)+","+
             std::to_string(unsigned(gate.recovery_pending))+",";
-        if(write_&&write_(prefix+producer2::trace_csv(row)))return true;
+        if(write_&&write_(prefix+producer2::trace_csv(row))){
+            if(request_sink_)request_sink_(gate,row);
+            return true;
+        }
     }catch(...){}
     stop();return false;
 }
@@ -83,5 +87,5 @@ void Core::observe(const Sample& sample) noexcept {
         }
     }catch(...){stop();}
 }
-void Core::stop() noexcept {active_=false;stream_.reset();write_={};}
+void Core::stop() noexcept {active_=false;stream_.reset();write_={};request_sink_={};}
 }

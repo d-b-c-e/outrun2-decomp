@@ -8,7 +8,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_sett
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
-    source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp
+    source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
     source/ffb_device.cpp source/desktop_panel.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
@@ -63,6 +63,15 @@ target_include_directories(test_ffb_shadow PRIVATE source ${PROJECT_SOURCE_DIR}/
 target_compile_features(test_ffb_shadow PRIVATE cxx_std_17)
 add_test(NAME ffb_shadow COMMAND test_ffb_shadow)
 
+# Explicit player selection, independent producer gains and the real shadow request logic through a fake software sink.
+# No WheelFfb or native output path is linked into this fixture.
+add_executable(test_ffb_player_model tests/test_ffb_player_model.cpp source/ffb_player_model.cpp
+    source/ffb_shadow.cpp source/ffb_producer2.cpp source/desktop_settings.cpp)
+target_include_directories(test_ffb_player_model PRIVATE source ${PROJECT_SOURCE_DIR}/src)
+target_compile_definitions(test_ffb_player_model PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_features(test_ffb_player_model PRIVATE cxx_std_17)
+add_test(NAME ffb_player_model COMMAND test_ffb_player_model)
+
 # F4, the delivery gates (source/ffb_device) against a fake WheelFfb library: identity, the accepted zero, recovery,
 # release and shutdown order, and silence whenever a gate is closed. No device and no DLL.
 add_executable(test_ffb_delivery tests/test_ffb_delivery.cpp source/ffb_device.cpp)
@@ -88,7 +97,7 @@ set_target_properties(fake_wheelffb PROPERTIES OUTPUT_NAME WheelFfb RUNTIME_OUTP
 target_compile_definitions(fake_wheelffb PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(fake_wheelffb PRIVATE ole32)
 add_executable(test_ffb_wiring tests/test_ffb_wiring.cpp source/ffb_live.cpp source/ffb_settings.cpp source/ffb_outrun.cpp
-    source/ffb_device.cpp source/desktop_settings.cpp)
+    source/ffb_device.cpp source/desktop_settings.cpp source/ffb_player_model.cpp source/ffb_shadow.cpp source/ffb_producer2.cpp)
 target_include_directories(test_ffb_wiring PRIVATE source vendor/controls vendor/wheelffb ${PROJECT_SOURCE_DIR}/xbox/source)
 target_compile_definitions(test_ffb_wiring PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_features(test_ffb_wiring PRIVATE cxx_std_17)

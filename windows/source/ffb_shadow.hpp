@@ -22,7 +22,9 @@ struct Sample {
 // Core has no file, device, game or F6 dependency. A failed writer detaches it.
 class Core {
 public:
-    explicit Core(std::function<bool(const std::string&)> write);
+    using RequestSink=std::function<void(const Gate&,const producer2::Row&)>;
+    explicit Core(std::function<bool(const std::string&)> write,
+                  const producer2::Strengths& strengths={},RequestSink request_sink={});
     static std::string header();
     void before_frame(const Gate& gate) noexcept;
     void observe(const Sample& sample) noexcept;
@@ -35,6 +37,7 @@ private:
     void generation(const Gate& gate,const char* origin);
     bool recovery(const Gate& gate,const char* origin);
     std::function<bool(const std::string&)> write_;
+    RequestSink request_sink_;
     producer2::Stream stream_;
     std::uint32_t epoch_{},generation_{},continuity_{};
     std::uint32_t valid_frame_{},valid_update_{};

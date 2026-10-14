@@ -4,6 +4,7 @@
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
 #include "ffb_live.hpp"
+#include "ffb_player_model.hpp"
 #include "native_window.hpp"
 #include "telemetry_forza.hpp"
 #include "shim_input.hpp"
@@ -32,6 +33,8 @@ namespace {
 struct Panel {
     bool configured{},latched{},input{},backend{},was_open{},playback{};
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
+    ffb::player::Model player_model{ffb::player::Model::Legacy};
+    std::string model_refusal;
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
     std::string ini,dev,name;
@@ -108,6 +111,14 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
+    if(p.player_model!=ffb::player::Model::Legacy){
+        const auto state=p.player_model==ffb::player::Model::Producer2?
+            std::string("outrun-producer@2: fixture-only source slice; wheel output is unavailable"):
+            "settings refused: "+p.model_refusal+"; wheel output is unavailable";
+        dbce::panel::Status("Player model",state.c_str(),dbce::panel::Tone::Warning);
+        dbce::panel::Text("The legacy FFB controls do not tune this model; the producer values are edited separately in the ini file.");
+        return;
+    }
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
     // The saved setting for the NEXT start ([FFB] Output = wheel | none), apart from the output above. It is never applied
@@ -343,6 +354,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
     p=Panel{};
     p.latched=latched;p.playback=playback;
+    {const auto selected=ffb::player::select(settings);p.player_model=selected.model;p.model_refusal=selected.refusal;}
     p.ini=settings.path();
     const auto slash=p.ini.find_last_of("\\/");
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
@@ -358,10 +370,12 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
-    {std::string notes,source;const auto s=ffb_settings(settings,notes,source);
-     v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
-     v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
-     v.idle=pct(s.engine_idle);v.invert=s.invert;}
+    if(p.player_model==ffb::player::Model::Legacy){
+        std::string notes,source;const auto s=ffb_settings(settings,notes,source);
+        v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
+        v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
+        v.idle=pct(s.engine_idle);v.invert=s.invert;
+    }
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
     {std::string notes;const auto o=ffb_output_config(settings,false,std::getenv("DBCE_FFB_MUTE"),notes);
      v.output_next=o.output;p.force_muted=o.muted;}
