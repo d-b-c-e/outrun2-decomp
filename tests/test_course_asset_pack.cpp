@@ -113,7 +113,9 @@ int main(int argc,char** argv){
                 outrun::driving::Bytes(const_cast<std::uint8_t*>(beach.data()),
                                        beach.size()).u32(0x20u)==0x005d7538u,
                 "full EXE descriptor retains BEAC collision and course-bin source tokens");
-        NativeRuntimeContext runtime{};
+        // Keep the large runtime fixtures out of main's 1 MiB Windows stack.
+        auto runtime_storage=std::make_unique<NativeRuntimeContext>();
+        auto& runtime=*runtime_storage;
         runtime.mode_descriptors[16u]={0u,0x00499d90u,0x0049c840u,0x00499e50u};
         runtime.mode_state.current=32u;
         require(native_runtime_attach_course_assets(runtime,real),"attach generated course pack");
@@ -166,7 +168,8 @@ int main(int argc,char** argv){
         require(native_start_owned_call(unready,0x0046c2f0u,nullptr,0u,unready_result)&&unready_result==0u&&
                 unready.game_mode.course_read_calls==0u,
                 "phase-3 state without an earlier ready course fails closed");
-        NativeRuntimeContext start{};
+        auto start_storage=std::make_unique<NativeRuntimeContext>();
+        auto& start=*start_storage;
         start.mode_descriptors[13u]={0u,0x0049db20u,0x0049dd40u,0x00499d80u};
         LoaderAssetPack start_resources{};
         start_resources.records.push_back({LoaderAssetStartLoadingId,2u,{0x78u,0xdau,1u}});
