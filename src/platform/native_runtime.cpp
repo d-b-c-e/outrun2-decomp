@@ -3929,6 +3929,9 @@ bool native_start_owned_call(NativeRuntimeContext& context,std::uint32_t pc_entr
             // PC 49DF67 passes the address of its stage-5 local to the variant-5
             // request manager. 481650 fills that local with the placement handle.
             if(count!=0u||context.game_mode.game_variant!=5u)return false;
+            // START can reach this before an AREA callback has built the PC
+            // memory view. The translated manager reads AREA's retail constants.
+            (void)native_race_area_memory(context,nullptr,true);
             start.request_placement_handle_44e590=0u;
             return requests_call(context,pc_entry,{PcRaceLocal44E590},result,
                                  &start.request_placement_handle_44e590);}
