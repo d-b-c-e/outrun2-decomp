@@ -182,7 +182,7 @@ int main(int argc,char** argv){
             std::memcpy(&translated_time,traffic.requests_7f9460.data()+0x180u,sizeof translated_time);
             require(request_control&&traffic.routed.count(0x004659f0u)!=0u&&
                     traffic.routed.count(0x0045bcd0u)!=0u&&
-                    (!traffic.latched||traffic.fault!=0x0045bcd0u)&&
+                    !traffic.latched&&
                     std::isfinite(translated_time)&&translated_time>0.f,
                     "variant-5 request control routes the x87 clock, sprite tick, and voice pump");
         }
