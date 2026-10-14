@@ -2327,6 +2327,17 @@ bool native_game_load_request_course(NativeRuntimeContext& c){
     if(cfg[0]>=16u)return false;
     auto& block=native_race_traffic(c).requests_7f9460;
     ++game.course_load_calls;
+    // The request manager retains its 7F94F0 loader phase after the first
+    // successful 44D720. At phase 3 that call only clears the stage keys and
+    // returns; rebuilding the host course state here discarded its selected
+    // record/matrix on every later START tick, leaving the request transition black.
+    const auto phase=std::int32_t(le32(block.data()+0x98u));
+    if(phase>=3){
+        game.course_runtime.stage_key_635f2c=-1;
+        game.course_runtime.stage_value_635f30=-1;
+        return game.course_provider_loaded&&game.course_runtime.active_count_7d33c4>0&&
+            game.course_runtime.selected_copy_active&&game.course_matrix_ready;
+    }
     game.course_load={};game.course_runtime={};
     game.course_work.assign(std::max<std::size_t>(game.course_assets->course_blob.size(),0x10000u),0u);
     game.course_matrix_stack.fill(0u);
