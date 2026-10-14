@@ -102,6 +102,7 @@ bool native_race_hud_display(NativeRuntimeContext&,PcSceneRenderer&,std::uint32_
 // the mission manager's result (false: a missing callee, reported).
 // 45BD30(id, duration, priority) on the HUD voice queue 7F1998 (the race end and the other owners).
 std::uint32_t native_race_hud_voice_45bd30(NativeRuntimeContext&,std::int32_t id,std::int16_t duration,std::int16_t priority);
+void native_race_hud_voice_pump_45bcd0(NativeRuntimeContext&);
 bool native_race_hud_mission_control(NativeRuntimeContext&,MissionManagerServices&);
 // 45C470 for the START scene owner (variant 2): quest object path of a stage.
 bool native_race_hud_quest_object_45c470(NativeRuntimeContext&,std::uint32_t stage,std::uint32_t& path,std::string& why);

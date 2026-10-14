@@ -751,6 +751,7 @@ struct Run {
                 return translated_call_list(m(),ctx->service,nm,pc,TranslatedRegisters{k.eax,k.ecx,0,0,0,0},args);}
         }
         if(t.requests_heap&&translated_crt_call(m(),*t.requests_heap,k,eax)){routed(pc);return eax;}   // the request manager's new / delete
+        if(pc==0x45bcd0u){routed(pc);native_race_hud_voice_pump_45bcd0(c);return 0u;}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){
