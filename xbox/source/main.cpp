@@ -13,6 +13,8 @@
 #include "input/runtime_adapter.hpp"
 
 #include "driving/pc_driving.hpp"
+#include "driving/pc_wheel_dynamics.hpp"
+#include "platform/race_player_car.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "platform/frontend_preview_pack.hpp"
 #include "platform/native_race_effects.hpp"   // scn-efc
@@ -715,6 +717,28 @@ const bool core_passed=loader_bytes_match&&rc==0u&&ev405.function_id==36u&&ev405
         static_cast<unsigned>(context.game_mode.gameplay_vehicle.steering_full_lock),
         context.game_mode.gameplay_steering_normalized,context.game_mode.gameplay_yaw_step,
         context.game_mode.gameplay_steering_peak,context.game_mode.gameplay_yaw_step_peak);
+    {   // The native player car (GamePlCar 4A8330 on the event-8 car 799D18 and its body work 82E7F0),
+        // unlike the legacy direct-course diagnostic lines above: frames, the CommonPlCar start hold
+        // (event+4 bit 3), 8367BC / [780248], the 49FB70 time-up input, and per wheel contact (+0 bit 0
+        // clear = on the ground), load +34 and Mu +E8. The first GAME hold transitions follow.
+        const auto& cw=context.race.car_world;
+        const auto& cs=context.event_function36.car_select;
+        const outrun::driving::Bytes car(const_cast<std::uint8_t*>(cs.car_799d18.data()),cs.car_799d18.size());
+        const auto wheels=outrun::driving::embedded_wheels(
+            outrun::driving::Bytes(const_cast<std::uint8_t*>(cs.body_82e7f0.data()),cs.body_82e7f0.size()));
+        result_printf(result_log,"player car (GamePlCar) frames=%u completed=%u pos=%.2f/%.2f/%.2f speed=%.4f hold=%u countdown=%d flag780248=%u timeup=%d"
+            " contact=%c%c%c%c load=%.3f/%.3f/%.3f/%.3f mu=%.3f/%.3f/%.3f/%.3f last=%06X %s\n",
+            cw.frames,cw.completed_frames,car.f32(0x14),car.f32(0x18),car.f32(0x1c),car.f32(0x1c4),(car.u32(4)&8u)?1u:0u,
+            int(context.game_mode.start_countdown),unsigned(context.start_mode.game_flag_780248),int(cw.timeup_44fe40),
+            (wheels[0].u8(0)&1u)?'-':'G',(wheels[1].u8(0)&1u)?'-':'G',(wheels[2].u8(0)&1u)?'-':'G',(wheels[3].u8(0)&1u)?'-':'G',
+            wheels[0].f32(0x34),wheels[1].f32(0x34),wheels[2].f32(0x34),wheels[3].f32(0x34),
+            wheels[0].f32(0xe8),wheels[1].f32(0xe8),wheels[2].f32(0xe8),wheels[3].f32(0xe8),
+            unsigned(cw.last_error_pc),cw.last_error.c_str());
+        result_printf(result_log,"player car GAME hold transitions=%u",cw.hold_transition_count);
+        for(std::uint32_t k=0;k<cw.hold_transition_count&&k<cw.hold_transitions.size();++k){const auto& t=cw.hold_transitions[k];
+            result_printf(result_log," [frame %u hold=%u countdown=%d flag780248=%u speed=%.4f]",t.frame,unsigned(t.hold),int(t.countdown),unsigned(t.flag_780248),t.speed);}
+        result_printf(result_log,"\n");
+    }
     result_printf(result_log,"pc vehicle shifts up=%u down=%u changes=%u collision_halts=%u event_ptr=%08x\n",
         context.game_mode.gameplay_vehicle.shift_up_requests,context.game_mode.gameplay_vehicle.shift_down_requests,
         context.game_mode.gameplay_vehicle.gear_changes,context.game_mode.gameplay_vehicle.rejected_motion,

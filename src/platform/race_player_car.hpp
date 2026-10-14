@@ -62,6 +62,21 @@ struct RaceCarWorld {
     std::map<std::uint32_t,std::uint32_t> missing;   // PC service -> count
     std::uint32_t last_error_pc{};
     std::string last_error;
+    // Standard result-log summary of the native player car (GamePlCar 4A8330 on the
+    // event-8 car 799D18): frames that completed without a failed child, the time-up
+    // counter 49FB70 last received, and the first transitions in GAME (78026C 0x10)
+    // of CommonPlCar's start hold (event+4 bit 3: CopyCarWork keeps position/velocity).
+    struct HoldTransition {
+        std::uint32_t frame{};          // 95AF0C
+        std::int16_t countdown{};       // 8367BC (49B2D0)
+        std::uint8_t hold{},flag_780248{};
+        float speed{};                  // event+1C4
+    };
+    std::uint32_t completed_frames{};
+    std::int32_t timeup_44fe40{};
+    std::array<HoldTransition,3> hold_transitions{};
+    std::uint32_t hold_transition_count{};
+    std::int32_t last_hold{-1};
 };
 // One GamePlCar_Ctrl frame on c's car/work. Returns false (and records the
 // failing PC entry) when a child rejected its inputs.
