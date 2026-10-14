@@ -21,7 +21,8 @@ template<class Body> auto run24(Body&& body){f24_bad=0;auto r=body(F24{});if(f24
 template<class Body> auto run24(Body&& body){return body(X87{});}
 #endif
 Bytes slot(const PcMatrixStack& s,std::ptrdiff_t offset){
-    if(offset<0)throw std::out_of_range("matrix pointer precedes explicit native arena");
+    if(offset<0)throw std::out_of_range("matrix pointer precedes explicit native arena: offset="+
+        std::to_string(offset)+" depth="+std::to_string(s.depth)+" capacity="+std::to_string(s.capacity));
     return s.storage.sub(static_cast<std::size_t>(offset),64);
 }
 }
