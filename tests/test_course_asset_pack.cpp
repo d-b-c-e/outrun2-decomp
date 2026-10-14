@@ -212,6 +212,11 @@ int main(int argc,char** argv){
                         lane.set_transform(0u,course_world_identity_transform(),&error)&&lane.query_ready(),
                         "owned course world ready for the player car");
                 request.game_mode.driving_data=nullptr;
+                // The race manager's 451350 (before the push) reads the player car through
+                // event 8, whose work is the car 7804B0 in a race, and refuses an open
+                // rival/traffic event 9..31 without a native owner: none in this fixture.
+                request.event_state.slots[8].work_token=0x7804b0u;
+                for(unsigned id=9u;id<32u;++id)request.event_state.slots[id].flags=0u;
                 auto& car_world=request.race.car_world;
                 for(unsigned frame=0;frame<3u;++frame){
                     // Slot 1 is where GamePlCar's 409EF0 push copies the current matrix: a
