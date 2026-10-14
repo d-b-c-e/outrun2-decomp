@@ -1,5 +1,6 @@
 #include "enhancements/frame_rate.hpp"
 #include "platform/race_player_car.hpp"
+#include <exception>
 #include "system/dev_hooks.hpp"
 #include "platform/race_ghosts_runtime.hpp"
 #include "platform/frontend_profiles.hpp"
@@ -108,6 +109,20 @@ struct Frame {
         return h.sub(off,n);
     }
     Bytes surface_codes(unsigned type){return coli_section(type,0x24,1);}
+    // The renderer's matrix stack is shared with the frame's later callbacks. A failed
+    // control leaves nesting the PC never leaves: GamePlCar pushes (409EF0), a child
+    // fails, and the gated game_service then skips the paired 40A010; a child or a
+    // parent that throws after its own push skips its pop too. A failed or unwinding
+    // frame restores the entry depth and pointer (reported under OR2_MATRIX_TRACE).
+    std::int32_t entry_depth=m.depth;
+    std::ptrdiff_t entry_offset=m.current_offset;
+    int entry_exceptions=std::uncaught_exceptions();
+    ~Frame(){
+        if(!failed&&std::uncaught_exceptions()<=entry_exceptions)return;
+        driving::pc_matrix_trace_scope("car",c.frame_state.frame_counter_95af0c,c.mode_state.current,w.last_error_pc,8u,
+            entry_depth,entry_offset,m,failed?w.last_error.c_str():"exception");
+        m.depth=entry_depth;m.current_offset=entry_offset;
+    }
 };
 // EXE data tables of the wall/crash paths (embedded ranges, read-only).
 struct ExeTables {

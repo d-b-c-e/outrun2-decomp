@@ -1,6 +1,10 @@
 #include "platform/native_runtime.hpp"
 #include "platform/race_traffic_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
+#include "platform/race_player_car.hpp"
+#include "platform/world_source_pack.hpp"
+#include "platform/course_collision_pack.hpp"
+#include "platform/course_world_runtime.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "system/exe_image.hpp"
 #include <array>
@@ -194,6 +198,27 @@ int main(int argc,char** argv){
                 require(native_race_requests_event(request,0x0046c200u,0u,request_matrices)&&!traffic.latched&&
                         request_matrices.depth==0&&request_matrices.current_offset==0,
                         "repeated variant-5 request control keeps the matrix stack balanced");
+            }
+            {   // GamePlCar (4A8330) on the loaded course without driving data: 502C90 fails after the
+                // parent's 409EF0 push and the gated children then skip its 40A010. Every failed frame
+                // must still return the caller's depth and pointer (the mode-13 per-frame leak shape).
+                WorldSourcePack world{};CourseCollisionPack coli{};
+                require(build_beac_world_source_from_retail(retail,real,world,&error)&&world.entries[0].size!=0u,
+                        "owned BEAC world source");
+                const auto* coli_bytes=world_source_bytes(world,world.entries[0]);
+                require(coli_bytes&&parse_pc_coli0200(coli_bytes,world.entries[0].size,coli,&error),"owned BEAC collision parses");
+                auto& lane=request.start_mode.scene_owner_course_world;
+                require(lane.admit_lane(0u,coli.pc_coli0200.data(),coli.pc_coli0200.size(),{},&error)&&
+                        lane.set_transform(0u,course_world_identity_transform(),&error)&&lane.query_ready(),
+                        "owned course world ready for the player car");
+                request.game_mode.driving_data=nullptr;
+                auto& car_world=request.race.car_world;
+                for(unsigned frame=0;frame<3u;++frame){
+                    car_world.last_error_pc=0u;car_world.last_error.clear();
+                    require(!race_player_car_control_4a8330(request,request_matrices,true)&&car_world.last_error_pc==0x00502c90u&&
+                            request_matrices.depth==0&&request_matrices.current_offset==0,
+                            "a failed GamePlCar frame returns the caller's matrix stack unchanged");
+                }
             }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
