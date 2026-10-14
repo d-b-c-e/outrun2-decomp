@@ -8,8 +8,10 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 namespace outrun::driving {
 namespace {
@@ -38,14 +40,23 @@ void pc_matrix_trace_scope(const char* scope,std::uint32_t frame,std::uint32_t m
     const bool moved=s.depth!=depth0||s.current_offset!=offset0;
     const bool noted=note&&*note;
     if(!moved&&!noted)return;
-    static unsigned lines=0;
-    static std::string last_note;
+    // Separate budgets: changing error texts cannot starve the moved lines that
+    // name a producer. One leak prints at each nesting scope (leaf/bulk, display,
+    // event, frame), so a per-frame producer costs at most 4 lines per scope.
+    static unsigned moved_lines=0,note_lines=0;
     static std::map<std::pair<std::string,std::uint32_t>,unsigned> repeats;
-    if(!moved&&last_note==note)return;   // the same swallowed error again: once
-    if(moved&&++repeats[{scope,pc}]>4u)return;   // a per-frame producer: its first four
-    if(lines>=96u)return;
-    ++lines;
-    if(noted)last_note=note;
+    static std::set<std::tuple<std::string,std::uint32_t,std::string>> notes;
+    if(moved){
+        if(++repeats[{scope,pc}]>4u)return;
+        if(moved_lines>128u)return;
+        if(moved_lines==128u){++moved_lines;std::fprintf(stderr,"[mx] moved-line budget exhausted at frame %u\n",frame);return;}
+        ++moved_lines;
+    }else{
+        if(note_lines>32u)return;
+        if(!notes.insert({scope,pc,note}).second)return;   // the same swallowed error again: once
+        if(note_lines==32u){++note_lines;std::fprintf(stderr,"[mx] note budget exhausted at frame %u\n",frame);return;}
+        ++note_lines;
+    }
     // Within capacity the pointer is depth slots above the arena base unless an
     // overflow/underflow already separated them.
     const bool desync=s.depth>=0&&s.depth<s.capacity&&s.current_offset!=std::ptrdiff_t(s.depth)*64;

@@ -90,6 +90,8 @@ public:
     // bound by the platform to the robots runtime's work (race_robots_runtime.hpp).
     const std::uint8_t* autoscene_work_799ca0{};
     std::uint32_t camera_inits{},camera_controls{},camera_unanswered{},car_displays{},race_car_displays{};
+    // The first CAMERA failure the event swallowed (last_error keeps only the latest error).
+    std::string camera_first_error;
     // PMT banks (inflated archive bytes) loaded through the native loader
     // 42E490..42E8C0 onto the device.
     bool load_bank(std::uint32_t resource,std::vector<std::uint8_t> pmt,std::string& error);

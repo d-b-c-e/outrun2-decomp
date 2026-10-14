@@ -249,6 +249,7 @@ void PcSceneRenderer::camera_reset_4857c0(){
         driving::camera_project_484bd0(camera,matrices_,d,screen_,blend);
     }catch(const std::exception& e){
         ++camera_unanswered;last_error=std::string("4857C0 failed: ")+e.what();
+        if(camera_first_error.empty())camera_first_error="frame "+std::to_string(frames)+" mode "+std::to_string(current_mode_)+": "+last_error;
         driving::pc_matrix_trace_scope("camera",frames,current_mode_,0x4857c0u,0u,depth,offset,matrices_,last_error.c_str());
         matrices_.depth=depth;matrices_.current_offset=offset;
     }
@@ -301,10 +302,12 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
             catch(const std::exception& e){
                 ++camera_unanswered;last_error=std::string("485FE0 failed (view ")+std::to_string(camera.u8(0x34a))+"): "+e.what();
+                if(camera_first_error.empty())camera_first_error="frame "+std::to_string(frames)+" mode "+std::to_string(mode_78026c)+": "+last_error;
                 // The next frame's callbacks share this stack: drop the nesting the failed control left.
                 driving::pc_matrix_trace_scope("camera",frames,mode_78026c,callback,385u,depth,offset,matrices_,last_error.c_str());
                 matrices_.depth=depth;matrices_.current_offset=offset;
                 return true;}
+            // 485FE0 returns false only from its mode guard, before any push: no nesting to restore.
             if(!answered){
                 ++camera_unanswered;last_error="485FE0 debug camera or race mode without inputs: mode "+std::to_string(mode_78026c)+" (view "+std::to_string(camera.u8(0x34a))+", +94/+98/+9C "+std::to_string(camera.u32(0x94))+"/"+std::to_string(camera.u32(0x98))+"/"+std::to_string(camera.u32(0x9c))+")";return true;}
             ++camera_controls;

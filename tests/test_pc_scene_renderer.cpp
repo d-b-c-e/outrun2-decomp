@@ -59,6 +59,9 @@ int main(int argc,char** argv){
             require(r.invoke(0x485fe0u,0,385,13,5)&&r.camera_unanswered==unanswered+frame+1u&&
                     r.last_error.find("Z rotation")!=std::string::npos&&mx.depth==depth&&mx.current_offset==offset,
                     "failed START camera control restores the renderer matrix stack");
+        require(r.camera_first_error.find("mode 13: 485FE0 failed")!=std::string::npos&&
+                r.camera_first_error.find("Z rotation")!=std::string::npos,
+                "the first swallowed camera failure is retained for the status line");
         cb.putf(0x2c8,0.f);cb.putf(0x2ec,0.f);r.race_camera_inputs=nullptr;
     }
     if(argc>1){

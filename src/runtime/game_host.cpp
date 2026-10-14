@@ -1221,6 +1221,10 @@ std::string pc_scene_summary(const GameHost& host){
     for(const auto& [cb,n]:p.unported_displays){char b[32];std::snprintf(b,sizeof b,"%x:%u,",cb,n);summary+=b;}
     summary+=" unported_leaves=";
     for(const auto& [pc,n]:p.unported_leaves){char b[32];std::snprintf(b,sizeof b,"%x:%u,",pc,n);summary+=b;}
+    // A swallowed CAMERA failure keeps the run going (its matrix nesting is restored):
+    // reported here so a run with one does not read as clean.
+    summary+=" camera="+std::to_string(p.camera_inits)+"/"+std::to_string(p.camera_controls)+"/unanswered "+std::to_string(p.camera_unanswered);
+    if(!p.camera_first_error.empty())summary+=" camera_first="+p.camera_first_error;
     if(!p.last_error.empty())summary+=" last="+p.last_error;
     return summary;
 }
