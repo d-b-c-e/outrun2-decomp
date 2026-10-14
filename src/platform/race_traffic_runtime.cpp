@@ -47,7 +47,18 @@ namespace outrun::platform {
 bool native_mission_type4_4962a0(const NativeRuntimeContext&);
 extern const TranslatedFunction network_cars_functions[];
 extern const TranslatedCodeData network_cars_code_data[];
+extern const TranslatedFunction network_functions[];
 namespace {
+// 4AF500 is the PC race-clock getter (`fld [842110]`): its x87 return must
+// stay on the same translated CPU as the C2C request manager that calls it.
+const TranslatedModule* request_clock_module(){
+    static const std::array<TranslatedFunction,2> functions=[](){
+        for(const auto* f=network_functions;f->pc;++f)
+            if(f->pc==0x4af500u)return std::array<TranslatedFunction,2>{*f,{0,nullptr}};
+        throw std::logic_error("translated 4AF500 race clock getter is missing");}();
+    static const TranslatedModule module{functions.data(),nullptr,{}};
+    return &module;
+}
 // Synthetic PC addresses of the racer setup tables ([80FB00] / [80FB1C] / [80FB20] / [80FB30]).
 constexpr std::uint32_t RacersBase=0x5d000000u,Table1cBase=0x5d100000u,Table20Base=0x5d200000u,Table30Base=0x5d300000u;
 std::string hex(std::uint32_t v){char t[16];std::snprintf(t,sizeof t,"%X",v);return t;}
@@ -89,6 +100,7 @@ void racers_out(NativeRuntimeContext& c,NativeRaceTraffic& t){
 void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
     OR2_PERF_ZONE("traffic map_memory");
     auto& m=t.memory;m.clear();
+    m.map(0x842110u,reinterpret_cast<std::uint8_t*>(&c.race.clock.time_842110),4u);
     native_race_requests_map(c,m);   // first: the area regions and the cells below shadow its words
     // The AREA owner's PC memory as its last callback built it: EXE ranges, the
     // area block 7D2D80.., the race manager block, the player car, the car works.
@@ -751,7 +763,7 @@ struct Run {
             if(!ui.call(pc,bytes,k.args.data(),std::min<std::size_t>(k.argc,k.args.size()),value)||ui.missing_pc)
                 missing(ui.missing_pc?ui.missing_pc:pc,"sprite resource service");
             routed(pc);return value;}
-        if(bulk_translated(pc)&&ctx){routed(pc);return bulk_call(m(),ctx->service,k,&matrices,&c.event_function36.pc_crt_random_state);}
+        if(bulk_translated(pc)&&ctx){routed(pc);return bulk_call(m(),ctx->service,k,&matrices,&c.event_function36.pc_crt_random_state,request_clock_module());}
         missing(pc,"traffic service not ported");
     }
 };
@@ -1120,7 +1132,7 @@ std::uint32_t requests_stage_script_4829d0(NativeRuntimeContext& c,PcRaceContext
     const std::uint32_t n=m.u32(B+0x170u)+1u;
     m.put32(B+0x168u,0xffffffffu);m.put32(B+0x170u,n);m.put32(B+0x100u+n*4u,m.u32(B+0x140u));
     if(m.u32(B+0x68u))m.put32(B+0x5810u,m.u32(B+0x70u));
-    {PcRaceCall k{};k.pc=0x482820u;k.ecx=B;(void)bulk_call(m,ctx.service,k,&matrices,&c.event_function36.pc_crt_random_state);}
+    {PcRaceCall k{};k.pc=0x482820u;k.ecx=B;(void)bulk_call(m,ctx.service,k,&matrices,&c.event_function36.pc_crt_random_state,request_clock_module());}
     if(m.u32(B+0x148u))m.put32(B+0x170u,m.u32(B+0x170u)-1u);
     return 1u;
 }
@@ -1149,7 +1161,7 @@ bool native_race_requests_call(NativeRuntimeContext& c,driving::PcMatrixStack& m
         if(!bulk_translated(k.pc))for(const auto& [w,method]:Methods)if(w==k.pc){k.pc=method;k.ecx=NativeRaceTraffic::RequestsBase;break;}
         if(k.pc==0x46c1f0u&&!bulk_translated(k.pc)){k.pc=0x481250u;k.ecx=NativeRaceTraffic::RequestsBase;k.argc=1;k.args[0]=0u;}
         if(!bulk_translated(k.pc))throw TrafficUnported(pc,"request manager entry neither native nor translated");
-        eax=bulk_call(ctx.m,ctx.service,k,&matrices,&c.event_function36.pc_crt_random_state);done=true;});
+        eax=bulk_call(ctx.m,ctx.service,k,&matrices,&c.event_function36.pc_crt_random_state,request_clock_module());done=true;});
     return ok&&done;
 }
 bool native_race_requests_event(NativeRuntimeContext& c,std::uint32_t callback,std::uint32_t work,driving::PcMatrixStack& matrices){
