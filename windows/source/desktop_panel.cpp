@@ -111,14 +111,6 @@ void page_controls(bool){
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    if(p.player_model!=ffb::player::Model::Legacy){
-        const auto state=p.player_model==ffb::player::Model::Producer2?
-            std::string("outrun-producer@2: fixture-only source slice; wheel output is unavailable"):
-            "settings refused: "+p.model_refusal+"; wheel output is unavailable";
-        dbce::panel::Status("Player model",state.c_str(),dbce::panel::Tone::Warning);
-        dbce::panel::Text("The legacy FFB controls do not tune this model; the producer values are edited separately in the ini file.");
-        return;
-    }
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
     // The saved setting for the NEXT start ([FFB] Output = wheel | none), apart from the output above. It is never applied
@@ -137,6 +129,16 @@ void page_ffb(bool advanced){
         dbce::panel::Status("This session",p.force_muted?"not running: this process is force-muted (DBCE_FFB_MUTE)":"not running in this session; see Wheel output above",
                             dbce::panel::Tone::Normal);
     dbce::panel::Text("Stop FFB and F8 turn the output off now and at the next start.");
+    if(p.player_model!=ffb::player::Model::Legacy){
+        if(p.player_model==ffb::player::Model::Producer2){
+            dbce::panel::Status("Player model","outrun-producer@2 selected; steering and shift strengths come from [FFBProducer2]");
+            dbce::panel::Text("The legacy FFB sliders do not tune this model; edit its strengths in the ini file.");
+        }else{
+            const auto state="settings refused: "+p.model_refusal+"; correct the model settings before force can run";
+            dbce::panel::Status("Player model",state.c_str(),dbce::panel::Tone::Warning);
+        }
+        return;
+    }
     const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
     percent_key("Strength",&v.global,100,pct(d.global_strength),"FFBGlobalStrength");
     if(!advanced)return;

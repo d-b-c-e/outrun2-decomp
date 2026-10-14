@@ -151,6 +151,14 @@ int main(){
                 outrun::platform::notify_car_producer(outrun::xbox_runtime::car_producer_observer(),o);
             }
         };
+        const auto gated_tick=[&](const char* what){
+            const auto before=forces();
+            tick(); // Direct, fresh producer callback still arrives after this gated input tick.
+            const auto after=forces();
+            bool all_zero=after.size()>=before.size()&&!after.empty()&&after.back()==0;
+            for(std::size_t i=before.size();i<after.size();++i)all_zero=all_zero&&after[i]==0;
+            check(all_zero,what);
+        };
         tick();tick();tick();
         auto sent=forces();check(!sent.empty()&&sent.back()!=0,"primed producer reaches fake native with bounded force");
         outrun::desktop::ffb::producer2::Stream expected({25,75});
@@ -169,15 +177,18 @@ int main(){
         state.producer_continuity=1;
         tick();sent=forces();check(sent.back()==0,"recovery gate zeros before another car callback");
         tick();sent=forces();check(sent.back()==0,"recovery callback neutralizes the next delivery");
-        outrun::desktop::g_panel_open=true;tick(false);
-        sent=forces();check(sent.back()==0,"F6 panel remains neutral");
+        tick();sent=forces();check(sent.back()!=0,"force resumes after recovery prime");
+        outrun::desktop::g_panel_open=true;
+        for(int i=0;i<3;++i)gated_tick("every F6-open tick stays zero with producer callbacks present");
         outrun::desktop::g_panel_open=false;
-        tick();tick();sent=forces();check(sent.back()==0,"F6 close starts from a fresh prime");
+        tick();sent=forces();check(sent.back()==0,"F6 close first tick stays zero");
+        tick();sent=forces();check(sent.back()==0,"F6 close primes before force");
         tick();sent=forces();check(sent.back()!=0,"force resumes only after F6 prime");
         outrun::desktop::ffb_front_check()=[](void*){return false;};
-        tick(false);sent=forces();check(sent.back()==0,"focus loss zeros held selected force");
+        for(int i=0;i<3;++i)gated_tick("every unfocused tick stays zero with producer callbacks present");
         outrun::desktop::ffb_front_check()=[](void*){return true;};
-        tick();tick();sent=forces();check(sent.back()==0,"focus return primes before force");
+        tick();sent=forces();check(sent.back()==0,"focus return first tick stays zero");
+        tick();sent=forces();check(sent.back()==0,"focus return primes before force");
         tick();sent=forces();check(sent.back()!=0,"focus return resumes after prime");
         rt->mode_state.current=13;tick(false);sent=forces();check(sent.back()==0,"menu transition zeros selected force");
         rt->mode_state.current=16;tick();tick();sent=forces();check(sent.back()==0,"menu return primes before force");

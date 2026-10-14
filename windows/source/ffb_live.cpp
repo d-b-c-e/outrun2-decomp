@@ -27,7 +27,7 @@ struct Row:ffb::Sink {
 };
 struct Live {
     bool on{};
-    bool selected{},row_ready{};
+    bool selected{},row_ready{},selected_gate_open{};
     std::int32_t selected_intent{};
     std::unique_ptr<ffb::LegacyForce> model;
     std::FILE* trace{};
@@ -124,8 +124,12 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     if(f.selected){
         const bool race=rt&&rt->mode_state.current==16u&&rt->event_state.pause_depth==0u;
         const bool allowed=race&&!desktop_panel_open()&&ffb_front_check()(xbox_runtime::native_window().hwnd);
-        if(!allowed||!f.row_ready)ffb_shadow_invalidate_selected();
+        if(!allowed||!f.row_ready||!f.selected_gate_open)ffb_shadow_invalidate_selected();
+        // A callback can arrive after a gated filter tick. Never consume that cached request on gate reopening;
+        // the first callback after reopening must prime a fresh producer stream.
+        if(!allowed||!f.selected_gate_open){f.row_ready=false;f.selected_intent=0;}
         const auto intent=allowed&&f.row_ready?f.selected_intent:0;
+        f.selected_gate_open=allowed;
         f.row_ready=false;f.selected_intent=0;
         if(f.output)deliver(race,intent);
         return;
