@@ -491,6 +491,34 @@ int main(int argc,char** argv){
                     for(std::size_t i=0;same&&i<draws.size();++i)same=draws[i].pc==plain_draws[i].pc&&draws[i].args==plain_draws[i].args;
                     require(plain&&listed&&missing==0&&fault==0&&same&&draws.size()==3&&listed_block==plain_block,
                             "a request object's 41BD40 virtual display leaves the request block and the draws unchanged");}
+                // 50ECC0: the virtual display of route-run-2212's request objects (vtable 5E5D64). Its children 50E460 /
+                // 50E4E0 / 50E9A0 loop over the object's +70 / +72 entries; with none, each kind runs its stock child and
+                // the block and draws stay as without the object; a kind above 6 or a key mismatch runs no child.
+                {   constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,Req=0x6e40u,Edi=0x6e80u,Obj=0x6ec0u;
+                    const auto start=block;
+                    put32(block,0x80u,B+Req);put32(block,0x7660u,B+Edi);put32(block,Req+0x58u,B+Obj);
+                    scratch_put(0x44u,B);scratch_put(0x48u,0x1234u);scratch_put(0x74u,0x50ecc0u);
+                    const auto set=block;
+                    auto run=[&](std::uint32_t kind,std::uint32_t key,bool listed){
+                        block=set;put32(block,Obj,key);put32(block,Obj+4u,kind);put32(block,0x78u,listed?0x0dfe2000u:0u);
+                        const bool ok=display();put32(block,0x78u,0u);return ok;};
+                    struct Case{std::uint32_t kind,key,child;};
+                    for(const Case& entry:{Case{0u,0x1234u,0x50e460u},Case{4u,0x1234u,0x50e4e0u},Case{6u,0x1234u,0x50e9a0u},
+                                       Case{7u,0x1234u,0u},Case{0u,0x4321u,0u}}){
+                        const bool plain=run(entry.kind,entry.key,false);const auto plain_block=block;const auto plain_draws=draws;
+                        const auto shown=traffic.routed[0x50ecc0u];
+                        const std::array<std::uint32_t,3> pcs{0x50e460u,0x50e4e0u,0x50e9a0u};
+                        std::array<std::uint32_t,3> before{};for(std::size_t i=0;i<3;++i)before[i]=traffic.routed[pcs[i]];
+                        const bool listed=run(entry.kind,entry.key,true);
+                        bool same=plain&&listed&&missing==0&&fault==0&&block==plain_block&&draws.size()==3&&draws.size()==plain_draws.size();
+                        for(std::size_t i=0;same&&i<draws.size();++i)same=draws[i].pc==plain_draws[i].pc&&draws[i].args==plain_draws[i].args;
+                        bool children=traffic.routed[0x50ecc0u]==shown+1u;
+                        for(std::size_t i=0;i<3;++i)children=children&&traffic.routed[pcs[i]]==before[i]+(pcs[i]==entry.child?1u:0u);
+                        require(same&&children,"50ECC0 runs the stock child of the object's kind (none above 6 or on a key mismatch) "
+                                               "and leaves the request block and the draws as without the object");
+                    }
+                    block=start;scratch_put(0x44u,0u);scratch_put(0x48u,0u);
+                }
                 scratch_put(0x74u,0xdead0042u);
                 require(!display()&&missing==0xdead0042u&&fault==0&&!error.empty()&&draws.empty(),
                         "unsupported virtual request display retains its exact child PC without guessed draws");
@@ -539,7 +567,23 @@ int main(int argc,char** argv){
                         "4EFD20 lane != 0 copies two vectors to the light words and returns the source + C");
                 area.light_words_6a5dc4=lights;area.light_words_written=lights_written;
                 request.start_mode.scene_owner_table68=table;
-                std::fprintf(stderr,"request 4EFD20: 521930 rows to 84BD08 and 41BD40 virtual display checked\n");
+                // 4EF870(v): route-run-2212 latched the traffic module there. The same request object's control 50E9F0
+                // (vtable 5E5D64 +C) at request state 7 runs 521930 (nothing outside states 1 / 5), clears the manager's
+                // +19C and runs 4EF870(0): the appear override 84CC18 in the traffic state's appear block.
+                {   auto& appear=traffic.state.appear;constexpr std::uint32_t Override=0x84cc18u-PcTrafficState::AppearBase;
+                    const auto kept=appear;
+                    auto get32=[](const std::vector<std::uint8_t>& b,std::size_t o){std::uint32_t v;std::memcpy(&v,b.data()+o,4);return v;};
+                    put32(block,Req+8u,7u);put32(block,0x19cu,0x55u);put32(appear,Override,0x7f23e0u);
+                    const auto routed=traffic.routed[0x4ef870u];
+                    std::uint32_t control_eax=0u;
+                    const bool control=native_race_requests_call(request,request_matrices,0x0050e9f0u,{},control_eax,B+This);
+                    require(control&&!traffic.latched&&traffic.routed[0x4ef870u]==routed+1u&&
+                            get32(appear,Override)==0u&&get32(block,0x19cu)==0u,
+                            "request state 7: 50E9F0 clears the manager's +19C and runs 4EF870(0) on the appear override 84CC18");
+                    require(traffic.memory.at(0x84cc18u,4u)==appear.data()+Override,"84CC18 is the traffic state's appear block");
+                    appear=kept;
+                }
+                std::fprintf(stderr,"request 4EFD20 / 4EF870: 521930 rows to 84BD08, 50E9F0 state 7 override clear checked\n");
             }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
