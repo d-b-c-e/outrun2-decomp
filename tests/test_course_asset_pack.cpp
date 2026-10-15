@@ -6,6 +6,7 @@
 #include "platform/race_ghosts.hpp"
 #include "driving/pc_wheel_dynamics.hpp"
 #include "driving/pc_x87.hpp"
+#include "driving/pc_ground_collision.hpp"
 #include "platform/world_source_pack.hpp"
 #include "platform/course_collision_pack.hpp"
 #include "platform/course_world_runtime.hpp"
@@ -584,6 +585,54 @@ int main(int argc,char** argv){
                     appear=kept;
                 }
                 std::fprintf(stderr,"request 4EFD20 / 4EF870: 521930 rows to 84BD08, 50E9F0 state 7 override clear checked\n");
+            }
+            {   // 5209A0(out, normal) with ECX = a course place {t, cs, .., part}: the course point under the request
+                // objects' display (50DBE0 -> 520BD0 -> 5209A0). Its first course read is the polygon root [780110 + part * 4];
+                // on a loaded lane it runs 43D920 (hint -1 for t up to 0.5) on the selected course world and blends the run's
+                // polygon and normal records (40F180, then 40EF00). At t 0 the weight is 0 whatever the 44F0F0 gate gives:
+                // the point is the first polygon's +24 vector and the normal that of its normal record, normalized. Lane 1
+                // is not loaded: 5209A0 returns the zero point and the up normal without 43D920.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;
+                const auto saved=block;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t>& saved;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());}} restore{block,saved};
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,Place=0x6e00u,Out=0x6e40u,Normal=0x6e80u;
+                constexpr std::int16_t Cs=10;
+                auto& world=request.start_mode.scene_owner_course_world;
+                require(world.query_ready()&&world.lane_loaded(0u)&&!world.lane_loaded(1u),"lane 0 holds the owned course, lane 1 is empty");
+                auto vec=[&](std::uint32_t o){std::array<float,3> v{};std::memcpy(v.data(),block.data()+o,12);return v;};
+                auto point=[&](std::uint32_t part){
+                    std::fill(block.begin()+Place,block.begin()+Normal+12u,std::uint8_t(0));
+                    const float t=0.0f;std::memcpy(block.data()+Place,&t,4);std::memcpy(block.data()+Place+4u,&Cs,2);
+                    put32(block,Place+0xcu,part);
+                    std::uint32_t eax=0u;
+                    const bool ran=native_race_requests_call(request,request_matrices,0x005209a0u,{B+Out,B+Normal},eax,B+Place);
+                    if(!ran)std::fprintf(stderr,"5209A0 part %u: latched=%d fault=%X %s\n",part,int(traffic.latched),
+                                         unsigned(traffic.fault),traffic.error.c_str());
+                    return ran;};
+                const auto lookups=traffic.routed[0x43d920u];
+                const bool loaded=point(0u);
+                const auto tables=world.tables();
+                std::array<std::uint8_t,10> place{};std::memcpy(place.data()+8,&Cs,2);   // part 0, side 0, cs
+                std::int32_t first=-1,last=-1;
+                const auto run=outrun::driving::find_selected_course_run(tables,outrun::driving::Bytes(place.data(),place.size()),-1,first,last);
+                require(loaded&&!traffic.latched&&traffic.routed[0x43d920u]==lookups+1u&&run>0&&first>=0,
+                        "lane 0: 5209A0 runs 43D920 on the owned course through the mapped polygon root");
+                const auto& course=tables.courses[0];
+                const auto at=std::uint32_t(first);
+                const auto p=vec(Out),n=vec(Normal);
+                require(p[0]==course.polygons.f32(at*64u+0x24u)&&p[1]==course.polygons.f32(at*64u+0x28u)&&
+                        p[2]==course.polygons.f32(at*64u+0x2cu),
+                        "lane 0 at t 0: the point is the first polygon's +24 vector (43D920's first, 780110's records)");
+                const float rx=course.normals.f32(at*48u+0x24u),ry=course.normals.f32(at*48u+0x28u),rz=course.normals.f32(at*48u+0x2cu);
+                const float len=std::sqrt(rx*rx+ry*ry+rz*rz);
+                require(len>0.f&&std::fabs(n[0]-rx/len)<1e-5f&&std::fabs(n[1]-ry/len)<1e-5f&&std::fabs(n[2]-rz/len)<1e-5f,
+                        "lane 0 at t 0: the normal is the first normal record's +24 vector, normalized (40F180, 40EF00)");
+                const bool empty=point(1u);
+                require(empty&&!traffic.latched&&traffic.routed[0x43d920u]==lookups+1u&&
+                        vec(Out)==std::array<float,3>{0.f,0.f,0.f}&&vec(Normal)==std::array<float,3>{0.f,1.f,0.f},
+                        "lane 1 (not loaded): its polygon root is 0, so 5209A0 returns the zero point and the up normal without 43D920");
+                std::fprintf(stderr,"request course point 5209A0: lane 0 run %d first %d, lane 1 empty checked\n",int(run),int(first));
             }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
