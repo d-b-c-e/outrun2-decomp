@@ -3,6 +3,7 @@
 // device/decoder. No retail files, game window, controller or hardware output.
 #include "platform/cd_switcher.hpp"
 #include "platform/race_goal_camera.hpp"
+#include "../windows/source/cd_switcher.hpp"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -88,6 +89,44 @@ void cursor(){
     s.enabled=true;s.tracks.clear();check(!s.change({true,false})&&p.calls==n,"absent catalog does not call audio");
     s.tracks={{"a","title"}};s.play=nullptr;check(!s.select(0),"unbound host transparent");
 }
+void actual_pad_adapter(){
+    using namespace outrun::ps5;using outrun::desktop::cd_switcher_pad_sample;
+    DualSenseInput adapter;PadSample sample;sample.connected=true;
+    // Actual production adapter output, not an idealized host-layout mask.
+    struct Named { const char* name;std::uint32_t button; };
+    static constexpr Named names[]={{"A",Cross},{"B",Circle},{"X",Square},{"Y",Triangle},
+        {"LS",StickL},{"RS",StickR},{"LB",L1},{"RB",R1},{"LT",L2},{"RT",R2},
+        {"Start",Options},{"Back",Share},{"Left",Left},{"Up",Up},{"Right",Right},{"Down",Down}};
+    for(const auto& entry:names){
+        sample.buttons=entry.button;const auto native=adapter.update(sample,16);
+        std::uint64_t configured=0;check(parse_cd_combo(entry.name,configured),"adapter case binding parses");
+        const auto normalized=cd_switcher_pad_sample(native);
+        check(normalized.connected&&normalized.held==configured,"actual DualSense sample maps to configured combination");
+        check(native.raw_buttons_held==entry.button,"normalization leaves native raw input unchanged");
+    }
+    std::uint64_t back=0,previous=0;(void)parse_cd_combo("Back",back);(void)parse_cd_combo("RS+Back",previous);
+    CdEdges edges;
+    auto step=[&](std::uint32_t buttons,bool connected=true,bool blocked=false,bool tie=false){
+        sample.buttons=buttons;sample.connected=connected;
+        auto native=adapter.update(sample,16);const auto pad=cd_switcher_pad_sample(native);
+        native.connected=true; // a later wheel filter must not mask pad disconnect
+        if(!connected)check(native.connected&&!pad.connected,"native-pad connection snapshot survives wheel connection");
+        return edges.step(false,false,pad.held,pad.connected,tie?back:previous,back,blocked);
+    };
+    (void)step(0);check(!step(Share).next,"actual Back press waits for release");
+    check(!step(Share).next,"actual Back hold does not repeat");
+    const auto next=step(0);check(next.next&&!next.previous,"actual Share/Back release selects Next");
+    (void)step(Share|StickR);const auto prev=step(0);
+    check(prev.previous&&!prev.next,"actual RS+Back release wins specificity");
+    (void)step(Up|L1);const auto wrong=step(0);
+    check(!wrong.previous&&!wrong.next,"PS5 Up/L1 never masquerade as configured Back/RS");
+    (void)step(Share);const auto disconnected=step(0,false);
+    check(!disconnected.previous&&!disconnected.next,"actual adapter disconnect ignored even if wheel later connects");
+    (void)step(0);(void)step(Share,true,false,true);const auto tied=step(0,true,false,true);
+    check(tied.next&&!tied.previous,"actual adapter equal combinations favor Next");
+    (void)step(Share,true,true);check(!step(Share).next&&!step(0).next,"actual held pad crossing race/panel boundary is disarmed");
+    (void)step(Share);check(step(0).next,"actual fresh pad press/release after boundary works");
+}
 struct Script {
     PcRaceMemory memory;std::array<std::uint8_t,0x58> records{};
     std::array<std::uint8_t,4> table{},camera{},car{},mode{};std::array<std::uint8_t,0x30> scene{};
@@ -124,4 +163,4 @@ void race(){
     s={};
 }
 }
-int main(){catalog();resolve();edges();cursor();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}
+int main(){catalog();resolve();edges();cursor();actual_pad_adapter();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}

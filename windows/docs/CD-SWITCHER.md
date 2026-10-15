@@ -48,7 +48,10 @@ keys/buttons are released. Pad disconnect is not a switch.
 
 Digital pad names: A/B/X/Y, LS/RS, LB/RB, LT/RT, Start/Back and
 Left/Up/Right/Down, joined with `+`, case insensitive. These use the existing
-native gamepad sample; wheel Controls actions are not new switcher bindings.
+native gamepad sample, normalized from its actual DualSense raw-bit layout to
+the host pad layout used by combination names. The pad connection is captured
+before wheel/shim filters update their own connection state, so a wheel cannot
+turn a pad disconnect into a track switch. Wheel Controls actions are not new switcher bindings.
 Analog stick direction aliases are refused. A bad combination disables this
 slice instead of silently changing its meaning.
 

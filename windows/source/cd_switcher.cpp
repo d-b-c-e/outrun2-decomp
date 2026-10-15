@@ -14,12 +14,15 @@ struct State {
     std::uint64_t previous{},next{};platform::CdEdges edges;xbox_runtime::InputFilter inner{};
 } s;
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
+    // Preserve the actual pad's connection before wheel/shim filters can mark
+    // their own device connected. A disconnected pad must not look released.
+    const auto pad=cd_switcher_pad_sample(out);
     if(s.inner)s.inner(out,rt);
     const bool race=rt&&rt->mode_state.current==16u;
     const bool cleared=desktop_key_clears()!=s.clears;s.clears=desktop_key_clears();
     const bool blocked=!race||!s.in_race||desktop_panel_open()||cleared;
     s.in_race=race;
-    const auto action=s.edges.step(desktop_key(s.z),desktop_key(s.x),out.raw_buttons_held,out.connected,
+    const auto action=s.edges.step(desktop_key(s.z),desktop_key(s.x),pad.held,pad.connected,
                                    s.previous,s.next,blocked);
     if(!blocked)(void)platform::cd_switcher().change(action);
     // No keyboard, native pad, wheel or frontend input is consumed or rewritten.
