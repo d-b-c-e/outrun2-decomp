@@ -165,6 +165,10 @@ struct MusicStream::Impl {
     bool draining{},finished{};
     std::uint64_t decoded_since_seek{};
     std::uint64_t expected_samples{};
+    // Exact source phase in units of 1/48000 source frames. Repeated double
+    // addition (e.g. 8000/48000) drifts below EOF and can emit an extra frame.
+    std::size_t replacement_position{};
+    std::uint32_t replacement_fraction{};
     static int read_memory(void* user,std::uint8_t* out,int n){
         auto& s=*static_cast<Impl*>(user);
         if(n<=0)return AVERROR(EINVAL);
@@ -298,6 +302,7 @@ struct MusicStream::Impl {
         // avformat does not own custom AVIO; it may have replaced its buffer.
         if(io){av_freep(&io->buffer);avio_context_free(&io);}
         stream=-1;input_format=AV_SAMPLE_FMT_NONE;draining=false;finished=false;decoded_since_seek=0;expected_samples=0;
+        replacement_position=0;replacement_fraction=0;
 #endif
         open=false;replacement=false;ended=false;pending.clear();base=0;position=0;file.clear();read_at=0;
     }
@@ -372,9 +377,8 @@ bool MusicStream::mix_add(double* acc,std::size_t frames,double gain,std::string
 #if defined(OUTRUN_WITH_FFMPEG)
     if(s.open&&s.replacement){
         if(frames>96000u||(!acc&&frames)){s.close();return fail(error,"music: replacement mix request exceeds bound");}
-        const double step=double(s.rate)/48000.0;
         for(std::size_t f=0;f<frames;++f){
-            const auto index=std::size_t(s.position);
+            const auto index=s.replacement_position;
             while(!s.finished&&(index+2u-s.base)*2u>s.pending.size()){
                 const auto consumed=std::min(index-s.base,s.pending.size()/2u);
                 if(consumed){s.pending.erase(s.pending.begin(),s.pending.begin()+std::ptrdiff_t(consumed*2u));s.base+=consumed;}
@@ -383,10 +387,11 @@ bool MusicStream::mix_add(double* acc,std::size_t frames,double gain,std::string
             const auto have=s.pending.size()/2u;
             if(index-s.base>=have){++stats.ends;s.close();break;}
             const auto i0=index-s.base,i1=std::min(i0+1u,have-1u);
-            const double fraction=s.position-double(index);
+            const double fraction=double(s.replacement_fraction)/48000.0;
             for(std::size_t c=0;c<2;++c)
                 acc[f*2u+c]+=(s.pending[i0*2u+c]+(s.pending[i1*2u+c]-s.pending[i0*2u+c])*fraction)*gain;
-            s.position+=step;++stats.frames;
+            const auto next=s.replacement_fraction+s.rate;
+            s.replacement_position+=next/48000u;s.replacement_fraction=next%48000u;++stats.frames;
         }
         return true;
     }

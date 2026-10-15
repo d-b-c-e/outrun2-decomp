@@ -24,12 +24,12 @@ void le(std::vector<std::uint8_t>& out,std::uint32_t value,unsigned count){
     for(unsigned i=0;i<count;++i)out.push_back(std::uint8_t(value>>(8u*i)));
 }
 void text(std::vector<std::uint8_t>& out,const char* value){out.insert(out.end(),value,value+4);}
-std::vector<std::uint8_t> wav(unsigned rate,unsigned channels,unsigned bits,bool floating=false){
-    std::vector<std::uint8_t> out;const auto bytes=std::uint32_t(SourceFrames*channels*(bits/8u));
+std::vector<std::uint8_t> wav(unsigned rate,unsigned channels,unsigned bits,bool floating=false,std::size_t frames=SourceFrames){
+    std::vector<std::uint8_t> out;const auto bytes=std::uint32_t(frames*channels*(bits/8u));
     text(out,"RIFF");le(out,36u+bytes+(bytes&1u),4);text(out,"WAVE");text(out,"fmt ");le(out,16,4);
     le(out,floating?3u:1u,2);le(out,channels,2);le(out,rate,4);le(out,rate*channels*(bits/8u),4);
     le(out,channels*(bits/8u),2);le(out,bits,2);text(out,"data");le(out,bytes,4);
-    for(std::size_t f=0;f<SourceFrames;++f)for(unsigned c=0;c<channels;++c){
+    for(std::size_t f=0;f<frames;++f)for(unsigned c=0;c<channels;++c){
         const int value=sample(f,c);
         if(floating){const float v=float(value)/32768.0f;std::uint32_t encoded{};static_assert(sizeof v==sizeof encoded);std::memcpy(&encoded,&v,sizeof v);le(out,encoded,4);}
         else if(bits==8)le(out,std::uint32_t(value/256+128),1);
@@ -43,37 +43,54 @@ std::vector<std::uint8_t> load(const std::string& path){
     std::ifstream in(path,std::ios::binary);check(bool(in),"missing generated owned fixture");
     return {std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()};
 }
-void decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsigned channels,const char* format,unsigned bits){
+struct NumericResult {std::vector<double> pcm;std::uint64_t loops{};};
+NumericResult decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsigned channels,const char* format,unsigned bits,
+                            std::size_t source_frames=SourceFrames,std::array<std::size_t,4> chunks={{1,3,17,61}},
+                            bool loop=false,std::size_t requested=0){
     MusicStream stream;std::string error;
-    std::printf("case format=%s rate=%u channels=%u bits=%u\n",format,rate,channels,bits);
-    check(stream.open(std::move(bytes),false,error),error);
+    std::printf("case format=%s rate=%u channels=%u bits=%u sourceFrames=%zu loop=%u\n",format,rate,channels,bits,source_frames,unsigned(loop));
+    check(stream.open(std::move(bytes),loop,error),error);
     check(stream.stats.rate==rate&&stream.stats.channels==channels,"source layout stats");
-    const double step=double(rate)/48000.0;double position=0;std::size_t output=0;
-    for(unsigned call=0;stream.playing()&&call<4096;++call){
-        const std::size_t count=std::array<std::size_t,4>{{1,3,17,61}}[call%4u];
+    // Closed-form sample/time oracle, independent of the decoder's incremental
+    // phase state. Expected counts remain exact; no epsilon permits extra EOF.
+    const auto expected=loop?requested:std::size_t((std::uint64_t(source_frames)*48000u+rate-1u)/rate);
+    std::size_t output=0;NumericResult result;
+    for(std::size_t call=0;stream.playing()&&(!loop||output<requested)&&call<expected+2u;++call){
+        const std::size_t count=loop?std::min(chunks[call%4u],requested-output):chunks[call%4u];
         std::vector<double> acc(count*2u,7.0);const auto before=stream.stats.frames;
         check(stream.mix_add(acc.data(),count,0.5,error),error);
         const auto rendered=std::size_t(stream.stats.frames-before);
         for(std::size_t f=0;f<count;++f){
             if(f<rendered){
-                check(position<double(SourceFrames),"too many decoded frames");
-                const auto index=std::size_t(position),next=std::min(index+1u,SourceFrames-1u);
-                const auto fraction=position-double(index);
+                const auto timestamp=std::uint64_t(output)*rate;
+                const auto absolute_index=std::size_t(timestamp/48000u);
+                check(loop||absolute_index<source_frames,"too many decoded frames");
+                const auto index=absolute_index%source_frames;
+                const auto next=loop?(index+1u)%source_frames:std::min(index+1u,source_frames-1u);
+                const auto fraction=double(timestamp%48000u)/48000.0;
                 for(unsigned c=0;c<2;++c){const unsigned source_channel=channels==1?0:c;
-                    const double expected=7.0+(sample(index,source_channel)+(sample(next,source_channel)-sample(index,source_channel))*fraction)*0.5;
-                    check(std::abs(acc[f*2u+c]-expected)<0.0001,"numeric PCM/gain/channel/resample mismatch");
+                    const double numeric=7.0+(sample(index,source_channel)+(sample(next,source_channel)-sample(index,source_channel))*fraction)*0.5;
+                    check(std::abs(acc[f*2u+c]-numeric)<0.0001,"numeric PCM/gain/channel/resample mismatch");
+                    result.pcm.push_back(acc[f*2u+c]);
                 }
-                position+=step;++output;
+                ++output;
             }else check(acc[f*2u]==7.0&&acc[f*2u+1u]==7.0,"EOF must not change unused mix frames");
         }
     }
-    check(!stream.playing(),"bounded EOF and buffered-tail drain");
-    const auto expected=std::size_t(std::ceil(double(SourceFrames)/step));
-    std::printf("case count format=%s rate=%u channels=%u bits=%u output=%zu expected=%zu sourceFrames=%zu finalExpectedPosition=%.17g\n",
-                format,rate,channels,bits,output,expected,SourceFrames,position);
+    std::printf("case count format=%s rate=%u channels=%u bits=%u output=%zu expected=%zu sourceFrames=%zu loop=%u loops=%llu\n",
+                format,rate,channels,bits,output,expected,source_frames,unsigned(loop),static_cast<unsigned long long>(stream.stats.loops));
     std::fflush(stdout);
     check(output==expected,"source frame count mismatch (see actual case/count context)");
-    check(stream.stats.ends==1,"exact one end");
+    if(loop){
+        check(stream.playing()&&stream.stats.ends==0,"whole-file loop remains active");
+        const auto last_index=(std::uint64_t(output-1u)*rate)/48000u;
+        check(stream.stats.loops==(last_index+1u)/source_frames,"exact source loop count including interpolation lookahead");
+        result.loops=stream.stats.loops;stream.stop();check(!stream.playing(),"loop stop");
+    }else{
+        check(!stream.playing(),"bounded EOF and buffered-tail drain");
+        check(stream.stats.ends==1,"exact one end");
+    }
+    return result;
 }
 #endif
 void policy_and_validation(){
@@ -125,6 +142,28 @@ void replacement_checks(const std::string& dir){
     for(const auto& c:std::array<Case,5>{{{"mono-48000-s16.flac",48000,1,16},{"stereo-24000-s24.flac",24000,2,24},
         {"stereo-96000-s32.flac",96000,2,32},{"mono-8000-u8.flac",8000,1,16},{"stereo-192000-f32.flac",192000,2,24}}})
         decode_numeric(load(dir+"/"+c.file),c.rate,c.channels,"FLAC",c.bits);
+    // Long, nonintegral output/source ratios with independent chunk schedules.
+    // These exercise actual WAV decoding, exact tail length and identical PCM.
+    for(const auto rate:{11025u,44100u,47999u}){
+        constexpr std::size_t frames=480017;
+        const auto bytes=wav(rate,2,24,false,frames);
+        const auto a=decode_numeric(bytes,rate,2,"WAV-long",24,frames,{{4096,997,17,1}});
+        const auto b=decode_numeric(bytes,rate,2,"WAV-long",24,frames,{{31,1,3,509}});
+        check(a.pcm==b.pcm,"chunk-independent long fractional PCM/tail count");
+    }
+    for(const auto rate:{11025u,44100u,47999u}){
+        constexpr std::size_t frames=1003;
+        const auto outputs=std::size_t((std::uint64_t(frames)*3u*48000u+rate-1u)/rate)+73u;
+        const auto bytes=wav(rate,1,16,false,frames);
+        const auto a=decode_numeric(bytes,rate,1,"WAV-loop",16,frames,{{1,3,17,61}},true,outputs);
+        const auto b=decode_numeric(bytes,rate,1,"WAV-loop",16,frames,{{509,31,1,3}},true,outputs);
+        check(a.pcm==b.pcm&&a.loops==b.loops,"chunk-independent fractional loop PCM/count");
+    }
+    // Existing generated FLAC also traverses fractional-rate loop boundaries.
+    const auto flac_loop=load(dir+"/mono-8000-u8.flac");
+    const auto fa=decode_numeric(flac_loop,8000,1,"FLAC-loop",16,SourceFrames,{{1,3,17,61}},true,5003);
+    const auto fb=decode_numeric(flac_loop,8000,1,"FLAC-loop",16,SourceFrames,{{509,31,1,3}},true,5003);
+    check(fa.pcm==fb.pcm&&fa.loops==fb.loops,"chunk-independent FLAC fractional loop PCM/count");
     auto tagged=load(dir+"/tagged-loop.flac");
     check(!stream.open(std::move(tagged),true,error)&&error.find("parity pending")!=std::string::npos,"custom loop tags explicitly pending");
     for(const auto& bytes:std::array<std::vector<std::uint8_t>,2>{{wav(48000,1,16),load(dir+"/mono-48000-s16.flac")}}){
