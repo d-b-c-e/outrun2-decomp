@@ -75,7 +75,7 @@ struct Binding final : RaceSoundServices {
     void pc_42f0d0(std::uint32_t command)override{
         if(s.effect&&s.effect(command))++s.played[command];else ++s.refused[command];
     }
-    void pc_427630()override{++s.clear_alls;c.pc_sound.clear_all_427630();if(s.stop_all)s.stop_all();}
+    void pc_427630()override{++s.clear_alls;c.pc_sound.clear_all_427630();if(s.stop_all)s.stop_all();s.horn_active=false;}   // the horn's loop stops with every effect
 };
 void latch(NativeRaceSound& s,std::uint32_t pc,const std::string& why){
     s.last_error=why;
@@ -158,17 +158,25 @@ std::string native_race_sound_status(const NativeRuntimeContext& c){
     else if(!s.last_error.empty())o<<" last="<<s.last_error;
     return o.str();
 }
-void native_race_horn(NativeRuntimeContext& c,bool held){
-    if(!g_pc_allow_horn)return;
-    auto& s=c.race.sound;
-    std::uint32_t command=0u;
-    if(held&&c.mode_state.current==16u){command=0x1bcu|0x800u;s.horn_active=true;}   // every frame, as Tweaks
-    else if(s.horn_active){command=0x1bcu|0x8000u;s.horn_active=false;}
-    if(!command)return;
-    // The race SE queue 9563E8, gated by event 383 (SOUND) as the race's own 424940 callers queue it.
+namespace {
+// 424940 on the race SE queue 9563E8, gated by event 383 (SOUND) as the race's own 424940 callers queue it. True once the
+// command is in the ring: queued now, or still pending (424940 drops a copy of a pending command; 4249A0 writes -1 to
+// each consumed entry). False when 424940 refused it: event 383 closed or paused, or the ring full.
+bool race_se_queued(NativeRuntimeContext& c,std::uint32_t command){
     auto& w=c.race.car_world;
     driving::PcSoundQueue q{driving::Bytes(w.sound_entries_9563e8.data(),w.sound_entries_9563e8.size()),
         driving::Bytes(w.sound_state.data(),w.sound_state.size()),std::uint8_t(c.event_state.slots[383].flags)};
     driving::pc_enqueue_sound(q,command);
+    for(std::uint32_t n=0;n<32u;++n){std::uint32_t v;std::memcpy(&v,w.sound_entries_9563e8.data()+n*4u,4);if(v==command)return true;}
+    return false;
+}
+}
+void native_race_horn(NativeRuntimeContext& c,bool held){
+    if(!g_pc_allow_horn)return;
+    auto& s=c.race.sound;
+    if(held&&c.mode_state.current==16u){s.horn_active=true;(void)race_se_queued(c,0x1bcu|0x800u);return;}   // every tick, as Tweaks
+    // The stop stays pending until 424940 takes it, so a release while event 383 is closed or paused, or the ring is
+    // full, still stops the loop later (sana #129986). ClearAllSound (427630, also from 424790) ends it too.
+    if(s.horn_active&&race_se_queued(c,0x1bcu|0x8000u))s.horn_active=false;
 }
 }

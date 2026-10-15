@@ -42,5 +42,36 @@ int main(){
     req(cursor(4)==0u&&!c->race.sound.horn_active,"[Audio] AllowHorn = false: no horn");
     g_pc_allow_horn=true;c->event_state.slots[383].flags=0;native_race_horn(*c,true);
     req(cursor(4)==0u&&c->race.sound.horn_active,"event 383 closed: 424940 drops it (the state follows the action, as Tweaks)");
+    // The stop is kept until 424940 takes it (sana #129986): an accepted loop, a release while event 383 is paused
+    // (flags 0x12: 424940 refuses), then the queue open again with the horn still released.
+    reset();c->event_state.slots[383].flags=2;native_race_horn(*c,true);
+    req(entry(0)==0x9bcu&&c->race.sound.horn_active,"the loop is accepted");
+    c->event_state.slots[383].flags=0x12;native_race_horn(*c,false);
+    req(cursor(4)==1u&&c->race.sound.horn_active,"released while event 383 is paused: the stop is refused and stays pending");
+    c->event_state.slots[383].flags=2;native_race_horn(*c,false);
+    req(entry(1)==0x81bcu&&cursor(4)==2u&&!c->race.sound.horn_active,"the queue open again, still released: the pending stop is sent");
+    native_race_horn(*c,false);
+    req(cursor(4)==2u,"and only once");
+    // The full ring refuses it too (read == write): the stop waits for room.
+    reset();native_race_horn(*c,true);
+    {const std::uint32_t r=1u;std::memcpy(w.sound_state.data(),&r,4);}           // write 1 == read 1: full
+    native_race_horn(*c,false);
+    req(c->race.sound.horn_active&&entry(1)!=0x81bcu,"a full ring: the stop stays pending");
+    {const std::uint32_t r=0u;std::memcpy(w.sound_state.data(),&r,4);}           // room again
+    native_race_horn(*c,false);
+    req(entry(1)==0x81bcu&&!c->race.sound.horn_active,"room again: the stop is sent");
+    // The seam (sana #129986): 453BB0's input step sounds the horn from the FINAL input, after a consumed playback
+    // replaced the live one (as decoded_consumed restores final.horn), once per tick.
+    reset();c->mode_state.current=16u;
+    native_input_replay_hook()=[](NativeInputState& in,bool&,const NativeRuntimeContext&){in.horn=true;};
+    c->input_state=NativeInputState{};native_input_step_453bb0(*c);
+    req(entry(0)==0x9bcu&&c->race.sound.horn_active,"a replayed tick with the horn held sounds it (live input released)");
+    native_input_replay_hook()=[](NativeInputState& in,bool&,const NativeRuntimeContext&){in.horn=false;};
+    c->input_state=NativeInputState{};c->input_state.horn=true;native_input_step_453bb0(*c);
+    req(entry(1)==0x81bcu&&!c->race.sound.horn_active,"a replayed release wins over a live held horn: the stop");
+    native_input_replay_hook()=nullptr;
+    std::memset(w.sound_entries_9563e8.data(),0xff,4);                       // the first loop was consumed meanwhile
+    c->input_state=NativeInputState{};c->input_state.horn=true;native_input_step_453bb0(*c);
+    req(entry(2)==0x9bcu&&c->race.sound.horn_active,"no playback: the live input's horn");
     std::printf("race horn: %u checks passed\n",checks);
 }

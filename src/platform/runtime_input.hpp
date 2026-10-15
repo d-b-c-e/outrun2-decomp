@@ -73,6 +73,10 @@ InputConsumedHook& native_input_consumed_hook();
 // argument with a recorded tick's. Null by default (the ordinary and live paths never replay).
 using InputReplayHook=void(*)(NativeInputState& in,bool& pc_drive,const NativeRuntimeContext& context);
 InputReplayHook& native_input_replay_hook();
+// 453BB0's input step on the sampled context.input_state (native_runtime.cpp, once per tick): the PC layer, the consumed
+// playback (the replay hook), race_input_update_453bb0, the horn on the final input (AllowHorn, native_race_horn), then
+// the consumed hook.
+void native_input_step_453bb0(NativeRuntimeContext&);
 
 inline void runtime_input_sample(NativeRuntimeInput& input,NativeInputState& state){
     if(!runtime_input_ready(input)){state=NativeInputState{};return;}

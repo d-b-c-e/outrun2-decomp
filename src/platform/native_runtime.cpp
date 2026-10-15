@@ -1,5 +1,6 @@
 #include "system/dev_hooks.hpp"
 #include "platform/native_runtime.hpp"
+#include "platform/race_sound_runtime.hpp"   // AllowHorn (native_input_step_453bb0)
 #include "enhancements/frame_rate.hpp"
 #include "platform/race_variant_owners.hpp"
 #include "platform/pc_input_devices.hpp"
@@ -4735,6 +4736,27 @@ struct NativeFramePlatformBridge {
     bool use_native_mode_control{};
     driving::PcRuntimeFrameServices417c7b upstream{};
 };
+void native_input_step_453bb0(NativeRuntimeContext& c){
+    auto& in=c.input_state;
+    // 406FA0 (the PC device layer) every frame; the race (modes 16 / 18) reads its
+    // record, the other modes keep the direct mapping (the menus' A / B).
+    if(in.pc_input_layer){
+        native_pc_input_set_pad(c,in.pc_pad);
+        PcInputDevice d{};const auto m=c.mode_state.current;
+        in.pc_record_used=native_pc_input_update_406fa0(c,d)&&(m==16u||m==18u)&&(!in.pc_overlay||in.pc_overlay_yield);
+        if(in.pc_record_used)in.pc_device=d;
+        if(std::getenv("OR2_INPUT_DEBUG")){static std::string last;auto& st=native_pc_input_stats();
+            if(st.last_error!=last){last=st.last_error;std::fprintf(stderr,"[input] %s\n",last.c_str());}
+            if(st.updates%60u==1u)std::fprintf(stderr,"[input] updates %u bits %08x steer %d accel %d brake %d\n",
+                st.updates,d.buttons_04,d.axes_94[0xe],d.axes_94[0xd],d.axes_94[0xc]);}
+    }
+    bool pc_drive=in.pc_input_layer&&in.pc_record_used&&driving::Bytes(const_cast<std::uint8_t*>(native_pc_input_record(c)),0x1d4).u32(0x1d0)==0u;
+    if(const auto replay=native_input_replay_hook())replay(in,pc_drive,c);   // consumed playback (latched only)
+    race_input_update_453bb0(c,in.pc_device,pc_drive);
+    // [Audio] AllowHorn on the final input: after a consumed playback replaced it, once per tick (sana #129986).
+    native_race_horn(c,in.horn);
+    if(const auto consumed=native_input_consumed_hook())consumed(in,c,pc_drive);
+}
 std::uint32_t native_frame_platform_call(void* user,std::uint32_t pc,const std::uint32_t* args,std::size_t count){
     auto& b=*static_cast<NativeFramePlatformBridge*>(user);
     if(pc==0x449430u&&b.platform){
@@ -4756,23 +4778,7 @@ std::uint32_t native_frame_platform_call(void* user,std::uint32_t pc,const std::
         b.context->event_function36.frontend_ui_motion_step=float(static_cast<long double>(1000.0f/60.0f*float(enhancements::display_ticks()))*0.001f);
     if(pc==0x453bb0u&&b.context&&b.input){
         runtime_input_sample(*b.input,b.context->input_state);
-        auto& in=b.context->input_state;
-        // 406FA0 (the PC device layer) every frame; the race (modes 16 / 18) reads its
-        // record, the other modes keep the direct mapping (the menus' A / B).
-        if(in.pc_input_layer){
-            native_pc_input_set_pad(*b.context,in.pc_pad);
-            PcInputDevice d{};const auto m=b.context->mode_state.current;
-            in.pc_record_used=native_pc_input_update_406fa0(*b.context,d)&&(m==16u||m==18u)&&(!in.pc_overlay||in.pc_overlay_yield);
-            if(in.pc_record_used)in.pc_device=d;
-            if(std::getenv("OR2_INPUT_DEBUG")){static std::string last;auto& st=native_pc_input_stats();
-                if(st.last_error!=last){last=st.last_error;std::fprintf(stderr,"[input] %s\n",last.c_str());}
-                if(st.updates%60u==1u)std::fprintf(stderr,"[input] updates %u bits %08x steer %d accel %d brake %d\n",
-                    st.updates,d.buttons_04,d.axes_94[0xe],d.axes_94[0xd],d.axes_94[0xc]);}
-        }
-        bool pc_drive=in.pc_input_layer&&in.pc_record_used&&driving::Bytes(const_cast<std::uint8_t*>(native_pc_input_record(*b.context)),0x1d4).u32(0x1d0)==0u;
-        if(const auto replay=native_input_replay_hook())replay(in,pc_drive,*b.context);   // consumed playback (latched only)
-        race_input_update_453bb0(*b.context,in.pc_device,pc_drive);
-        if(const auto consumed=native_input_consumed_hook())consumed(in,*b.context,pc_drive);
+        native_input_step_453bb0(*b.context);
     }
     if(pc==0x43fa20u&&b.context&&b.use_native_mode_control)
         (void)native_runtime_mode_control(*b.context,b.mode);
