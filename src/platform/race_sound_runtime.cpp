@@ -4,7 +4,9 @@
 #include "platform/race_sound_runtime.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
+#include "platform/pc_screen.hpp"   // AllowHorn
 #include "driving/pc_common_control.hpp"
+#include "driving/pc_wall_rebound.hpp"
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -155,5 +157,18 @@ std::string native_race_sound_status(const NativeRuntimeContext& c){
     if(s.latched)o<<" fault="<<s.fault_pc<<' '<<s.last_error;
     else if(!s.last_error.empty())o<<" last="<<s.last_error;
     return o.str();
+}
+void native_race_horn(NativeRuntimeContext& c,bool held){
+    if(!g_pc_allow_horn)return;
+    auto& s=c.race.sound;
+    std::uint32_t command=0u;
+    if(held&&c.mode_state.current==16u){command=0x1bcu|0x800u;s.horn_active=true;}   // every frame, as Tweaks
+    else if(s.horn_active){command=0x1bcu|0x8000u;s.horn_active=false;}
+    if(!command)return;
+    // The race SE queue 9563E8, gated by event 383 (SOUND) as the race's own 424940 callers queue it.
+    auto& w=c.race.car_world;
+    driving::PcSoundQueue q{driving::Bytes(w.sound_entries_9563e8.data(),w.sound_entries_9563e8.size()),
+        driving::Bytes(w.sound_state.data(),w.sound_state.size()),std::uint8_t(c.event_state.slots[383].flags)};
+    driving::pc_enqueue_sound(q,command);
 }
 }

@@ -13,6 +13,7 @@
 #include "platform/race_ghosts_runtime.hpp"   // Time Attack ghosts
 #include "platform/race_end_runtime.hpp"      // race end modes 19..35
 #include "platform/race_traffic_runtime.hpp"  // the C2C request manager (event 0x190)
+#include "platform/race_sound_runtime.hpp"    // AllowHorn
 #include "platform/race_course_passes.hpp"
 #include "platform/pc_input_devices.hpp"     // 40BD80 / 40BE70 course passes
 #include "platform/race_manager.hpp"
@@ -871,6 +872,8 @@ void input_sample(void* user,pf::NativeInputState& out){
     out.raw_buttons_up=pad.up;
     if(s.map_input)s.map_input(held,down,pad,out);
     else map_pad(s,out,held,down,pad.left,pad.right);
+    // [Audio] AllowHorn: the horn action's sound, once per frame (race_sound_runtime.cpp native_race_horn).
+    if(s.runtime)pf::native_race_horn(*s.runtime,out.horn);
     // Every frame (the configuration screen polls the pad outside 453BB0 too).
     if(s.runtime&&out.pc_input_layer)pf::native_pc_input_set_pad(*s.runtime,out.pc_pad);
 #if defined(OR2_HOST_HOOKS)

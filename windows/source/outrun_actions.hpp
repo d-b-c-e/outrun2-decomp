@@ -7,12 +7,12 @@
 namespace outrun::desktop {
 struct UnavailableAction { const char* id; const char* why; };
 inline constexpr const char* DeliveredActions[]{"steer","throttle","brake","shiftUp","shiftDown","confirm","back","start",
-    "navUp","navDown","navLeft","navRight","camera","gear1","gear2","gear3","gear4","gear5","gear6"};
+    "navUp","navDown","navLeft","navRight","camera","gear1","gear2","gear3","gear4","gear5","gear6","horn"};
 inline constexpr UnavailableAction UnavailableActions[]{
     {"clutch","OutRun 2006 has no clutch"},{"handbrake","OutRun 2006 has no handbrake"},
     {"neutral","OutRun 2006 has no neutral gear"},{"reverse","OutRun 2006 has no reverse gear"},
     {"gear7","the H-pattern mapping covers gears 1-6"},{"gear8","the H-pattern mapping covers gears 1-6"},
-    {"select","no game action"},{"lookBack","not mapped yet"},{"reset","not mapped yet"},{"horn","not mapped yet"},
+    {"select","no game action"},{"lookBack","not mapped yet"},{"reset","not mapped yet"},
     {"modMenu","not mapped yet (the F6 key opens the panel)"},{"muteFfb","not mapped yet (force output is set in the F6 panel)"}};
 // nullptr for a delivered action; the reason for an unavailable one; "unknown action" for anything else.
 inline const char* outrun_unavailable_reason(std::string_view action){

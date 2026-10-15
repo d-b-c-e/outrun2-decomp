@@ -181,6 +181,8 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     out.menu_left|=down_k("navLeft",KLeft);out.menu_right|=down_k("navRight",KRight);
     out.menu_confirm|=down_k("confirm",KEnter)||down(f,"start");out.menu_cancel|=down_k("back",KEsc);
     out.start|=down(f,"start");
+    // The horn ([Audio] AllowHorn): its own held action, sounded by native_race_horn; no record bit, so it never shifts.
+    out.horn|=held(f,"horn");
     // Frontend features (48F5F0), as the pad adapter sets them from its button edges.
     auto& m=out.frontend.feature_mask;
     if(down(f,"start"))m|=1u;
@@ -202,7 +204,7 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
         // Held buttons as wheel_input's ButtonActions, without the gears: an H-pattern gate is a button held for as long
         // as the lever sits in it, so a lever at rest in a gate is not wheel use (zero 25230). A gear change is: a gate's
         // own edge, or the gearbox's shift pulse, as wheel_input counts its gear_pulses.
-        static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight"};
+        static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight","horn"};
         static constexpr const char* Gates[]{"gear1","gear2","gear3","gear4","gear5","gear6"};
         bool wheel_button=false;for(const char* b:Buttons)wheel_button=wheel_button||held(f,b);
         bool gear_change=pulse!=0u;for(const char* g:Gates)gear_change=gear_change||down(f,g);

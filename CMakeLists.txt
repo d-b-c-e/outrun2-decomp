@@ -363,6 +363,9 @@ target_link_libraries(test_frontend_progress PRIVATE outrun_native_runtime ${OR2
 add_test(NAME frontend_progress COMMAND test_frontend_progress)
 add_test(NAME owned_frontend_progress COMMAND test_frontend_progress
   "${OR2_PC_ASSET_ROOT}")
+add_executable(test_race_horn tests/test_race_horn.cpp)   # [Audio] AllowHorn (race_sound_runtime.cpp)
+target_link_libraries(test_race_horn PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
+add_test(NAME race_horn COMMAND test_race_horn)
 add_executable(test_world_source_pack tests/test_world_source_pack.cpp)
 target_link_libraries(test_world_source_pack PRIVATE outrun_native_runtime)
 add_test(NAME switch_world_source_pack COMMAND test_world_source_pack)

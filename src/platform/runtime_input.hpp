@@ -36,6 +36,7 @@ struct NativeInputState {
     bool menu_preview{}; // explicit diagnostic GAME shortcut
     bool menu_start_probe{}; // explicit START probe, not the original menu path
     bool start{};
+    bool horn{};   // the controls contract's "horn" action, held ([Audio] AllowHorn, native_race_horn); no game record bit
     bool exit_requested{};
     std::uint64_t raw_buttons_held{};
     std::uint64_t raw_buttons_down{};

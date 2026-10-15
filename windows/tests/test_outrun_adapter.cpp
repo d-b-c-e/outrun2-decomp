@@ -116,6 +116,25 @@ void test_sink(){
     check(r.adapter->signals().record_buttons==out.pc_device.buttons_04&&r.adapter->signals().frame_seq>0,"signals carry what was written");
 }
 
+// [Audio] AllowHorn: the horn is its own held action (native_race_horn sounds it). It writes no record bit, so it never
+// shifts, and shift-down (the record bit behind the PC's X switch) never sounds it.
+void test_horn(){
+    Rig r(false,profile({Steer,wb("horn",3),wb("shiftDown",12)}));
+    r.view.mode=16;auto& d=r.dev(r.w);
+    const auto bits=r.tick().pc_device.buttons_04;
+    d.state.buttons[3]=0x80;
+    auto out=r.tick();
+    check(out.horn&&out.pc_device.buttons_04==bits&&!out.shift_down,"horn held: out.horn, no record bit, no shift");
+    out=r.tick();
+    check(out.horn,"still held: still on (a held action, not an edge)");
+    d.state.buttons[3]=0;
+    out=r.tick();
+    check(!out.horn,"released");
+    d.state.buttons[12]=0x80;
+    out=r.tick();
+    check(!out.horn&&(out.pc_device.buttons_04&0x8u)&&out.shift_down,"shift-down sets its bit and edge, never the horn");
+}
+
 // P22: pedals keep working without the steering device (R1 review of 35a8aa3, item 1).
 void test_pedals_without_steering(){
     Rig r(false,profile({"steer = axis 0 dev="+S+" prod="+SP+" range=0..65535 rest=32768 travel=+1",Throttle}),false);   // S absent
@@ -446,7 +465,7 @@ void test_action_table(){
         check((why==nullptr)==(cap==nullptr)&&(why==nullptr||std::string(why)==cap),"the capability's reason for "+name);
         delivered+=why==nullptr;
     }
-    check(delivered==19&&std::size(DeliveredActions)==19&&std::size(UnavailableActions)==12,"19 delivered, 12 unavailable");
+    check(delivered==20&&std::size(DeliveredActions)==20&&std::size(UnavailableActions)==11,"20 delivered (horn: AllowHorn), 11 unavailable");
     check(std::string(outrun_unavailable_reason("reverse"))=="OutRun 2006 has no reverse gear","reverse has one reason");
     check(std::string(outrun_unavailable_reason("gear9"))=="unknown action","an action outside the contract is unknown");
 }
@@ -543,7 +562,7 @@ void test_owned_pad_path(){
 int main(){
     try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
         test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();
-        test_action_table();test_hpattern_pause();test_owned_pad_path();}
+        test_action_table();test_hpattern_pause();test_owned_pad_path();test_horn();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"outrun adapter: "<<checks<<" checks passed\n";
     return 0;
