@@ -814,6 +814,17 @@ struct Run {
         // 45BD30(id, duration, priority): the voice queue push of the request manager (4FB390, 4FEA00, 5072F0, 507620)
         // on the HUD's voice queue, as the race end routes it.
         if(pc==0x45bd30u){routed(pc);return native_race_hud_voice_45bd30(c,std::int32_t(a[0]),std::int16_t(a[1]),std::int16_t(a[2]));}
+        // 41BD40: jmp 49A650, a bare RET in this build (the request objects' virtual display, 481A40): EAX unchanged.
+        if(pc==0x41bd40u){routed(pc);return k.eax;}
+        // 4EFD20(source, lane), the course-light copy the request manager runs (521930). Lane != 0 copies two vectors to
+        // the AREA's light words 6A5DC4..; lane 0 copies up to seven 12-byte rows to START's table 84BD08 and the FFFF end
+        // mark. Both targets are mapped to their owners above. EAX: the source + C, or advanced past the rows copied.
+        if(pc==0x4efd20u){routed(pc);
+            std::uint32_t eax=a[0]+0xcu;
+            if(a[1]==0u){eax=a[0];for(unsigned n=0;n<7u&&m().u16(eax)!=0xffffu;++n)eax+=12u;}
+            race_objects_copy_4efd20(m(),a[0],a[1]);
+            if(a[1]!=0u)native_race_area(c).light_words_written=true;
+            return eax;}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){

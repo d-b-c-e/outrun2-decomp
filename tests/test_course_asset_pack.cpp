@@ -480,7 +480,12 @@ int main(int argc,char** argv){
                 overlay.mode=16;
                 auto scratch_put=[&](std::size_t at,std::uint32_t v){std::memcpy(overlay.scratch.data()+at,&v,4);};
                 scratch_put(0x0cu,0x0dfe2020u);scratch_put(0x20u,0x0dfe2040u);
-                scratch_put(0x40u,0x0dfe2060u);scratch_put(0x74u,0xdead0042u);put32(block,0x78u,0x0dfe2000u);
+                scratch_put(0x40u,0x0dfe2060u);put32(block,0x78u,0x0dfe2000u);
+                // 41BD40 (jmp 49A650, a bare RET): the stock virtual display of hud-run-2145's request objects.
+                scratch_put(0x74u,0x41bd40u);
+                require(display()&&missing==0&&fault==0&&draws.size()==3&&draws[0].pc==0x4bb9e0u,
+                        "a request object's 41BD40 virtual display returns without draws before the stock rows");
+                scratch_put(0x74u,0xdead0042u);
                 require(!display()&&missing==0xdead0042u&&fault==0&&!error.empty()&&draws.empty(),
                         "unsupported virtual request display retains its exact child PC without guessed draws");
                 scratch_put(0x74u,0x0dfe3000u); // an unknown PC is distinct from an unmapped object/vtable read
@@ -488,6 +493,34 @@ int main(int argc,char** argv){
                 require(!display()&&missing==0x481a40u&&fault==0x0dfe3014u&&draws.empty(),
                         "unmapped request vtable input retains its exact fault address");
                 std::fprintf(stderr,"request HUD bridge: canonical owner, signed gauge, ordered capture, mode20 and unsupported child checked\n");
+            }
+            {   // 4EFD20(source, lane): hud-run-2145 latched the traffic module there. The request manager's 521930 runs it
+                // (this +4 = manager, manager +80 = request with +8 == 1, request +58 = an object keyed like this +8, manager
+                // +7660 non-zero): 4EFDB0(0) saves START's table 84BD08 to 84C8E8, the first row's word becomes [+7660]+64,
+                // then 4EFD20(object +58, 0) copies the rows to 84BD08 up to the FFFF mark. Scratch structures inside the
+                // request block (owner of 7F9460..800AF7) and START's table are restored afterwards.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;
+                const auto saved=block;const auto table=request.start_mode.scene_owner_table68;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t>& saved;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());}} restore{block,saved};
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,This=0x6e00u,Req=0x6e40u,Edi=0x6e80u,Obj=0x6ec0u,Rows=0x6f00u;
+                put32(block,This+4u,B);put32(block,This+8u,0x1234u);
+                put32(block,0x80u,B+Req);put32(block,0x7660u,B+Edi);
+                put32(block,Req+8u,1u);put32(block,Req+0x58u,B+Obj);
+                put32(block,Obj,0x1234u);put32(block,Obj+0x58u,B+Rows);
+                const std::uint16_t word=0x0042u,end=0xffffu;std::memcpy(block.data()+Edi+0x64u,&word,2);
+                for(std::uint32_t k=0;k<24u;k+=4)put32(block,Rows+k,0x11110000u+k);           // rows 0 and 1
+                std::memcpy(block.data()+Rows+24u,&end,2);                                     // row 2: the end mark
+                const auto before=traffic.routed[0x4efd20u];
+                std::uint32_t eax=0u;
+                const bool ran=native_race_requests_call(request,request_matrices,0x00521930u,{},eax,B+This);
+                std::array<std::uint8_t,26> expect{};std::memcpy(expect.data(),block.data()+Rows,24u);
+                std::memcpy(expect.data(),&word,2);std::memcpy(expect.data()+24,&end,2);
+                require(ran&&!traffic.latched&&traffic.routed[0x4efd20u]==before+1u,"the request manager's 521930 runs 4EFD20 as a traffic service");
+                require(!std::memcmp(request.start_mode.scene_owner_table68.data(),expect.data(),expect.size()),
+                        "4EFD20 lane 0 copies the request rows to START's table 84BD08 and ends them with FFFF");
+                request.start_mode.scene_owner_table68=table;
+                std::fprintf(stderr,"request 4EFD20: 521930 rows to 84BD08 and 41BD40 virtual display checked\n");
             }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
