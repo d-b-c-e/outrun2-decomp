@@ -359,7 +359,7 @@ add_executable(test_race_asset_pack tests/test_race_asset_pack.cpp)
 target_link_libraries(test_race_asset_pack PRIVATE outrun_native_runtime)
 add_test(NAME switch_race_asset_pack COMMAND test_race_asset_pack)
 add_executable(test_frontend_progress tests/test_frontend_progress.cpp)
-target_link_libraries(test_frontend_progress PRIVATE outrun_native_runtime)
+target_link_libraries(test_frontend_progress PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})   # runtime_platform: __udivti3
 add_test(NAME frontend_progress COMMAND test_frontend_progress)
 add_test(NAME owned_frontend_progress COMMAND test_frontend_progress
   "${OR2_PC_ASSET_ROOT}")

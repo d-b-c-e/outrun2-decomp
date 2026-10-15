@@ -85,8 +85,9 @@ int main(){
         lane_grade(2,4);c.selected_84b7f0=0;CHECK(frontend_categories_display_4e8c60(c,s));   // Holly 1 reaches A
         CHECK(c.holly2_nav_patched&&c.holly2_nav_unlocked&&sprite(0x494)->token==0x4400b7&&sprite(0x494)->first==15.f);
         CHECK(at(3,Down)==7&&at(6,Right)==7&&at(4,Left)==7&&at(7,Right)==4&&at(0,Left)==3&&at(3,Right)==0);
-        lane_grade(2,3);c.selected_84b7f0=0;CHECK(frontend_categories_display_4e8c60(c,s));   // locked again
+        lane_grade(2,3);c.selected_84b7f0=7;CHECK(frontend_categories_display_4e8c60(c,s));   // locked again (license switch)
         CHECK(c.holly2_nav_patched&&!c.holly2_nav_unlocked);
+        CHECK(c.selected_84b7f0==6&&sprite(0x5d4)->first==180.f&&sprite(0x5d4)->last==209.f);   // hidden 7 -> Holly 1, its list
         CHECK(at(3,Down)==3&&at(6,Right)==4&&at(4,Left)==6&&at(0,Left)==3&&at(3,Right)==0);
         // Mode 1: always eight tiles; group 7 opens with Holly 1 (group 5's A).
         g_pc_enable_holly_course2=1;

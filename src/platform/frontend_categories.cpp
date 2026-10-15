@@ -104,6 +104,9 @@ bool frontend_categories_display_4e8c60(FrontendCategoryState& c,FrontendCategor
         bool open{};if(!unlocked(s,7,open))return false;
         if(open!=c.holly2_nav_unlocked){c.holly2_nav_unlocked=open;c.holly2_nav_patched=true;}
         tiles=open?8u:7u;
+        // Not in Tweaks (sana #127617): 84B7F0 outlives a license switch, so group 7 can stay selected after its tile is
+        // hidden; select Holly 1 then, with its list.
+        if(!open&&c.selected_84b7f0==7){c.selected_84b7f0=6;if(!selection(c,s))return false;}
     }
     constexpr float xs[]{87,149,212,274,87,149,212,274};   // 5CE480
     for(unsigned i=0;i<tiles;++i){bool available{};if(!unlocked(s,i,available))return false;
