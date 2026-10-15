@@ -1,6 +1,7 @@
 #include "controls_store.hpp"
 #include "outrun_actions.hpp"
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 namespace outrun::desktop {
@@ -13,6 +14,10 @@ ctl::Binding axis(const DeviceIdentity& d,int index,bool centred,bool inverted){
     auto b=base(d);b.kind=ctl::Kind::Axis;b.index=index;b.min=0;b.max=65535;b.hasRange=b.hasRest=true;
     b.rest=centred?32768:0;b.travel=1;b.inverted=inverted;   // Tweaks: raw / 65535, 1 - that when inverted
     return b;
+}
+bool legacy_number(const std::string& text,double& value){
+    char* end=nullptr;errno=0;value=std::strtod(text.c_str(),&end);
+    return end!=text.c_str()&&*end=='\0'&&errno!=ERANGE&&std::isfinite(value);
 }
 // A Tweaks button number: 0..127 a button, 128 + hat*4 + direction a POV direction.
 bool digital(const DeviceIdentity& d,int number,ctl::Binding& b){
@@ -76,8 +81,37 @@ std::vector<std::string> import_legacy(const LegacyControls& c,const LegacyDevic
     }
     const auto& throttle=d.throttle.present()?d.throttle:d.wheel;
     const auto& brake=d.brake.present()?d.brake:d.wheel;
-    if(c.accel_axis>=0&&c.accel_axis<=7)put("throttle",axis(throttle,c.accel_axis,false,c.accel_invert));
-    if(c.brake_axis>=0&&c.brake_axis<=7)put("brake",axis(brake,c.brake_axis,false,c.brake_invert));
+    auto pedal=[&](const char* action,const DeviceIdentity& device,int index,bool inverted,const LegacyPedalCalibration& calibration){
+        if(index<0||index>7)return;
+        auto b=axis(device,index,false,inverted);
+        if(calibration.enabled){
+            double deadzone{};
+            if(!legacy_number(calibration.deadzone,deadzone)||deadzone!=0.0){
+                notes.push_back(std::string(action)+": nonzero or invalid legacy pedal deadzone is unsupported by ini-controls-2; pedal not imported");
+                return;
+            }
+            std::array<double,3> points{};
+            bool valid=true;
+            for(unsigned i=0;i<points.size();++i){
+                if(!legacy_number(calibration.points[i],points[i])||points[i]<0.0||points[i]>65535.0)valid=false;
+            }
+            // Tweaks validates center but uses only minimum/maximum for pedals.
+            // Validate before rounding as well as against the canonical contract.
+            valid=valid&&points[2]-points[0]>=8192.0&&points[1]>=points[0]&&points[1]<=points[2];
+            if(valid){
+                b.cal={std::lround(points[0]),std::lround(points[2])};
+                valid=ctl::calibrationFits(ctl::Shape::Pedal,b);
+            }
+            if(!valid){
+                notes.push_back(std::string(action)+": enabled [DirectInput.Calibration] is invalid for ini-controls-2; pedal not imported");
+                return;
+            }
+            b.rest=b.cal[0];lines[0]="Schema = 2";
+        }
+        put(action,b); // Preserve Tweaks inversion once, after endpoint normalization.
+    };
+    pedal("throttle",throttle,c.accel_axis,c.accel_invert,c.accel_calibration);
+    pedal("brake",brake,c.brake_axis,c.brake_invert,c.brake_calibration);
     // Tweaks Button<Name> -> action; X is Tweaks' horn switch (SwitchId::X, AudioHooks_Update); Y has no contract action.
     static constexpr const char* Actions[13]{"confirm","back","horn",nullptr,"start","select","shiftUp","shiftDown","camera",
                                              "navUp","navDown","navLeft","navRight"};

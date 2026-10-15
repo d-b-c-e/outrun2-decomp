@@ -137,6 +137,82 @@ void test_import_steering_calibration(){
     check(absent.schema==1&&!ctl::find(absent,"steer")&&notes.empty(),"an unbound steering axis does not promote the schema");
 }
 
+void test_import_pedal_calibration(){
+    const DeviceIdentity brake_device{"{d9b1d891-6f3f-11f1-8002-444553540000}",ShifterProd,"Brake"};
+    const LegacyDevices devices{{Wheel,WheelProd,"Wheel"},{Shifter,ShifterProd,"Throttle"},brake_device};
+    std::vector<std::string> notes;
+    LegacyControls both;both.accel_axis=2;both.brake_axis=5;
+    both.accel_calibration={true,{"1000","26000","61000"},"0"};
+    both.brake_calibration={true,{"10000","10000","50000"},"0"};both.brake_invert=true;
+    const auto section=ctl::parseSection(import_legacy(both,devices,notes),ControlsReads);
+    const auto* throttle=ctl::find(section,"throttle");const auto* brake=ctl::find(section,"brake");
+    check(section.schema==2&&section.invalid.empty()&&notes.empty(),"independent pedal calibrations round trip through schema 2");
+    check(throttle&&throttle->dev==Shifter&&throttle->index==2&&throttle->cal==std::vector<long>{1000,61000},"throttle keeps its own device, axis and endpoints");
+    check(brake&&brake->dev==brake_device.dev&&brake->index==5&&brake->cal==std::vector<long>{10000,50000},"brake keeps its own device, axis and endpoints");
+    check(throttle&&brake&&ctl::normalize("throttle",*throttle,31000)==0.5&&ctl::normalize("brake",*brake,10000)==1&&ctl::normalize("brake",*brake,50000)==0,
+          "separate pedal spans normalize independently and apply inversion once");
+    for(bool is_brake:{false,true}){
+        LegacyControls c;
+        auto& calibration=is_brake?c.brake_calibration:c.accel_calibration;
+        const char* action=is_brake?"brake":"throttle";
+        const char* other=is_brake?"throttle":"brake";
+        calibration={true,{"1000","26000","61000"},"0"};
+        const auto imported=[&]{notes.clear();return ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);};
+        const auto calibrated=imported();const auto* binding=ctl::find(calibrated,action);
+        for(const auto& point:std::vector<std::pair<long,double>>{{0,0},{1000,0},{16000,0.25},{31000,0.5},{61000,1},{65535,1}})
+            check(binding&&std::fabs(ctl::normalize(action,*binding,point.first)-point.second)<1e-12,std::string(action)+" measured scaling and saturation at "+std::to_string(point.first));
+        (is_brake?c.brake_invert:c.accel_invert)=true;
+        const auto inverted=imported();const auto* inv=ctl::find(inverted,action);
+        check(inv&&ctl::normalize(action,*inv,1000)==1&&ctl::normalize(action,*inv,16000)==0.75&&ctl::normalize(action,*inv,61000)==0,
+              std::string(action)+" calibration preserves the native inversion exactly once");
+        (is_brake?c.brake_invert:c.accel_invert)=false;
+        calibration.points={"1000.25","26000.5","61000.75"};
+        const auto rounded=imported();const auto* fractional=ctl::find(rounded,action);
+        check(fractional&&fractional->cal==std::vector<long>{1000,61001},std::string(action)+" fractional endpoints round to whole raw counts");
+        for(const auto& center:{"1000","61000"}){
+            calibration.points={"1000",center,"61000"};
+            const auto edge_center=imported();const auto* edge=ctl::find(edge_center,action);
+            check(edge&&ctl::normalize(action,*edge,31000)==0.5,std::string(action)+" validates center but never uses it as a pedal midpoint");
+        }
+        for(const auto& bad:std::vector<std::array<std::string,3>>{
+                {"-1","26000","61000"},{"1000","26000","65536"},{"61000","26000","1000"},
+                {"1000","999","61000"},{"1000","61001","61000"},{"1000","1000","1000"},
+                {"1000","5000","9191.99"},{"0","nan","65535"},{"0","32768","inf"},
+                {"0","center","65535"},{"0","32768oops","65535"},{"0","","65535"},{"1e-999","32768","65535"}}){
+            calibration.points=bad;
+            const auto refused=imported();
+            check(refused.schema==1&&!ctl::find(refused,action)&&ctl::find(refused,other)&&ctl::find(refused,"steer")&&
+                  notes.size()==1&&notes[0].find(std::string(action)+": enabled")==0,
+                  std::string(action)+" malformed/range/order/span calibration refuses only that pedal");
+        }
+        calibration.points={"0","4096","8192"};
+        const auto minimum_span=imported();
+        check(ctl::find(minimum_span,action)&&notes.empty(),std::string(action)+" accepts the native minimum measured span");
+        for(const auto& deadzone:{"0.1","-0.1","nan","inf","oops","","0.0oops","1e-999"}){
+            calibration.deadzone=deadzone;
+            const auto refused=imported();
+            check(refused.schema==1&&!ctl::find(refused,action)&&ctl::find(refused,other)&&notes.size()==1&&
+                  notes[0].find("deadzone is unsupported")!=std::string::npos,
+                  std::string(action)+" unsupported/nonfinite/malformed deadzone is reported without silently changing the curve");
+        }
+        calibration.enabled=false;calibration.points={"bad","nan","inf"};
+        const auto disabled=imported();const auto* old=ctl::find(disabled,action);
+        check(disabled.schema==1&&old&&old->cal.empty()&&notes.empty()&&std::fabs(ctl::normalize(action,*old,12345)-12345.0/65535.0)<1e-12,
+              std::string(action)+" disabled calibration preserves the legacy full-range route, ignoring unused calibration/deadzone");
+        calibration.enabled=true;(is_brake?c.brake_axis:c.accel_axis)=-1;
+        const auto absent=imported();
+        check(absent.schema==1&&!ctl::find(absent,action)&&notes.empty(),std::string(action)+" unbound axis neither promotes schema nor reports unused calibration");
+    }
+    both.accel_calibration.points={"bad","26000","61000"};notes.clear();
+    const auto mixed=ctl::parseSection(import_legacy(both,devices,notes),ControlsReads);
+    check(mixed.schema==2&&!ctl::find(mixed,"throttle")&&ctl::find(mixed,"brake")&&ctl::find(mixed,"steer")&&notes.size()==1,
+          "a valid brake still promotes schema 2 when throttle calibration refuses");
+    LegacyControls fallback;fallback.accel_calibration.enabled=true;notes.clear();
+    const auto wheel_pedals=ctl::parseSection(import_legacy(fallback,LegacyDevices{{Wheel,WheelProd,"Wheel"}},notes),ControlsReads);
+    const auto* wheel_throttle=ctl::find(wheel_pedals,"throttle");
+    check(wheel_throttle&&wheel_throttle->dev==Wheel&&wheel_throttle->cal==std::vector<long>{0,65535},"calibrated pedal without a separate device keeps the wheel fallback");
+}
+
 void test_write_section(){
     char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
     const std::string path=std::string(dir)+"or2_desktop_settings_test.ini";
@@ -255,7 +331,7 @@ void test_wheel_steering(){
 }
 
 int main(){
-    try{test_report();test_import();test_import_steering_calibration();test_write_section();test_write_key();test_injection();test_wheel_steering();}
+    try{test_report();test_import();test_import_steering_calibration();test_import_pedal_calibration();test_write_section();test_write_key();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;

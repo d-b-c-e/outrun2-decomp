@@ -30,6 +30,12 @@ ControlsReport report_controls(const ctl::Section&);
 
 // A device as the import resolved it: instance and product GUIDs ("{...}", lower case), display name.
 struct DeviceIdentity { std::string dev,prod,name; bool present()const{return !dev.empty();} };
+// Saved Tweaks pedal calibration; disabled preserves its legacy full-range route.
+struct LegacyPedalCalibration {
+    bool enabled{};
+    std::array<std::string,3> points{"0","32767.5","65535"}; // minimum, center (validated), maximum
+    std::string deadzone{"0"}; // a nonzero legacy curve cannot be represented by cal= endpoints
+};
 // The OutRun2006Tweaks keys the import reads. Buttons in Tweaks order (Button<Name>): A B X Y Start Back GearUp
 // GearDown ChangeView SelUp SelDown SelLeft SelRight; 0..127, 128 + hat*4 + direction for a POV, -1 unbound.
 struct LegacyControls {
@@ -38,6 +44,7 @@ struct LegacyControls {
     // Tweaks [DirectInput.Calibration], ignored unless SteeringEnabled is true.
     bool steer_calibration{};
     std::array<std::string,3> steer_points{"0","32767.5","65535"};
+    LegacyPedalCalibration accel_calibration,brake_calibration;
     std::array<int,13> buttons{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
     std::array<int,13> aux_buttons{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
     bool hpattern{};

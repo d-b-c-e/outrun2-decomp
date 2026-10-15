@@ -206,6 +206,17 @@ LegacyControls legacy_controls(const Ini& ini){
                     ini.text("DirectInput.Calibration","SteeringMaximum","65535")};
     c.accel_axis=ini.integer("DirectInput","AccelerationAxis",1);c.accel_invert=ini.flag("DirectInput","AccelerationInvert",false);
     c.brake_axis=ini.integer("DirectInput","BrakeAxis",2);c.brake_invert=ini.flag("DirectInput","BrakeInvert",false);
+    const auto pedal_calibration=[&](const char* role,const char* deadzone){
+        LegacyPedalCalibration calibration;
+        calibration.enabled=ini.flag("DirectInput.Calibration",std::string(role)+"Enabled",false);
+        calibration.points={ini.text("DirectInput.Calibration",std::string(role)+"Minimum","0"),
+                            ini.text("DirectInput.Calibration",std::string(role)+"Center","32767.5"),
+                            ini.text("DirectInput.Calibration",std::string(role)+"Maximum","65535")};
+        calibration.deadzone=ini.text("DirectInput",deadzone,"0");
+        return calibration;
+    };
+    c.accel_calibration=pedal_calibration("Throttle","AccelerationDeadzone");
+    c.brake_calibration=pedal_calibration("Brake","BrakeDeadzone");
     static constexpr const char* Keys[13]{"ButtonA","ButtonB","ButtonX","ButtonY","ButtonStart","ButtonBack","ButtonGearUp",
                                           "ButtonGearDown","ButtonChangeView","ButtonSelUp","ButtonSelDown","ButtonSelLeft","ButtonSelRight"};
     static constexpr int Defaults[13]{0,1,2,3,7,6,4,5,8,-1,-1,-1,-1};   // Tweaks' own defaults
