@@ -291,6 +291,26 @@ int main(int argc,char** argv){
                             "a failed GamePlCar frame returns the caller's matrix stack unchanged");
                 }
             }
+            {   // The request manager's road Mu +764C (800AAC). gated-run-2000: the wheels hit road kind 2 and
+                // GetRoadMu's 4FC390 returned the manager's +764C, read from the raw block, as 0 with [7F94C0] = 1.
+                // START_Init's variant-5 path (49DBC2: 46C2B0(1), then 46C2D0(-1) -> 482B90 -> 481250) stores
+                // [62806C] = 1.0 there through the traffic module's memory, where the traffic state block
+                // 800A00.. is mapped after the manager block 7F9460..800B60. Report what the translated write
+                // reached and what the player car's reader (race_player_road_mu: the raw block) sees.
+                auto& traffic=native_race_traffic(request);
+                auto raw_mu=[&]{float v;std::memcpy(&v,traffic.requests_7f9460.data()+0x764cu,4u);return v;};
+                request.start_mode.manager_state_7f94c0=1u;
+                std::uint32_t reset_eax=0u;
+                const bool reset=native_race_requests_call(request,request_matrices,0x0046c2d0u,{0xffffffffu},reset_eax);
+                const auto* mapped=traffic.memory.at(0x800aacu,4u);
+                float mapped_mu;std::memcpy(&mapped_mu,mapped,4u);
+                const bool same_storage=mapped==traffic.requests_7f9460.data()+0x764cu;
+                std::fprintf(stderr,"request manager +764C after 46C2D0(-1): ran=%d latched=%d mapped=%g raw=%g same_storage=%d\n",
+                    int(reset),int(traffic.latched),double(mapped_mu),double(raw_mu()),int(same_storage));
+                require(reset&&!traffic.latched,"START's 46C2D0(-1) runs on the request manager");
+                require(mapped_mu==1.0f,"481250 stores [62806C] = 1.0 at the manager's mapped road Mu 800AAC");
+                require(same_storage&&raw_mu()==1.0f,"the player car's road Mu reader sees the manager's mapped +764C");
+            }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;
