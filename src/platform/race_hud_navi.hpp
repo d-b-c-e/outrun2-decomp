@@ -72,6 +72,9 @@ struct NaviPubServices {
     // false when the routine did not run (not ported, or latched).
     void* heart_user{};
     bool (*heart)(void* user,std::uint32_t pc){};
+    // Variant 5: 46C220 request-manager display and 46C500 goal-ahead gate.
+    void* request_user{};
+    bool (*request)(void* user,std::uint32_t pc,std::uint32_t& value){};
     // LAN races (variants 3 / 4): 45A2B0 CommRace_GetRank in mode 16 (the translated
     // original); false when it did not run.
     void* lan_user{};
@@ -101,6 +104,7 @@ void navi_emit_draw(NaviPubServices&,const RaceHudDraw&);
 // Pieces exposed for the oracle.
 bool navi_digits_4ba9d0(NaviPubServices&,std::uint32_t style,std::int32_t x,std::int32_t y,
                         const std::string& text,std::uint32_t layer,float alpha);
+bool navi_request_row_4bb9e0(NaviPubServices&,std::uint32_t row,std::int32_t value);
 bool navi_rival_labels_4bad20(NaviPubServices&,std::uint32_t car_pc);
 // 4B04D0: the variant 9 rank markers (4BDAA0 -> 4BBC70, slots 5..7) of the first cars at ranks 0..2.
 bool navi_rank_markers_4b04d0(NaviPubServices&);

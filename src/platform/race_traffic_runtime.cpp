@@ -1207,6 +1207,58 @@ std::uint32_t requests_stage_script_4829d0(NativeRuntimeContext& c,PcRaceContext
 // The C2C request manager 7F9460 (variant 5): one of its entries (46C2xx..46C5xx, the manager
 // methods 481xxx / 482xxx / 4Fxxxx / 50xxxx with ECX = 7F9460) over the traffic module's memory
 // (its block and heap mapped there). The translated originals until the native port.
+bool native_race_requests_display_481a40(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,NativeHeartBinding& display,
+                                        std::uint32_t& missing,std::uint32_t& fault,std::string& error){
+    missing=0;fault=0;error.clear();
+    if(!display.display||!display.draws){missing=0x481a40u;error="request display needs an ordered draw capture";return false;}
+    auto& t=native_race_traffic(c);
+    const auto depth=matrices.depth;const auto offset=matrices.current_offset;
+    Run run{c,t,matrices};run.heart=&display;run.renderer=display.renderer;
+    try{
+        map_memory(c,t);racers_in(c,t);
+        if(display.map)display.map(display.user,t.memory); // HUD globals only; retain canonical manager/heap storage
+        PcRaceContext ctx{t.memory,matrices,[&](const PcRaceCall& k){return run(k);},display.models};run.ctx=&ctx;
+        auto& m=ctx.m;constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase;
+        auto call=[&](std::uint32_t pc,std::uint32_t self){PcRaceCall k{};k.pc=pc;k.ecx=self;return run(k);};
+        auto emit=[&](std::uint32_t pc,const std::array<std::uint32_t,7>& args){RaceHudDraw d;d.pc=pc;d.args=args;display.draws->push_back(d);};
+        ++t.routed[0x481a40u];
+        if(m.u32(B+0x7604u)||m.u32(B+0x7628u)){                         // 481BA0 hide/status display
+            call(0x4fe0d0u,B);call(0x4fe360u,B);
+        }else if(m.u32(0x78026cu)!=0x14u){
+            if(const auto list=m.u32(B+0x78u)){                        // 481A6F: list iterator is kept at +14
+                std::uint32_t node=m.u32(list+0xcu);m.put32(list+0x14u,node);
+                while(node){
+                    const auto object=m.u32(node);if(!object)break;
+                    call(m.u32(m.u32(object)+0x14u),object);           // original virtual display, no guessed substitute
+                    const auto current_list=m.u32(B+0x78u);
+                    node=m.u32(current_list+0x14u);if(!node)break;
+                    node=m.u32(node+4u);m.put32(current_list+0x14u,node);
+                }
+            }
+            const auto last=m.i32(B+0x16cu);
+            for(std::int32_t row=0;row<=last&&row<5;++row){             // later iterations have no observable side effects
+                const auto key=m.u32(B+0x100u+std::uint32_t(row)*4u);
+                emit(0x4bb9e0u,{std::uint32_t(row),m.u32(B+0x3a24u+key*0x74u),0,0,0,0,0});
+            }
+            const auto value=m.i32(B+0x5800u);
+            const auto frame=std::min(value/37,99);                    // signed magic divide at 481AF0..481B08
+            std::uint32_t token=0;
+            switch(m.u32(B+0x74u)){case 0:token=0x460064u;break;case 1:token=0x2c006du;break;case 2:token=0x460063u;break;}
+            if(token)emit(0x429530u,{token,0,0,0,std::uint32_t(frame),0,0});
+            char text[16]{};std::snprintf(text,sizeof text,"%4d",int(value)); // [5B4A28], 5802DD
+            RaceHudDraw digits;digits.pc=0x4bc990u;digits.args[0]=10u;digits.args[1]=0x206u;digits.args[2]=0x1b2u;
+            std::memcpy(&digits.args[3],text,sizeof text);display.draws->push_back(digits);
+            call(0x4fdc10u,B);call(0x4fdf90u,B);
+            if(m.u32(B+0x154u))call(0x4fe440u,B);
+        }
+        call(0x4fc800u,B);                                            // every stock branch reaches this display tail
+        racers_out(c,t);ints_out(c,t);return true;
+    }catch(const TrafficUnported& e){missing=e.pc?e.pc:0x481a40u;error=e.what();}
+    catch(const PcRaceUnmapped& e){missing=0x481a40u;fault=e.address;error=e.what();}
+    catch(const std::exception& e){missing=0x481a40u;error=e.what();}
+    matrices.depth=depth;matrices.current_offset=offset;
+    return false; // display faults stay in the HUD report; traffic control keeps its independent latch
+}
 bool native_race_requests_call(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,std::uint32_t pc,
                                std::initializer_list<std::uint32_t> args,std::uint32_t& eax,std::uint32_t ecx,
                                std::uint32_t* start_local){

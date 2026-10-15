@@ -1863,13 +1863,18 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
         return !n.faulted()&&!s.missing;};
     if(md==0xdu){m.put32(0x842c10,0);if(!s.heart||!s.heart(s.heart_user,0x46ed20u))return n.fail(0x46ed20);return !s.missing;}
     const auto var=n.variant();
-    if(var!=6u&&var!=9u&&var!=2u&&var!=1u&&var!=0u&&var!=7u&&var!=3u&&var!=4u)return n.fail(var<=9u?0x4beb3f:0x4bedb8);
+    if(var!=6u&&var!=9u&&var!=2u&&var!=1u&&var!=0u&&var!=7u&&var!=3u&&var!=4u&&var!=5u)return n.fail(var<=9u?0x4beb3f:0x4bedb8);
     // UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a; Tweaks hooks_uiscaling.cpp): NaviPub_Disp's HUD is spaced to
     // the screen edges from 4BEB31 (on) to 4BEDE0 (off), re-asserted at 4BEDBE. Inside it the rival labels / markers
     // (4BEB8E..4BEBAF), the heart service 462CD0 (4BEBE1..4BEBE6) and the LAN markers (4BEC83..4BEC88) are unspaced;
     // from 4BEDE0 on (level, split, ghost, lap, countdown, the 4BEDF0 tail) nothing is. The guards restore on every exit.
     const UiSpacingGuard spaced(UiSpacing::detect);
     if(var==1u&&m.u32(0x8446ec)){n.draw(0x429530,{0x2c002f,0,0,3,0});if(!score_4bd480(n,car))return false;}   // 4BEB46
+    if(var==5u&&md==0x14u){                                                   // 4BECD2: request display also runs in mode 20
+        std::uint32_t value{};
+        if(!s.request||!s.request(s.request_user,0x46c220u,value))return n.fail(0x46c220);
+        return tail(true);
+    }
     if(md!=16u)return tail(true);                                               // 4BEDF0 protected test: mode != 16
     if(var==0u||var==7u){                                                       // 4BEBF0
         n.draw(0x429530,{0x2c0031,0,0,3,0});
@@ -1888,6 +1893,13 @@ bool navi_pub_display_4beb00_impl(NaviPubServices& s){
         if(!requests_4bcd50(n))return false;
         {   const UiSpacingGuard unspaced(UiSpacing::off);                     // Tweaks 4BEBE1 .. 4BEBE6
             if(!s.heart||!s.heart(s.heart_user,0x462cd0u))return n.fail(0x462cd0);}
+        if(!clock_4bd900(n))return false;
+    }else if(var==5u){                                                         // 4BEC9B: request panel, child, goal gate, clock
+        n.draw(0x429530,{0x2c0030,0,0,1,0});
+        std::uint32_t value{};
+        if(!s.request||!s.request(s.request_user,0x46c220u,value))return n.fail(0x46c220);
+        if(!s.request(s.request_user,0x46c500u,value))return n.fail(0x46c500);
+        if(value)goal_ahead_4bb970(n,car);
         if(!clock_4bd900(n))return false;
     }else if(var==3u||var==4u){                                                 // 4BEC3D LAN races
         // 456D50: [7DE784] (CommRace: a player has finished) hides the 2C004C panel
@@ -1938,6 +1950,9 @@ bool navi_pub_init_4bc9e0(NaviPubServices& s){return s.m&&guarded(s,[&]{return n
 bool navi_pub_control_4bcc40(NaviPubServices& s){return s.m&&guarded(s,[&]{return navi_pub_control_4bcc40_impl(s);});}
 bool navi_pub_display_4beb00(NaviPubServices& s){return s.m&&guarded(s,[&]{return navi_pub_display_4beb00_impl(s);});}
 bool navi_pub_destroy_4b8df0(NaviPubServices& s){return s.m&&guarded(s,[&]{return navi_pub_destroy_4b8df0_impl(s);});}
+bool navi_request_row_4bb9e0(NaviPubServices& s,std::uint32_t row,std::int32_t value){
+    return s.m&&guarded(s,[&]{N n(s,*s.m);return request_row_4bb9e0(n,row,value);});
+}
 bool navi_digits_4ba9d0(NaviPubServices& s,std::uint32_t style,std::int32_t x,std::int32_t y,const std::string& text,std::uint32_t layer,float alpha){
     return s.m&&guarded(s,[&]{return navi_digits_4ba9d0_impl(s,style,x,y,text,layer,alpha);});}
 bool navi_sector_banners_4bea50(NaviPubServices& s){
