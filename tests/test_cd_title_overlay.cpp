@@ -92,7 +92,7 @@ void viewport_ellipsis(){
     check(cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&glyph_text(f,glyphs)=="#01.100%%s"&&inside_hud(f,glyphs),"fitting literal title remains whole with original font layout");
     check(glyphs.front().x==375.f&&glyphs.front().y==450.f&&glyphs.front().scale_x==0.3f&&glyphs.front().scale_y==0.5f,"width fitting preserves configured position and scale");
     cd.tracks[0].title=std::string(512,'A');cd.title.changed();glyphs.clear();
-    check(cd_title_glyphs(cd,&pack,2,1,true,glyphs)&&glyph_text(f,glyphs).starts_with("#01.")&&glyph_text(f,glyphs).ends_with("...")&&glyphs.size()<98&&inside_hud(f,glyphs),"long title retains full prefix and three complete dots inside viewport");
+    check(cd_title_glyphs(cd,&pack,2,1,true,glyphs)&&glyph_text(f,glyphs).rfind("#01.",0)==0&&glyphs.size()>=3&&glyph_text(f,glyphs).compare(glyphs.size()-3,3,"...")==0&&glyphs.size()<98&&inside_hud(f,glyphs),"long title retains full prefix and three complete dots inside viewport");
     check(cd.tracks[0].title==std::string(512,'A')&&cd.tracks[0].path=="unchanged.ogg"&&p.calls==0,"width ellipsis does not modify catalog or audio");
     cd.title.options=cd_title_options(true,2,1.f,0.5f,407,450);cd.title.changed();glyphs.clear();
     check(cd_title_glyphs(cd,&pack,3,1,true,glyphs)&&glyph_text(f,glyphs)=="#01...."&&glyphs.back().x+32.f==640.f&&inside_hud(f,glyphs),"complete prefix and three dots can end exactly at viewport edge");
@@ -104,7 +104,7 @@ void viewport_ellipsis(){
     f.kerning.assign(96*96,0);f.kerning[std::size_t('A'-32)*96+std::size_t('.'-32)]=3;
     f.kerning[std::size_t('.'-32)*96+std::size_t('.'-32)]=1;
     cd.title.options=cd_title_options(true,2,0.3f,0.5f,375,450);cd.title.changed();glyphs.clear();
-    check(cd_title_glyphs(cd,&pack,5,1,true,glyphs)&&glyph_text(f,glyphs).ends_with("...")&&inside_hud(f,glyphs),"proportional metrics bearings spacing and cut-boundary kerning remain bounded");
+    check(cd_title_glyphs(cd,&pack,5,1,true,glyphs)&&glyphs.size()>=3&&glyph_text(f,glyphs).compare(glyphs.size()-3,3,"...")==0&&inside_hud(f,glyphs),"proportional metrics bearings spacing and cut-boundary kerning remain bounded");
     cd.title.options=cd_title_options(true,2,2.f,0.5f,600,450);cd.title.changed();
     const auto kept=glyphs.size();
     check(!cd_title_glyphs(cd,&pack,6,1,true,glyphs)&&glyphs.size()==kept&&cd.title.remaining==119,"insufficient space for prefix and ellipsis refuses atomically while timer ages");

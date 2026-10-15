@@ -1,6 +1,7 @@
 #pragma once
 #include "platform/cd_switcher.hpp"
 #include "platform/frontend_text.hpp"
+#include <stdexcept>
 namespace outrun::platform {
 // Keep complete source cells as well as their scaled rendered extents inside
 // the existing 640-wide HUD. The recovered producer clips unscaled cells; a
@@ -11,28 +12,41 @@ inline bool cd_title_draw_bounded(const FrontendFont& font,FrontendTextStyle sty
     const auto full=cd_title_label(index,title);
     if(full.empty())return false;
     std::vector<FrontendGlyph> draws;
+    const auto glyph_fits=[&](const FrontendGlyph& g){
+        return g.right-g.left==font.width&&std::isfinite(g.x)&&g.x>=float(style.clip_left)&&
+            g.x+float(g.right-g.left)*g.scale_x<=float(style.clip_right);
+    };
     const auto fits=[&](std::string_view text){
         const auto count=std::size_t(std::count_if(text.begin(),text.end(),[](char c){return c!=' ';}));
         if(draws.size()!=count)return false; // The producer dropped a clipped glyph.
-        return std::all_of(draws.begin(),draws.end(),[&](const FrontendGlyph& g){
-            return g.right-g.left==font.width&&std::isfinite(g.x)&&g.x>=float(style.clip_left)&&
-                g.x+float(g.right-g.left)*g.scale_x<=float(style.clip_right);
-        });
+        return std::all_of(draws.begin(),draws.end(),glyph_fits);
     };
     // Preserve the producer's atomic refusal of unavailable glyphs/pair data.
     if(!frontend_text_draw(font,style,cursor,full,draws))return false;
     if(!fits(full)){
         const auto prefix=cd_title_label(index,{}).size();
         // Remove the byte-limit ellipsis before considering a shorter body.
-        auto keep=full.size()-(title.size()>96u?3u:1u);
-        for(;;){
-            if(keep<prefix)return false; // Even the track prefix plus ... cannot fit.
-            const auto text=full.substr(0,keep)+"...";
-            draws.clear();
-            if(!frontend_text_draw(font,style,cursor,text,draws))return false;
-            if(fits(text))break;
-            --keep;
-        }
+        const auto limit=full.size()-(title.size()>96u?3u:1u);
+        std::size_t keep{};auto current=cursor;
+        try{
+            // One pass over the bounded label. Earlier prefix glyph positions
+            // are unchanged by a cut; only the last retained character's
+            // advance must be recomputed with '.' as its next character.
+            for(std::size_t i=0;i<limit;++i){
+                const auto c=std::uint8_t(full[i]);FrontendGlyph g;
+                if(c!=' '&&(!frontend_text_glyph_42c860(font,style,current,c,g)||!glyph_fits(g)))break;
+                if(i+1>=prefix){
+                    auto dots=current;frontend_text_advance_42c610(font,style,dots,c,'.');
+                    draws.clear();
+                    if(!frontend_text_draw(font,style,dots,"...",draws))return false;
+                    if(fits("..."))keep=i+1;
+                }
+                frontend_text_advance_42c610(font,style,current,c,std::uint8_t(full[i+1]));
+            }
+        }catch(const std::out_of_range&){return false;}
+        if(keep<prefix)return false; // Even the track prefix plus ... cannot fit.
+        const auto text=full.substr(0,keep)+"...";draws.clear();
+        if(!frontend_text_draw(font,style,cursor,text,draws)||!fits(text))return false;
     }
     out.insert(out.end(),draws.begin(),draws.end());return true;
 }
