@@ -478,6 +478,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // its character item from the name (Down) and the nationality (Up) (pc_screen.hpp).
     outrun::platform::g_pc_allow_character_selection=settings.flag("Misc","AllowCharacterSelection",false);
     if(outrun::platform::g_pc_allow_character_selection)std::printf("settings: the license editor's character selection on\n");
+    // [Misc] EnableHollyCourse2, the Tweaks key (3 by default, as Tweaks' shipped INI): Holly's MIX 2 course set as the
+    // racer menu's group 7; 0 off, 1 unlocked with Holly 1, 2 once Holly 1 reaches A, 3 as 2 and shown only then
+    // (pc_screen.hpp). It needs the fourth course lane; without it the group stays locked.
+    {   const int v=settings.integer("Misc","EnableHollyCourse2",3);
+        if(v<0||v>3)std::printf("settings: EnableHollyCourse2 = %d refused (0..3); 3 applies\n",v);
+        outrun::platform::g_pc_enable_holly_course2=v<0||v>3?3:v;
+        if(outrun::platform::g_pc_enable_holly_course2!=3)
+            std::printf("settings: Holly's MIX 2 course (EnableHollyCourse2) %d\n",outrun::platform::g_pc_enable_holly_course2);}
     // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).
     outrun::platform::g_pc_default_manual_transmission=settings.flag("Misc","DefaultManualTransmission",false);

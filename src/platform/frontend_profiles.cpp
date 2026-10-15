@@ -1,4 +1,5 @@
 #include "frontend_profiles.hpp"
+#include "pc_screen.hpp"   // EnableHollyCourse2
 #include "driving/pc_x87.hpp"
 #include <cstdio>
 #include <algorithm>
@@ -129,7 +130,8 @@ bool frontend_category_grade_4e81d0(const PcLicense& p,const LicenseProgressTabl
         grade=int(total/count);return true;
 }
 bool frontend_group_grade_4e82a0(const PcLicense& p,const LicenseProgressTables& tables,unsigned group,int& grade){
-    if(group>=7)return false;
+    // EnableHollyCourse2 (pc_screen.hpp; Tweaks' 4E82B4 / 4E83E0): group 7 is Holly's grade over the fourth lane.
+    if(group>7||(group==7&&!g_pc_enable_holly_course2))return false;
     constexpr unsigned boundaries[]={0,5,14,25,40};
         grade=7;
         if(group<4){int sum=0;
@@ -153,7 +155,15 @@ bool frontend_group_grade_4e82a0(const PcLicense& p,const LicenseProgressTables&
     return true;
 }
 bool frontend_category_unlocked_4e8410(const PcLicense& p,const LicenseProgressTables& tables,unsigned group,bool& unlocked){
-    unlocked=false;if(group>=7)return true;
+    unlocked=false;
+    if(group==7&&g_pc_enable_holly_course2){
+        // EnableHollyCourse2 (Tweaks' 4E8414 / 4E8537): group 7 takes group 6's test (the previous group's grade, 5)
+        // in mode 1; in modes 2 and 3 Holly 1's own grade (group 6) must reach A. An absent or malformed fourth lane
+        // (race_asset_pack.cpp) keeps it locked in every mode, so the menu never offers courses it cannot request.
+        int grade{};if(!frontend_group_grade_4e82a0(p,tables,g_pc_enable_holly_course2==1?5u:6u,grade))return false;
+        unlocked=tables.championship_present[3]&&grade!=7&&grade>=4;return true;
+    }
+    if(group>=7)return true;
     if(group==0||group==4){unlocked=true;return true;}
     int grade{};if(!frontend_group_grade_4e82a0(p,tables,group-1,grade))return false;
     unlocked=grade!=7&&grade>=4;return true;
@@ -170,7 +180,7 @@ std::int32_t frontend_unlock_notice_499730(PcLicense& p,const std::array<int,7>&
     put32(p.data()+0x11c,seen|bit);p[0x3f4]|=2u;return notice;
 }
 bool frontend_category_picture_4e8b20(const PcLicense& p,const LicenseProgressTables& tables,unsigned selected,unsigned& result){
-    if(selected>=7)return false;
+    if(selected>7||(selected==7&&!g_pc_enable_holly_course2))return false;   // group 7: EnableHollyCourse2's menu
     result=0;for(int group=2;group>=0;--group){int grade{};
         if(!frontend_group_grade_4e82a0(p,tables,unsigned(group),grade))return false;
         if(grade!=7&&grade>=4){result=unsigned(group+1)*4;break;}}

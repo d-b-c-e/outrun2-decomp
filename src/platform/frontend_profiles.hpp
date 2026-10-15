@@ -43,10 +43,13 @@ FrontendProfileList frontend_profiles_list_4e1c00(FrontendProfiles&);
 // Views of the live 495930 category counts and 84B7E0 championship records.
 // An absent championship table is the PC's null pointer, not 15 dummy races.
 // Counts/types must be obtained from loaded PC data before SUMO_FE completion.
+// Lanes 0..2 are groups 4..6 (84B7E0..84B7E8) and required. Lane 3 (84B7EC, the fourth course script: Holly's MIX 2
+// set) is optional: present only when its table is valid, and used only by [Misc] EnableHollyCourse2 (pc_screen.hpp)
+// as group 7, which stays locked and unrequestable without it.
 struct LicenseProgressTables {
     std::array<std::uint8_t,40> category_counts{};
-    std::array<std::array<std::uint32_t,15>,3> championship_types{};
-    std::array<bool,3> championship_present{};
+    std::array<std::array<std::uint32_t,15>,4> championship_types{};
+    std::array<bool,4> championship_present{};
     bool categories_ready{};
     std::uint32_t mode{32};
 };

@@ -165,6 +165,17 @@ inline bool g_pc_disable_countdown_timer=false;
 // item 1 on the PC, Down from the name and Up from the nationality going past it. On, those two moves select the
 // character item (this +3C = 1, 4DD990(5)), whose own handling the PC kept: confirm opens the character grid.
 inline bool g_pc_allow_character_selection=false;
+// [Misc] EnableHollyCourse2 (the Tweaks key, hooks_misc.cpp; Tweaks' plugin default 1, its shipped INI 3, here 3 as the
+// shipped INI): Holly's second mission set ("MIX 2 COURSE", from the PSP release) as the racer menu's group 7.
+//   0 off (the PC: seven groups);
+//   1 on, unlocked with Holly 1 (group 7 opens as group 6 does);
+//   2 on, unlocked once Holly 1 itself reaches rank A (grade >= 4);
+//   3 as 2, and the menu draws and reaches it only once it is unlocked (frontend_categories.cpp).
+// Group 7 grades from the fourth course lane (frontend_profiles.hpp), requests its courses there (frontend_requests.cpp)
+// and sets up as Holly with request course set 2 (Req_Course_MIX_PSP) instead of 3 (pc_common_control.cpp 4EEB50). The
+// lane is optional: absent or malformed, group 7 stays locked and unrequestable in every mode. No save change: its results
+// are the course types' nibbles at licence +36E like every championship's.
+inline int g_pc_enable_holly_course2=3;
 // [Graphics] UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a): Tweaks' HUD shift in 640-wide UI units at the 4:3
 // scale, 320 (1 - 4 / (3A)) for the 2D rectangle's frame of aspect A (80 at 16:9: three quarters of the margin, as
 // Tweaks' AddSpriteSpacing lands; display_fit.hpp ui_scaling_rect .hud), set by the renderer each frame; 0 in modes 0

@@ -1396,6 +1396,9 @@ struct PcRuntimePrepareState {
     std::uint8_t selection_active_836374{};
     std::uint8_t game_flag_780260{};
     std::array<std::uint32_t,5> event_config_7f94c4{};
+    // Not a PC global: [Misc] EnableHollyCourse2 with a valid fourth course lane, set by the caller. Only then does
+    // 4EEB50 take group 7 (Holly's MIX 2 set), as Tweaks' hook there does.
+    bool holly_course2{};
 };
 using PcRuntimePrepareCount = std::uint32_t(*)(void* user,std::uint32_t category);
 using PcRuntimePrepareSelect = void(*)(void* user,std::uint32_t category,std::uint32_t index);

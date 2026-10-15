@@ -1,4 +1,5 @@
 #include "frontend_course_fixture.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -40,6 +41,18 @@ int main(int argc,char** argv){
     auto missing=tables;missing[1]={};
     req(!frontend_license_progress_tables(&races,&assignment,missing,32,progress)&&
         progress.championship_types==expected.championship_types,"missing table cannot become empty completed group");
+    for(unsigned i=0;i<15;++i)req(expected.championship_present[3]&&expected.championship_types[3][i]==45+i,
+        "the fourth lane (Holly's MIX 2 set) is read when its table is valid");
+    // Lane 3 is optional (EnableHollyCourse2's group 7): absent or malformed, groups 4..6 still load.
+    auto no_holly2=tables;no_holly2[3]={};
+    auto bad_holly2=tables;put(bad_holly2[3].records,0x1c,66);
+    for(const auto* lanes:{&no_holly2,&bad_holly2}){
+        req(frontend_license_progress_tables(&races,&assignment,*lanes,32,progress)&&progress.categories_ready&&
+            !progress.championship_present[3]&&progress.championship_types[3]==std::array<std::uint32_t,15>{},
+            "an absent or malformed fourth lane only leaves group 7 unavailable");
+        for(unsigned lane=0;lane<3;++lane)req(progress.championship_present[lane]&&
+            progress.championship_types[lane]==expected.championship_types[lane],"lanes 0..2 unchanged without the fourth");
+    }
     auto bad_races=races;for(unsigned i=0;i<6;++i)put(bad_races.bytes,i*0x44,1);
     req(!frontend_license_progress_tables(&bad_races,&assignment,tables,32,progress),"more than five grades rejected");
     req(!frontend_license_progress_tables(nullptr,&assignment,tables,32,progress),"missing race source rejected");
@@ -67,6 +80,16 @@ int main(int argc,char** argv){
             state.frontend_bulk_missing_pc==0,"all retail scripts validated by production loader");
         tables=state.frontend_course_tables;
         req(frontend_license_progress_tables(&races,&assignment,tables,32,progress),"retail progress provider");
+        // EnableHollyCourse2's evidence: whether the retail fourth lane (Holly's MIX 2 set) is valid, and its course types.
+        std::fprintf(stderr,"retail fourth lane: present=%d types",int(progress.championship_present[3]));
+        for(const auto type:progress.championship_types[3])std::fprintf(stderr," %u",unsigned(type));
+        // A type shared with lanes 0..2 shares its result nibbles at licence +36E (the PC's and Tweaks' semantics).
+        unsigned shared=0;
+        for(const auto type:progress.championship_types[3])for(unsigned lane=0;lane<3;++lane)
+            if(std::find(progress.championship_types[lane].begin(),progress.championship_types[lane].end(),type)!=
+               progress.championship_types[lane].end()){std::fprintf(stderr,"%s%u(lane %u)",shared++?" ":"; shared with lanes 0..2: ",
+                   unsigned(type),lane);break;}
+        std::fprintf(stderr,"%s\n",shared?"":"; shared with lanes 0..2: none");
         unsigned total=0;for(auto n:progress.category_counts)total+=n;
         req(total==94,"forty original categories cover all ninety-four retail races");
         req(frontend_license_completion_447400(license,progress,completion)&&completion==0,"new license has zero retail progress");

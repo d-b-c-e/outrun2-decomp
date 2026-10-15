@@ -1,4 +1,5 @@
 #include "frontend_requests.hpp"
+#include "pc_screen.hpp"   // EnableHollyCourse2
 #include <cstring>
 namespace outrun::platform {
 using driving::Bytes;
@@ -20,8 +21,9 @@ constexpr Descriptor lists_5ce990[6]{{0x4400ba,0,29},{0x4400ba,30,59},{0x4400ba,
 constexpr Descriptor grades_5ce9c0[7]{{0x4400af,6,6},{0x4400af,5,5},{0x4400af,4,4},{0x4400af,3,3},{0x4400af,2,2},{0x4400af,1,1},{0x4400af,0,0}};
 constexpr unsigned icons_5cea18[30]{31,17,24,7,33,15,14,20,16,18,35,28,8,12,23,34,10,36,13,22,11,9,25,27,30,26,32,19,29,21};
 constexpr unsigned courses_5cea90[30]{12,6,10,0,13,4,3,8,5,7,14,11,1,2,9,28,16,29,18,21,17,15,22,24,26,23,27,19,25,20};
-constexpr Descriptor footers_5ceb08[3]{{0x4400ca,0,0},{0x4400ca,3,3},{0x4400ca,1,1}};
-constexpr Descriptor titles_5ceb38[3]{{0x4400a7,71,71},{0x4400a7,70,70},{0x4400a7,72,72}};
+// Footers and titles by group 4..7: the PC's tables have a fourth entry (5CEB2C, 5CEB5C) that only group 7 reaches.
+constexpr Descriptor footers_5ceb08[4]{{0x4400ca,0,0},{0x4400ca,3,3},{0x4400ca,1,1},{0x4400ca,2,2}};
+constexpr Descriptor titles_5ceb38[4]{{0x4400a7,71,71},{0x4400a7,70,70},{0x4400a7,72,72},{0x4400a7,73,73}};
 constexpr Descriptor list_titles_5ceb68[4]{{0x4400a7,74,74},{0x4400a7,75,75},{0x4400a7,76,76},{0x4400a7,77,77}};
 constexpr unsigned captions_5ceb98[33]{0x354,0x355,0x356,0x357,0x358,0x359,0x35a,0x35b,0x35c,0x35d,0x35f,0x35e,0x360,
     0x361,0x362,0x363,0x364,0x365,0x366,0x367,0x368,0x369,0x36a,0x36b,0x36c,0x36d,0x36e,0x36f,0x370,0x371,0x372,0x373,0x42f};
@@ -45,10 +47,11 @@ bool configure(FrontendRequestState& c,FrontendRequestServices& s,unsigned off,D
 bool sound(FrontendRequestServices& s,unsigned id){
     return (s.ui.effect_4249f0&&s.ui.effect_4249f0(s.ui.effect_user,id))||fail(s,0x4249f0);
 }
-// [535EF0(4035F0()) + 208] >> 8 & 7: the categories group (4..6), its 15 course types.
+// [535EF0(4035F0()) + 208] >> 8 & 7: the categories group (4..6; 7 with EnableHollyCourse2 and a valid fourth
+// lane), its 15 course types. The PC has no bound here; group 7 off or without its lane fails closed.
 bool group(FrontendRequestServices& s,unsigned& g){
     g=(s.root.u32(0x20c)>>8)&7;
-    if(g<4||g>6||!s.progress.championship_present[g-4])return fail(s,0x4ea3c0);
+    if(g<4||(g==7&&!g_pc_enable_holly_course2)||!s.progress.championship_present[g-4])return fail(s,0x4ea3c0);
     return true;
 }
 unsigned type_of(FrontendRequestServices& s,unsigned g,unsigned i){return s.progress.championship_types[g-4][i];}

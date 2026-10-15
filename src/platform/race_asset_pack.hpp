@@ -42,7 +42,9 @@ bool parse_frontend_course_table(std::uint32_t lane,const std::uint8_t* data,
     std::size_t size,FrontendCourseTable&,std::string* error=nullptr);
 // Atomic: unavailable or malformed source data leaves the previous output
 // untouched. mode is the actual 78026C value; non-SUMO_FE returns zero progress
-// through 447400 without touching the course tables, as on PC.
+// through 447400 without touching the course tables, as on PC. Course lanes 0..2
+// are required; lane 3 (EnableHollyCourse2's group 7) is optional and only marked
+// not present when its table is absent or malformed.
 bool frontend_license_progress_tables(const RaceAssetPack*,const RaceAssignmentPack*,
     const std::array<FrontendCourseTable,4>&,std::uint32_t mode,
     LicenseProgressTables&);
