@@ -550,43 +550,53 @@ def main():
         finally:
             if leased and receipt.get("retained"):   # --horn: the retained process still runs on the rig; the lease stays with it
                 receipt["retained"]["lease"] = "kept: Rig-Lease -Exit after the process is resolved"
-            elif leased:
+            elif leased and not o.horn:
                 try: lease("Exit")
                 except Exception as e: receipt["errors"].append(repr(e))
-        if consumed:   # the run's own @2 capture is evidence, compared with the recording (not P21-sealed: no recording seal)
-            receipt["seal"] = "not sealed (consumed playback run: its @2 capture is compared, not sealed)"
-            try:
-                q = subprocess.run([sys.executable, "-B", str(HERE / "compare_consumed.py"), str(reference / "capture" / "source.jsonl"),
-                                    str(out / "run" / "capture" / "source.jsonl")], capture_output=True, text=True, timeout=600)
-                receipt["consumed"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
-            except Exception as e: receipt["errors"].append("consumed compare: %r" % e)
-        else:
-            try: seal(out, proc, created, receipt, o.finalizer)
-            except Exception as e: receipt["errors"].append("seal: %r" % e)
-            try: replay(out, receipt, o.replay_tool)
-            except Exception as e: receipt["errors"].append("replay: %r" % e)
-        if tape and isinstance(receipt.get("replay"), dict) and receipt["replay"].get("exit") == 0:
-            q = subprocess.run([sys.executable, "-B", str(HERE / "compare_replay.py"), str(tape), str(out / "validated.tsv")],
-                               capture_output=True, text=True, timeout=600)
-            try: receipt["r3"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
-            except ValueError: receipt["r3"]["compare"] = (q.stdout + q.stderr).strip()[-400:]
         try:
-            if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
-            if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
-        except Exception as e: receipt["errors"].append("evidence read: %r" % e)
-        sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
-        sig = [m for m in sig if m]
-        receipt["modes"] = sorted({int(m.group(3)) for m in sig})
-        receipt["maxRecordSteer"] = max([abs(int(m.group(5))) for m in sig], default=0)
-        receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
-        receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
-        receipt["route"] = route_of(receipt, (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else "")
-        if receipt.get("horn") is not None:
-            receipt["horn"].update(horn_evidence((out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else ""))
-        failures = verdict(receipt)
-        (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
-        print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "retained", "phase", "race", "modes", "maxRecordSteer",
-                                                     "maxConsumedSteer", "maxConsumedAccel", "seal", "replay", "r3")}, indent=1))
+            if consumed:   # the run's own @2 capture is evidence, compared with the recording (not P21-sealed: no recording seal)
+                receipt["seal"] = "not sealed (consumed playback run: its @2 capture is compared, not sealed)"
+                try:
+                    q = subprocess.run([sys.executable, "-B", str(HERE / "compare_consumed.py"), str(reference / "capture" / "source.jsonl"),
+                                        str(out / "run" / "capture" / "source.jsonl")], capture_output=True, text=True, timeout=600)
+                    receipt["consumed"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
+                except Exception as e: receipt["errors"].append("consumed compare: %r" % e)
+            else:
+                try: seal(out, proc, created, receipt, o.finalizer)
+                except Exception as e: receipt["errors"].append("seal: %r" % e)
+                try: replay(out, receipt, o.replay_tool)
+                except Exception as e: receipt["errors"].append("replay: %r" % e)
+            if tape and isinstance(receipt.get("replay"), dict) and receipt["replay"].get("exit") == 0:
+                q = subprocess.run([sys.executable, "-B", str(HERE / "compare_replay.py"), str(tape), str(out / "validated.tsv")],
+                                   capture_output=True, text=True, timeout=600)
+                try: receipt["r3"]["compare"] = json.loads(q.stdout) if q.returncode == 0 else (q.stdout + q.stderr).strip()[-400:]
+                except ValueError: receipt["r3"]["compare"] = (q.stdout + q.stderr).strip()[-400:]
+            try:
+                if (out / "run" / "controls-journal.jsonl").exists(): receipt["journal"] = read_journal.read(str(out / "run" / "controls-journal.jsonl"))
+                if (out / "run" / "host-shutdown.json").exists(): receipt["host"] = json.loads((out / "run" / "host-shutdown.json").read_text())
+            except Exception as e: receipt["errors"].append("evidence read: %r" % e)
+            sig = [SIGNAL.search(l) for l in (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace").splitlines()] if (out / "run" / "runtime.log").exists() else []
+            sig = [m for m in sig if m]
+            receipt["modes"] = sorted({int(m.group(3)) for m in sig})
+            receipt["maxRecordSteer"] = max([abs(int(m.group(5))) for m in sig], default=0)
+            receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
+            receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
+            receipt["route"] = route_of(receipt, (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else "")
+            if receipt.get("horn") is not None:
+                receipt["horn"].update(horn_evidence((out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else ""))
+            failures = verdict(receipt)
+            (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
+            print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "retained", "phase", "race", "modes", "maxRecordSteer",
+                                                         "maxConsumedSteer", "maxConsumedAccel", "seal", "replay", "r3")}, indent=1))
+        finally:
+            # --horn (sana #132742): the lease is held through the seal, replay, evidence and receipt, and released only after
+            # all of it (also when that work raised); a retained process keeps it. A failed release is added to the receipt.
+            if leased and o.horn and not receipt.get("retained"):
+                try: lease("Exit")
+                except Exception as e:
+                    receipt["errors"].append("lease exit: %r" % e); failures = verdict(receipt)
+                    (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
+                    print(json.dumps(dict(result=receipt.get("result"), failures=failures), indent=1))
     return 1 if failures else 0
 
 

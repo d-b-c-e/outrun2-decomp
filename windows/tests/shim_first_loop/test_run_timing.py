@@ -109,6 +109,27 @@ with tempfile.TemporaryDirectory() as t:
     (pathlib.Path(t) / "run" / "capture").mkdir(parents=True)
     run.seal(pathlib.Path(t), Running(), 7, r, None)
     check(r["seal"] == "no observed exit" and not (pathlib.Path(t) / "run" / "capture" / "exit.json").exists(), "a retained process is not sealed: %r" % r["seal"])
+# The --horn lease order (sana #132742), read from main's source: the early release (right after the cleanup) skips --horn;
+# --horn releases in the finally of the try that holds the seal, the replay and the verdict, unless the process is retained.
+import ast, inspect
+def calls(node, name): return [n for n in ast.walk(node) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name]
+tree = ast.parse(inspect.getsource(run.main))
+parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+exits = []   # each lease("Exit"): (the calls in the body of the try whose finally holds it, its nearest if-test)
+for c in calls(tree, "lease"):
+    if not (c.args and getattr(c.args[0], "value", None) == "Exit"): continue
+    node, guard, owner = c, None, None
+    while node in parents and owner is None:
+        p = parents[node]
+        if isinstance(p, ast.If) and guard is None: guard = ast.unparse(p.test)
+        if isinstance(p, ast.Try) and node in p.finalbody: owner = p
+        node = p
+    body = ast.Module(body=owner.body, type_ignores=[]) if owner else None
+    exits.append(({n for n in ("seal", "replay", "verdict") if body and calls(body, n)}, guard))
+check(len(exits) == 2, "two lease releases in main: %r" % exits)
+check((set(), "leased and (not o.horn)") in exits, "the early release (after the cleanup) skips --horn: %r" % exits)
+check(({"seal", "replay", "verdict"}, "leased and o.horn and (not receipt.get('retained'))") in exits,
+      "--horn releases in the finally after the seal, replay and verdict, unless retained: %r" % exits)
 # No race: the startup budget alone bounds the run.
 why, at = simulate(180, 10_000, bound)
 check(why == "deadline" and 180 <= at < 180.5, "no race: the startup budget ends the run (%s at %.1f)" % (why, at))
