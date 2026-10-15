@@ -231,6 +231,9 @@ void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
         m.map(0x84d6d8u,vis.data()+(0x84d6d8u-0x84cec8u),vis.size()-(0x84d6d8u-0x84cec8u));}
     if(!t.data_681200.empty())m.map(0x681200u,t.data_681200.data(),t.data_681200.size());
     m.map_const(0x95d860u,c.race_effects.render_95d860.data(),c.race_effects.render_95d860.size());
+    // The HUD's voice queue: the C2C request manager (4FB520, 4FB66F, 50EC38, 521420, 521824) flushes it
+    // through 45BCC0 (head 7F1C64 = tail 7F1994).
+    native_race_hud_map_voice(c,m);
     if(c.game_mode.game_variant==2u)native_race_hud_map_heart(c,m);   // Heart Attack: NAVI words, voice, robots (45C450, 46D250..)
     // the AREA's course road tables (46FC40 streamer): 804480 (6 x 1030), 800DA8 (2 x 1030), 80A670 (12 x 70C)
     {auto& o=native_race_area(c);

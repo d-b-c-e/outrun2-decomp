@@ -66,6 +66,11 @@ void drain_sounds(NativeRuntimeContext& c,NativeRaceHudRuntime& o){
 }
 // ---- NAVI memory -----------------------------------------------------------------
 void map_word(PcRaceMemory& m,std::uint32_t a,void* p,std::size_t n){m.map(a,static_cast<std::uint8_t*>(p),n);}
+// The voice queue (45Bxxx), owned by the HUD's voice state: tail 7F1994, entries 7F1998.., head 7F1C64, last 7F8B40.
+void map_voice(PcRaceMemory& m,NativeRaceHudRuntime& o){
+    map_word(m,0x7f1994u,&o.voice.tail_7f1994,4);map_word(m,0x7f1998u,o.voice.entries_7f1998.data(),sizeof(o.voice.entries_7f1998));
+    map_word(m,0x7f1c64u,&o.voice.head_7f1c64,4);map_word(m,0x7f8b40u,&o.voice.last_7f8b40,4);
+}
 void rebuild(NativeRuntimeContext& c,NativeRaceHudRuntime& o){
     auto& m=o.memory;m.clear();
     for(std::size_t i=0;i<EmbeddedExeRangeCount;++i)m.map_const(EmbeddedExeRanges[i].base,EmbeddedExeRanges[i].data,EmbeddedExeRanges[i].size);
@@ -163,8 +168,7 @@ void rebuild(NativeRuntimeContext& c,NativeRaceHudRuntime& o){
     map_word(m,0x7f8abcu,&c.race.car_world.nos_speed_7f8abc,4);
     map_word(m,0x7f94c0u,&c.start_mode.manager_state_7f94c0,4);
     map_word(m,0x7f95a8u,&rt.force_mode_7f95a8,4);
-    map_word(m,0x7f1994u,&o.voice.tail_7f1994,4);map_word(m,0x7f1998u,o.voice.entries_7f1998.data(),sizeof(o.voice.entries_7f1998));
-    map_word(m,0x7f1c64u,&o.voice.head_7f1c64,4);map_word(m,0x7f8b40u,&o.voice.last_7f8b40,4);
+    map_voice(m,o);
 }
 // 43EB60(0x100, &point, 0, 0, &flags): the course ground query (4BA0E0 line of sight); flags is
 // its kind output, the attribute word tested against F00002.
@@ -363,9 +367,9 @@ void native_race_hud_map_heart(NativeRuntimeContext& c,PcRaceMemory& m){
     // rank-change words 84DF00 / 84DF0C stay as 4F2AC0 left them)
     m.map(0x84def8u,c.race.manager.score_84def8.data(),c.race.manager.score_84def8.size());
     c.race.robots.state.map(m);   // 7A01E0.. robot works, 82F11C.. (RobMotion 82F5F0), 654568..
-    map_word(m,0x7f1994u,&o.voice.tail_7f1994,4);map_word(m,0x7f1998u,o.voice.entries_7f1998.data(),sizeof(o.voice.entries_7f1998));
-    map_word(m,0x7f1c64u,&o.voice.head_7f1c64,4);map_word(m,0x7f8b40u,&o.voice.last_7f8b40,4);
+    map_voice(m,o);
 }
+void native_race_hud_map_voice(NativeRuntimeContext& c,PcRaceMemory& m){map_voice(m,native_race_hud(c));}
 NativeRaceHudRuntime& native_race_hud(NativeRuntimeContext& c){
     if(!c.race_hud)c.race_hud=std::make_shared<NativeRaceHudRuntime>();
     return *c.race_hud;

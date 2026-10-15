@@ -1,5 +1,6 @@
 #include "platform/native_runtime.hpp"
 #include "platform/race_traffic_runtime.hpp"
+#include "platform/race_hud_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_player_car.hpp"
 #include "driving/pc_wheel_dynamics.hpp"
@@ -324,6 +325,20 @@ int main(int argc,char** argv){
                 require(traffic.memory.at(0x800af8u,0x38u)==traffic.state.block.data()+(0x800af8u-PcTrafficState::BlockBase)&&
                         traffic.memory.at(0x800b30u,0x38u)==traffic.state.block.data()+(0x800b30u-PcTrafficState::BlockBase),
                         "traffic records 0 and 1 (800AF8..800B67) are whole in the traffic state block");
+            }
+            {   // 45BCC0 (the voice queue flush: head 7F1C64 = tail 7F1994), called by the request manager (4FB520,
+                // 4FB66F, 50EC38, 521420, 521824) in the traffic memory. drive-run-2044 latched there: 7F1994 was not
+                // mapped. The HUD's voice state owns the queue words in every memory that runs that code.
+                auto& traffic=native_race_traffic(request);
+                auto& voice=native_race_hud(request).voice;
+                voice.tail_7f1994=7;voice.head_7f1c64=3;
+                std::uint32_t flush_eax=0u;
+                const bool flushed=native_race_requests_call(request,request_matrices,0x0045bcc0u,{},flush_eax);
+                require(flushed&&!traffic.latched,"the request manager's voice flush 45BCC0 runs in the traffic memory");
+                require(voice.head_7f1c64==7&&voice.tail_7f1994==7,"45BCC0 sets the HUD's voice head to its tail");
+                require(traffic.memory.at(0x7f1994u,4u)==reinterpret_cast<std::uint8_t*>(&voice.tail_7f1994)&&
+                        traffic.memory.at(0x7f1c64u,4u)==reinterpret_cast<std::uint8_t*>(&voice.head_7f1c64),
+                        "the traffic memory maps the voice tail and head to the HUD's voice state");
             }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
