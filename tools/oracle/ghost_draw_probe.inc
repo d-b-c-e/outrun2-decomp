@@ -3,7 +3,7 @@ if(only=="ghost_draw_probe"){
     // Other-car / ghost-car display (race_ghost_car.cpp) against the original:
     //   0 4AE5F0 display (event flags 79FB48, 7D39F0, 7C24C9, +B62/+B64/+B53
     //     blink counters, the 0x40 ghost gate, the 4AE0F0 model tree for
-    //     every LOD 0..4 and all 30 car models, 842038/84203C/842040 alpha)
+    //     every LOD 0..4 and all 45 car models, 842038/84203C/842040 alpha)
     //   1 4ADAC0 shadow (4AD380)   2 4AE0F0 direct (+4 bit 2 fade path)
     // Draw leaves (405360, 4056D0, 4044F0, 4044A0, 4044C0, 4044E0, 4052B0,
     // 4052C0, 404540, 405350) are capture stubs recording {pc, 6 stack args,
@@ -85,7 +85,7 @@ if(only=="ghost_draw_probe"){
         std::array<std::uint32_t,6> value{};value[0]=rnd(3)?rnd(0x40)-3u:rng();value[1]=rnd(3)?4u:rnd(6);value[2]=rnd(2);value[3]=rnd(2);value[4]=rnd(2);value[5]=rnd(6);
         std::memcpy(reinterpret_cast<void*>(values),value.data(),sizeof value);
         for(std::uint32_t a=Car;a<Car+CarBytes;a+=4)p32(a,rnd(4)?0u:rng());
-        const unsigned model=rnd(30);
+        const unsigned model=rnd(45);
         p32(Car,9+rnd(4));*reinterpret_cast<std::uint8_t*>(Car+0x11)=std::uint8_t(model);*reinterpret_cast<std::uint8_t*>(Car+0x12)=std::uint8_t(rnd(8));
         p32(Car+4,(rnd(3)?0xc0u:rng()&0xffu)|(rnd(4)?0u:0x100u)|(rnd(4)?0u:0x200u)|(rnd(8)?0u:0x20u)|(rnd(6)?0u:4u));
         p32(Car+8,rnd(8)?0u:1u);
@@ -105,7 +105,11 @@ if(only=="ghost_draw_probe"){
         p32(0x780258u,rnd(4)?7u:rnd(10));
         p32(0x7d39f0u,rnd(8)?0u:4u);*reinterpret_cast<std::uint8_t*>(0x7c24c9u)=std::uint8_t(rnd(10)?0:1);
         for(std::uint32_t a=0x79fb48u;a<0x79fd48u;++a)*reinterpret_cast<std::uint8_t*>(a)=std::uint8_t(rnd(3)?0:0x10);
-        p32(0x7f94c0u,0);
+        const bool active=(iter/21u)%2u!=0u;
+        const unsigned request_state=(iter/3u)%7u; // 0..5 and the ordinary fallback 6, for all three entries
+        p32(0x7f94c0u,active?1u:0u);p32(Car+0xd14,request_state);
+        constexpr std::int32_t phases[]{-121,-120,-1,0,1,59,60,119,120,121,2147483647,(-2147483647-1)};
+        p32(Car+0xd18,std::uint32_t(phases[(iter/42u)%(sizeof phases/sizeof phases[0])]));
         p32(0x842038u,rng());p32(0x84203cu,rng());p32(0x842040u,rng());
         for(auto& mi:mirrors){mi.bytes.resize(mi.end-mi.base);std::memcpy(mi.bytes.data(),reinterpret_cast<void*>(mi.base),mi.bytes.size());}
         reset_matrix_oracle_globals();
@@ -134,9 +138,11 @@ if(only=="ghost_draw_probe"){
             default:other_car_draw_4ae0f0(ctx,Car);break;
             }
         }catch(const std::exception& e){ok=false;why=e.what();}
-        const std::string tag="entry "+std::to_string(entry)+" run "+std::to_string(iter)+" model "+std::to_string(model);
+        const std::string tag="entry "+std::to_string(entry)+" run "+std::to_string(iter)+" model "+std::to_string(model)+
+            " active "+std::to_string(active)+" state "+std::to_string(request_state);
         if(!ok&&why.find("Heart Attack +C5C 0x80000")!=std::string::npos&&g32(0x780258u)==2u&&(g32(Car+0xc5c)&0x80000u)){++coverage["latched 4AE0F0 Heart Attack 0x80000"];continue;}
         ++cases;if(!ok){fail(tag+" native threw: "+why);continue;}
+        ++cases;if(stack.depth!=0||stack.current_offset!=0)fail(tag+" native matrix stack is unbalanced");
         if(inject&&!injected&&!draws.empty()){draws[0].matrix[0]^=1;injected=true;}
         for(std::size_t i=0;i<mirrors.size();++i){std::ostringstream s;s<<tag<<" region "<<std::hex<<mirrors[i].base;
             compare(native[i].data(),reinterpret_cast<void*>(mirrors[i].base),native[i].size(),s.str());}
@@ -158,6 +164,7 @@ if(only=="ghost_draw_probe"){
             bool same=g[0]==calls[i].pc;if(g[0]==0x46f990u)same=same&&g[1]==calls[i].a[0]&&g[2]==calls[i].a[1];
             if(!same){fail(tag+" service #"+std::to_string(i));break;}}
         ++coverage["entry "+std::to_string(entry)];
+        ++coverage[std::string(active?"active state ":"inactive state ")+std::to_string(request_state)+" entry "+std::to_string(entry)];
         if(n){const int l=int(std::int8_t(mirrors[0].bytes[0x328]));++coverage[l>=0&&l<=4?"drew lod "+std::to_string(l):std::string("drew lod other")];}
     }
     std::cout<<"{\"routine\":\""<<only<<"\",\"coverage\":{";bool first=true;
