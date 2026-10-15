@@ -91,6 +91,9 @@ struct NativeRaceHudRuntime {
 NativeRaceHudRuntime& native_race_hud(NativeRuntimeContext&);
 // Maps the HUD-owned Heart Attack words into another owner's memory (race_traffic).
 void native_race_hud_map_heart(NativeRuntimeContext&,PcRaceMemory&);
+// Maps the HUD-owned voice queue (tail 7F1994, entries 7F1998.., head 7F1C64, last 7F8B40) into another
+// owner's memory: the traffic module, where the C2C request manager flushes it (45BCC0).
+void native_race_hud_map_voice(NativeRuntimeContext&,PcRaceMemory&);
 // Event callbacks 427E30/427F70 (mode 16), 4970F0/498590/497210 and
 // 4BC9E0/4BCC40/4B8DF0. False when the callback is not one of them.
 bool native_race_hud_event_invoke(NativeRuntimeContext&,std::uint32_t callback,std::uint32_t work,std::uint32_t event_id,
