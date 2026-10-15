@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_sett
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb

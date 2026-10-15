@@ -1,4 +1,5 @@
 #include "platform/race_goal_camera.hpp"
+#include "platform/cd_switcher.hpp"
 #include "platform/pc_address_view.hpp"
 #include "driving/pc_x87.hpp"
 #include "driving/pc_crash.hpp"
@@ -211,12 +212,16 @@ void goal_script_486730(PcRaceContext& c){
         auto w=[&](std::uint32_t o){return m.u32(rec+o);};
         switch(op){
         case 0:call(c,0x428320u,{w(4),w(8),w(0xc)});break;
-        case 1:call(c,0x401000u,{w(4),w(8),w(0xc)});break;
+        case 1: // Tweaks' 48687F race-owned adxPlay call, never a global 401000 override.
+            if(!cd_switcher().enabled||!cd_switcher_race_load(m.u32(0x78026cu),w(8)))call(c,0x401000u,{w(4),w(8),w(0xc)});
+            break;
         case 2:call(c,0x42e020u,{w(4),w(0x14),w(8)});break;
         case 3:if(w(4)==3u)call(c,0x401050u,{});else call(c,0x401030u,{w(4)});break;
         case 4:{
             const std::int8_t a=std::int8_t(call(c,0x48b1e0u,{}));
-            call(c,0x401000u,{w(4),std::uint32_t(std::int32_t(a)),1u});
+            // Tweaks' second call at 4868D3. Preserve both 48B1E0 calls.
+            if(!cd_switcher().enabled||!cd_switcher_race_load(m.u32(0x78026cu),std::uint32_t(std::int32_t(a))))
+                call(c,0x401000u,{w(4),std::uint32_t(std::int32_t(a)),1u});
             const std::int8_t b=std::int8_t(call(c,0x48b1e0u,{}));
             const std::uint32_t level=call(c,0x427aa0u,{std::uint32_t(std::int32_t(b))});   // x87 result, stored as a float
             call(c,0x42e020u,{w(4),level,0u});

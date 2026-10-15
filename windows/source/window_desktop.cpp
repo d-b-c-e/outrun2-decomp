@@ -10,6 +10,7 @@
 #include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
 #include "hud_toggle.hpp"
+#include "cd_switcher.hpp"
 #include "display_fit.hpp"
 #include "renderer.hpp"
 #include "d3d11_d3d9.hpp"
@@ -594,6 +595,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // [Misc] HudToggleKey (hud_toggle.hpp): ordinary play that is not recording only; the key still reaches the game.
     outrun::desktop::hud_toggle_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
     outrun::desktop::hud_toggle_wrap_input_filter();
+    outrun::desktop::cd_switcher_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
+    outrun::desktop::cd_switcher_wrap_input_filter();
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open

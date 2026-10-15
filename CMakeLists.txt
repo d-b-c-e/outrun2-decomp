@@ -217,6 +217,9 @@ set_tests_properties(camera_render_binding PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(test_c2c_goal_sequence tests/test_c2c_goal_sequence.cpp)
 target_link_libraries(test_c2c_goal_sequence PRIVATE outrun_native_runtime)
 add_test(NAME c2c_goal_sequence COMMAND test_c2c_goal_sequence)
+add_executable(test_cd_switcher tests/test_cd_switcher.cpp)
+target_link_libraries(test_cd_switcher PRIVATE outrun_native_runtime)
+add_test(NAME cd_switcher COMMAND test_cd_switcher)
 set_tests_properties(c2c_goal_sequence PROPERTIES SKIP_RETURN_CODE 77)
 # [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
 # compiled-in globals only, no game files.

@@ -1,5 +1,6 @@
 #include "enhancements/frame_rate.hpp"
 #include "runtime/game_host.hpp"
+#include "platform/cd_switcher.hpp"
 #include "platform/bulk_fallback.hpp"
 #include "driving/pc_driving.hpp"
 #include "platform/embedded_exe_data.hpp"
@@ -249,6 +250,56 @@ bool menu_music_stop(void* user,unsigned){
     if(s.audio_open&&!pump_audio(s)){s.render_failed=true;return false;}
     if(s.menu_audio.music().playing())++s.music_stops;
     s.menu_audio.stop_music();return true;
+}
+// CD paths are explicit user configuration, distinct from title strings and the
+// retail-relative table. Retain the existing 64 MiB read bound, format validation,
+// MusicStream decoder, custom-loop validation and shared MenuAudio mixer.
+bool cd_music_play(void* user,const pf::CdTrack& track,std::size_t index,bool loop){
+    auto& s=*static_cast<GameHost*>(user);
+    if(!s.runtime||s.runtime->mode_state.current!=16u||!s.retail)return false;
+    const auto exists=[](const std::string& path){
+#ifdef _WIN32
+        std::error_code ec;return std::filesystem::is_regular_file(path,ec)&&!ec;
+#else
+        std::FILE* f=std::fopen(path.c_str(),"rb");if(!f)return false;std::fclose(f);return true;
+#endif
+    };
+    const auto selected=pf::resolve_cd_track(track.path,pf::retail_asset_path(*s.retail,"Sound"),pf::music_replacement_policy(),exists);
+    std::vector<std::uint8_t> bytes;std::string error;
+    if(selected.path.empty())error="catalog file missing or format not enabled";
+    else{
+        std::FILE* file=std::fopen(selected.path.c_str(),"rb");
+        if(!file)error="catalog file cannot be opened";
+        else{
+            if(std::fseek(file,0,SEEK_END)!=0)error="cannot size catalog file";
+            const auto length=error.empty()?std::ftell(file):-1L;
+            if(error.empty()&&(length<0||static_cast<std::uint64_t>(length)>64u*1024u*1024u))error="catalog file exceeds size limit";
+            if(error.empty()){
+                std::rewind(file);bytes.resize(static_cast<std::size_t>(length));
+                const auto got=bytes.empty()?0u:std::fread(bytes.data(),1,bytes.size(),file);
+                const int extra=std::fgetc(file);
+                if(got!=bytes.size()||extra!=EOF||std::ferror(file))error="catalog file read mismatch";
+            }
+            std::fclose(file);
+        }
+    }
+    if(error.empty()&&!pf::validate_music_file(selected.format,bytes,error)){
+        if(error.empty())error="catalog format validation failed";
+    }
+    std::lock_guard<std::recursive_mutex> audio_lock(audio_mutex());
+    if(error.empty()){
+        if(s.audio_open&&!pump_audio(s)){s.render_failed=true;error="catalog audio pump failed";}
+        else if(s.menu_audio.play_music(std::move(bytes),loop,error)){
+            ++s.music_starts;s.music_track=static_cast<unsigned>(index);
+            ++s.runtime->event_function36.music_play_requests;
+            s.runtime->event_function36.music_last_track=static_cast<unsigned>(index);
+            std::printf("music: CD track %zu selected %s loop=%u\n",index,selected.path.c_str(),unsigned(loop));
+            return true;
+        }
+    }
+    if(error.empty())error="catalog decoder refused file";
+    ++s.music_failures;s.music_error=error;
+    std::fprintf(stderr,"music: CD track %zu refused: %s\n",index,error.c_str());return false;
 }
 // Options > Audio: 42EFA0 (SE master, integer level) and 42FC90 (BGM, float bits).
 bool menu_volume(void* user,unsigned pc,unsigned arg){
@@ -1257,6 +1308,7 @@ bool open_frontend(GameHost& host,pf::NativeRuntimeContext& context,pf::RetailAs
     fe.title_widgets->effect(&host,menu_effect);fe.title_widgets->volume(&host,menu_volume);fe.license_owners->platform(&host,menu_platform);
     state.frontend_effect_user=&host;state.frontend_effect=menu_effect;
     host.retail=&retail;state.music_user=&host;state.music_play=menu_music_play;state.music_stop=menu_music_stop;
+    pf::cd_switcher().user=&host;pf::cd_switcher().play=cd_music_play;
     // OutRun2SP button: 4165C0 rankings.dat / 4F3CC0 ranking tables (race_end_runtime).
     state.frontend_choice_service_user=&context;
     state.frontend_choice_service=[](void* u,unsigned pc){
@@ -1271,6 +1323,7 @@ void close_frontend(GameHost& host,pf::NativeRuntimeContext& context,FrontendSes
     if(fe.license_owners)fe.license_owners->reset();state.license_owners=nullptr;
     state.frontend_effect=nullptr;state.frontend_effect_user=nullptr;
     state.music_play=nullptr;state.music_stop=nullptr;state.music_user=nullptr;host.menu_audio.stop_music();
+    if(pf::cd_switcher().user==&host){pf::cd_switcher().play=nullptr;pf::cd_switcher().user=nullptr;}
     state.frontend_choice_service=nullptr;state.frontend_choice_service_user=nullptr;
     host.menu_audio.bind_driver(nullptr);context.pc_sound.ready=false;
     audio_thread().stop();audio_main_release();
