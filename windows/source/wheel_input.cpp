@@ -25,8 +25,8 @@
 namespace outrun::desktop {
 namespace {
 // The game's buttons, by the controls-contract action that drives each.
-enum Button : unsigned { Confirm, Back, Start, ShiftUp, ShiftDown, Camera, NavUp, NavDown, NavLeft, NavRight, ButtonCount };
-constexpr const char* ButtonActions[ButtonCount]{"confirm","back","start","shiftUp","shiftDown","camera","navUp","navDown","navLeft","navRight"};
+enum Button : unsigned { Confirm, Back, Start, ShiftUp, ShiftDown, Camera, NavUp, NavDown, NavLeft, NavRight, Horn, ButtonCount };
+constexpr const char* ButtonActions[ButtonCount]{"confirm","back","start","shiftUp","shiftDown","camera","navUp","navDown","navLeft","navRight","horn"};
 constexpr const char* GearActions[6]{"gear1","gear2","gear3","gear4","gear5","gear6"};
 
 struct Device {
@@ -433,6 +433,7 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     out.menu_left|=on(down,NavLeft);out.menu_right|=on(down,NavRight);
     out.menu_confirm|=on(down,Confirm)||on(down,Start);out.menu_cancel|=on(down,Back);
     out.start|=on(down,Start);
+    out.horn|=on(held,Horn);   // [Audio] AllowHorn: its own action, no record bit (native_race_horn)
     // Frontend features (48F5F0), as the pad adapter sets them from its button edges.
     auto& f=out.frontend.feature_mask;
     if(on(down,Start))f|=1u;

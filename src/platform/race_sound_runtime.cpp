@@ -4,7 +4,9 @@
 #include "platform/race_sound_runtime.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
+#include "platform/pc_screen.hpp"   // AllowHorn
 #include "driving/pc_common_control.hpp"
+#include "driving/pc_wall_rebound.hpp"
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -155,5 +157,28 @@ std::string native_race_sound_status(const NativeRuntimeContext& c){
     if(s.latched)o<<" fault="<<s.fault_pc<<' '<<s.last_error;
     else if(!s.last_error.empty())o<<" last="<<s.last_error;
     return o.str();
+}
+namespace {
+// 424940 on the race SE queue 9563E8, gated by event 383 (SOUND) as the race's own 424940 callers queue it. True once the
+// command is in the ring: queued now, or still pending (424940 drops a copy of a pending command; 4249A0 writes -1 to
+// each consumed entry). False when 424940 refused it: event 383 closed or paused, or the ring full.
+bool race_se_queued(NativeRuntimeContext& c,std::uint32_t command){
+    auto& w=c.race.car_world;
+    driving::PcSoundQueue q{driving::Bytes(w.sound_entries_9563e8.data(),w.sound_entries_9563e8.size()),
+        driving::Bytes(w.sound_state.data(),w.sound_state.size()),std::uint8_t(c.event_state.slots[383].flags)};
+    driving::pc_enqueue_sound(q,command);
+    for(std::uint32_t n=0;n<32u;++n){std::uint32_t v;std::memcpy(&v,w.sound_entries_9563e8.data()+n*4u,4);if(v==command)return true;}
+    return false;
+}
+}
+void native_race_horn(NativeRuntimeContext& c,bool held){
+    if(!g_pc_allow_horn)return;
+    auto& s=c.race.sound;
+    if(held&&c.mode_state.current==16u){s.horn_active=true;(void)race_se_queued(c,0x1bcu|0x800u);return;}   // every tick, as Tweaks
+    // The stop stays pending until 424940 takes it, so a release while event 383 is closed or paused, or the ring is
+    // full, still stops the loop later (sana #129986). ClearAllSound (427630) does not end the obligation: 424700 clears
+    // and then flushes the ring in one callback (pause_clear_424b10, then flush_se_4249a0), so a loop still queued plays
+    // after the clear (lola #130449). A stop sent after a clear stops nothing, which is harmless.
+    if(s.horn_active&&race_se_queued(c,0x1bcu|0x8000u))s.horn_active=false;
 }
 }

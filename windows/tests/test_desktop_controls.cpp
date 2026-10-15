@@ -71,9 +71,11 @@ void test_import(){
     check(lines[0]=="Schema = 1"&&lines[3]=="Transmission = H-pattern","header lines");
     const auto s=ctl::parseSection(lines);
     check(s.error.empty()&&s.invalid.empty(),"the import parses back with nothing invalid");
-    // steer throttle brake + confirm back start select shiftUp shiftDown camera navUp navDown navLeft navRight + 6 gears + reverse
-    check(s.bound.size()==3+11+7,"bound count "+std::to_string(s.bound.size()));
-    check(notes.size()==2,"ButtonX and ButtonY are noted, not imported");
+    // steer throttle brake + confirm back horn start select shiftUp shiftDown camera navUp navDown navLeft navRight + 6 gears + reverse
+    check(s.bound.size()==3+12+7,"bound count "+std::to_string(s.bound.size()));
+    check(notes.size()==1,"ButtonY is noted, not imported");
+    const auto* horn=ctl::find(s,"horn");   // Tweaks' X switch is its horn (AudioHooks_Update)
+    check(horn&&horn->dev==Wheel&&horn->index==33,"ButtonX imports as the horn");
     const auto* steer=ctl::find(s,"steer");
     check(steer&&steer->dev==Wheel&&steer->prod==WheelProd&&steer->index==0&&!steer->inverted,"steer binding");
     const auto* throttle=ctl::find(s,"throttle");

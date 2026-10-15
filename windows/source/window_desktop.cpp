@@ -486,6 +486,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::platform::g_pc_enable_holly_course2=v<0||v>3?3:v;
         if(outrun::platform::g_pc_enable_holly_course2!=3)
             std::printf("settings: Holly's MIX 2 course (EnableHollyCourse2) %d\n",outrun::platform::g_pc_enable_holly_course2);}
+    // [Audio] AllowHorn, the Tweaks key (on unless set false, as there): the controls contract's "horn" action sounds the
+    // horn in the race (pc_screen.hpp; race_sound_runtime.cpp native_race_horn).
+    outrun::platform::g_pc_allow_horn=settings.flag("Audio","AllowHorn",true);
+    if(!outrun::platform::g_pc_allow_horn)std::printf("settings: the horn off ([Audio] AllowHorn = false)\n");
     // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).
     outrun::platform::g_pc_default_manual_transmission=settings.flag("Misc","DefaultManualTransmission",false);

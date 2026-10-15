@@ -60,8 +60,8 @@ std::vector<std::string> import_legacy(const LegacyControls& c,const LegacyDevic
     const auto& brake=d.brake.present()?d.brake:d.wheel;
     if(c.accel_axis>=0&&c.accel_axis<=7)put("throttle",axis(throttle,c.accel_axis,false,c.accel_invert));
     if(c.brake_axis>=0&&c.brake_axis<=7)put("brake",axis(brake,c.brake_axis,false,c.brake_invert));
-    // Tweaks Button<Name> -> action; X and Y have no controls-contract action.
-    static constexpr const char* Actions[13]{"confirm","back",nullptr,nullptr,"start","select","shiftUp","shiftDown","camera",
+    // Tweaks Button<Name> -> action; X is Tweaks' horn switch (SwitchId::X, AudioHooks_Update); Y has no contract action.
+    static constexpr const char* Actions[13]{"confirm","back","horn",nullptr,"start","select","shiftUp","shiftDown","camera",
                                              "navUp","navDown","navLeft","navRight"};
     static constexpr const char* Names[13]{"A","B","X","Y","Start","Back","GearUp","GearDown","ChangeView","SelUp","SelDown","SelLeft","SelRight"};
     auto buttons=[&](const DeviceIdentity& dev,const std::array<int,13>& set,const char* section){

@@ -176,6 +176,11 @@ inline bool g_pc_allow_character_selection=false;
 // lane is optional: absent or malformed, group 7 stays locked and unrequestable in every mode. No save change: its results
 // are the course types' nibbles at licence +36E like every championship's.
 inline int g_pc_enable_holly_course2=3;
+// [Audio] AllowHorn (the Tweaks key, on by default as there; hooks_audio.cpp AudioHooks_Update): while the contract's own
+// "horn" action is held in GAME (mode 16), SE 0x1BC is queued looping every frame (0x1BC | SND_LOOP 0x800), and on release
+// or on leaving GAME it is stopped (0x1BC | SND_STOP 0x8000). Tweaks reads the X switch (0x10); here the horn is its own
+// action, because the desktop record's button behind that switch is shift-down (race_sound_runtime.cpp native_race_horn).
+inline bool g_pc_allow_horn=true;
 // [Graphics] UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a): Tweaks' HUD shift in 640-wide UI units at the 4:3
 // scale, 320 (1 - 4 / (3A)) for the 2D rectangle's frame of aspect A (80 at 16:9: three quarters of the margin, as
 // Tweaks' AddSpriteSpacing lands; display_fit.hpp ui_scaling_rect .hud), set by the renderer each frame; 0 in modes 0

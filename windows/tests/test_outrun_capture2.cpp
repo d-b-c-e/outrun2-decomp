@@ -27,7 +27,7 @@ int main(){
 
     auto two=base();two.has_consumed=true;
     auto& f=two.consumed;
-    f.steering=-77;f.accelerator=200;f.brake=13;f.shift_up=true;f.menu_left=true;f.menu_confirm=true;f.start=true;
+    f.steering=-77;f.accelerator=200;f.brake=13;f.shift_up=true;f.menu_left=true;f.menu_confirm=true;f.start=true;f.horn=true;
     f.frontend.feature_mask=0x2004u;f.frontend.device_held=0x80u;f.frontend.axes={-5,6,-7,8};f.connected=true;
     f.pc_input_layer=true;f.pc_record_used=true;f.pc_overlay=true;f.pc_overlay_yield=true;
     f.pc_device.buttons_04=0x182u;f.pc_device.axes_94[0x0e]=-12000;f.pc_device.axes_94[0x0d]=255;f.pc_device.axes_94[0x0c]=17;
@@ -75,6 +75,10 @@ int main(){
     check(g.pc_input_layer&&g.pc_record_used&&g.pc_overlay&&g.pc_overlay_yield&&g.pc_device.buttons_04==0x182u&&
           g.pc_device.axes_94[0x0e]==-12000&&g.pc_device.axes_94[0x0d]==255&&g.pc_device.axes_94[0x0c]==17,"the PC layer's record round-trips");
     check(d.keyboard.enter&&!d.keyboard.esc&&d.keyboard.up&&d.keyboard.right&&d.keyboard.any&&d.keyboard.drives,"the keyboard provenance round-trips");
+    check(g.horn&&c2.at("final.horn")==1.0,"the horn action round-trips (final.horn)");
+    {auto old=c2;old.erase("final.horn");check(!decoded_consumed(old).input.horn,"a row recorded before the horn decodes it as released");
+     old=c2;old["final.horn"]=2;bool refused=false;try{(void)decoded_consumed(old);}catch(const std::exception&){refused=true;}
+     check(refused,"an out-of-range horn value is refused");}
     // Strict decoding: an out-of-range or missing value throws.
     auto bad=c2;bad["final.steering"]=200;
     bool threw=false;try{(void)decoded_consumed(bad);}catch(const std::exception&){threw=true;}

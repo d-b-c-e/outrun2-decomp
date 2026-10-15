@@ -45,6 +45,7 @@ struct NativeRaceSound {
     std::map<std::uint32_t,std::uint32_t> routed,missing; // services answered / not ported
     std::uint32_t inits{},controls{},destroys{},skipped{},ics_updates{},clear_alls{},comm_trans{};
     bool initialized{},latched{};
+    bool horn_active{};                                   // AllowHorn: SE 0x1BC queued looping (native_race_horn)
     std::uint32_t fault_pc{};
     std::string last_error;
 };
@@ -53,4 +54,10 @@ bool native_race_sound_invoke(NativeRuntimeContext&,std::uint32_t callback,PcSce
 // Mode callbacks writing 83036C (48B210 init / 48B2A0 exit).
 void native_race_sound_mode_token(NativeRuntimeContext&,std::uint32_t token);
 std::string native_race_sound_status(const NativeRuntimeContext&);
+// [Audio] AllowHorn (pc_screen.hpp; Tweaks' AudioHooks_Update), once per tick from 453BB0's input step on the final
+// (possibly replayed) input: in GAME (mode 16) it queues 0x1BC | SND_LOOP on the race SE queue 9563E8 every tick while
+// held (the queue drops a copy still pending); otherwise, if it had, 0x1BC | SND_STOP, kept pending until 424940 takes it
+// (event 383 closed or paused, or a full ring, refuses it), even across ClearAllSound (a loop still queued plays after
+// 424700's clear). Audio only: no RNG, no record bit.
+void native_race_horn(NativeRuntimeContext&,bool held);
 }
