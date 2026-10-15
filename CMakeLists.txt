@@ -277,7 +277,11 @@ target_link_libraries(test_screen_edge_cull PRIVATE outrun_native_runtime)
 add_test(NAME screen_edge_cull COMMAND test_screen_edge_cull)
 add_executable(test_pc_pmt_loader tests/test_pc_pmt_loader.cpp)
 target_link_libraries(test_pc_pmt_loader PRIVATE outrun_native_runtime)
-add_test(NAME pc_pmt_loader COMMAND test_pc_pmt_loader)
+if(OR2_RETAIL_FIXTURE_ROOT)
+  add_test(NAME pc_pmt_loader COMMAND test_pc_pmt_loader --retail-root "${OR2_RETAIL_FIXTURE_ROOT}")
+else()
+  add_test(NAME pc_pmt_loader COMMAND test_pc_pmt_loader --retail-root "${OR2_PC_ASSET_ROOT}")
+endif()
 add_executable(test_pc_sprite_replacement tests/test_pc_sprite_replacement.cpp)
 # The retail check reaches sprite_2d_runtime, whose clang-cl objects call the compiler-rt builtins (128-bit division),
 # as in windows/CMakeLists.txt.

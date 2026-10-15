@@ -3,9 +3,11 @@
 // pmt_loader_probe oracle.
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_dds.hpp"
+#include "system/exe_image.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <string>
 #include <utility>
 #include <cstring>
@@ -77,7 +79,19 @@ void load_synthetic(PcPmtResources& r,Device& dev){
     pmt_textures_begin_42e850(r,cur);CHECK(pmt_textures_step_42e8c0(r,cur,dev));
 }
 }
-int main(){
+int main(int argc,char** argv){
+    // The PMT is synthetic, but its material shader fragments come from the player's verified EXE tables.
+    // Bind them in memory before link_vertex_shader_40e140; never prepare or rewrite an on-disk game cache.
+    if(argc!=3||std::strcmp(argv[1],"--retail-root")!=0){
+        std::fprintf(stderr,"pc_pmt_loader requires --retail-root OWNED_GAME_FOLDER for verified shader tables\n");return 2;}
+    std::vector<std::uint8_t> image;std::string path,error;ExeSource source=ExeSource::Missing;
+    try{
+        if(!exe_image_find_source(argv[2],image,path,&source,&error)){
+            std::fprintf(stderr,"pc_pmt_loader cannot read a verified retail EXE: %s\n",error.c_str());return 2;}
+        exe_image_install(std::move(image));
+    }catch(const std::exception& ex){std::fprintf(stderr,"pc_pmt_loader cannot initialize shader tables: %s\n",ex.what());return 2;}
+    CHECK(exe_image_loaded());
+    std::printf("pc_pmt_loader: verified EXE tables bound in memory from %s\n",path.c_str());
     PcVertexDeclaration d{};
     CHECK(d3dx_declarator_from_fvf(0x152,d)); // XYZ | NORMAL | DIFFUSE | TEX1
     CHECK(d[0].type==2&&d[0].usage==0&&d[0].offset==0);
