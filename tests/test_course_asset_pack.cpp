@@ -756,6 +756,54 @@ int main(int argc,char** argv){
                         "505850 state 3: a kind-0x10 object with another subtype still pushes the voice line (both must match)");
                 std::fprintf(stderr,"request record 505850: state 3, 5217C0 voice line and the kind-0x10 skip checked\n");
             }
+            {   // 505850 state 6 (505B7E), after 4FC830: 5217E0([obj], [rec+24]) picks a voice line by the record's +24 with
+                // function-local statics (guard 85B340; 85B33C = rand(), then a counter for +24 >= 4; 85B338 = that rand, then
+                // a counter for +24 <= 1); then 521890([rec+24]) asks the passenger (robot 1, event 0x16B) for a pose through
+                // 487DD0 / 487D60. run-0311 latched at 5217F8: 85B338..85B33F lay under the read-only EXE range. Both are
+                // called directly at their call shapes (ECX = the manager); the state's earlier calls are not part of this.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;auto& voice=native_race_hud(request).voice;
+                auto& slots=request.event_state.slots;auto& car=request.event_function36.car_select.car_799d18;
+                auto& works=request.race.robots.state.works;auto& rnd=request.event_function36.pc_crt_random_state;
+                auto cell=std::find_if(traffic.requests_cells.begin(),traffic.requests_cells.end(),[](const auto& p){return p.first==0x85b338u;});
+                require(cell!=traffic.requests_cells.end()&&cell->second.size()==0x188u,"the request cell 85B338..85B4BF holds 5217E0's statics");
+                auto& statics=cell->second;
+                const auto block0=block;const auto voice0=voice;const auto statics0=statics;const auto car0=car;const auto works0=works;
+                const auto rnd0=rnd;const auto car_work0=slots[8].work_token,passenger0=slots[0x16bu].work_token;
+                std::fill(statics.begin(),statics.end(),std::uint8_t(0));                     // as at process start (.bss)
+                auto stat=[&](std::uint32_t at){std::uint32_t v;std::memcpy(&v,statics.data()+(at-0x85b338u),4);return v;};
+                auto table=[](std::uint32_t at){std::int32_t v;std::memcpy(&v,exe_image_bytes(at,4u),4);return v;};
+                auto call=[&](std::uint32_t pc,std::initializer_list<std::uint32_t> args){
+                    voice=NaviVoiceQueue{};std::uint32_t eax=0u;
+                    const bool ran=native_race_requests_call(request,request_matrices,pc,args,eax,NativeRaceTraffic::RequestsBase);
+                    if(!ran)std::fprintf(stderr,"%X: latched=%d fault=%X %s\n",unsigned(pc),int(traffic.latched),unsigned(traffic.fault),traffic.error.c_str());
+                    return ran&&!traffic.latched;};
+                request.start_mode.manager_state_7f94c0=1u;put32(block,0x164u,0u);put32(block,0xf4u,1u);   // 46C530 = 0; voice row 1
+                std::uint32_t preview=rnd;const std::uint32_t r=frontend_crt_random_580f40(preview);
+                require(call(0x5217e0u,{3u,5u})&&(stat(0x85b340u)&3u)==3u&&stat(0x85b33cu)==r+1u&&stat(0x85b338u)==r&&
+                        voice.entries_7f1998[0].id==table(0x5ea280u+(7u+(r+1u)%3u+4u)*4u)&&
+                        voice.entries_7f1998[0].duration==0x3c&&voice.entries_7f1998[0].priority==0xa,
+                        "5217E0 (+24 = 5): the statics are written in the cell (rand, then the counter); the line is 5EA280 row 1");
+                const auto rnd1=rnd;
+                require(call(0x5217e0u,{3u,1u})&&rnd==rnd1&&stat(0x85b33cu)==r+1u&&stat(0x85b338u)==r+1u&&
+                        voice.entries_7f1998[0].id==table(0x5ea280u+(7u+((r+1u)&1u))*4u),
+                        "5217E0 (+24 = 1): the guard holds (no second rand); 85B338 counts and picks the line");
+                constexpr std::uint32_t CarWork=0x7804b0u,Passenger=PcRaceRobotState::WorkBase+0x90u;
+                slots[8].work_token=CarWork;slots[0x16bu].work_token=Passenger;car[0x11]=0;   // car +11 = 0: the 5EA30C row
+                auto work=[&](std::uint32_t o){std::uint32_t v;std::memcpy(&v,works.data()+(Passenger-PcRaceRobotState::WorkBase)+o,4);return v;};
+                auto set=[&](std::uint32_t o,std::uint32_t v){std::memcpy(works.data()+(Passenger-PcRaceRobotState::WorkBase)+o,&v,4);};
+                set(0x68u,0xffffffffu);set(0x78u,0u);set(0x7cu,1u);
+                const auto dd0=traffic.routed[0x487dd0u],d60=traffic.routed[0x487d60u];
+                require(call(0x521890u,{2u})&&stat(0x85b344u)==CarWork&&(stat(0x85b348u)&1u)&&work(0x7cu)==0u&&
+                        work(0x68u)==std::uint32_t(table(0x5ea30cu+2u*4u))&&work(0x78u)==2u&&
+                        traffic.routed[0x487dd0u]==dd0+1u&&traffic.routed[0x487d60u]==d60+1u,
+                        "521890: 487DD0 clears the passenger's +7C; 487D60 requests the 5EA30C pose (+68) with +78 = 2");
+                set(0x68u,0xffffffffu);set(0x78u,0u);set(0x7cu,1u);put32(block,0x164u,1u);    // 46C530 nonzero: robot 1 keeps its pose
+                require(call(0x521890u,{2u})&&work(0x7cu)==0u&&work(0x68u)==0xffffffffu&&work(0x78u)==0u,
+                        "521890 while 46C530 is nonzero: 487DD0 still clears +7C; 487D60 leaves robot 1's pose");
+                block=block0;voice=voice0;statics=statics0;car=car0;works=works0;rnd=rnd0;
+                slots[8].work_token=car_work0;slots[0x16bu].work_token=passenger0;
+                std::fprintf(stderr,"request record 505850 state 6: 5217E0 statics and voice line, 521890 passenger pose and 46C530 skip checked\n");
+            }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
             NaviPubGlobals globals;PcRaceMemory memory;globals.map(memory);
