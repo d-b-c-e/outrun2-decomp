@@ -15,6 +15,7 @@
 #include "driving/pc_driving.hpp"
 #include "driving/pc_wheel_dynamics.hpp"
 #include "platform/race_player_car.hpp"
+#include "platform/race_traffic_runtime.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "platform/frontend_preview_pack.hpp"
 #include "platform/native_race_effects.hpp"   // scn-efc
@@ -721,18 +722,27 @@ const bool core_passed=loader_bytes_match&&rc==0u&&ev405.function_id==36u&&ev405
         // unlike the legacy direct-course diagnostic lines above: frames, the CommonPlCar start hold
         // (event+4 bit 3), 8367BC / [780248], the 49FB70 time-up input, and per wheel contact (+0 bit 0
         // clear = on the ground), load +34 and Mu +E8. The first GAME hold transitions follow.
+        // GetRoadMu 500B30's inputs for that Mu: per wheel the surface flags +14 (the ground probe's;
+        // exactly 1 = no polygon found) and polygon +10, and the C2C request manager's road Mu +764C
+        // (481250 writes 1.0) with [7F94C0] (non-zero: the manager's lookup 4FC390 serves the Mu).
         const auto& cw=context.race.car_world;
         const auto& cs=context.event_function36.car_select;
         const outrun::driving::Bytes car(const_cast<std::uint8_t*>(cs.car_799d18.data()),cs.car_799d18.size());
         const auto wheels=outrun::driving::embedded_wheels(
             outrun::driving::Bytes(const_cast<std::uint8_t*>(cs.body_82e7f0.data()),cs.body_82e7f0.size()));
+        auto& requests=outrun::platform::native_race_traffic(context).requests_7f9460;
+        const outrun::driving::Bytes manager(requests.data(),requests.size());
         result_printf(result_log,"player car (GamePlCar) frames=%u completed=%u pos=%.2f/%.2f/%.2f speed=%.4f hold=%u countdown=%d flag780248=%u timeup=%d"
-            " contact=%c%c%c%c load=%.3f/%.3f/%.3f/%.3f mu=%.3f/%.3f/%.3f/%.3f last=%06X %s\n",
+            " contact=%c%c%c%c load=%.3f/%.3f/%.3f/%.3f mu=%.3f/%.3f/%.3f/%.3f surface=%X/%X/%X/%X polygon=%d/%d/%d/%d"
+            " manager_mu764c=%.3f manager7f94c0=%X last=%06X %s\n",
             cw.frames,cw.completed_frames,car.f32(0x14),car.f32(0x18),car.f32(0x1c),car.f32(0x1c4),(car.u32(4)&8u)?1u:0u,
             int(context.game_mode.start_countdown),unsigned(context.start_mode.game_flag_780248),int(cw.timeup_44fe40),
             (wheels[0].u8(0)&1u)?'-':'G',(wheels[1].u8(0)&1u)?'-':'G',(wheels[2].u8(0)&1u)?'-':'G',(wheels[3].u8(0)&1u)?'-':'G',
             wheels[0].f32(0x34),wheels[1].f32(0x34),wheels[2].f32(0x34),wheels[3].f32(0x34),
             wheels[0].f32(0xe8),wheels[1].f32(0xe8),wheels[2].f32(0xe8),wheels[3].f32(0xe8),
+            wheels[0].u32(0x14),wheels[1].u32(0x14),wheels[2].u32(0x14),wheels[3].u32(0x14),
+            wheels[0].i32(0x10),wheels[1].i32(0x10),wheels[2].i32(0x10),wheels[3].i32(0x10),
+            manager.f32(0x764c),unsigned(context.start_mode.manager_state_7f94c0),
             unsigned(cw.last_error_pc),cw.last_error.c_str());
         result_printf(result_log,"player car GAME hold transitions=%u",cw.hold_transition_count);
         for(std::uint32_t k=0;k<cw.hold_transition_count&&k<cw.hold_transitions.size();++k){const auto& t=cw.hold_transitions[k];
