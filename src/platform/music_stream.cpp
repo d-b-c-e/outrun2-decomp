@@ -223,6 +223,7 @@ struct MusicStream::Impl {
     MusicFlacLoopPoints loop_points;
     bool custom_loop{},custom_wrap_pending{},custom_seek_pending{},custom_seek_seen{};
     std::uint64_t custom_next_sample{},custom_seek_discarded{};
+    std::int64_t custom_seek_anchor{AV_NOPTS_VALUE};
     static int read_memory(void* user,std::uint8_t* out,int n){
         auto& s=*static_cast<Impl*>(user);
         if(n<=0)return AVERROR(EINVAL);
@@ -286,7 +287,11 @@ struct MusicStream::Impl {
         replacement=true;return true;
     }
     bool seek_custom_loop(std::string& error){
-        const int rc=av_seek_frame(format,stream,std::int64_t(loop_points.start),AVSEEK_FLAG_BACKWARD);
+        // Seek the verified containing frame, then discard its proven prefix.
+        // An interior sample timestamp can make FFmpeg's FLAC binary search
+        // request an unavailable upper timestamp even in a one-frame file.
+        if(custom_seek_anchor==AV_NOPTS_VALUE)return fail(error,"music: missing FLAC loop frame anchor");
+        const int rc=av_seek_frame(format,stream,custom_seek_anchor,AVSEEK_FLAG_BACKWARD);
         if(rc<0)return ff_fail(error,"custom FLAC loop seek",rc);
         avcodec_flush_buffers(codec);swr_free(&convert);input_format=AV_SAMPLE_FMT_NONE;
         av_packet_unref(packet);av_frame_unref(frame);
@@ -316,6 +321,8 @@ struct MusicStream::Impl {
                     if((!custom_seek_pending||custom_seek_seen)&&first!=custom_next_sample)
                         return fail(error,"music: discontinuous FLAC sample timestamps");
                     custom_next_sample=end;custom_seek_seen=true;
+                    if(custom_seek_anchor==AV_NOPTS_VALUE&&first<=loop_points.start&&loop_points.start<end)
+                        custom_seek_anchor=timestamp;
                     if(custom_seek_pending){
                         if(first>loop_points.start)return fail(error,"music: FLAC seek skipped loop start");
                         if(end<=loop_points.start){
@@ -409,7 +416,7 @@ struct MusicStream::Impl {
         stream=-1;input_format=AV_SAMPLE_FMT_NONE;draining=false;finished=false;decoded_since_seek=0;expected_samples=0;
         replacement_position=0;replacement_fraction=0;
         loop_points={};custom_loop=false;custom_wrap_pending=false;custom_seek_pending=false;custom_seek_seen=false;
-        custom_next_sample=0;custom_seek_discarded=0;
+        custom_next_sample=0;custom_seek_discarded=0;custom_seek_anchor=AV_NOPTS_VALUE;
 #endif
         open=false;replacement=false;ended=false;pending.clear();base=0;position=0;file.clear();read_at=0;
     }

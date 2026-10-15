@@ -162,14 +162,16 @@ NumericResult decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsig
 NumericResult render_custom_loop(const std::vector<std::uint8_t>& bytes,unsigned rate,unsigned channels,
                                 std::uint64_t start,std::uint64_t end,std::size_t outputs,std::array<std::size_t,4> chunks){
     MusicStream stream;std::string error;NumericResult result;
-    check(stream.open(bytes,true,error),error);
+    const std::string case_name="custom rate="+std::to_string(rate)+" channels="+std::to_string(channels)+
+        " start="+std::to_string(start)+" endExclusive="+std::to_string(end);
+    check(stream.open(bytes,true,error),case_name+": "+error);
     check(stream.stats.rate==rate&&stream.stats.channels==channels,"custom decoded layout");
     auto physical=[&](std::uint64_t logical){return logical<end?logical:start+(logical-end)%(end-start);};
     std::size_t output=0;
     for(std::size_t call=0;output<outputs&&call<outputs+1u;++call){
         const auto count=std::min(chunks[call%4u],outputs-output);std::vector<double> pcm(count*2u);
         const auto before=stream.stats.frames;
-        check(stream.mix_add(pcm.data(),count,0.5,error),error);
+        check(stream.mix_add(pcm.data(),count,0.5,error),case_name+": "+error);
         check(stream.stats.frames-before==count,"custom loop emitted exact requested frames");
         for(std::size_t f=0;f<count;++f,++output){
             const auto timestamp=std::uint64_t(output)*rate,index=timestamp/48000u;
@@ -206,6 +208,8 @@ void custom_loop_decode_checks(const std::string& retained,const std::string& fo
     pair(add_flac_comments(small,{{"LOOPSTART=10","LOOPLENGTH=2"}}),48000,1,10,11,111,{{10,1,1,31}});
     pair(add_flac_comments(small,{{"LOOPSTART=113","LOOPEND=257"}}),48000,1,113,257,1003,{{256,1,1,31}});
     pair(add_flac_comments(small,{{"LOOPSTART=0","LOOPEND=257"}}),48000,1,0,257,1003,{{257,1,3,31}});
+    // Interior final sample in a one-frame file must seek its containing frame0.
+    pair(add_flac_comments(small,{{"LOOPSTART=256","LOOPEND=257"}}),48000,1,256,257,503,{{256,1,3,31}});
     const auto fractional=add_flac_comments(load(retained+"/mono-8000-u8.flac"),{{"LOOPSTART=3","LOOPLENGTH=31"}});
     pair(fractional,8000,1,3,33,1503,{{197,1,1,31}});
     // loop=false deliberately retains the entire file, including samples after END.
@@ -216,6 +220,8 @@ void custom_loop_decode_checks(const std::string& retained,const std::string& fo
     check(long_flac.size()>12&&((unsigned(long_flac[10])<<8)|long_flac[11])==1024,"owned FLAC fixed block size 1024");
     pair(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=13123"}}),44100,2,1137,13123,43003,{{14282,1,3,31}});
     pair(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=20017"}}),44100,2,1137,20017,65003,{{21786,1,3,31}});
+    // LOOPSTART inside the final short frame exercises a nonzero frame anchor.
+    pair(add_flac_comments(long_flac,{{"LOOPSTART=19900","LOOPEND=20017"}}),44100,2,19900,20017,23003,{{21786,1,3,31}});
     decode_numeric(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=13123"}}),44100,2,"tagged-multiblock-nonloop",24,20017,{{4096,31,1,3}});
     MusicStream stream;
     check(stream.open(add_flac_comments(small,{{"LOOPSTART=3","LOOPEND=34"}}),true,error),"custom lifecycle open");
