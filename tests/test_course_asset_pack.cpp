@@ -678,6 +678,41 @@ int main(int argc,char** argv){
                         "4FC0B0 / 4FBBB0: a refused pose closes the record, counts +7638 in 4FBBB0 and in 4FC0B0, opens no event");
                 std::fprintf(stderr,"request car 4FBBB0: no event, live event and refused pose through 4FC0B0 checked\n");
             }
+            {   // 4FC240: the request manager starts its cars. For each live traffic event ([79FB48] & 3 == 2) whose work is a
+                // request car (+C5C & 40000) it runs 470240 on the car's place (result not tested), takes +1C4 / +1F4 from the
+                // speed it gives and clears +B58; then [+7640] = 1. combined-2341 latched the traffic module at 470240. The
+                // work here is scratch in the request block; on course type 0 lane 6 the pose is refused before any table read,
+                // so the speed is the caller's stack word and is not compared.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;
+                auto& racers=request.mission.racers;constexpr std::uint32_t Event=0x108u;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t> saved;
+                    outrun::platform::RacerSetupState& racers;const std::uint32_t base,count;
+                    outrun::driving::PcEventSlot& slot;const outrun::driving::PcEventSlot kept;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());racers.v680ad4=base;racers.v680ad8=count;slot=kept;}
+                } restore{block,block,racers,racers.v680ad4,racers.v680ad8,request.event_state.slots[Event],request.event_state.slots[Event]};
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,Work=0x6000u;
+                auto get32=[&](std::size_t o){std::uint32_t v;std::memcpy(&v,block.data()+o,4);return v;};
+                auto start=[&](std::uint32_t count,std::uint8_t flags,std::uint32_t c5c){
+                    std::fill(block.begin()+Work,block.begin()+Work+0xc60u,std::uint8_t(0));
+                    block[Work+0x5cu+0xau]=6;put32(block,Work+0xc5cu,c5c);put32(block,Work+0xb58u,0x77u);put32(block,0x7640u,0);
+                    racers.v680ad4=Event-8u;racers.v680ad8=count;
+                    auto& slot=request.event_state.slots[Event];slot.flags=flags;slot.work_token=B+Work;
+                    std::uint32_t eax=0u;
+                    const bool ran=native_race_requests_call(request,request_matrices,0x004fc240u,{},eax,B);
+                    if(!ran)std::fprintf(stderr,"4FC240: latched=%d fault=%X %s\n",int(traffic.latched),unsigned(traffic.fault),traffic.error.c_str());
+                    return ran;};
+                auto poses=traffic.routed[0x470240u];
+                require(start(1u,2u,0x40000u)&&!traffic.latched&&traffic.routed[0x470240u]==poses+1u&&
+                        traffic.memory.at(B+Work+0xb58u,4u)==block.data()+Work+0xb58u&&
+                        get32(Work+0xb58u)==0u&&get32(0x7640u)==1u&&request_matrices.depth==0,
+                        "4FC240: a live request car runs 470240 as a traffic service, clears +B58 and sets the manager's +7640");
+                poses=traffic.routed[0x470240u];
+                require(start(1u,2u,0u)&&traffic.routed[0x470240u]==poses&&get32(Work+0xb58u)==0x77u&&get32(0x7640u)==1u,
+                        "4FC240: a traffic car that is no request car keeps its work; +7640 is still set");
+                require(start(0u,2u,0x40000u)&&traffic.routed[0x470240u]==poses&&get32(Work+0xb58u)==0x77u&&get32(0x7640u)==1u,
+                        "4FC240: without traffic events only +7640 is set");
+                std::fprintf(stderr,"request cars 4FC240: 470240 route, non-request car and no events checked\n");
+            }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
             NaviPubGlobals globals;PcRaceMemory memory;globals.map(memory);

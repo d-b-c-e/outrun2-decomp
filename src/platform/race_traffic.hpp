@@ -53,6 +53,9 @@ std::uint32_t traffic_progress_4a6cf0(PcRaceContext&,std::uint32_t car);
 // 4EFB90(place) / 4F0030(place, record): the appear / speed records of a course place (84CAB4 / 84C6F8).
 std::uint32_t traffic_appear_rec_4efb90(PcRaceContext&,std::uint32_t place);
 std::uint32_t traffic_speed_rec_4f0030(PcRaceContext&,std::uint32_t place,std::uint32_t rec);
+// 470240(place, row, pos out, angles out, side out): the pose of a road place; 0 without its road table rows.
+std::uint32_t traffic_place_pose_470240(PcRaceContext&,std::uint32_t place,std::int32_t row,std::uint32_t pos,
+                                        std::uint32_t ang,std::uint32_t side);
 // Parts exposed for the probe.
 void traffic_spawn_47d8b0(PcRaceContext&);
 // 4B0330 (variant 9): the open traffic car works of events [680AD4]+8..31 marked (476740).
