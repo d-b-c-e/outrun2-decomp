@@ -211,7 +211,8 @@ void race_objects_dynamic_open_4f0cb0(const PcRaceMemory&,std::uint32_t id,std::
     void(*open)(void*,std::uint32_t event,std::uint32_t function),void* user);
 // PC 4EFD20(e, lane): lane != 0 copies 6 dwords to 6A5DC4; lane 0 copies up
 // to 7 12-byte entries (until u16 FFFF) to 84BD08 and terminates the list.
-void race_objects_copy_4efd20(const PcRaceMemory&,std::uint32_t e,std::uint32_t lane);
+// Returns the stock EAX: the source + C (lane != 0), or advanced past the rows copied (lane 0).
+std::uint32_t race_objects_copy_4efd20(const PcRaceMemory&,std::uint32_t e,std::uint32_t lane);
 // ---- course-prog: end ----
 // ---- race manager binding: begin ----
 // The AREA memory (PC addresses of the area block, course records, EXE data,

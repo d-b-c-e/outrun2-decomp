@@ -480,11 +480,17 @@ int main(int argc,char** argv){
                 overlay.mode=16;
                 auto scratch_put=[&](std::size_t at,std::uint32_t v){std::memcpy(overlay.scratch.data()+at,&v,4);};
                 scratch_put(0x0cu,0x0dfe2020u);scratch_put(0x20u,0x0dfe2040u);
-                scratch_put(0x40u,0x0dfe2060u);put32(block,0x78u,0x0dfe2000u);
-                // 41BD40 (jmp 49A650, a bare RET): the stock virtual display of hud-run-2145's request objects.
-                scratch_put(0x74u,0x41bd40u);
-                require(display()&&missing==0&&fault==0&&draws.size()==3&&draws[0].pc==0x4bb9e0u,
-                        "a request object's 41BD40 virtual display returns without draws before the stock rows");
+                scratch_put(0x40u,0x0dfe2060u);scratch_put(0x74u,0x41bd40u);
+                // 41BD40 (jmp 49A650, a bare RET): the stock virtual display of hud-run-2145's request objects. The same
+                // request state with and without that object in the list ends in the same block and the same draws.
+                {   const auto start=block;
+                    put32(block,0x78u,0u);const bool plain=display();const auto plain_block=block;const auto plain_draws=draws;
+                    std::memcpy(block.data(),start.data(),start.size());put32(block,0x78u,0x0dfe2000u);
+                    const bool listed=display();auto listed_block=block;put32(listed_block,0x78u,0u);
+                    bool same=plain_draws.size()==draws.size();
+                    for(std::size_t i=0;same&&i<draws.size();++i)same=draws[i].pc==plain_draws[i].pc&&draws[i].args==plain_draws[i].args;
+                    require(plain&&listed&&missing==0&&fault==0&&same&&draws.size()==3&&listed_block==plain_block,
+                            "a request object's 41BD40 virtual display leaves the request block and the draws unchanged");}
                 scratch_put(0x74u,0xdead0042u);
                 require(!display()&&missing==0xdead0042u&&fault==0&&!error.empty()&&draws.empty(),
                         "unsupported virtual request display retains its exact child PC without guessed draws");
@@ -503,7 +509,7 @@ int main(int argc,char** argv){
                 const auto saved=block;const auto table=request.start_mode.scene_owner_table68;
                 struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t>& saved;
                     ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());}} restore{block,saved};
-                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,This=0x6e00u,Req=0x6e40u,Edi=0x6e80u,Obj=0x6ec0u,Rows=0x6f00u;
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,This=0x6e00u,Req=0x6e40u,Edi=0x6e80u,Obj=0x6ec0u,Rows=0x7000u,Src=0x7040u;
                 put32(block,This+4u,B);put32(block,This+8u,0x1234u);
                 put32(block,0x80u,B+Req);put32(block,0x7660u,B+Edi);
                 put32(block,Req+8u,1u);put32(block,Req+0x58u,B+Obj);
@@ -519,6 +525,19 @@ int main(int argc,char** argv){
                 require(ran&&!traffic.latched&&traffic.routed[0x4efd20u]==before+1u,"the request manager's 521930 runs 4EFD20 as a traffic service");
                 require(!std::memcmp(request.start_mode.scene_owner_table68.data(),expect.data(),expect.size()),
                         "4EFD20 lane 0 copies the request rows to START's table 84BD08 and ends them with FFFF");
+                // The targets are their owners' storage, and the shared copy returns the stock EAX: lane 0 the source
+                // advanced past the rows copied, lane != 0 the source + C (the light words, restored afterwards).
+                auto& area=native_race_area(request);
+                const auto lights=area.light_words_6a5dc4;const auto lights_written=area.light_words_written;
+                require(traffic.memory.at(0x84bd08u,4u)==request.start_mode.scene_owner_table68.data()&&
+                        traffic.memory.at(0x6a5dc4u,4u)==reinterpret_cast<std::uint8_t*>(area.light_words_6a5dc4.data()),
+                        "the traffic memory maps 84BD08 to START's table68 and 6A5DC4 to the AREA's light words");
+                require(race_objects_copy_4efd20(traffic.memory,B+Rows,0u)==B+Rows+24u,"4EFD20 lane 0 returns the source past two rows");
+                for(std::uint32_t k=0;k<24u;k+=4)put32(block,Src+k,0x22220000u+k);
+                require(race_objects_copy_4efd20(traffic.memory,B+Src,1u)==B+Src+0xcu&&
+                        !std::memcmp(area.light_words_6a5dc4.data(),block.data()+Src,24u),
+                        "4EFD20 lane != 0 copies two vectors to the light words and returns the source + C");
+                area.light_words_6a5dc4=lights;area.light_words_written=lights_written;
                 request.start_mode.scene_owner_table68=table;
                 std::fprintf(stderr,"request 4EFD20: 521930 rows to 84BD08 and 41BD40 virtual display checked\n");
             }
