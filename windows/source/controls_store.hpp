@@ -35,6 +35,9 @@ struct DeviceIdentity { std::string dev,prod,name; bool present()const{return !d
 struct LegacyControls {
     int steer_axis{0},accel_axis{1},brake_axis{2};
     bool steer_invert{},accel_invert{},brake_invert{};
+    // Tweaks [DirectInput.Calibration], ignored unless SteeringEnabled is true.
+    bool steer_calibration{};
+    std::array<std::string,3> steer_points{"0","32767.5","65535"};
     std::array<int,13> buttons{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
     std::array<int,13> aux_buttons{-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
     bool hpattern{};

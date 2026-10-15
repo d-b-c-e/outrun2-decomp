@@ -200,6 +200,10 @@ void rescan(const char* reason){
 LegacyControls legacy_controls(const Ini& ini){
     LegacyControls c;
     c.steer_axis=ini.integer("DirectInput","SteeringAxis",0);c.steer_invert=ini.flag("DirectInput","SteeringInvert",false);
+    c.steer_calibration=ini.flag("DirectInput.Calibration","SteeringEnabled",false);
+    c.steer_points={ini.text("DirectInput.Calibration","SteeringMinimum","0"),
+                    ini.text("DirectInput.Calibration","SteeringCenter","32767.5"),
+                    ini.text("DirectInput.Calibration","SteeringMaximum","65535")};
     c.accel_axis=ini.integer("DirectInput","AccelerationAxis",1);c.accel_invert=ini.flag("DirectInput","AccelerationInvert",false);
     c.brake_axis=ini.integer("DirectInput","BrakeAxis",2);c.brake_invert=ini.flag("DirectInput","BrakeInvert",false);
     static constexpr const char* Keys[13]{"ButtonA","ButtonB","ButtonX","ButtonY","ButtonStart","ButtonBack","ButtonGearUp",

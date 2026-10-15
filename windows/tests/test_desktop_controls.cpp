@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 using namespace outrun::desktop;
 namespace ctl=dbce::controls;
@@ -96,6 +97,44 @@ void test_import(){
     check(inv&&std::fabs(ctl::normalize("throttle",*inv,65535))<1e-12&&std::fabs(ctl::normalize("throttle",*inv,0)-1.0)<1e-12,"inverted pedal");
     std::vector<std::string> n3;
     check(import_legacy(c,LegacyDevices{},n3).size()==4&&!n3.empty(),"no wheel: nothing imported");
+}
+
+void test_import_steering_calibration(){
+    const LegacyDevices devices{{Wheel,WheelProd,"W"}};
+    LegacyControls c;c.steer_calibration=true;c.steer_points={"1000","26000","62000"};
+    std::vector<std::string> notes;
+    const auto lines=import_legacy(c,devices,notes);
+    const auto s=ctl::parseSection(lines,ControlsReads);
+    const auto* steer=ctl::find(s,"steer");const auto* throttle=ctl::find(s,"throttle");
+    check(lines[0]=="Schema = 2"&&s.error.empty()&&s.invalid.empty()&&notes.empty(),"enabled measured steering imports through schema 2");
+    check(steer&&steer->cal==std::vector<long>{1000,26000,62000}&&steer->rest==26000,"measured steering endpoints and center survive the canonical round trip");
+    for(const auto& point:std::vector<std::pair<long,double>>{{0,-1},{1000,-1},{13500,-0.5},{26000,0},{44000,0.5},{62000,1},{65535,1}})
+        check(steer&&std::fabs(ctl::normalize("steer",*steer,point.first)-point.second)<1e-12,"measured steering at "+std::to_string(point.first));
+    check(throttle&&throttle->cal.empty()&&std::fabs(ctl::normalize("throttle",*throttle,12345)-12345.0/65535.0)<1e-12,"schema promotion preserves uncalibrated pedal scaling");
+    c.steer_invert=true;notes.clear();
+    const auto inverted=ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);
+    const auto* inv=ctl::find(inverted,"steer");
+    check(inv&&ctl::normalize("steer",*inv,1000)==1&&ctl::normalize("steer",*inv,62000)==-1,"calibrated steering applies inversion once");
+    c.steer_invert=false;c.steer_points={"1000.25","26000.5","62000.75"};notes.clear();
+    const auto rounded=ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);
+    const auto* fractional=ctl::find(rounded,"steer");
+    check(fractional&&fractional->cal==std::vector<long>{1000,26001,62001},"fractional Tweaks endpoints round to the nearest raw count");
+    for(const auto& bad:std::vector<std::array<std::string,3>>{
+            {"-1","26000","62000"},{"1000","26000","65536"},{"26000","1000","62000"},{"1000","1000","62000"},
+            {"1000","1200","62000"},{"1000","2000","3000"},
+            {"0","nan","65535"},{"0","32768","inf"},{"0","center","65535"},{"0","32768oops","65535"},{"0","","65535"}}){
+        c.steer_points=bad;notes.clear();
+        const auto refused=ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);
+        check(refused.schema==1&&!ctl::find(refused,"steer")&&ctl::find(refused,"throttle")&&notes.size()==1&&notes[0].find("steering not imported")!=std::string::npos,
+              "invalid enabled calibration refuses steering without dropping other bindings");
+    }
+    c.steer_calibration=false;notes.clear();
+    const auto disabled=ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);
+    const auto* old=ctl::find(disabled,"steer");
+    check(disabled.schema==1&&old&&old->cal.empty()&&notes.empty(),"disabled calibration ignores invalid endpoints and keeps schema 1");
+    c.steer_calibration=true;c.steer_axis=-1;notes.clear();
+    const auto absent=ctl::parseSection(import_legacy(c,devices,notes),ControlsReads);
+    check(absent.schema==1&&!ctl::find(absent,"steer")&&notes.empty(),"an unbound steering axis does not promote the schema");
 }
 
 void test_write_section(){
@@ -216,7 +255,7 @@ void test_wheel_steering(){
 }
 
 int main(){
-    try{test_report();test_import();test_write_section();test_write_key();test_injection();test_wheel_steering();}
+    try{test_report();test_import();test_import_steering_calibration();test_write_section();test_write_key();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;

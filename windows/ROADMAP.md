@@ -146,7 +146,7 @@ needed in a native build.
 | | Vibration\*, ImpulseVibration\* | ⬜ | gamepad rumble / trigger motors |
 | DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | canonical `[Controls]` (`ini-controls-1`); the Tweaks keys are imported once with Tweaks' scaling |
 | | ThrottleDeviceGuid, BrakeDeviceGuid | ✅ | each binding names its own device instance |
-| DirectInput.Calibration | Steering/Throttle/Brake Min/Center/Max | ⬜ | contract `range` / `rest` / `travel` cover pedal endpoints; steering calibration open |
+| DirectInput.Calibration | Steering/Throttle/Brake Min/Center/Max | 🟡 | source-only one-time import of enabled `SteeringMinimum` / `SteeringCenter` / `SteeringMaximum` into the existing schema-2 `cal=` binding; fractional values round to the nearest raw count, disabled calibration retains schema 1, invalid enabled calibration refuses the steering binding with an import note. Focused `desktop_controls` cases written, unbuilt/unrun. No existing canonical binding is rewritten. Legacy pedal calibration import remains open; contract `range` / `rest` / `travel` already cover pedal endpoints |
 | DirectInput.Shifter | sequential | ✅ | |
 | | hpattern gears 1-6 | 🟡 | pulses toward the gate's gear (car +208); R: the game has no reverse |
 | DirectInput.Aux | DeviceGuid, buttons | ✅ | any action may sit on any device (one binding per action) |

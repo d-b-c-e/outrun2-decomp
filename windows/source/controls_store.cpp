@@ -1,6 +1,8 @@
 #include "controls_store.hpp"
 #include "outrun_actions.hpp"
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 namespace outrun::desktop {
 namespace {
 std::string joined(const std::vector<std::string>& ids){
@@ -55,7 +57,23 @@ std::vector<std::string> import_legacy(const LegacyControls& c,const LegacyDevic
         if(std::find(done.begin(),done.end(),action)!=done.end()){notes.push_back(action+": a second binding was not imported (one per action)");return;}
         done.push_back(action);lines.push_back(action+" = "+ctl::format(b));};
     if(!d.wheel.present()){notes.push_back("no wheel device: nothing imported");return lines;}
-    if(c.steer_axis>=0&&c.steer_axis<=7)put("steer",axis(d.wheel,c.steer_axis,true,c.steer_invert));
+    if(c.steer_axis>=0&&c.steer_axis<=7){
+        auto b=axis(d.wheel,c.steer_axis,true,c.steer_invert);
+        bool valid=true;
+        if(c.steer_calibration){
+            // The contract stores whole raw counts. Refuse malformed text and
+            // check before rounding; never pass NaN/infinity to lround.
+            for(const auto& text:c.steer_points){
+                char* end=nullptr;const double p=std::strtod(text.c_str(),&end);
+                if(end==text.c_str()||*end!='\0'||!std::isfinite(p)||p<0.0||p>65535.0)valid=false;
+                else b.cal.push_back(std::lround(p));
+            }
+            if(valid)valid=ctl::calibrationFits(ctl::Shape::Centred,b);
+            if(valid){b.rest=b.cal[1];lines[0]="Schema = 2";}
+            else notes.push_back("steer: enabled [DirectInput.Calibration] is invalid for ini-controls-2; steering not imported");
+        }
+        if(valid)put("steer",b);
+    }
     const auto& throttle=d.throttle.present()?d.throttle:d.wheel;
     const auto& brake=d.brake.present()?d.brake:d.wheel;
     if(c.accel_axis>=0&&c.accel_axis<=7)put("throttle",axis(throttle,c.accel_axis,false,c.accel_invert));
