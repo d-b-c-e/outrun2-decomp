@@ -23,8 +23,19 @@ std::vector<std::uint8_t> zip(const std::vector<std::uint8_t>&raw){uLongf n=comp
 std::vector<std::uint8_t> wrap(const std::vector<std::uint8_t>&ani){std::vector<std::uint8_t> raw(4+ani.size());const auto n=std::uint32_t(ani.size());for(unsigned i=0;i<4;++i)raw[i]=std::uint8_t(n>>(i*8));std::copy(ani.begin(),ani.end(),raw.begin()+4);return zip(raw);}
 }
 int main(int argc,char**argv){try{
- req(argc==4,"usage LOADER FRONTEND LOADING");std::string e;LoaderAssetPack loader;FrontendPreviewPack fe,loading;
- req(load_loader_asset_pack_file(argv[1],loader,&e),"loader fixture");req(load_frontend_preview_pack_file(argv[2],fe,&e),"frontend fixture");req(load_frontend_preview_pack_file(argv[3],loading,&e),"loading fixture");
+ const bool retail=argc>=2&&std::strcmp(argv[1],"--retail-root")==0;
+ req(retail?argc==3:argc==4,"usage --retail-root OWNED_GAME_FOLDER (or legacy LOADER FRONTEND LOADING)");
+ std::string e;LoaderAssetPack loader;FrontendPreviewPack fe,loading;
+ if(retail){
+  RetailAssetStore input;req(retail_asset_store_open(input,argv[2],&e),e.c_str());
+  for(const auto entry:{std::pair<std::uint32_t,std::uint32_t>{0x0b,8},{0x44,9},{0x2f,2}}){
+   const auto* record=retail_asset_lookup(input,entry.first,entry.second,&e);req(record!=nullptr,e.c_str());loader.records.push_back(*record);}
+  // The expected timelines come directly from the authored retail files, not the START pack builder under test.
+  GameUiPack timeline;req(load_retail_sprani(input,"SUMO_FE",224u,timeline,&e),e.c_str());fe.animation=std::move(timeline.animation);
+  req(load_retail_sprani(input,"LOADING",9u,timeline,&e),e.c_str());loading.animation=std::move(timeline.animation);
+ }else{
+  req(load_loader_asset_pack_file(argv[1],loader,&e),"loader fixture");req(load_frontend_preview_pack_file(argv[2],fe,&e),"frontend fixture");req(load_frontend_preview_pack_file(argv[3],loading,&e),"loading fixture");
+ }
  const auto root=fs::temp_directory_path()/"outrun-r152-auto-cache";fs::remove_all(root);
  // A game folder holds the 250 GTO model (retail_asset_store_is_game_root).
  put(root/"CARS/obj_plcar_250gto_pmt.sz",rec(loader,0x0b,8).bytes);
@@ -36,7 +47,21 @@ int main(int argc,char**argv){try{
  RetailAssetStore store{};req(retail_asset_store_open(store,root.string(),&e),"retail root");std::vector<std::uint8_t> pack;
  {const bool ok=build_retail_start_loading(store,pack,&e);if(!ok)throw std::runtime_error(e);++checks;}
  req(!fs::exists(root/"Cache")&&!fs::exists(root/"start_loading_en.ldp2"),"nothing written next to the game files");
- FrontendPreviewPack load2;{const bool parsed=parse_frontend_preview_pack(pack.data(),pack.size(),load2,&e);req(parsed,e.c_str());}req(!load2.scenes.empty()&&!load2.textures.empty()&&load2.animation.size()==loading.animation.size(),"START loading pack");
+ FrontendPreviewPack load2;{const bool parsed=parse_frontend_preview_pack(pack.data(),pack.size(),load2,&e);req(parsed,e.c_str());}
+ // Independent baseline expectations: original DDS payloads/dimensions plus authored timeline, fixed archive shape.
+ // Off/empty/no-match comparisons below must preserve this baseline; a consistently wrong stock builder cannot pass.
+ req(std::memcmp(pack.data(),"OR2LDP2",8u)==0&&load2.source_texture_count==5u&&load2.source_scene_count==9u&&
+     load2.scenes.size()==9u&&load2.textures.size()==5u&&load2.draws.size()==171u,"stock START archive identity and shape");
+ req(load2.animation==loading.animation,"stock START timeline equals the independently read source");
+ {std::vector<std::uint8_t> source;req(retail_asset_read_relative_inflated(store,"Sprite/spr_SPRANI_LOADING_CVT_Exst.sz",source,128u<<20,&e),e.c_str());
+  std::vector<std::size_t> starts;for(std::size_t i=0;i+4<=source.size();++i)if(std::memcmp(source.data()+i,"DDS ",4)==0){starts.push_back(i);i+=3;}
+  req(starts.size()==5u,"source has five stock DDS pages");
+  const auto u32=[&](std::size_t o){req(o+4<=source.size(),"source DDS field bounds");return std::uint32_t(source[o])|(std::uint32_t(source[o+1])<<8u)|(std::uint32_t(source[o+2])<<16u)|(std::uint32_t(source[o+3])<<24u);};
+  for(const auto& t:load2.textures){req(t.source_index<starts.size(),"stock texture index");const auto begin=starts[t.source_index];const auto end=t.source_index+1u<starts.size()?starts[t.source_index+1u]:source.size();
+   const auto fourcc=u32(begin+84u),format=fourcc==0x31545844u?1u:fourcc==0x33545844u?2u:fourcc==0x35545844u?3u:0u;
+   req(begin+128u<=end&&t.width==u32(begin+16u)&&t.height==u32(begin+12u)&&std::uint32_t(t.format)==format&&format!=0u&&
+       t.uv_width==0u&&t.uv_height==0u&&t.bytes==std::vector<std::uint8_t>(source.begin()+begin+128u,source.begin()+end),"stock texture equals original DDS dimensions/format/payload");}
+ }
  outrun::switch_runtime::SwitchRenderer renderer;
  using namespace outrun::switch_runtime;
  {const bool ok=switch_renderer_initialize(renderer,nullptr,e,&pack,nullptr,nullptr,nullptr);req(ok,e.c_str());}
@@ -74,7 +99,8 @@ int main(int argc,char**argv){try{
        frontend_uv_width(t)==sw&&frontend_uv_height(t)==sh&&s.width==sw&&s.height==sh,"texture 0: the file's texels, stock size for the crops");
    else req(t.source_index==s.source_index&&t.format==s.format&&t.width==s.width&&t.height==s.height&&t.uv_width==0u&&t.bytes==s.bytes,"other START textures stock");}
   req(hd.scenes.size()==load2.scenes.size()&&hd.draws.size()==load2.draws.size()&&hd.animation==load2.animation,"scenes, draws and animation unchanged");
-  for(std::size_t i=0;i<hd.draws.size();++i)req(hd.draws[i].source_texture==load2.draws[i].source_texture&&hd.draws[i].crop==load2.draws[i].crop,"draw crops unchanged");
+  for(std::size_t i=0;i<hd.scenes.size();++i){const auto& h=hd.scenes[i];const auto& s=load2.scenes[i];req(h.token==s.token&&h.width==s.width&&h.height==s.height&&h.first_draw==s.first_draw&&h.draw_count==s.draw_count,"scene geometry and order unchanged");}
+  for(std::size_t i=0;i<hd.draws.size();++i){const auto& h=hd.draws[i];const auto& s=load2.draws[i];req(h.source_texture==s.source_texture&&h.crop==s.crop&&h.corners==s.corners&&h.layer_order==s.layer_order&&h.frame_index==s.frame_index,"draw geometry, crops and order unchanged");}
   GameUiPack view;{const bool ok=make_frontend_animation_view(hd,view,&e);req(ok,e.c_str());}req(view.textures[0].width==sw&&view.textures[0].height==sh,"animated crops bounded by the stock size");
   texture_replacement_configure(false,false,{});
   req(build_retail_start_loading(store,again,&e)&&again==pack,"UI replacement off again: stock bytes");}

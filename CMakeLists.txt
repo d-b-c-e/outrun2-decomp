@@ -62,6 +62,7 @@ endif()
 set(OR2_PC_ASSET_ROOT "${OR2_DEFAULT_PC_ASSETS}" CACHE PATH "Owned PC installation")
 set(OR2_PC_EXECUTABLE "${OR2_DEFAULT_PC_EXE}" CACHE FILEPATH "Owned PC executable used by reconstruction tests")
 set(OR2_GENERATED_ASSET_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/runtime-data/switch/outrun2006" CACHE PATH "External generated test packs")
+set(OR2_RETAIL_FIXTURE_ROOT "" CACHE PATH "Optional owned retail root for the START-loading offline fixtures; empty uses legacy generated packs")
 # Host-only audit/reconstruction tests; NOT a libnx build or a runnable game.
 add_library(outrun_control STATIC src/control.cpp)
 target_include_directories(outrun_control PUBLIC src)
@@ -389,10 +390,14 @@ add_test(NAME switch_loader_asset_pack COMMAND test_loader_asset_pack)
 add_executable(test_frontend_preview_pack tests/test_frontend_preview_pack.cpp)
 target_link_libraries(test_frontend_preview_pack PRIVATE outrun_native_runtime)
 add_test(NAME switch_frontend_preview_pack COMMAND test_frontend_preview_pack)
-add_test(NAME switch_start_loading_pack COMMAND test_frontend_preview_pack
-  ${OR2_GENERATED_ASSET_ROOT}/or2_frontend_preview.bin
-  ${OR2_GENERATED_ASSET_ROOT}/or2_start_loading_preview.bin
-  ${OR2_GENERATED_ASSET_ROOT}/or2_game_ui.bin)
+if(OR2_RETAIL_FIXTURE_ROOT)
+  add_test(NAME switch_start_loading_pack COMMAND test_frontend_preview_pack --retail-root "${OR2_RETAIL_FIXTURE_ROOT}")
+else()
+  add_test(NAME switch_start_loading_pack COMMAND test_frontend_preview_pack
+    ${OR2_GENERATED_ASSET_ROOT}/or2_frontend_preview.bin
+    ${OR2_GENERATED_ASSET_ROOT}/or2_start_loading_preview.bin
+    ${OR2_GENERATED_ASSET_ROOT}/or2_game_ui.bin)
+endif()
 add_executable(test_game_ui_pack tests/test_game_ui_pack.cpp)
 target_link_libraries(test_game_ui_pack PRIVATE outrun_native_runtime)
 add_test(NAME switch_game_ui_pack COMMAND test_game_ui_pack)
@@ -920,10 +925,14 @@ add_executable(test_retail_gpu_cache_r153 tests/test_retail_gpu_cache_r153.cpp
 target_compile_definitions(test_retail_gpu_cache_r153 PRIVATE OUTRUN_SWITCH_STUB)
 target_include_directories(test_retail_gpu_cache_r153 PRIVATE switch/source)
 target_link_libraries(test_retail_gpu_cache_r153 PRIVATE outrun_native_runtime)
-add_test(NAME retail_gpu_cache_r153 COMMAND test_retail_gpu_cache_r153
-  ${OR2_GENERATED_ASSET_ROOT}/or2_loader_assets.bin
-  ${OR2_GENERATED_ASSET_ROOT}/or2_frontend_preview.bin
-  ${OR2_GENERATED_ASSET_ROOT}/or2_start_loading_preview.bin)
+if(OR2_RETAIL_FIXTURE_ROOT)
+  add_test(NAME retail_gpu_cache_r153 COMMAND test_retail_gpu_cache_r153 --retail-root "${OR2_RETAIL_FIXTURE_ROOT}")
+else()
+  add_test(NAME retail_gpu_cache_r153 COMMAND test_retail_gpu_cache_r153
+    ${OR2_GENERATED_ASSET_ROOT}/or2_loader_assets.bin
+    ${OR2_GENERATED_ASSET_ROOT}/or2_frontend_preview.bin
+    ${OR2_GENERATED_ASSET_ROOT}/or2_start_loading_preview.bin)
+endif()
 add_executable(test_pc_scene_renderer tests/test_pc_scene_renderer.cpp)
 target_link_libraries(test_pc_scene_renderer PRIVATE outrun_native_runtime)
 add_test(NAME pc_scene_renderer COMMAND test_pc_scene_renderer)
