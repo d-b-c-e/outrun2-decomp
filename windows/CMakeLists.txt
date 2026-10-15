@@ -248,6 +248,12 @@ target_include_directories(test_hud_toggle PRIVATE source ${PROJECT_SOURCE_DIR}/
 target_compile_features(test_hud_toggle PRIVATE cxx_std_17)
 target_compile_options(test_hud_toggle PRIVATE /W4 /WX)
 add_test(NAME hud_toggle COMMAND test_hud_toggle)
+# The native wheel path's rescan policy (source/wheel_rescan.hpp): device changes and missing bindings only.
+add_executable(test_wheel_rescan tests/test_wheel_rescan.cpp)
+target_include_directories(test_wheel_rescan PRIVATE source)
+target_compile_features(test_wheel_rescan PRIVATE cxx_std_17)
+target_compile_options(test_wheel_rescan PRIVATE /W4 /WX)
+add_test(NAME wheel_rescan COMMAND test_wheel_rescan)
 # AutoDetectResolution (src/enhancements/video.hpp): an unset options.ini resolution takes the display's height.
 add_executable(test_auto_resolution tests/test_auto_resolution.cpp)
 target_include_directories(test_auto_resolution PRIVATE ${PROJECT_SOURCE_DIR}/src)

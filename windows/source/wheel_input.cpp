@@ -1,4 +1,5 @@
 #include "wheel_input.hpp"
+#include "wheel_rescan.hpp"
 #include "controls_store.hpp"
 #include "desktop_settings.hpp"
 #include "test_injection.hpp"
@@ -11,6 +12,7 @@
 #include <dinput.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -55,8 +57,10 @@ struct State {
     bool gear_release{};
     bool keyboard_drives{};std::int32_t keyboard_anchor{};   // the race follows the keyboard (see wheel_input_filter)
     std::array<LONG,8> logged_axes{};
+    unsigned rescans{};double rescan_ms_max{};   // after start (wheel_rescan.hpp): each one's reason and duration
 };
 State g;
+std::atomic<bool> devices_changed{false};   // WM_DEVICECHANGE (wheel_input_devices_changed), taken by the next input sample
 
 void print(const std::vector<std::string>& lines){for(const auto& l:lines)std::printf("%s\n",l.c_str());}
 std::string lower_guid(const GUID& v){
@@ -175,6 +179,22 @@ void bind_present_devices(bool initial){
         const auto existing=std::find_if(g.bound.begin(),g.bound.end(),[&](const Bound& b){return b.action==e.action;});
         if(existing==g.bound.end())g.bound.push_back({e.action,e.binding,d});
     }
+}
+// The rescan policy's input (wheel_rescan.hpp): the applicable bindings, and each applied one's device handle and read.
+bool bound_missing(){
+    std::size_t applicable=0;
+    for(const auto& e:g.section.bound)if(!unavailable_reason(e.action))++applicable;
+    std::vector<WheelBoundDevice> bound;bound.reserve(g.bound.size());
+    for(const auto& b:g.bound)bound.push_back({b.device&&b.device->device,b.device&&b.device->connected});
+    return wheel_bound_missing(applicable,bound);
+}
+void rescan(const char* reason){
+    const auto t0=WheelClock::now();
+    scan_devices();bind_present_devices(false);
+    const double ms=std::chrono::duration<double,std::milli>(WheelClock::now()-t0).count();
+    ++g.rescans;g.rescan_ms_max=std::max(g.rescan_ms_max,ms);
+    if(g.rescans<=10)std::printf("wheel input: rescan %u (%s) %.1f ms\n",g.rescans,reason,ms);
+    g.next_scan=WheelClock::now()+WheelMissingRescan;
 }
 
 // ---- the one-time import of the OutRun2006Tweaks [DirectInput] keys into [Controls]
@@ -345,9 +365,9 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     out.pc_input_layer=true;
     if(!g.configured)return;
     if(!g.started)start();
-    if(g.input&&std::chrono::steady_clock::now()>=g.next_scan){
-        scan_devices();bind_present_devices(false);
-        g.next_scan=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+    if(g.input){   // a rescan stalls this frame: only on a device change, or every 2 s while a binding has no device
+        const bool changed=devices_changed.exchange(false);
+        if(wheel_rescan_due(changed,bound_missing(),WheelClock::now(),g.next_scan))rescan(changed?"device change":"bound device missing");
     }
     const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
     const bool race=mode==16u||mode==18u;
@@ -443,7 +463,10 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     }
 }
 
+void wheel_input_devices_changed(){devices_changed.store(true);}
+
 void wheel_input_shutdown(){
+    if(g.started)std::printf("wheel input: rescans after start %u, longest %.1f ms\n",g.rescans,g.rescan_ms_max);
     for(Device* d:g.open)if(d->device){d->device->Unacquire();d->device->Release();d->device=nullptr;}
     g.open.clear();
     if(g.input){g.input->Release();g.input=nullptr;}

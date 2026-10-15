@@ -16,6 +16,9 @@ class Ini;
 void wheel_input_configure(const Ini&);
 void wheel_input_filter(platform::NativeInputState&,const platform::NativeRuntimeContext* runtime);
 void wheel_input_shutdown();
+// Any thread (the window procedure's WM_DEVICECHANGE): the controllers changed, so the next input sample rescans them
+// (wheel_rescan.hpp). Without it the native path rescans only while a binding has no open, connected device.
+void wheel_input_devices_changed();
 // The instance GUID ("{...}", lower case) of the device the steer binding reads, while it is connected; "" otherwise
 // (no binding, the device absent or lost, or this backend not in use). The force output's device identity (ffb_device.hpp).
 std::string wheel_input_steer_device();
