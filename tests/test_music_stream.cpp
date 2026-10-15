@@ -43,8 +43,9 @@ std::vector<std::uint8_t> load(const std::string& path){
     std::ifstream in(path,std::ios::binary);check(bool(in),"missing generated owned fixture");
     return {std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()};
 }
-void decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsigned channels){
+void decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsigned channels,const char* format,unsigned bits){
     MusicStream stream;std::string error;
+    std::printf("case format=%s rate=%u channels=%u bits=%u\n",format,rate,channels,bits);
     check(stream.open(std::move(bytes),false,error),error);
     check(stream.stats.rate==rate&&stream.stats.channels==channels,"source layout stats");
     const double step=double(rate)/48000.0;double position=0;std::size_t output=0;
@@ -67,7 +68,11 @@ void decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsigned chann
         }
     }
     check(!stream.playing(),"bounded EOF and buffered-tail drain");
-    check(output==std::size_t(std::ceil(double(SourceFrames)/step)),"source tail was lost");
+    const auto expected=std::size_t(std::ceil(double(SourceFrames)/step));
+    std::printf("case count format=%s rate=%u channels=%u bits=%u output=%zu expected=%zu sourceFrames=%zu finalExpectedPosition=%.17g\n",
+                format,rate,channels,bits,output,expected,SourceFrames,position);
+    std::fflush(stdout);
+    check(output==expected,"source frame count mismatch (see actual case/count context)");
     check(stream.stats.ends==1,"exact one end");
 }
 #endif
@@ -113,13 +118,13 @@ void replacement_checks(const std::string& dir){
     check(music_replacement_decoder_available(MusicFileFormat::Wav),"actual required WAV demuxer/PCM decoders unavailable");
     check(music_replacement_decoder_available(MusicFileFormat::Flac),"actual FLAC demuxer/decoder unavailable");
     for(const auto rate:{8000u,24000u,48000u,96000u,192000u})for(const auto channels:{1u,2u})
-        for(const auto bits:{8u,16u,24u,32u})decode_numeric(wav(rate,channels,bits),rate,channels);
-    decode_numeric(wav(48000,1,32,true),48000,1);decode_numeric(wav(24000,2,32,true),24000,2);
+        for(const auto bits:{8u,16u,24u,32u})decode_numeric(wav(rate,channels,bits),rate,channels,"WAV-PCM",bits);
+    decode_numeric(wav(48000,1,32,true),48000,1,"WAV-FLOAT",32);decode_numeric(wav(24000,2,32,true),24000,2,"WAV-FLOAT",32);
     check(!dir.empty(),"FFmpeg fixture requires generated FLAC directory");
-    struct Case {const char* file;unsigned rate,channels;};
-    for(const auto& c:std::array<Case,5>{{{"mono-48000-s16.flac",48000,1},{"stereo-24000-s24.flac",24000,2},
-        {"stereo-96000-s32.flac",96000,2},{"mono-8000-u8.flac",8000,1},{"stereo-192000-f32.flac",192000,2}}})
-        decode_numeric(load(dir+"/"+c.file),c.rate,c.channels);
+    struct Case {const char* file;unsigned rate,channels,bits;};
+    for(const auto& c:std::array<Case,5>{{{"mono-48000-s16.flac",48000,1,16},{"stereo-24000-s24.flac",24000,2,24},
+        {"stereo-96000-s32.flac",96000,2,32},{"mono-8000-u8.flac",8000,1,16},{"stereo-192000-f32.flac",192000,2,24}}})
+        decode_numeric(load(dir+"/"+c.file),c.rate,c.channels,"FLAC",c.bits);
     auto tagged=load(dir+"/tagged-loop.flac");
     check(!stream.open(std::move(tagged),true,error)&&error.find("parity pending")!=std::string::npos,"custom loop tags explicitly pending");
     for(const auto& bytes:std::array<std::vector<std::uint8_t>,2>{{wav(48000,1,16),load(dir+"/mono-48000-s16.flac")}}){
