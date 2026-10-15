@@ -869,7 +869,8 @@ void heart_item_draw_4ae386(Draw& d,std::uint32_t car){
     d.pop();                                                                     // 40A010
 }
 // 4AE19B / 4AE249: request items (+D14 states 5 / 4). The phase converts to
-// f32 for the SSE products, while the cosine and bob additions retain x87 precision.
+// f32 for the SSE products. The bob spills to f32 (4AE1DC / 4AE272), then
+// reloads for the x87 height addition (4AE1EA / 4AE2BA); the cosine stays x87.
 void request_item_draw(Draw& d,std::uint32_t car,std::uint32_t state){
     auto& m=d.m;
     const std::int32_t phase=std::int32_t(m.u32(car+0xd18));

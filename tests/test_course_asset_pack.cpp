@@ -3,6 +3,7 @@
 #include "platform/race_hud_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_player_car.hpp"
+#include "platform/race_ghosts.hpp"
 #include "driving/pc_wheel_dynamics.hpp"
 #include "driving/pc_x87.hpp"
 #include "platform/world_source_pack.hpp"
@@ -339,6 +340,83 @@ int main(int argc,char** argv){
                 require(traffic.memory.at(0x7f1994u,4u)==reinterpret_cast<std::uint8_t*>(&voice.tail_7f1994)&&
                         traffic.memory.at(0x7f1c64u,4u)==reinterpret_cast<std::uint8_t*>(&voice.head_7f1c64),
                         "the traffic memory maps the voice tail and head to the HUD's voice state");
+            }
+            {   // Native branch regression from pinned 68CEB386 disassembly, 4AE0F0..4AE5D4.
+                // Original-code parity is UNRUN: ghost_draw_probe needs Linux/WSL and separate pinned assets.
+                auto& memory=native_race_traffic(request).memory;
+                const auto mark=memory.mark();
+                struct Release{PcRaceMemory& memory;std::size_t mark;~Release(){memory.release(mark);}} release{memory,mark};
+                std::array<std::uint8_t,12> alpha{};
+                std::uint32_t active=0,variant=5;
+                memory.map(0x842038u,alpha.data(),alpha.size());
+                memory.map(0x7f94c0u,reinterpret_cast<std::uint8_t*>(&active),4);
+                memory.map(0x780258u,reinterpret_cast<std::uint8_t*>(&variant),4);
+                constexpr std::uint32_t Car=0x7815a0u;
+                auto car=memory.bytes(Car,0x10f0u);
+                std::memset(car.data(),0,car.size());
+                car.put8(0x11,30);car.put8(0xc35,0xff); // an authored traffic model, no optional lamps
+                for(const std::uint32_t base:{0xb0u,0xf0u,0xc90u})
+                    for(unsigned i=0;i<16u;++i)car.putf(base+i*4u,i%5u==0u?1.0f:0.0f);
+                const auto depth=request_matrices.depth;const auto offset=request_matrices.current_offset;
+                std::array<std::uint8_t,64> current{};
+                std::memcpy(current.data(),request_matrices.current().data(),current.size());
+                auto draw=[&](bool enabled,unsigned state,int phase,unsigned mode=5u,bool heart=false){
+                    active=enabled?1u:0u;variant=mode;
+                    car.put32(0xd14u,state);car.put32(0xd18u,std::uint32_t(phase));car.put32(0xc5cu,heart?0x80000u:0u);
+                    std::vector<PcVehicleDrawCall> calls;
+                    PcRaceContext ctx{memory,request_matrices,[](const PcRaceCall&)->std::uint32_t{
+                        throw std::logic_error("unexpected service in the request draw fixture");},&calls};
+                    other_car_draw_4ae0f0(ctx,Car);
+                    require(request_matrices.depth==depth&&request_matrices.current_offset==offset&&
+                            !std::memcmp(current.data(),request_matrices.current().data(),current.size()),
+                            "request draw preserves the caller's matrix depth, pointer and current matrix");
+                    return calls;
+                };
+                auto equal=[](const std::vector<PcVehicleDrawCall>& a,const std::vector<PcVehicleDrawCall>& b){
+                    if(a.size()!=b.size())return false;
+                    for(std::size_t i=0;i<a.size();++i)
+                        if(a[i].pc!=b[i].pc||a[i].argc!=b[i].argc||a[i].args!=b[i].args||a[i].matrix!=b[i].matrix)return false;
+                    return true;
+                };
+                auto item=[&](const std::vector<PcVehicleDrawCall>& calls,std::initializer_list<std::uint32_t> ids){
+                    require(calls.size()==ids.size()+3u&&calls.front().pc==0x4044a0u&&
+                            calls[1].pc==0x4044e0u&&calls[1].args[0]==8u&&calls.back().pc==0x4044c0u,
+                            "request item has stock LOD push, threshold, ordered objects and LOD pop");
+                    std::size_t i=2;
+                    for(const auto id:ids){const auto& call=calls[i++];
+                        require(call.pc==0x405360u&&call.argc==6u&&call.args==std::array<std::uint32_t,6>{id,0,0,0,0xffffffffu,0},
+                                "request item submits the authored object ID and six arguments");}
+                };
+                const auto ordinary=draw(false,0,0);
+                bool model=false;for(const auto& call:ordinary)model=model||call.pc==0x405360u;
+                require(model,"inactive ordinary traffic model emits object draws");
+                for(unsigned state=0;state<=6u;++state){
+                    for(const int phase:{-30,0,30}){
+                        require(equal(draw(false,state,phase),ordinary),"inactive request states keep the ordinary model path");
+                        const auto calls=draw(true,state,phase);
+                        if(state==2u||state==3u){
+                            require(calls.empty(),"active request states 2 and 3 hide the car");
+                            require(draw(true,state,phase,2u,true).empty(),"active hide gates precede Heart Attack items");
+                        }else if(state==1u)item(calls,{0x57002cu});
+                        else if(state==4u||state==5u){
+                            if(state==4u)item(calls,{0x01400000u,0x01ee0010u,0x01ee0010u,0x01ee0010u});
+                            else item(calls,{0x01400000u});
+                            require(equal(draw(true,state,phase,2u,true),calls),"active request item takes precedence over the Heart flag");
+                            float x,y,z;std::memcpy(&x,calls[2].matrix.data()+48,4);
+                            std::memcpy(&y,calls[2].matrix.data()+52,4);std::memcpy(&z,calls[2].matrix.data()+56,4);
+                            const float height=(state==4u?7.0f:1.0f)+(phase==0?0.0f:(phase>0?1.0f:-1.0f)*(state==4u?0.5f:0.25f));
+                            require(std::isfinite(x)&&std::isfinite(y)&&std::isfinite(z)&&
+                                    std::fabs(std::sqrt(x*x+y*y+z*z)-height)<0.00001f,
+                                    "signed quarter-cycle request phases retain the authored item height");
+                        }else require(equal(calls,ordinary),"active ordinary states reuse the unchanged model path");
+                    }
+                    std::fprintf(stderr,"request draw state %u: inactive/active phases -30/0/30 and stack checked\n",state);
+                }
+                item(draw(false,0,0,2u,true),{0x57002cu});
+                car.put32(0x2f0u,2u);item(draw(true,1,0),{0x57002du});car.put32(0x2f0u,0u);
+                const auto heart_fallback=draw(true,0,0,2u,true);
+                require(heart_fallback.size()==1u&&heart_fallback[0].pc==0x4044c0u,
+                        "active Heart ordinary-state fallback preserves the stock cleanup leaf");
             }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
