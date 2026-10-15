@@ -11,6 +11,7 @@
 #include "driving/pc_x87.hpp"
 #include "platform/frontend_profiles.hpp"
 #include "platform/pc_screen.hpp"   // EnableHollyCourse2 (pc_network_lobby.inc)
+#include "platform/level_select.hpp"
 #include <chrono>
 #include <cstdio>
 #include <random>

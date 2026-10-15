@@ -223,6 +223,13 @@ add_test(NAME cd_switcher COMMAND test_cd_switcher)
 add_executable(test_cd_title_overlay tests/test_cd_title_overlay.cpp)
 target_link_libraries(test_cd_title_overlay PRIVATE outrun_native_runtime)
 add_test(NAME cd_title_overlay COMMAND test_cd_title_overlay)
+add_executable(test_level_select tests/test_level_select.cpp)
+target_link_libraries(test_level_select PRIVATE outrun_native_runtime)
+target_compile_features(test_level_select PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(test_level_select PRIVATE /W4 /WX)
+endif()
+add_test(NAME level_select COMMAND test_level_select)
 set_tests_properties(c2c_goal_sequence PROPERTIES SKIP_RETURN_CODE 77)
 # [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
 # compiled-in globals only, no game files.

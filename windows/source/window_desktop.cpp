@@ -512,6 +512,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).
     outrun::platform::g_pc_default_manual_transmission=settings.flag("Misc","DefaultManualTransmission",false);
     if(outrun::platform::g_pc_default_manual_transmission)std::printf("settings: the transmission menu starts on Manual\n");
+    outrun::platform::g_pc_enable_level_select=settings.flag("Misc","EnableLevelSelect",false);
+    if(outrun::platform::g_pc_enable_level_select)std::printf("settings: initial frontend opens the level selection menu\n");
     // [Graphics] UIScalingMode, the Tweaks key (windows/docs/UI-SCALING.md; 2, keep centred, by default here until Tweaks'
     // 1 is checked in game): 0 stretches the 2D over the 16:9 frame, or over a span's centre panel (display_fit.hpp); 1
     // spaces the HUD to the edges (partial: the note says which parts).

@@ -137,6 +137,9 @@ inline PcLetterboxBars pc_letterbox_bars(std::int32_t w,std::int32_t h){
 // menu starts on Manual. Tweaks keeps the key in [Controls]; here that section is the ini-controls-1 contract, where
 // any other key is an invalid binding (dbce_controls.hpp parseSection), so it lives in [Misc].
 inline bool g_pc_default_manual_transmission=false;
+// [Misc] EnableLevelSelect: opt in to the PC's existing key-27 course menu at
+// first frontend entry. Off by default, as Tweaks; returning history is kept.
+inline bool g_pc_enable_level_select=false;
 // The transmission owner (key 16, 0x1F4 bytes; frontend_transmission.cpp): its carousel at +34 keeps the previous index
 // at +E4 (carousel +B0) and the current at +E8 (+B4); 4DD250's carousel init zeroes both (Automatic).
 inline constexpr std::size_t PcTransmissionPrevious=0xe4u,PcTransmissionCurrent=0xe8u;

@@ -18,6 +18,7 @@
 #include "platform/frontend_stack.hpp"
 #include "platform/frontend_ui_resources.hpp"
 #include "platform/pc_screen.hpp"   // HideOnlineSigninText, ShowOutRunMilesOnMenu
+#include "platform/level_select.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -801,7 +802,7 @@ std::uint32_t native_stage12_this_call(void* user,std::uint32_t pc_entry,
             &state,native_stage12_embedded_void,native_stage12_embedded_u32,
             native_stage12_callback,native_stage12_dispatch_global};
         return driving::object_dispatch_callback_443eb0(
-            object,0u,pair_view,callback_view,inputs,services);
+            object,level_select_initial_key(g_pc_enable_level_select),pair_view,callback_view,inputs,services);
     }
     if(pc_entry==0x00444e10u&&object_offset==0u&&count==0u){
         // 444E10 (stage 12 with 7B17EC set, i.e. back from a race): the

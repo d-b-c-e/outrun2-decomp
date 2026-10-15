@@ -66,6 +66,35 @@ bool network_native(NativeRuntimeContext& c,State& s,std::uint32_t pc,std::uint3
     N net(c,s);
     auto a=[&](std::size_t k){return k<n?args[k]:0u;};
     switch(pc){
+    case 0x4e7800u:
+        if(!g_pc_enable_level_select)return false; // preserve the translated stock screen when off
+        {
+            struct Screen {N& net;std::uint32_t object;};
+            Screen screen{net,ecx};
+            const LevelSelectServices services{
+                &screen,
+                [](void* p){auto& x=*static_cast<Screen*>(p);
+                    return x.net.call(x.net.u32(x.net.u32(x.object)+0x14u),{1u},x.object);},
+                [](void* p,std::uint32_t mask){return static_cast<Screen*>(p)->net.c.race.car_world.switch_7d6770.held&mask;},
+                [](void*,unsigned table,unsigned index){
+                    const auto* entry=exe_image_bytes((table?0x4e7950u:0x4e7920u)+index,1u);
+                    if(!entry)throw std::runtime_error("level select: missing course classification table");
+                    return *entry==0u;},
+                [](void* p,std::int32_t course,bool secondary){auto& x=*static_cast<Screen*>(p);
+                    auto& live=x.net.c.game_mode.course_runtime;
+                    live.resource_type_635f34=std::uint32_t(course);
+                    live.resource_source_635f38=secondary?std::uint32_t(course):0u;
+                    live.fallback_gate_7d33b0=secondary?1u:0u;
+                    x.net.p32(0x635f34u,std::uint32_t(course));
+                    x.net.p32(0x635f38u,secondary?std::uint32_t(course):0u);
+                    x.net.p32(0x7d33b0u,secondary?1u:0u);
+                    const auto owner=x.net.call(0x4035f0u,{3u});
+                    // The preceding cdecl 4035F0 left its argument 3 on the
+                    // PC stack, where 440DF0 consumes it (RET 4).
+                    (void)x.net.call(0x440df0u,{3u},owner);}};
+            eax=level_select_update_4e7800(driving::Bytes(net.m.at(ecx,0x130e5u,true),0x130e5u),true,services);
+            return true;
+        }
     case 0x454670u:net.tick_454670();eax=0;return true;
     case 0x453c60u:net.listeners_453c60(ecx);eax=0;return true;
     case 0x454260u:eax=net.session_event_454260(ecx)?1u:0u;return true;
