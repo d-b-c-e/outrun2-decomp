@@ -126,6 +126,11 @@ struct NativeHeartBinding {
     PcSceneRenderer* renderer{};
 };
 bool native_race_traffic_heart(NativeRuntimeContext&,driving::PcMatrixStack&,std::uint32_t pc,NativeHeartBinding&);
+// 46C220 -> 481A40: request HUD display on the canonical manager/heap. Reuses the
+// display capture binding; 4BB9E0 row markers are replayed by the NAVI owner in order.
+// Unsupported children retain their PC/error without latching traffic control.
+bool native_race_requests_display_481a40(NativeRuntimeContext&,driving::PcMatrixStack&,NativeHeartBinding&,
+                                        std::uint32_t& missing,std::uint32_t& fault,std::string& error);
 // Race manager score control 4F2DF0 (per frame) and stage bonus 4F2B20(seconds) over the traffic
 // memory with the HUD words (NAVI 842800 block, score block 84DEF8) and the miles word 84BCF8.
 // False when latched (own latch, reported in the status line).
