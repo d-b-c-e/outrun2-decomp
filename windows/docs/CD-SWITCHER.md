@@ -102,8 +102,17 @@ and dots cannot fit at the configured position and scale, it submits nothing
 while the timer ages. It does not shrink text, move the position, change the
 shared font renderer or edit the catalog. Vertical placement remains configured.
 
+The title uses its own advance policy with the same native glyph records for
+both fitting and drawing. Word spaces advance at least half a scaled cell,
+rounded up. A period and the character immediately before one advance at least
+their scaled metric ink width plus one UI unit (or one scale unit above 1x),
+rounded up. This keeps word gaps and ellipsis dots distinct at the defaults.
+Normal letter kerning, font/scale/position and all other HUD text stay unchanged.
+
 Partial Tweaks parity remains: startup shuffle, default track catalog and
 analog-direction aliases are not implemented. Scoped CD request/open/current
-evidence does not establish audible/physical quality. The base title source
-passed its affected compile/link and41 synthetic checks; this width-aware
-follow-up is not compiled or run yet. Rendered/visual acceptance remains open.
+evidence does not establish audible/physical quality. The width-aware title
+passed its affected compile/link and98 synthetic checks; its sampled visual
+run confirmed timing and center placement with tight-space/dot findings. This
+title-only spacing follow-up is not compiled or run yet. Readability acceptance
+remains open; the next visual check should combine with another useful change.

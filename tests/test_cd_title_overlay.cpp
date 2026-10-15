@@ -89,14 +89,14 @@ void viewport_ellipsis(){
     cd.title.options=cd_title_options(true,2,0.3f,0.5f,375,450);
     std::vector<FrontendGlyph> glyphs;
     cd.title.changed();
-    check(cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&glyph_text(f,glyphs)=="#01.100%%s"&&inside_hud(f,glyphs),"fitting literal title remains whole with original font layout");
+    check(cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&glyph_text(f,glyphs)=="#01.100%%s"&&inside_hud(f,glyphs),"fitting literal title keeps native glyphs with title-only readable spacing");
     check(glyphs.front().x==375.f&&glyphs.front().y==450.f&&glyphs.front().scale_x==0.3f&&glyphs.front().scale_y==0.5f,"width fitting preserves configured position and scale");
     cd.tracks[0].title=std::string(512,'A');cd.title.changed();glyphs.clear();
     check(cd_title_glyphs(cd,&pack,2,1,true,glyphs)&&glyph_text(f,glyphs).rfind("#01.",0)==0&&glyphs.size()>=3&&glyph_text(f,glyphs).compare(glyphs.size()-3,3,"...")==0&&glyphs.size()<98&&inside_hud(f,glyphs),"long title retains full prefix and three complete dots inside viewport");
     check(cd.tracks[0].title==std::string(512,'A')&&cd.tracks[0].path=="unchanged.ogg"&&p.calls==0,"width ellipsis does not modify catalog or audio");
-    cd.title.options=cd_title_options(true,2,1.f,0.5f,407,450);cd.title.changed();glyphs.clear();
+    cd.title.options=cd_title_options(true,2,1.f,0.5f,396,450);cd.title.changed();glyphs.clear();
     check(cd_title_glyphs(cd,&pack,3,1,true,glyphs)&&glyph_text(f,glyphs)=="#01...."&&glyphs.back().x+32.f==640.f&&inside_hud(f,glyphs),"complete prefix and three dots can end exactly at viewport edge");
-    cd.title.options.x=408;cd.title.changed();const auto edge_count=glyphs.size();
+    cd.title.options.x=397;cd.title.changed();const auto edge_count=glyphs.size();
     check(!cd_title_glyphs(cd,&pack,4,1,true,glyphs)&&glyphs.size()==edge_count,"one pixel less than the prefix and ellipsis needs refuses without clipped dots");
     // Variable advances, bearings, spacing and kerning use the recovered draw
     // path, rather than assuming cell count times scale is the text width.
@@ -118,5 +118,28 @@ void viewport_ellipsis(){
         check(cd.title.remaining==119&&((drawn&&!glyphs.empty()&&inside_hud(f,glyphs))||(!drawn&&glyphs.empty())),"cell/scale/position boundaries submit only complete horizontally bounded glyphs");
     }
 }
+void readable_spacing(){
+    FrontendFont font;font.width=30;font.height=30;font.first=32;font.token=3;
+    font.metrics.assign(96,{0,22});font.metrics['.'-32]={11,10};
+    font.kerning.assign(96*96,0);font.kerning[std::size_t('.'-32)*96+std::size_t('.'-32)]=1;
+    FrontendTextStyle style;style.scale_x=0.3f;style.scale_y=0.5f;
+    const FrontendTextCursor origin{375,375,450};
+    auto native=origin,readable=origin;
+    frontend_text_advance_42c610(font,style,native,' ',0);cd_title_advance(font,style,readable,' ',0);
+    check(native.x==377&&readable.x==380,"default word gap survives truncation as half a scaled cell rounded up");
+    native=readable=origin;
+    frontend_text_advance_42c610(font,style,native,'.','.');cd_title_advance(font,style,readable,'.','.');
+    check(native.x==377&&readable.x==379,"period advance includes scaled ink width plus a visible gap");
+    native=readable=origin;
+    frontend_text_advance_42c610(font,style,native,'A','.');cd_title_advance(font,style,readable,'A','.');
+    check(readable.x==383&&native.x==381,"letter before period gets the same explicit gap used by fitting");
+    std::vector<FrontendGlyph> dots,words,letters;
+    check(cd_title_layout(font,style,origin,"...",dots)&&dots.size()==3&&dots[1].x-dots[0].x==4.f&&dots[2].x-dots[1].x==4.f,"three distinct period origins use the shared title layout");
+    check(cd_title_layout(font,style,origin,"A B",words)&&cd_title_layout(font,style,origin,"AB",letters)&&words.size()==2&&letters.size()==2&&words[1].x-letters[1].x==5.f,"word space remains distinct in submitted native glyph positions");
+    std::vector<FrontendGlyph> native_draws;
+    check(frontend_text_draw(font,style,origin,"...",native_draws)&&native_draws.size()==3&&native_draws[1].x-native_draws[0].x==2.f,"global frontend font spacing remains unchanged");
+    std::vector<FrontendGlyph> fitted;
+    check(cd_title_draw_bounded(font,style,origin,0,std::string(512,'A'),fitted)&&fitted.size()>=3&&inside_hud(font,fitted)&&fitted.back().x-fitted[fitted.size()-2].x==4.f&&fitted[fitted.size()-2].x-fitted[fitted.size()-3].x==4.f,"width fit and final ellipsis submission share the same readable spacing");
 }
-int main(){timing();transaction();labels_and_options();font_path();viewport_ellipsis();std::printf("CD title overlay: %u checks PASS (synthetic font/timer/ownership only)\n",checks);}
+}
+int main(){timing();transaction();labels_and_options();font_path();viewport_ellipsis();readable_spacing();std::printf("CD title overlay: %u checks PASS (synthetic font/timer/ownership only)\n",checks);}
