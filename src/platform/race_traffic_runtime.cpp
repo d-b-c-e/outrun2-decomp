@@ -28,6 +28,7 @@
 #include "driving/pc_wrecker.hpp"
 #include "driving/pc_course_query.hpp"
 #include "driving/pc_course_world.hpp"
+#include "driving/pc_ground_collision.hpp"   // 43D920 (find_selected_course_run)
 #include "driving/pc_wall_geometry.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_render_flush.hpp"
@@ -59,17 +60,21 @@ float angle_wrap_449470(float x){
     return x;
 }
 // The race clock, the matrix leaves and 449360's fsin must stay on the translated CPU that
-// calls them, retaining the x87 return and the guest matrix stack's pointer/depth.
+// calls them, retaining the x87 return and the guest matrix stack's pointer/depth. So do the
+// vector leaves of the request objects' display 50DBE0 (and its 4FB280 / 50C1A0 / 520BD0 /
+// 5209A0), the LAN car set's translations (40A820 / 40EF00 call the D3DX imports it answers).
 const TranslatedModule* request_clock_module(){
-    static const std::array<TranslatedFunction,6> functions=[](){
+    static const std::array<TranslatedFunction,16> functions=[](){
         constexpr std::array<std::uint32_t,5> pcs{0x4af500u,0x409f90u,0x40a170u,0x40a010u,0x449360u};
-        std::array<TranslatedFunction,6> found{};
-        for(std::size_t i=0;i<pcs.size();++i){
-            const auto* f=network_functions;
-            while(f->pc&&f->pc!=pcs[i])++f;
+        constexpr std::array<std::uint32_t,10> leaves{0x40a820u,0x40eeb0u,0x40ef00u,0x40ef10u,0x40ef40u,
+                                                      0x40efa0u,0x40f050u,0x40f140u,0x40f180u,0x449330u};
+        std::array<TranslatedFunction,16> found{};
+        auto take=[](const TranslatedFunction* f,std::uint32_t pc){
+            while(f->pc&&f->pc!=pc)++f;
             if(!f->pc)throw std::logic_error("translated request leaf is missing");
-            found[i]=*f;
-        }
+            return *f;};
+        for(std::size_t i=0;i<pcs.size();++i)found[i]=take(network_functions,pcs[i]);
+        for(std::size_t i=0;i<leaves.size();++i)found[pcs.size()+i]=take(network_cars_functions,leaves[i]);
         return found;}();
     static const TranslatedModule module=[](){
         TranslatedModule result{functions.data(),nullptr,{}};
@@ -823,6 +828,37 @@ struct Run {
             const auto eax=race_objects_copy_4efd20(m(),a[0],a[1]);   // one pass, in the stock read/write order
             if(a[1]!=0u)native_race_area(c).light_words_written=true;
             return eax;}
+        // 4EF870(v): [84CC18] = v, EAX = v (no children): the appear-record override 4F0030 returns as is, in the
+        // module's appear block (the request object 5E5D64's control 50E9F0 clears it at request state 7).
+        if(pc==0x4ef870u){routed(pc);m().put32(0x84cc18u,a[0]);return a[0];}
+        // 50ECC0 (thiscall, no arguments), the virtual display of the request object 5E5D64 (481A40): after 49A650 (a
+        // bare RET) nothing unless this +4 (the manager), its +80 (the current request), the request's +58 (its object)
+        // and the manager's +7660 are set and the object's key [object] is this +8; the object's kind [object +4]
+        // 0 / 1..4 / 5..6 then runs 50E460 / 50E4E0 / 50E9A0 (translated, ECX = this, the request as the argument).
+        // EAX: the child's; else the entry EAX (no manager), 0 (no request) or the request.
+        if(pc==0x50ecc0u){routed(pc);
+            const std::uint32_t self=k.ecx,manager=m().u32(self+4u);
+            if(!manager)return k.eax;
+            const std::uint32_t request=m().u32(manager+0x80u);
+            if(!request)return 0u;
+            const std::uint32_t object=m().u32(request+0x58u);
+            if(!object||!m().u32(manager+0x7660u))return request;
+            const std::uint32_t key=m().u32(object);
+            if(key!=m().u32(self+8u))return request;
+            const std::uint32_t kind=m().u32(object+4u);
+            if(kind>6u)return request;
+            PcRaceCall q{};q.pc=kind==0u?0x50e460u:kind<5u?0x50e4e0u:0x50e9a0u;q.ecx=self;q.argc=1;q.args[0]=request;
+            return (*this)(q);}
+        // 43D920(&first, &last, place, hint) (cdecl), GetColiPnumByCsLen: the course run carrying the place's cs length
+        // (part 0: 43D4D0 with the hint, other parts: 43D6E0), the driving core's lookup on the selected course world as
+        // the player car's CheckChickenDriver runs it (5209A0 calls it). EAX: the run's polygon count; the outputs keep
+        // the values the lookup leaves.
+        if(pc==0x43d920u){routed(pc);
+            std::int32_t first=m().i32(a[0]),last=m().i32(a[1]);
+            const auto n=driving::find_selected_course_run(c.start_mode.scene_owner_course_world.tables(),m().bytes(a[2],10u),
+                                                           std::int32_t(a[3]),first,last);
+            m().put32(a[0],std::uint32_t(first));m().put32(a[1],std::uint32_t(last));
+            return std::uint32_t(n);}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){
