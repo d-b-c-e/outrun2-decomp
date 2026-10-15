@@ -11,6 +11,7 @@
 #include "platform/course_world_runtime.hpp"
 #include "platform/embedded_exe_data.hpp"
 #include "system/exe_image.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -418,6 +419,99 @@ int main(int argc,char** argv){
                 require(heart_fallback.size()==1u&&heart_fallback[0].pc==0x4044c0u,
                         "active Heart ordinary-state fallback preserves the stock cleanup leaf");
             }
+            {   // 481A40 executes its real translated children on the canonical request owner.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;
+                const auto saved=block;const auto active=request.start_mode.manager_state_7f94c0;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t>& saved;
+                    NativeRuntimeContext& c;std::uint32_t active;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());c.start_mode.manager_state_7f94c0=active;}
+                } restore{block,saved,request,active};
+                std::fill(block.begin(),block.end(),0);request.start_mode.manager_state_7f94c0=1;
+                put32(block,0x16cu,0);put32(block,0x3a24u,123); // one stock row; inactive child resources
+                struct Overlay{std::uint32_t mode{16};std::array<std::uint8_t,0x80> scratch{};std::size_t mark{};} overlay;
+                std::vector<RaceHudDraw> draws;NativeHeartBinding binding;
+                binding.user=&overlay;binding.display=true;binding.draws=&draws;
+                binding.map=[](void* user,PcRaceMemory& m){auto& o=*static_cast<Overlay*>(user);o.mark=m.mark();
+                    m.map(0x78026cu,reinterpret_cast<std::uint8_t*>(&o.mode),4);
+                    m.map(0x0dfe2000u,o.scratch.data(),o.scratch.size());};
+                std::uint32_t missing{},fault{};std::string error;
+                const auto depth=request_matrices.depth;const auto offset=request_matrices.current_offset;
+                const auto latched=traffic.latched;
+                auto display=[&](){draws.clear();const bool ok=native_race_requests_display_481a40(
+                        request,request_matrices,binding,missing,fault,error);
+                    for(const auto field:{0x74u,0x78u,0x16cu,0x5800u,0x764cu})
+                        require(traffic.memory.at(NativeRaceTraffic::RequestsBase+field,4)==block.data()+field,
+                                "request HUD reads the canonical request owner, including the old NAVI overlap");
+                    require(request_matrices.depth==depth&&request_matrices.current_offset==offset&&traffic.latched==latched,
+                            "request display preserves matrix state and the independent traffic latch");
+                    traffic.memory.release(overlay.mark);return ok;};
+                for(const int value:{74,-74,3700}){
+                    put32(block,0x5800u,std::uint32_t(value));put32(block,0x74u,value==74?0u:value<0?1u:2u);
+                    const bool ok=display();if(!ok)std::fprintf(stderr,"request HUD child failure %08x/%08x: %s\n",missing,fault,error.c_str());
+                    require(ok&&missing==0&&fault==0&&draws.size()==3,"request HUD executes real guarded children and captures three ordered calls");
+                    require(draws[0].pc==0x4bb9e0u&&draws[0].args[0]==0&&draws[0].args[1]==123&&
+                            draws[1].pc==0x429530u&&draws[1].args[0]==(value==74?0x460064u:value<0?0x2c006du:0x460063u)&&
+                            std::int32_t(draws[1].args[4])==(value==3700?99:value/37)&&draws[2].pc==0x4bc990u&&
+                            draws[2].args[0]==10&&draws[2].args[1]==0x206u&&draws[2].args[2]==0x1b2u,
+                            "stock row, signed gauge/clamp and digits keep exact arguments and order");
+                    char text[16]{};std::snprintf(text,sizeof text,"%4d",value);
+                    require(!std::memcmp(&draws[2].args[3],text,sizeof text),"request total uses the pinned retail percent-4-d format");
+                }
+                overlay.mode=20;require(display()&&draws.empty(),"mode 20 skips main rows and gauge but executes the stock resource tail");
+                overlay.mode=16;
+                auto scratch_put=[&](std::size_t at,std::uint32_t v){std::memcpy(overlay.scratch.data()+at,&v,4);};
+                scratch_put(0x0cu,0x0dfe2020u);scratch_put(0x20u,0x0dfe2040u);
+                scratch_put(0x40u,0x0dfe2060u);scratch_put(0x74u,0xdead0042u);put32(block,0x78u,0x0dfe2000u);
+                require(!display()&&missing==0xdead0042u&&fault==0&&!error.empty()&&draws.empty(),
+                        "unsupported virtual request display retains its exact child PC without guessed draws");
+                scratch_put(0x74u,0x0dfe3000u); // an unknown PC is distinct from an unmapped object/vtable read
+                scratch_put(0x40u,0x0dfe3000u);
+                require(!display()&&missing==0x481a40u&&fault==0x0dfe3014u&&draws.empty(),
+                        "unmapped request vtable input retains its exact fault address");
+                std::fprintf(stderr,"request HUD bridge: canonical owner, signed gauge, ordered capture, mode20 and unsupported child checked\n");
+            }
+        }
+        {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
+            NaviPubGlobals globals;PcRaceMemory memory;globals.map(memory);
+            std::uint32_t mode=13,variant=5,car=0;
+            memory.map(0x78026cu,reinterpret_cast<std::uint8_t*>(&mode),4);
+            memory.map(0x780258u,reinterpret_cast<std::uint8_t*>(&variant),4);
+            memory.map(0x799d18u,reinterpret_cast<std::uint8_t*>(&car),4);
+            memory.put32(0x8447f8u,1);memory.put32(0x844700u,0xffffffffu);
+            struct Calls{std::vector<std::uint32_t> pcs;std::uint32_t refuse{},goal{};} calls;
+            std::vector<RaceHudDraw> draws;NaviPubServices services;
+            services.m=&memory;services.draws=&draws;services.request_user=&calls;services.heart_user=&calls;
+            services.request=[](void* p,std::uint32_t pc,std::uint32_t& value){
+                auto& c=*static_cast<Calls*>(p);c.pcs.push_back(pc);value=pc==0x46c500u?c.goal:0;return pc!=c.refuse;};
+            services.heart=[](void* p,std::uint32_t pc){static_cast<Calls*>(p)->pcs.push_back(pc);return true;};
+            auto reset=[&](std::uint32_t next,std::uint32_t refuse=0){mode=next;calls.pcs.clear();calls.refuse=refuse;
+                draws.clear();services.missing=0;services.fault=0;calls.goal=0;};
+            require(navi_pub_display_4beb00(services)&&draws.empty()&&memory.u32(0x842c10u)==0&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46ed20u},"mode 13 skips request HUD and preserves its stock tail flag");
+            reset(20);
+            require(navi_pub_display_4beb00(services)&&draws.empty()&&memory.u32(0x842c10u)==1&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46c220u,0x46ed20u},"mode 20 runs request display before the protected tail");
+            reset(17);
+            require(navi_pub_display_4beb00(services)&&draws.empty()&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46ed20u},"other non-GAME modes keep the protected tail");
+            reset(16,0x46c220u);
+            require(!navi_pub_display_4beb00(services)&&services.missing==0x46c220u&&draws.size()==1&&
+                    draws[0].args==std::array<std::uint32_t,7>{0x2c0030u,0,0,1,0,0,0}&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46c220u},"GAME submits the stock panel before a retained request-child failure");
+            reset(16,0x46c500u);
+            require(!navi_pub_display_4beb00(services)&&services.missing==0x46c500u&&draws.size()==1&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46c220u,0x46c500u},"GAME tests the goal gate only after request display");
+            reset(16);
+            require(!navi_pub_display_4beb00(services)&&services.fault==0x7d3994u&&services.missing==0xfa000000u&&
+                    draws.size()==1&&calls.pcs==std::vector<std::uint32_t>{0x46c220u,0x46c500u},
+                    "GAME reaches the existing clock next and retains its first unmapped input");
+            reset(16);calls.goal=1;
+            require(!navi_pub_display_4beb00(services)&&services.fault==0x5cu&&draws.size()==1&&
+                    calls.pcs==std::vector<std::uint32_t>{0x46c220u,0x46c500u},
+                    "a true goal gate reaches the stock goal-ahead car input before the clock");
+            reset(16);memory.put32(0x8447f8u,0);
+            require(navi_pub_display_4beb00(services)&&draws.empty()&&calls.pcs.empty(),"HUD toggle suppresses the whole variant-5 display");
+            std::fprintf(stderr,"request HUD: modes 13/16/17/20, ordered children and retained faults checked\n");
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();
         auto& unready=*unready_storage;

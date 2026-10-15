@@ -190,14 +190,8 @@ void heart_map(void* user,PcRaceMemory& m){
     auto& h=*static_cast<HeartUser*>(user);
     native_race_hud_map_heart(*h.c,m);
 }
-bool heart_run(void* user,std::uint32_t pc){
-    auto& h=*static_cast<HeartUser*>(user);auto& o=*h.o;
-    if(pc==0x46ed20u&&h.c->race.car_world.heart_mode_7f2428!=9u)return true;   // 46ED20 draws only in state 9 (45C440)
-    std::vector<RaceHudDraw> draws;std::vector<PcVehicleDrawCall> models;
-    NativeHeartBinding b{user,heart_map,&draws};
-    b.display=pc==0x462cd0u||pc==0x46ed20u;b.models=&models;b.renderer=h.renderer;
-    const bool ok=native_race_traffic_heart(*h.c,*h.st,pc,b);
-    rebuild(*h.c,o);
+void replay_hud_draws(HeartUser& h,const std::vector<RaceHudDraw>& draws){
+    auto& o=*h.o;
     auto& pool=h.c->event_function36.frontend_sprites;
     for(const auto& d:draws){
         if(d.pc==0x4289e0u){   // 428A10 (scale 1, s = argument 4, angle 0) like 4289B0
@@ -206,7 +200,8 @@ bool heart_run(void* user,std::uint32_t pc){
             continue;
         }
         if(!h.navi){note(o,d.pc);continue;}
-        if(d.pc==0x429530u)navi_emit_draw(*h.navi,d);
+        if(d.pc==0x4bb9e0u){if(!navi_request_row_4bb9e0(*h.navi,d.args[0],std::int32_t(d.args[1])))note(o,0x4bb9e0u);}
+        else if(d.pc==0x429530u)navi_emit_draw(*h.navi,d);
         else if(d.pc==0x4295d0u){
             std::uint32_t mn;std::memcpy(&mn,&d.matrix[3],4);
             if(!navi_sprite3d_4295d0(*h.navi,d.args[0],{d.matrix[0],d.matrix[1],d.matrix[2]},std::int32_t(d.args[1]),std::int32_t(d.args[2]),
@@ -216,12 +211,47 @@ bool heart_run(void* user,std::uint32_t pc){
             if(!navi_digits_4ba9d0(*h.navi,d.args[0],std::int32_t(d.args[1]),std::int32_t(d.args[2]),text,9,1.0f))note(o,0x4bc990u);
         }else note(o,d.pc);
     }
+}
+bool heart_run(void* user,std::uint32_t pc){
+    auto& h=*static_cast<HeartUser*>(user);auto& o=*h.o;
+    if(pc==0x46ed20u&&h.c->race.car_world.heart_mode_7f2428!=9u)return true;   // 46ED20 draws only in state 9 (45C440)
+    std::vector<RaceHudDraw> draws;std::vector<PcVehicleDrawCall> models;
+    NativeHeartBinding b{user,heart_map,&draws};
+    b.display=pc==0x462cd0u||pc==0x46ed20u;b.models=&models;b.renderer=h.renderer;
+    const bool ok=native_race_traffic_heart(*h.c,*h.st,pc,b);
+    rebuild(*h.c,o);replay_hud_draws(h,draws);
     if(!models.empty()){
         if(!h.renderer)note(o,0x405360u);
         else try{(void)native_race_draw_list_execute(*h.c,*h.renderer,models);}catch(const std::exception& e){note(o,0x405360u);if(o.last_error.empty())o.last_error=std::string("heart models: ")+e.what();}
     }
     if(!ok){const auto& t=native_race_traffic(*h.c);if(t.heart_latched&&o.last_error.empty())o.last_error="heart attack: "+t.heart_error;}
     return ok;
+}
+void request_hud_map(void* user,PcRaceMemory& m){
+    auto& o=*static_cast<HeartUser*>(user)->o;
+    m.map(0x842800u,o.navi.g842800.data(),o.navi.g842800.size());
+    m.map(0x688b00u,o.navi.g688b00.data(),o.navi.g688b00.size());
+    // Do not overlay the legacy NAVI 7F9400 band on the canonical request manager.
+}
+bool request_hud_run(void* user,std::uint32_t pc,std::uint32_t& value){
+    auto& h=*static_cast<HeartUser*>(user);auto& o=*h.o;value=0;
+    if(pc==0x46c500u){
+        std::uint32_t kind;std::memcpy(&kind,native_race_traffic(*h.c).requests_7f9460.data()+0x68u,4);
+        value=h.c->start_mode.manager_state_7f94c0&&kind==1u?1u:0u;return true;
+    }
+    if(pc!=0x46c220u){note(o,pc);return false;}
+    std::vector<RaceHudDraw> draws;std::vector<PcVehicleDrawCall> models;
+    NativeHeartBinding b{user,request_hud_map,&draws};b.display=true;b.models=&models;b.renderer=h.renderer;
+    std::uint32_t missing{},fault{};std::string error;
+    const bool ok=native_race_requests_display_481a40(*h.c,*h.st,b,missing,fault,error);
+    rebuild(*h.c,o);replay_hud_draws(h,draws);
+    if(!models.empty()){
+        if(!h.renderer){note(o,0x405360u);return false;}
+        try{(void)native_race_draw_list_execute(*h.c,*h.renderer,models);}
+        catch(const std::exception& e){note(o,0x405360u);o.last_error=std::string("request models: ")+e.what();return false;}
+    }
+    if(!ok){note(o,missing?missing:0x481a40u);if(fault)++o.unmapped[fault];o.last_error="request display: "+error;}
+    return ok&&(!h.navi||!h.navi->missing);
 }
 NaviPubServices navi_services(NativeRuntimeContext& c,NativeRaceHudRuntime& o,driving::PcMatrixStack& st,GroundUser& ground){
     NaviPubServices s;
@@ -506,6 +536,7 @@ bool native_race_hud_display(NativeRuntimeContext& c,PcSceneRenderer& r,std::uin
                 tr.object_draws.clear();
             }
             HeartUser hu{&c,&o,&st,&s,&r};s.heart_user=&hu;s.heart=heart_run;
+            s.request_user=&hu;s.request=request_hud_run;
             // [Misc] HudToggleKey (pc_screen.hpp): the toggles posted since the last display, flipped as Tweaks flips them.
             if(const auto requests=g_pc_hud_toggle_requests.exchange(0u)){
                 auto* flag=o.navi.g842800.data()+(PcNaviDisplayFlag-0x842800u);
