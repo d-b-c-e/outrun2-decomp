@@ -340,6 +340,25 @@ int main(int argc,char** argv){
                 require(traffic.memory.at(0x7f1994u,4u)==reinterpret_cast<std::uint8_t*>(&voice.tail_7f1994)&&
                         traffic.memory.at(0x7f1c64u,4u)==reinterpret_cast<std::uint8_t*>(&voice.head_7f1c64),
                         "the traffic memory maps the voice tail and head to the HUD's voice state");
+                // 45BD30(id, duration, priority), the queue push: the request manager (4FB390, 4FEA00, 5072F0, 507620)
+                // calls it as a traffic service, routed to this HUD service (combined-run-2105 latched there). An idle
+                // queue plays at once. A busy one keeps only a higher priority than its tail's. The 46C530 gate
+                // ([7F94C0] ? [7F95C4] : 0) reads the request manager's +164 in its block.
+                voice=NaviVoiceQueue{};
+                auto& requests=traffic.requests_7f9460;
+                auto put_164=[&](std::uint32_t v){std::memcpy(requests.data()+0x164u,&v,4u);};
+                put_164(0u);request.start_mode.manager_state_7f94c0=1u;request.race.clock.time_842110=100.0f;
+                const auto idle=native_race_hud_voice_45bd30(request,0xf3,0x3c,4);
+                require(idle==1u&&voice.head_7f1c64==0&&voice.entries_7f1998[0].id==0xf3&&voice.entries_7f1998[0].duration==0x3c&&
+                        voice.entries_7f1998[0].priority==4&&voice.last_7f8b40==100u,"an idle voice queue plays the pushed voice at once");
+                require(native_race_hud_voice_45bd30(request,0xf4,0x3c,4)==0u&&voice.tail_7f1994==0,
+                        "a busy queue refuses a voice no higher than its tail's priority");
+                require(native_race_hud_voice_45bd30(request,0xf4,0x3c,5)==1u&&voice.tail_7f1994==1&&
+                        voice.entries_7f1998[1].id==0xf4&&voice.entries_7f1998[1].priority==5,"a busy queue keeps a higher priority voice");
+                put_164(1u);
+                require(native_race_hud_voice_45bd30(request,0xf5,0x3c,9)==0u&&voice.tail_7f1994==1,
+                        "46C530: the active request manager's +164 holds the voice queue");
+                put_164(0u);
             }
             {   // Native branch regression from pinned 68CEB386 disassembly, 4AE0F0..4AE5D4.
                 // Original-code parity is UNRUN: ghost_draw_probe needs Linux/WSL and separate pinned assets.

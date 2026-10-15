@@ -550,8 +550,9 @@ bool native_race_hud_service(NativeRuntimeContext& c,std::uint32_t pc,const std:
 std::uint32_t native_race_hud_voice_45bd30(NativeRuntimeContext& c,std::int32_t id,std::int16_t duration,std::int16_t priority){
     auto& o=native_race_hud(c);
     NaviVoiceServices v;v.time_842110=c.race.clock.time_842110;v.busy_7f94c0=c.start_mode.manager_state_7f94c0;
-    v.busy_7f95c4=0;v.sounds_424940=&o.pending_sounds;   // 7F95C4 is only read when 7F94C0 != 0 (46C530)
-    if(v.busy_7f94c0)note(o,0x46c530u);
+    v.sounds_424940=&o.pending_sounds;
+    // 46C530: [7F94C0] ? [7F95C4] : 0. 7F95C4 is the request manager's +164, in the block that owns it.
+    std::memcpy(&v.busy_7f95c4,native_race_traffic(c).requests_7f9460.data()+0x164u,4u);
     const auto r=navi_voice_request_45bd30(o.voice,v,id,duration,priority);
     drain_sounds(c,o);
     return r;
