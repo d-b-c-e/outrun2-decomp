@@ -452,6 +452,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // culling-flag store at 44F6DC. Off preserves the PC's original store (pc_screen.hpp, race_area.cpp).
     outrun::platform::g_pc_fix_right_side_bunki_animations=settings.flag("Bugfixes","FixRightSideBunkiAnimations",true);
     if(!outrun::platform::g_pc_fix_right_side_bunki_animations)std::printf("settings: right-side bunki animation fix off (the PC's own model flag)\n");
+    // This distinct default-off key preserves native event conditions and C2C selection. Read once from
+    // the effective startup INI (including recorded Misc on cold-start playback); do not reset its PRNG here.
+    outrun::platform::g_pc_random_highway_animation_rows=settings.flag("Misc","RandomHighwayAnimationRows",false);
+    if(outrun::platform::g_pc_random_highway_animation_rows)
+        std::printf("settings: highway animation table rows on (v%u, fixed initial state %08X; native conditions and C2C retained)\n",
+            outrun::platform::PcHighwayAnimationRows::Version,unsigned(outrun::platform::PcHighwayAnimationRows::InitialState));
     // [Bugfixes] HideOnlineSigninText, the Tweaks key (off unless set true, as in its INI): no sign-in status box or text
     // and no SIGN-IN help-bar button on the menus (pc_screen.hpp).
     outrun::platform::g_pc_hide_online_signin_text=settings.flag("Bugfixes","HideOnlineSigninText",false);

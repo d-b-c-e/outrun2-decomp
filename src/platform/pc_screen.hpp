@@ -59,6 +59,23 @@ inline int pc_pegasus_sound_off_44bcc0(bool fix,unsigned out[2]){
 // on the mirrored right-side branch model. Tweaks skips that seven-byte store; race_area.cpp does the same when on.
 // Off retains the PC store, and the left-side path is unchanged.
 inline bool g_pc_fix_right_side_bunki_animations=true;
+// [Misc] RandomHighwayAnimationRows, off by default: a table-row-only visual variant, not Tweaks'
+// RandomHighwayAnimSets mode replacement. v1 is xorshift32 (13,17,5), seeded once per process with
+// 0x4F523252, returning the top two bits after each advance. Never consume the game's CRT random state.
+// The cold-start recording path retains Misc in its INI snapshot and pins the executable's algorithm.
+// This state survives area/menu resets; INI alone cannot restore an arbitrary midprocess position.
+struct PcHighwayAnimationRows {
+    static constexpr unsigned Version=1;
+    static constexpr std::uint32_t InitialState=0x4f523252u;
+    std::uint32_t state=InitialState;
+    std::uint32_t select(bool enabled,std::uint32_t native_mode){
+        if(!enabled||native_mode==3u||native_mode==4u)return native_mode;
+        state^=state<<13;state^=state>>17;state^=state<<5;
+        return state>>30;
+    }
+};
+inline bool g_pc_random_highway_animation_rows=false;
+inline PcHighwayAnimationRows g_pc_highway_animation_rows;
 // [Bugfixes] HideOnlineSigninText (the Tweaks key, off by default there since its b3c1825 and here; hooks_bugfixes.cpp;
 // Tweaks' code default is still true, its shipped INI sets false): the remnants of the online service on the menus.
 // - 443256 (JNE to JMP): 443110 never opens the 4400D3 sign-in status box at +C48 (pc_signin_box_call_skipped,
