@@ -32,6 +32,9 @@ PROFILE = "\n".join([
     "confirm = button 20 %s" % WHEEL, "start = button 21 %s" % WHEEL, "back = button 22 %s" % WHEEL,
     "navUp = button 23 %s" % WHEEL, "navDown = button 24 %s" % WHEEL,
     "navLeft = button 25 %s" % WHEEL, "navRight = button 26 %s" % WHEEL, ""])
+# --horn (R1 only; AllowHorn command path, sana #132035): this run's INI adds horn on an otherwise unused R12 button and
+# [Audio] AllowHorn = true; the copy's PROFILE is restored after it, as for a tape run.
+HORN_INI = PROFILE + "horn = button 27 %s\n[Audio]\nAllowHorn = true\n" % WHEEL
 # The menus from launch to a race (zero's mapped path, perf runs 1-3, hcom 24236), in seconds after the game window
 # appears. A latched process keeps its saves in the fresh run folder, so every run starts at "create new license":
 # title, CREATE NEW LICENSE, three downs to DONE, SINGLE PLAYER, OUTRUN mode, the OUTRUN2 course, the first car,
@@ -62,6 +65,7 @@ def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
 R1_RACE_SECONDS = 7.0          # steer-right then steer-left, 3.5 s each (the R1 workload in main)
 RACE_MARGIN = 15.0             # the end batch, log polling and a cold shader cache at race entry
 INJECT_MARGIN = 120            # inject.on outlives the run's own bound by this much
+HORN_SECONDS = 2.0             # --horn: one 1.5 s horn hold after the steer holds, then its release
 
 
 def valid_race_seconds(v):
@@ -75,9 +79,22 @@ def replay_bound(race_seconds, tape_rows):
     return max(tape_rows / 30 + 15, 2 * race_seconds + 30)
 
 
-def race_budget(replay_timeout):
-    """Seconds the race phase may use after race entry: R3 its replay bound, R1 its steer holds; plus the margin."""
-    return (replay_timeout if replay_timeout is not None else R1_RACE_SECONDS) + RACE_MARGIN
+def race_budget(replay_timeout, horn=False):
+    """Seconds the race phase may use after race entry: R3 its replay bound, R1 its steer holds (and the horn step with
+    --horn); plus the margin."""
+    return (replay_timeout if replay_timeout is not None else R1_RACE_SECONDS + (HORN_SECONDS if horn else 0.0)) + RACE_MARGIN
+
+
+HORN_LOOP = re.compile(r"\b9bcx\d+")   # the result log's race sound line: 42F0D0 0x1BC | SND_LOOP, played or refused
+HORN_STOP = re.compile(r"\b81bcx\d+")  # and 0x1BC | SND_STOP
+
+
+def horn_evidence(log_text):
+    """--horn: the last race sound status in the run's log (the exit result log's line). The LOOP and the accepted STOP are
+    read separately; this is the command path through 42F0D0, not a claim that the horn was heard."""
+    lines = [l.strip() for l in log_text.splitlines() if "race sound inits=" in l]
+    last = lines[-1] if lines else None
+    return dict(line=last, loop=bool(last and HORN_LOOP.search(last)), stop=bool(last and HORN_STOP.search(last)))
 
 
 def loop_deadline(start, startup_seconds, race_at, budget):
@@ -248,6 +265,11 @@ def verdict(receipt):
                 failures.append("no race progression during playback: %s" % json.dumps(cmp["progression"]))
     replay_result = receipt.get("replay")
     if not (isinstance(replay_result, dict) and replay_result.get("exit") == 0): failures.append("adapter replay did not reconstruct: %s" % str(replay_result)[:300])
+    horn = receipt.get("horn")
+    if horn is not None:   # --horn: the hold was sent, and the result log names both the LOOP and the accepted STOP
+        if not horn.get("sentAt"): failures.append("horn: the hold was not sent")
+        if not horn.get("loop"): failures.append("horn: no 9BC (loop) in the result log's race sound line: %s" % horn.get("line"))
+        if not horn.get("stop"): failures.append("horn: no 81BC (stop) in the result log's race sound line: %s" % horn.get("line"))
     receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
     return failures
 
@@ -282,6 +304,9 @@ def main():
                         "sealed capture\\); its fresh --export-recording is played at the 453BB0 seam from the first input tick, no presses")
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
+    a.add_argument("--horn", action="store_true", help="R1 only: this run binds horn (R12 button 27) with [Audio] AllowHorn = true "
+                   "and holds it 1.5 s after the steer holds; the exit result log's race sound line must name the 9BC loop and the "
+                   "81BC stop (the command path, not an audible check)")
     o = a.parse_args()
     if o.prepare_from: prepare(o.prepare_from, o.game, o.candidate); return
     if not o.result: a.error("--result is required for a run or a preflight")
@@ -307,6 +332,7 @@ def main():
     if not o.finalizer or not o.finalizer.exists(): problems.append("no --finalizer P21Finalizer.dll to seal the capture")
     consumed = o.consumed_replay is not None
     if consumed and o.replay_of: problems.append("--consumed-replay and --replay-of are exclusive")
+    if o.horn and (consumed or o.replay_of): problems.append("--horn is an R1 step only (no --replay-of or --consumed-replay)")
     if not consumed and (not o.replay_tool or not o.replay_tool.exists()): problems.append("no --replay-tool capture_replay.exe to replay the capture")
     tape = None; tape_rows = 0; tape_source = None; replay_timeout = None; reference = None
     if consumed:   # the same candidate plays its own saved recording, exported fresh from its recording seal (sana 35159)
@@ -351,8 +377,8 @@ def main():
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
-                replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout) if not o.replay_of or replay_timeout is not None else None,
-                dbce=str(DBCE), seconds=o.seconds, problems=problems)
+                replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout, o.horn) if not o.replay_of or replay_timeout is not None else None,
+                horn=o.horn, dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
@@ -385,8 +411,14 @@ def main():
         if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it
             wrote_ini = True
             ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n%s" % (tape, "Mode = consumed\n" if consumed else "")).encode("utf-8"))
+        elif o.horn:   # the horn binding and AllowHorn for this run only; restored to the exact profile bytes after it
+            wrote_ini = True
+            ini.write_bytes(HORN_INI.encode("utf-8"))
+            receipt["horn"] = dict(sentAt=None, line=None, loop=False, stop=False,
+                label="AllowHorn command path: one 'inject action horn 1 ms=1500' after the steer holds; the exit result log's race "
+                      "sound line (42F0D0 played/refused per command) is read for the 9BC loop and the 81BC stop; not an audible check")
         DBCE.mkdir(parents=True, exist_ok=True)
-        start = time.time(); budget = race_budget(replay_timeout)
+        start = time.time(); budget = race_budget(replay_timeout, o.horn)
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
         receipt["pid"] = proc.pid; created = creation_time(int(proc._handle)); receipt["creationTime"] = created
@@ -433,6 +465,10 @@ def main():
             elif phase == "steer-right" and time.time() - phase_at > 3.5:
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:
+                if o.horn:
+                    phase, phase_at = "horn", time.time(); batch(["inject action horn 1 ms=1500"]); receipt["horn"]["sentAt"] = phase_at
+                else: phase = "end"; batch(["end"]); break
+            elif phase == "horn" and time.time() - phase_at > HORN_SECONDS:
                 phase = "end"; batch(["end"]); break
             elif phase == "replay" and replay_due(time.time(), phase_at, replay_timeout, receipt["r3"]["playbackEnd"]):
                 phase = "end"; batch(["end"]); break
@@ -506,6 +542,8 @@ def main():
         receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
         receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
         receipt["route"] = route_of(receipt, (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else "")
+        if receipt.get("horn") is not None:
+            receipt["horn"].update(horn_evidence((out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else ""))
         failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
         print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",

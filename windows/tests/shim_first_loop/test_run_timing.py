@@ -13,17 +13,21 @@ def check(ok, what):
     if not ok: failures.append(what)
 
 
-def simulate(startup, race_entry, replay_timeout, playback_end_at=None, step=0.2):
+def simulate(startup, race_entry, replay_timeout, playback_end_at=None, step=0.2, horn=False):
     """The run loop's timing on a fake clock: the menus until race_entry, then the race phase. Returns (why the loop
-    ended, the fake time it ended). R1 when replay_timeout is None: its steer holds end it, 3.5 s each."""
-    start = 1000.0; budget = run.race_budget(replay_timeout); race_at = None; phase = "menus"; phase_at = 0.0; now = start
+    ended, the fake time it ended). R1 when replay_timeout is None: its steer holds end it, 3.5 s each; with horn, then
+    the horn step (HORN_SECONDS)."""
+    start = 1000.0; budget = run.race_budget(replay_timeout, horn); race_at = None; phase = "menus"; phase_at = 0.0; now = start
     while now < run.loop_deadline(start, startup, race_at, budget):
         now += step
         if phase == "menus":
             if now - start >= race_entry: race_at = now; phase, phase_at = ("replay" if replay_timeout is not None else "steer-right"), now
             continue
         if phase == "steer-right" and now - phase_at > 3.5: phase, phase_at = "steer-left", now
-        elif phase == "steer-left" and now - phase_at > 3.5: return "end", now - start
+        elif phase == "steer-left" and now - phase_at > 3.5:
+            if horn: phase, phase_at = "horn", now
+            else: return "end", now - start
+        elif phase == "horn" and now - phase_at > run.HORN_SECONDS: return "end", now - start
         elif phase == "replay" and run.replay_due(now, phase_at, replay_timeout,
                                                   playback_end_at is not None and now - race_at >= playback_end_at):
             return "end", now - start
@@ -48,6 +52,26 @@ finally:
 # R1 entering the race at the end of its startup budget still runs both steer holds.
 why, at = simulate(180, 179, None)
 check(why == "end" and at > 179 + 7, "late race entry: R1 completes its steer holds (%s at %.1f)" % (why, at))
+# --horn (AllowHorn command path): R1's budget grows by the horn step, a late race entry still sends it, and the
+# replay budgets do not change.
+check(run.race_budget(None, True) == run.R1_RACE_SECONDS + run.HORN_SECONDS + run.RACE_MARGIN, "the horn step's budget")
+check(run.race_budget(bound, True) == run.race_budget(bound), "the horn flag does not change a replay budget")
+why, at = simulate(180, 179, None, horn=True)
+check(why == "end" and at > 179 + 7 + run.HORN_SECONDS, "late race entry: R1 completes its steer holds and the horn step (%s at %.1f)" % (why, at))
+check(run.inject_expiry(0, 180, run.race_budget(None, True)) >= run.loop_deadline(0, 180, 180, run.race_budget(None, True)) + run.INJECT_MARGIN,
+      "inject.on outlives the horn run's latest bound")
+# The horn run's INI: the exact test profile, then the horn on an otherwise unused R12 button, then [Audio] AllowHorn.
+check(run.HORN_INI.startswith(run.PROFILE) and "button 27" not in run.PROFILE, "the horn button is unused by the test profile")
+check(run.HORN_INI[len(run.PROFILE):] == "horn = button 27 %s\n[Audio]\nAllowHorn = true\n" % run.WHEEL, "the horn run's INI delta")
+# The evidence: the LAST race sound line, the loop and the stop read separately (refused counts as the command path too).
+log = "x\nrace sound inits=1 controls=9 played: 51x2 refused:\nrace sound inits=1 controls=99 played: 51x3 9bcx40 refused: 81bcx1\n"
+ev = run.horn_evidence(log)
+check(ev["loop"] and ev["stop"] and ev["line"].endswith("81bcx1"), "the last race sound line names both: %r" % ev)
+ev = run.horn_evidence("race sound inits=1 played: 9bcx3 refused:\n")
+check(ev["loop"] and not ev["stop"], "a loop without its stop: %r" % ev)
+ev = run.horn_evidence("race sound inits=1 played: 19bcx3 381bcx1\n")
+check(not ev["loop"] and not ev["stop"], "other ids that merely end in 9bc / 81bc are not the horn: %r" % ev)
+check(run.horn_evidence("nothing")["line"] is None, "no race sound line: no evidence")
 # No race: the startup budget alone bounds the run.
 why, at = simulate(180, 10_000, bound)
 check(why == "deadline" and 180 <= at < 180.5, "no race: the startup budget ends the run (%s at %.1f)" % (why, at))
