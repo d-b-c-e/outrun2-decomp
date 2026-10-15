@@ -115,7 +115,8 @@ float ghost_spline_454fc0(const PcRaceMemory&,std::uint32_t spline,std::uint32_t
 // leaves 405360/4056D0/4044F0/4044A0/4044C0/4044E0/4052B0/4052C0/404540/
 // 405350; services 46F990, 49EED0, 4957F0/495B00/4962D0/495860) and the
 // shadow 4ADAC0 (4AD380). Reads 7D39F0, 7C24C9, 79FB48, 7F94C0 and the EXE
-// car tables mapped by ghost_map_car_tables.
+// car tables mapped by ghost_map_car_tables. 4AE0F0 preserves the request manager's
+// active +D14 state gates/items as well as the ordinary car model path.
 void ghost_map_car_tables(PcRaceMemory&);
 void other_car_draw_4ae0f0(PcRaceContext&,std::uint32_t car);
 // Tweaks DisableVehicleLODs (the host's [Graphics] key; off by default): 4AE0F0 draws LOD 0 instead of the car's

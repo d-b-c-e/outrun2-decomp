@@ -868,12 +868,50 @@ void heart_item_draw_4ae386(Draw& d,std::uint32_t car){
     d.leaf(0x4044c0u,{});
     d.pop();                                                                     // 40A010
 }
-// 4AE0F0 (ESI = car), offline path (the network draws are refused).
+// 4AE19B / 4AE249: request items (+D14 states 5 / 4). The phase converts to
+// f32 for the SSE products, while the cosine and bob additions retain x87 precision.
+void request_item_draw(Draw& d,std::uint32_t car,std::uint32_t state){
+    auto& m=d.m;
+    const std::int32_t phase=std::int32_t(m.u32(car+0xd18));
+    const float phase_f=float(phase);
+    const float wave=(phase_f*bits(0x3c088889u))*bits(0x40c90fdbu); // [5C4744] * [5A29DC]
+    const float bob=driving::x87_float(driving::x87_sin(X87(wave))*X87(state==5u?bits(0x3e800000u):K0_5));
+    d.push_load(car+0xb0);
+    if(state==4u){
+        const X87 angle=(X87(phase)*X87(bits(0x3d088889u)))*X87(KPi); // [5A91BC] * [6280C8]
+        driving::pc_matrix_rotate_x(d.s,driving::x87_float(driving::x87_cos(angle)*X87(bits(0x3d20d97cu))));
+    }
+    const float yaw=(phase_f*bits(0x3c888889u))*bits(state==5u?0x407b53d2u:0x4016cbe4u); // [6280E8] * [5C4740/38]
+    driving::pc_matrix_rotate_y(d.s,yaw);
+    d.translate3(0.0f,driving::x87_float(X87(bob)+X87(state==5u?K1:bits(0x40e00000u))),0.0f);
+    const float scale=bits(state==5u?0x3d99999au:0x3e4ccccdu);
+    d.scale3(scale,scale,scale);
+    d.leaf(0x4044a0u,{});d.leaf(0x4044e0u,{8});
+    d.leaf(0x405360u,{0x01400000u,0,0,0,None,0});
+    if(state==4u){
+        d.scale3(bits(0x3f99999au),bits(0x3fa66666u),bits(0x3f99999au));
+        d.leaf(0x405360u,{0x01ee0010u,0,0,0,None,0});
+        d.scale3(bits(0x3f4ccccdu),K1,bits(0x3f4ccccdu));
+        d.leaf(0x405360u,{0x01ee0010u,0,0,0,None,0});
+        d.scale3(K1,K1,K1);
+        d.leaf(0x405360u,{0x01ee0010u,0,0,0,None,0});
+    }
+    d.leaf(0x4044c0u,{});d.pop();
+}
+// 4AE0F0 (ESI = car): ordinary cars and the request manager's active-state items.
 bool& other_car_lods_disabled(){static bool off=false;return off;}
 void other_car_draw_4ae0f0(PcRaceContext& c,std::uint32_t car){
     Draw d(c);auto& m=c.m;
-    if(m.u32(0x7f94c0u)!=0u)throw std::runtime_error("4AE0F0: network car draw (55A930) not ported");
-    if(m.u32(0x780258u)==2u&&(m.u32(car+0xc5c)&0x80000u)){heart_item_draw_4ae386(d,car);return;}
+    const bool active=m.u32(0x7f94c0u)!=0u;                                   // 55A930
+    const std::uint32_t state=active?m.u32(car+0xd14):0u;
+    if(active&&(state==2u||state==3u))return;                                 // 4AE107..4AE118
+    const bool heart=m.u32(0x780258u)==2u&&(m.u32(car+0xc5c)&0x80000u);
+    if(heart||(active&&(state==1u||state==4u||state==5u))){
+        if(!active||state==1u)heart_item_draw_4ae386(d,car);
+        else if(state==4u||state==5u)request_item_draw(d,car,state);
+        else{d.push_load(car+0xb0);d.leaf(0x4044c0u,{});d.pop();}               // active Heart fallback: 4AE194 -> 4AE427
+        return;
+    }
     std::uint32_t flags=m.u32(car+4);
     float saved=0.f;std::uint32_t was40=0;
     if(flags&4u){
