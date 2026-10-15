@@ -63,7 +63,9 @@ binding.
 `runtime.log` lists every controller (instance and product GUIDs, name, type,
 axes, buttons, hats, force feedback); for the first two minutes it also logs
 every button pressed and the axes moved on the opened devices.
-The ordinary wheel path rescans controllers every two seconds. A configured
+The ordinary wheel path rescans controllers when Windows reports a device change,
+and every two seconds only while a bound control has no open, connected device
+(a rescan stalls the frame it runs in; source/wheel_rescan.hpp). A configured
 device connected after launch opens under its saved instance GUID; disconnects
 release its handle and neutralize its actions. Live rig qualification is pending.
 
