@@ -871,6 +871,9 @@ struct Run {
         // 4FBBB0(record, other) (thiscall on the C2C request manager, RET 8; the translated 4FC0B0 calls it):
         // a request's traffic car, the traffic module's part on its 470240 / 46E830 helpers.
         if(pc==0x4fbbb0u&&ctx){routed(pc);return traffic_control_part(*ctx,pc,k.ecx,a[0],a[1]);}
+        // 470240(place, row, pos out, angles out, side out) (cdecl): the traffic module's road-place pose, for the
+        // request manager's 4FC240 (its cars' road speed when the request starts).
+        if(pc==0x470240u&&ctx){routed(pc);return traffic_place_pose_470240(*ctx,a[0],std::int32_t(a[1]),a[2],a[3],a[4]);}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){

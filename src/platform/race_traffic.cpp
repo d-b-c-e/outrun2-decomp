@@ -6083,6 +6083,8 @@ void traffic_car_init(PcRaceContext& c,std::uint32_t callback,std::uint32_t car)
 }
 std::uint32_t traffic_appear_rec_4efb90(PcRaceContext& c,std::uint32_t place){T t(c);return t.appear_rec_4efb90(place);}
 std::uint32_t traffic_speed_rec_4f0030(PcRaceContext& c,std::uint32_t place,std::uint32_t rec){T t(c);return t.speed_rec_4f0030(place,rec);}
+std::uint32_t traffic_place_pose_470240(PcRaceContext& c,std::uint32_t place,std::int32_t row,std::uint32_t pos,
+                                        std::uint32_t ang,std::uint32_t side){T t(c);return t.place_pose_470240(place,row,pos,ang,side);}
 std::uint32_t traffic_progress_4a6cf0(PcRaceContext& c,std::uint32_t car){T t(c);return bits(driving::x87_float(t.progress_4a6cf0(car)));}
 void traffic_car_control_47e780(PcRaceContext& c,std::uint32_t car){T t(c);t.control_47e780(car);}
 bool traffic_network_call(PcRaceContext& c,std::uint32_t pc,std::uint32_t ecx,const std::uint32_t* a,std::size_t n,std::uint32_t& eax){
