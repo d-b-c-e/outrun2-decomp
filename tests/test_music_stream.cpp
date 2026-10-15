@@ -164,14 +164,16 @@ NumericResult render_custom_loop(const std::vector<std::uint8_t>& bytes,unsigned
     MusicStream stream;std::string error;NumericResult result;
     const std::string case_name="custom rate="+std::to_string(rate)+" channels="+std::to_string(channels)+
         " start="+std::to_string(start)+" endExclusive="+std::to_string(end);
-    check(stream.open(bytes,true,error),case_name+": "+error);
+    const bool opened=stream.open(bytes,true,error);
+    check(opened,case_name+": "+error);
     check(stream.stats.rate==rate&&stream.stats.channels==channels,"custom decoded layout");
     auto physical=[&](std::uint64_t logical){return logical<end?logical:start+(logical-end)%(end-start);};
     std::size_t output=0;
     for(std::size_t call=0;output<outputs&&call<outputs+1u;++call){
         const auto count=std::min(chunks[call%4u],outputs-output);std::vector<double> pcm(count*2u);
         const auto before=stream.stats.frames;
-        check(stream.mix_add(pcm.data(),count,0.5,error),case_name+": "+error);
+        const bool mixed=stream.mix_add(pcm.data(),count,0.5,error);
+        check(mixed,case_name+": "+error);
         check(stream.stats.frames-before==count,"custom loop emitted exact requested frames");
         for(std::size_t f=0;f<count;++f,++output){
             const auto timestamp=std::uint64_t(output)*rate,index=timestamp/48000u;
