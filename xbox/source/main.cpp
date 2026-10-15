@@ -16,7 +16,6 @@
 #include "driving/pc_wheel_dynamics.hpp"
 #include "platform/race_player_car.hpp"
 #include "platform/race_traffic_runtime.hpp"
-#include "platform/race_sound_runtime.hpp"   // the race SE command status in the result log
 #include "platform/embedded_exe_data.hpp"
 #include "platform/frontend_preview_pack.hpp"
 #include "platform/native_race_effects.hpp"   // scn-efc
@@ -558,9 +557,6 @@ const bool core_passed=loader_bytes_match&&rc==0u&&ev405.function_id==36u&&ev405
         (unsigned long long)diag.menu_audio.stats.mixed_frames,(unsigned long long)diag.menu_audio.stats.movie_frames);
     result_printf(result_log,"%s\n",context.pc_sound.status().c_str());
     result_printf(result_log,"%s\n",outrun::platform::native_race_traffic_status(context).c_str());
-    // The race SE commands (42F0D0, played / refused per command): with no OR2 switch, so a latched run shows them too
-    // (the horn's 0x9BC loop and 0x81BC stop, AllowHorn; sana #132035).
-    result_printf(result_log,"%s\n",outrun::platform::native_race_sound_status(context).c_str());
     {const auto& g=outrun::platform::native_race_ghosts(context);
         result_printf(result_log,"car displays (ghost/traffic 4AE5F0/4ADAC0) displays=%u shadows=%u objects=%u faults=%u error=%s\n",g.displays,g.shadows,g.objects_drawn,g.display_faults,g.display_error.c_str());}
     result_printf(result_log,"music decoder=%u requests=%u stops=%u started=%u failed=%u last_track=%u frames=%llu loops=%llu rate=%u error=%s mix_error=%s\n",

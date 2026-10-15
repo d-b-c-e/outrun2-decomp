@@ -63,15 +63,52 @@ check(run.inject_expiry(0, 180, run.race_budget(None, True)) >= run.loop_deadlin
 # The horn run's INI: the exact test profile, then the horn on an otherwise unused R12 button, then [Audio] AllowHorn.
 check(run.HORN_INI.startswith(run.PROFILE) and "button 27" not in run.PROFILE, "the horn button is unused by the test profile")
 check(run.HORN_INI[len(run.PROFILE):] == "horn = button 27 %s\n[Audio]\nAllowHorn = true\n" % run.WHEEL, "the horn run's INI delta")
-# The evidence: the LAST race sound line, the loop and the stop read separately (refused counts as the command path too).
-log = "x\nrace sound inits=1 controls=9 played: 51x2 refused:\nrace sound inits=1 controls=99 played: 51x3 9bcx40 refused: 81bcx1\n"
-ev = run.horn_evidence(log)
-check(ev["loop"] and ev["stop"] and ev["line"].endswith("81bcx1"), "the last race sound line names both: %r" % ev)
-ev = run.horn_evidence("race sound inits=1 played: 9bcx3 refused:\n")
+# The evidence (sana #132448): the LAST race sound line (native_race_sound_status's format); delivery is a positive PLAYED
+# count for both the loop and the stop; refused, missing or x0 is a request only.
+def sound(played="", refused="", missing=""):
+    return ("race sound inits=1 controls=99 destroys=0 skipped=0 ics=0 clear_all=0 comm_trans=0 fade9560cc=1 count955c9c=0"
+            " played:%s refused:%s missing:%s ics(ch/code=value): 1/2=3" % (played, refused, missing))
+ev = run.horn_evidence("x\n%s\n%s\n" % (sound(" 51x2"), sound(" 51x3 9bcx40 81bcx1")))
+check(ev["loop"] and ev["stop"] and ev["played"] == dict(loop=40, stop=1) and ev["refused"] == dict(loop=0, stop=0), "both played: %r" % ev)
+ev = run.horn_evidence("%s\n%s\n" % (sound(" 9bcx40 81bcx1"), sound(" 51x3")))
+check(not ev["loop"] and not ev["stop"], "only the LAST race sound line counts: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx40", " 81bcx1"))
+check(ev["loop"] and not ev["stop"] and ev["refused"]["stop"] == 1, "a refused stop is not delivered: %r" % ev)
+ev = run.horn_evidence(sound("", " 9bcx3 81bcx1"))
+check(not ev["loop"] and not ev["stop"] and ev["refused"] == dict(loop=3, stop=1), "request-only (both refused) is not delivered: %r" % ev)
+ev = run.horn_evidence(sound("", "", " 9bcx1 81bcx1"))
+check(not ev["loop"] and not ev["stop"] and ev["missing"] == dict(loop=1, stop=1), "missing effects are not delivered: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx0 81bcx0"))
+check(not ev["loop"] and not ev["stop"], "x0 counts are not delivered: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx3"))
 check(ev["loop"] and not ev["stop"], "a loop without its stop: %r" % ev)
-ev = run.horn_evidence("race sound inits=1 played: 19bcx3 381bcx1\n")
+ev = run.horn_evidence(sound(" 19bcx3 381bcx1"))
 check(not ev["loop"] and not ev["stop"], "other ids that merely end in 9bc / 81bc are not the horn: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx3 junk 81bcx1"))
+check(ev.get("malformed") and not ev["loop"] and not ev["stop"], "an unreadable played section is no evidence: %r" % ev)
+ev = run.horn_evidence("race sound inits=1 9bcx3 81bcx1")
+check(not ev["loop"] and not ev["stop"] and ev["played"] is None, "a line without its sections is no evidence: %r" % ev)
 check(run.horn_evidence("nothing")["line"] is None, "no race sound line: no evidence")
+def horn_failures(**horn):
+    return [f for f in run.verdict(dict(errors=[], phase="end", exitCode=0, horn=dict(sentAt=1.0, **horn))) if f.startswith("horn")]
+check(horn_failures(**run.horn_evidence(sound(" 9bcx40 81bcx1"))) == [], "the verdict passes a played loop and stop")
+f = horn_failures(**run.horn_evidence(sound("", " 9bcx3 81bcx1")))
+check(len(f) == 2 and "9BC (loop) not played" in f[0] and "81BC (stop) not played" in f[1] and "refused {'loop': 3, 'stop': 1}" in f[0],
+      "the verdict fails request-only, with the counts: %r" % f)
+# An unresolved close on a --horn run (sana #132311): retained and reported, never killed; never sealed; the verdict fails.
+class Running:
+    pid = 4242
+    def poll(self): return None
+    def kill(self): raise AssertionError("a retained process is killed")
+r = dict(creationTime=7, errors=[], forced=False)
+run.retain(Running(), r)
+check(r["retained"]["pid"] == 4242 and r["retained"]["creationTime"] == 7 and not r["forced"], "retain records pid and creation time: %r" % r)
+check(any(f.startswith("process retained") for f in run.verdict(dict(r, phase="end", exitCode=None))), "the verdict fails a retained process")
+import tempfile
+with tempfile.TemporaryDirectory() as t:
+    (pathlib.Path(t) / "run" / "capture").mkdir(parents=True)
+    run.seal(pathlib.Path(t), Running(), 7, r, None)
+    check(r["seal"] == "no observed exit" and not (pathlib.Path(t) / "run" / "capture" / "exit.json").exists(), "a retained process is not sealed: %r" % r["seal"])
 # No race: the startup budget alone bounds the run.
 why, at = simulate(180, 10_000, bound)
 check(why == "deadline" and 180 <= at < 180.5, "no race: the startup budget ends the run (%s at %.1f)" % (why, at))

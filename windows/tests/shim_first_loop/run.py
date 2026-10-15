@@ -85,16 +85,37 @@ def race_budget(replay_timeout, horn=False):
     return (replay_timeout if replay_timeout is not None else R1_RACE_SECONDS + (HORN_SECONDS if horn else 0.0)) + RACE_MARGIN
 
 
-HORN_LOOP = re.compile(r"\b9bcx\d+")   # the result log's race sound line: 42F0D0 0x1BC | SND_LOOP, played or refused
-HORN_STOP = re.compile(r"\b81bcx\d+")  # and 0x1BC | SND_STOP
+HORN_LOOP, HORN_STOP = 0x9BC, 0x81BC   # 42F0D0 commands: 0x1BC | SND_LOOP and 0x1BC | SND_STOP
+# native_race_sound_status: "... played: <hex>x<n> ... refused: ... missing: ... ics(ch/code=value): ..."
+SOUND_SECTIONS = re.compile(r"\bplayed:(.*?)\brefused:(.*?)\bmissing:(.*?)(?:\bics\(|$)")
+SOUND_COUNT = re.compile(r"([0-9a-f]+)x(\d+)")
+
+
+def sound_counts(section):
+    """One section of the race sound status ("51x2 9bcx40"): command -> count; None when a token is not <hex>x<n>."""
+    counts = {}
+    for tok in section.split():
+        m = SOUND_COUNT.fullmatch(tok)
+        if not m: return None
+        counts[int(m.group(1), 16)] = counts.get(int(m.group(1), 16), 0) + int(m.group(2))
+    return counts
 
 
 def horn_evidence(log_text):
-    """--horn: the last race sound status in the run's log (the exit result log's line). The LOOP and the accepted STOP are
-    read separately; this is the command path through 42F0D0, not a claim that the horn was heard."""
+    """--horn: the last race sound status in the run's log (the exit result log's line). 42F0D0 (pc_42f0d0) counts the
+    commands it played under "played:" and the ones it failed under "refused:"; "missing:" names absent effects. The
+    horn was delivered only with a positive PLAYED count for both the 0x9BC loop and the 0x81BC stop: a refused or
+    missing command was only requested (sana #132448). The command path, not a claim that the horn was heard."""
     lines = [l.strip() for l in log_text.splitlines() if "race sound inits=" in l]
-    last = lines[-1] if lines else None
-    return dict(line=last, loop=bool(last and HORN_LOOP.search(last)), stop=bool(last and HORN_STOP.search(last)))
+    ev = dict(line=lines[-1] if lines else None, played=None, refused=None, missing=None, loop=False, stop=False)
+    m = SOUND_SECTIONS.search(ev["line"] or "")
+    if not m: return ev
+    sections = [sound_counts(s) for s in m.groups()]
+    if None in sections: ev["malformed"] = True; return ev
+    for name, counts in zip(("played", "refused", "missing"), sections):
+        ev[name] = dict(loop=counts.get(HORN_LOOP, 0), stop=counts.get(HORN_STOP, 0))
+    ev["loop"] = ev["played"]["loop"] > 0; ev["stop"] = ev["played"]["stop"] > 0
+    return ev
 
 
 def loop_deadline(start, startup_seconds, race_at, budget):
@@ -232,6 +253,8 @@ def verdict(receipt):
     """Astra 16766: diagnostics are saved either way; any unmet condition fails the run."""
     failures = ["error: %s" % e for e in receipt["errors"]]
     if receipt.get("phase") != "end": failures.append("workload unfinished (phase %s)" % receipt.get("phase"))
+    if receipt.get("retained"):
+        failures.append("process retained: WM_CLOSE did not end pid %s; not killed, still running" % receipt["retained"].get("pid"))
     if receipt.get("forced") or receipt.get("exitCode") != 0:
         failures.append("exit not normal (code %r, forced %r)" % (receipt.get("exitCode"), receipt.get("forced")))
     if (receipt.get("host") or {}).get("state") != "resolved": failures.append("host shutdown not resolved")
@@ -266,12 +289,21 @@ def verdict(receipt):
     replay_result = receipt.get("replay")
     if not (isinstance(replay_result, dict) and replay_result.get("exit") == 0): failures.append("adapter replay did not reconstruct: %s" % str(replay_result)[:300])
     horn = receipt.get("horn")
-    if horn is not None:   # --horn: the hold was sent, and the result log names both the LOOP and the accepted STOP
+    if horn is not None:   # --horn: the hold was sent, and the result log shows 42F0D0 PLAYED both the LOOP and the STOP
         if not horn.get("sentAt"): failures.append("horn: the hold was not sent")
-        if not horn.get("loop"): failures.append("horn: no 9BC (loop) in the result log's race sound line: %s" % horn.get("line"))
-        if not horn.get("stop"): failures.append("horn: no 81BC (stop) in the result log's race sound line: %s" % horn.get("line"))
+        counts = "played %s, refused %s, missing %s%s; line %s" % (horn.get("played"), horn.get("refused"), horn.get("missing"),
+                                                                 ", malformed" if horn.get("malformed") else "", horn.get("line"))
+        if not horn.get("loop"): failures.append("horn: 9BC (loop) not played: %s" % counts)
+        if not horn.get("stop"): failures.append("horn: 81BC (stop) not played: %s" % counts)
     receipt["result"] = "fail" if failures else "pass"; receipt["failures"] = failures
     return failures
+
+
+def retain(proc, receipt):
+    """--horn (sana #132311): a process that WM_CLOSE did not end by its deadline is retained and reported, never
+    killed: its pid and creation time go in the receipt, the rig lease stays held, and the verdict fails."""
+    receipt["retained"] = dict(pid=proc.pid, creationTime=receipt.get("creationTime"),
+                               why="WM_CLOSE did not end the process within its deadline; not killed (--horn run)")
 
 
 def lease(action, purpose=""):
@@ -305,8 +337,8 @@ def main():
     a.add_argument("--seconds", type=int, default=180)
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     a.add_argument("--horn", action="store_true", help="R1 only: this run binds horn (R12 button 27) with [Audio] AllowHorn = true "
-                   "and holds it 1.5 s after the steer holds; the exit result log's race sound line must name the 9BC loop and the "
-                   "81BC stop (the command path, not an audible check)")
+                   "and holds it 1.5 s after the steer holds; the exit result log's race sound line must show the 9BC loop and the "
+                   "81BC stop as played (refused or missing is a request only; the command path, not an audible check)")
     o = a.parse_args()
     if o.prepare_from: prepare(o.prepare_from, o.game, o.candidate); return
     if not o.result: a.error("--result is required for a run or a preflight")
@@ -414,9 +446,10 @@ def main():
         elif o.horn:   # the horn binding and AllowHorn for this run only; restored to the exact profile bytes after it
             wrote_ini = True
             ini.write_bytes(HORN_INI.encode("utf-8"))
-            receipt["horn"] = dict(sentAt=None, line=None, loop=False, stop=False,
+            receipt["horn"] = dict(sentAt=None, line=None, played=None, refused=None, missing=None, loop=False, stop=False,
                 label="AllowHorn command path: one 'inject action horn 1 ms=1500' after the steer holds; the exit result log's race "
-                      "sound line (42F0D0 played/refused per command) is read for the 9BC loop and the 81BC stop; not an audible check")
+                      "sound line (42F0D0 played/refused/missing per command) must show the 9BC loop and the 81BC stop played; "
+                      "refused or missing is a request only; not an audible check")
         DBCE.mkdir(parents=True, exist_ok=True)
         start = time.time(); budget = race_budget(replay_timeout, o.horn)
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
@@ -480,15 +513,19 @@ def main():
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)   # WM_CLOSE: the game's own close path
             try: proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                # A latched process whose stop did not resolve parks for its supervisor (P21): this runner ends it.
-                receipt["forced"] = True; proc.kill(); proc.wait(timeout=15)
+                if o.horn: retain(proc, receipt)
+                else:
+                    # A latched process whose stop did not resolve parks for its supervisor (P21): this runner ends it.
+                    receipt["forced"] = True; proc.kill(); proc.wait(timeout=15)
         receipt["exitCode"] = proc.returncode
     except Exception as e:
         receipt["errors"].append(repr(e))
         if proc and proc.poll() is None:
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)
             try: proc.wait(timeout=30)
-            except subprocess.TimeoutExpired: receipt["forced"] = True; proc.kill()
+            except subprocess.TimeoutExpired:
+                if o.horn: retain(proc, receipt)
+                else: receipt["forced"] = True; proc.kill()
     finally:
         try:
             try:
@@ -511,7 +548,9 @@ def main():
                     if run_root and run_root.exists(): shutil.copytree(run_root, out / "run", dirs_exist_ok=True)
                 except Exception as e: receipt["errors"].append("evidence copy: %r" % e)
         finally:
-            if leased:
+            if leased and receipt.get("retained"):   # --horn: the retained process still runs on the rig; the lease stays with it
+                receipt["retained"]["lease"] = "kept: Rig-Lease -Exit after the process is resolved"
+            elif leased:
                 try: lease("Exit")
                 except Exception as e: receipt["errors"].append(repr(e))
         if consumed:   # the run's own @2 capture is evidence, compared with the recording (not P21-sealed: no recording seal)
@@ -546,7 +585,7 @@ def main():
             receipt["horn"].update(horn_evidence((out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else ""))
         failures = verdict(receipt)
         (out / "receipt.json").write_text(json.dumps(receipt, indent=1, default=str))
-        print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "phase", "race", "modes", "maxRecordSteer",
+        print(json.dumps({k: receipt.get(k) for k in ("result", "failures", "pid", "exitCode", "forced", "retained", "phase", "race", "modes", "maxRecordSteer",
                                                      "maxConsumedSteer", "maxConsumedAccel", "seal", "replay", "r3")}, indent=1))
     return 1 if failures else 0
 
