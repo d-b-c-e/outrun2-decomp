@@ -868,6 +868,9 @@ struct Run {
             const auto n=driving::find_selected_course_run(world.tables(),m().bytes(a[2],10u),std::int32_t(a[3]),first,last);
             m().put32(a[0],std::uint32_t(first));m().put32(a[1],std::uint32_t(last));
             return std::uint32_t(n);}
+        // 4FBBB0(record, other) (thiscall on the C2C request manager, RET 8; the translated 4FC0B0 calls it):
+        // a request's traffic car, the traffic module's part on its 470240 / 46E830 helpers.
+        if(pc==0x4fbbb0u&&ctx){routed(pc);return traffic_control_part(*ctx,pc,k.ecx,a[0],a[1]);}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){

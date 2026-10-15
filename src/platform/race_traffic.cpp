@@ -5984,6 +5984,74 @@ struct T {
         land_47ba30(w,E(4));
         return 1;
     }
+    // ==== C2C request manager 7F9460 (variant 5): its traffic cars =============================
+    // 4FBBB0(record, other) (thiscall, ECX = the manager, RET 8), called by the translated 4FC0B0:
+    // open the record's traffic car (event 0x59) at the player's place with cs = [+7634] + record
+    // +8 (or the car 4FBB30 finds - other +8 + record +8), lane record +A + 1. 0 = no free traffic
+    // event; 1 = the record is done ([record] = 1): the place has no pose ([+7638] counts it) or
+    // the car is open ([+763C] counts it). 45D470 is the Heart Attack manager's counterpart.
+    std::uint32_t request_car_4fbbb0(std::uint32_t mgr,std::uint32_t rec,std::uint32_t other){
+        Frame f(*this,0x40);
+        const std::uint32_t P=f(0x30),pos=f(0x24),ang=f(0x18),spd=f(0x14);
+        std::int32_t i=0;std::uint32_t id=other;                       // 4FBBFB: no events leave the argument word
+        if(i32(0x680ad8u)>0)
+            for(;i<i32(0x680ad8u);++i){
+                id=u32(0x680ad4u)+std::uint32_t(i)+8u;
+                if(!(u8(0x79fb48u+id)&3u)&&!call(0x440370u,{id}))break;
+            }
+        if(i==i32(0x680ad8u)||id==0x19au)return 0;
+        const std::uint32_t pl=u32(mgr+0x7660u);
+        for(std::uint32_t k=0;k<0x10u;k+=4)p32(P+k,u32(pl+0x5cu+k));
+        p16(P+8,std::uint16_t(u16(mgr+0x7634u)+u16(rec+8)));p8(P+0xa,std::uint8_t(u8(rec+0xa)+1u));
+        if(u32(mgr+0x7658u)==1u&&other!=rec)
+            if(const std::uint32_t car=call(0x4fbb30u,{},0,mgr))
+                p16(P+8,std::uint16_t(u16(car+0x64)-u16(other+8)+u16(rec+8)));
+        if(!place_pose_470240(P,0,pos,ang,spd)){p32(rec,1);p32(mgr+0x7638u,u32(mgr+0x7638u)+1u);return 1;}
+        call(0x440110u,{id,0x59});
+        p32(mgr+0x763cu,u32(mgr+0x763cu)+1u);
+        const std::uint32_t w=work(id);
+        // 4FBCEF: the kind (record +4) and the current request object's overrides
+        std::uint32_t kind=u32(rec+4),special=0;
+        if(const std::uint32_t req=u32(mgr+0x80u)){
+            const std::uint32_t obj=u32(req+0x58u),type=u32(obj);
+            if(type==3u&&u32(obj+4)==1u)kind=0;
+            if(type==0x10u&&u32(obj+4)==6u){
+                const std::uint32_t due=std::uint32_t(u16(obj+0x78))+3u;
+                special=1;
+                if(std::uint32_t(u8(rec+0xb))==due)p16(obj+0x7a,std::uint16_t(u16(obj+0x7a)+1u));
+            }
+        }
+        if(u8(rec+0xc))kind=3;
+        // 4FBD5A: the model by kind (jump table 4FBFA4; above 4, the argument word), the colour by event id
+        const std::int32_t sid=std::int32_t(id),lb=std::int8_t(std::uint8_t(id));
+        std::uint32_t model;
+        if(kind<=1u)model=0x2b;
+        else if(kind==2u)model=0x1f;
+        else if(kind<=4u){
+            if(special)model=u32(0x5e0c6cu+std::uint32_t(sid%3)*4u);
+            else if(call(0x44dc50u,{u32(u32(mgr+0x7660u)+0x68u)})==0x1au)model=u32(0x5e0c50u+std::uint32_t(sid%7)*4u);
+            else{const std::int32_t dv=i32(0x78024cu)==1?6:7;model=u32(0x5e0c34u+std::uint32_t(sid%dv)*4u);}
+        }else model=other;
+        std::uint8_t colour;
+        if(model==0x26u)colour=std::uint8_t(lb%2);
+        else if(model==0x2bu){                                           // 4FBD6A: 2 under a request object 3 / 1
+            const std::uint32_t req=u32(mgr+0x80u);std::uint32_t obj=0;
+            if(req)obj=u32(req+0x58u);
+            colour=(req&&u32(obj)==3u&&u32(obj+4)==1u)?2u:std::uint8_t(sid%2);
+        }else colour=std::uint8_t(lb%3);
+        const std::uint32_t cs=std::uint16_t(u16(u32(mgr+0x7660u)+0x25eu)+u16(rec+8));
+        set_work_46e830(w,id,std::int8_t(model),colour,pos,ang,f32(spd),P,0,cs,1);
+        p32(w+0xc5c,u32(w+0xc5c)|0x40000u);p16(w+0xb70,std::uint16_t(id*0x25u));p32(w+0x324,kind);p16(w+0xb62,0x3c);
+        if(!u32(mgr+0x7640u)){p32(w+0xb58,0x12);p32(w+0xb5c,0x12);pf(w+0x1c4,0.0f);p32(w+0x1f4,0);}
+        else{
+            (void)place_pose_470240(w+0x5c,0,pos,ang,spd);              // 4FBF30: the result is not tested
+            p32(w+0x1c4,u32(spd));p32(w+0x1f4,ftol(X87(f32(spd))*X87(K(0x5a460cu))));p32(w+0xb58,0);
+        }
+        p32(w+0xd10,u8(rec+0xb));p32(w+0xd14,u8(rec+0xc));p32(w+0xd18,u32(rec+0x10));
+        if(u8(rec+0xc)==1u)p16(w+0xb66,0);
+        p32(rec,1);
+        return 1;
+    }
 #include "platform/race_traffic_heart.inc"
 #include "platform/race_traffic_heart_meter.inc"
 #include "platform/race_traffic_heart_setup.inc"
@@ -6080,6 +6148,7 @@ std::uint32_t traffic_control_part(PcRaceContext& c,std::uint32_t pc,std::uint32
     case 0x462410u:t.request_462410();return 0;
     case 0x4626e0u:t.request_4626e0();return 0;
     case 0x45cca0u:t.request_45cca0();return 0;
+    case 0x4fbbb0u:return t.request_car_4fbbb0(a0,a1,a2);   // a0 = the C2C request manager (ECX)
     case 0x461940u:t.request_461940();return 0;
     case 0x45fb80u:t.heart_meter_45fb80();return 0;
     case 0x45b950u:t.effects_45b950();return 0;
