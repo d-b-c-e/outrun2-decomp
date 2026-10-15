@@ -1,4 +1,5 @@
 #include "frontend_license_editor.hpp"
+#include "pc_screen.hpp"   // AllowCharacterSelection
 #include <algorithm>
 #include <cstring>
 namespace outrun::platform {
@@ -52,6 +53,8 @@ void name_result(Bytes b,PcLicense& p,Calls& c,unsigned result){
 void menu(Bytes b,PcLicense& p,int action,Calls& c){
     const auto item=b.u32(0x3c);
     auto select=[&](unsigned next){b.put32(0x3c,next);highlight(b,c,next+4);};
+    // AllowCharacterSelection (pc_screen.hpp), Tweaks' hook ahead of 4DDC50: Down from the name, Up from the nationality.
+    if(g_pc_allow_character_selection&&((item==0&&action==4)||(item==2&&action==2))){select(1);return;}
     if(item==0){
         if(action==0){b.put32(0x38,2);keyboard_open(b,c);}
         else if(action==4)select(2); // PC deliberately skips item 1 from name.

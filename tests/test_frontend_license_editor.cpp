@@ -1,5 +1,6 @@
 #include "platform/frontend_license_editor.hpp"
 #include "platform/frontend_license_chooser.hpp"
+#include "platform/pc_screen.hpp"
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -41,6 +42,26 @@ int main(){try{
     f.keyboard=1;f.tick();req(std::memcmp(f.license.data(),"FERRARI",8)==0,"name commit");
     f.tick();req(f.bytes().u32(0x38)==1,"name return after close");
     f.input=4;f.tick();req(f.bytes().u32(0x3c)==2,"PC menu skips item 1 below name");
+    {   // AllowCharacterSelection (pc_screen.hpp), Tweaks' 4DDC50 hook: from the name Down and from the nationality Up
+        // select the character item 1 through 4DD990(5) (this +4AC's entries 52); off, the PC's skip stays.
+        Fixture h;h.init();h.ready=true;h.tick();h.ready=false;
+        req(h.bytes().u32(0x38)==1&&h.bytes().u32(0x3c)==0,"character test: menu on the name");
+        h.input=2;h.tick();req(h.bytes().u32(0x3c)==0,"off: Up from the name stays on the name");
+        g_pc_allow_character_selection=true;
+        h.trace.clear();h.input=4;h.tick();
+        bool highlighted=false;
+        for(const auto& call:h.trace)
+            if(call.pc==0x465860&&call.offset==0x4ac&&call.args.size()>2&&call.args[1]==52&&call.args[2]==52)highlighted=true;
+        req(h.bytes().u32(0x3c)==1&&h.bytes().u32(0x38)==1&&highlighted,"on: Down from the name selects the character item (4DD990(5))");
+        h.input=0;h.tick();req(h.bytes().u32(0x38)==3,"on: confirm on the character item opens the character grid (the PC's own branch)");
+        h.input=1;h.tick();req(h.bytes().u32(0x38)==1&&h.bytes().u32(0x3c)==1,"character grid cancel returns to the character item");
+        h.input=4;h.tick();req(h.bytes().u32(0x3c)==2,"on: Down from the character item reaches the nationality");
+        h.input=2;h.tick();req(h.bytes().u32(0x3c)==1,"on: Up from the nationality selects the character item");
+        h.input=2;h.tick();req(h.bytes().u32(0x3c)==0,"Up from the character item returns to the name");
+        g_pc_allow_character_selection=false;
+        h.input=4;h.tick();req(h.bytes().u32(0x3c)==2,"off again: Down from the name skips the character item");
+        h.input=2;h.tick();req(h.bytes().u32(0x3c)==0,"off: Up from the nationality skips the character item");
+    }
     f.input=0;f.tick();req(f.bytes().u32(0x38)==4,"26-choice editor");
     for(unsigned stage=3;stage<=5;++stage){
         const int count=stage==3?6:stage==4?26:12,columns=stage==3?2:stage==4?4:3;

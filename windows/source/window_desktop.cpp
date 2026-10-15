@@ -474,6 +474,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // also shows the license's OutRun Miles (pc_screen.hpp).
     outrun::platform::g_pc_show_outrun_miles_on_menu=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     if(!outrun::platform::g_pc_show_outrun_miles_on_menu)std::printf("settings: OutRun Miles on the menu off\n");
+    // [Misc] AllowCharacterSelection, the Tweaks key (off unless set true, as there): the license editor's menu reaches
+    // its character item from the name (Down) and the nationality (Up) (pc_screen.hpp).
+    outrun::platform::g_pc_allow_character_selection=settings.flag("Misc","AllowCharacterSelection",false);
+    if(outrun::platform::g_pc_allow_character_selection)std::printf("settings: the license editor's character selection on\n");
     // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).
     outrun::platform::g_pc_default_manual_transmission=settings.flag("Misc","DefaultManualTransmission",false);

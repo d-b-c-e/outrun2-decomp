@@ -160,6 +160,11 @@ inline bool g_pc_restore_jp_clarissa=false;
 // Sumo_CountdownTimerEnable, .data 637911): the race clock does not count down. The byte's only two readers (450B03 /
 // 450B4B) are race_manager.cpp's time_decrement_637911 tests; race_manager_runtime.cpp sets it from this.
 inline bool g_pc_disable_countdown_timer=false;
+// [Misc] AllowCharacterSelection (the Tweaks key, off by default there and here; hooks_misc.cpp, its hook on the license
+// screen's 4DDC50): the license editor's menu (frontend_license_editor.cpp, 4DDC50's menu branch) skips its character
+// item 1 on the PC, Down from the name and Up from the nationality going past it. On, those two moves select the
+// character item (this +3C = 1, 4DD990(5)), whose own handling the PC kept: confirm opens the character grid.
+inline bool g_pc_allow_character_selection=false;
 // [Graphics] UIScalingMode 1 (windows/docs/UI-SCALING.md step 2a): Tweaks' HUD shift in 640-wide UI units at the 4:3
 // scale, 320 (1 - 4 / (3A)) for the 2D rectangle's frame of aspect A (80 at 16:9: three quarters of the margin, as
 // Tweaks' AddSpriteSpacing lands; display_fit.hpp ui_scaling_rect .hud), set by the renderer each frame; 0 in modes 0
