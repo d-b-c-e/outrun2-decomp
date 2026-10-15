@@ -634,6 +634,50 @@ int main(int argc,char** argv){
                         "lane 1 (not loaded): its polygon root is 0, so 5209A0 returns the zero point and the up normal without 43D920");
                 std::fprintf(stderr,"request course point 5209A0: lane 0 run %d first %d, lane 1 empty checked\n",int(run),int(first));
             }
+            {   // 4FC0B0: the C2C request manager's car records (+7630, 20 bytes each from index +7638) call 4FBBB0(record,
+                // previous) for the first record whose cs ([+7634] + record +8) is 30..100 ahead of the player's ([+7660] +64).
+                // route-run-2303 latched the traffic module at 4FBBB0. Without the AREA's streamed road tables only a failed
+                // pose is reachable here: on course type 0 a lane of 6 is refused before any table read (470120). Covered:
+                // no traffic event (count 0) and a live one (flags & 3): 4FBBB0 returns 0, the record stays open and 4FC0B0
+                // stops; a free event and a refused pose: [record] = 1, +7638 counted in 4FBBB0 and again by 4FC0B0, no event
+                // opened. The placed car (model, colour, work fields) has no offline witness.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;
+                auto& racers=request.mission.racers;constexpr std::uint32_t Event=0x108u;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t> saved;
+                    outrun::platform::RacerSetupState& racers;const std::uint32_t base,count;
+                    outrun::driving::PcEventSlot& slot;const outrun::driving::PcEventSlot kept;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());racers.v680ad4=base;racers.v680ad8=count;slot=kept;}
+                } restore{block,block,racers,racers.v680ad4,racers.v680ad8,request.event_state.slots[Event],request.event_state.slots[Event]};
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,Table=0x6e00u,Car=0x6f00u;
+                auto get32=[&](std::size_t o){std::uint32_t v;std::memcpy(&v,block.data()+o,4);return v;};
+                auto put16=[&](std::size_t o,std::uint16_t v){std::memcpy(block.data()+o,&v,2);};
+                auto records=[&](std::uint32_t count,std::uint8_t flags){
+                    std::fill(block.begin()+Table,block.begin()+Car+0x260u,std::uint8_t(0));
+                    put32(block,0x7630u,B+Table);put32(block,0x7634u,0);put32(block,0x7638u,0);put32(block,0x763cu,0);
+                    put32(block,0x7654u,0);put32(block,0x7658u,0);put32(block,0x7660u,B+Car);
+                    put16(Car+0x64u,100);                                   // the player's place: course type 0, cs 100
+                    put16(Table+8u,132);block[Table+0xau]=5;               // record 0: cs 132 (30..100 ahead), lane 5 + 1
+                    put16(Table+0x14u+8u,0xffffu);                          // record 1: a negative cs ends 4FC0B0
+                    racers.v680ad4=Event-8u;racers.v680ad8=count;request.event_state.slots[Event].flags=flags;};
+                auto manager=[&](){std::uint32_t eax=0u;
+                    const bool ran=native_race_requests_call(request,request_matrices,0x004fc0b0u,{},eax,B);
+                    if(!ran)std::fprintf(stderr,"4FC0B0: latched=%d fault=%X %s\n",int(traffic.latched),unsigned(traffic.fault),traffic.error.c_str());
+                    return ran;};
+                for(const auto& [count,flags]:{std::pair<std::uint32_t,std::uint8_t>{0u,0u},std::pair<std::uint32_t,std::uint8_t>{1u,1u}}){
+                    records(count,flags);
+                    const auto cars=traffic.routed[0x4fbbb0u],checks=traffic.routed[0x440370u];
+                    require(manager()&&!traffic.latched&&traffic.routed[0x4fbbb0u]==cars+1u&&traffic.routed[0x440370u]==checks&&
+                            get32(Table)==0u&&get32(0x7638u)==0u&&get32(0x763cu)==0u,
+                            "4FC0B0: without a free traffic event 4FBBB0 returns 0, the record stays open and the manager stops");
+                }
+                records(1u,0u);
+                const auto cars=traffic.routed[0x4fbbb0u],checks=traffic.routed[0x440370u],opens=traffic.routed[0x440110u];
+                require(manager()&&!traffic.latched&&traffic.routed[0x4fbbb0u]==cars+1u&&traffic.routed[0x440370u]==checks+1u&&
+                        traffic.routed[0x440110u]==opens&&request.event_state.slots[Event].flags==0u&&
+                        get32(Table)==1u&&get32(0x7638u)==2u&&get32(0x763cu)==0u&&request_matrices.depth==0,
+                        "4FC0B0 / 4FBBB0: a refused pose closes the record, counts +7638 in 4FBBB0 and in 4FC0B0, opens no event");
+                std::fprintf(stderr,"request car 4FBBB0: no event, live event and refused pose through 4FC0B0 checked\n");
+            }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
             NaviPubGlobals globals;PcRaceMemory memory;globals.map(memory);
