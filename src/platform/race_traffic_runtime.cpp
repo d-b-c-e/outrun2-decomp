@@ -827,6 +827,22 @@ struct Run {
         // 5217C0 (thiscall on the request manager, ECX unused, no stack arguments; 505850 state 3 at 505AAF): the fixed
         // voice line push 9, push 3C, push E8, call 45BD30, add esp,C, ret, with 45BD30's EAX.
         if(pc==0x5217c0u){routed(pc);return native_race_hud_voice_45bd30(c,0xe8,0x3c,9);}
+        // 487DD0(i) / 487D60(i, pose) (cdecl): the robot of event 0x16A + i, whose work is [79F010 + i * 0x3C] (that
+        // event's record, mirrored above). 487DD0 clears the work's +7C; 487D60 requests a pose, +68 = pose and +78 = 2
+        // (the passenger's control 489A90 plays +68 and ends the pose at +78 == 2), except for robot 1 while 46C530
+        // ([7F94C0] ? [7F95C4] : 0) is nonzero. The C2C request manager's 521890 (505850 state 6, after 5217E0) asks
+        // robot 1, the passenger. The works are the robots' state (7A01E0..); EAX as the PC leaves it.
+        if(pc==0x487dd0u||pc==0x487d60u){
+            routed(pc);
+            const std::uint32_t i=a[0];
+            if(pc==0x487d60u&&m().u32(0x7f94c0u)&&m().u32(0x7f95c4u)&&i==1u)return i;
+            const std::uint32_t work=m().u32(0x79f010u+i*0x3cu);
+            auto put=[&](std::uint32_t at,std::uint32_t v){
+                if(at<PcRaceRobotState::WorkBase||at>PcRaceRobotState::WorkEnd-4u)throw PcRaceUnmapped(at,4);
+                std::memcpy(c.race.robots.state.works.data()+(at-PcRaceRobotState::WorkBase),&v,4);};
+            if(pc==0x487dd0u){put(work+0x7cu,0u);return i*0x3cu;}
+            put(work+0x68u,a[1]);put(work+0x78u,2u);return work;
+        }
         // 41BD40: jmp 49A650, a bare RET in this build (the request objects' virtual display, 481A40): EAX unchanged.
         if(pc==0x41bd40u){routed(pc);return k.eax;}
         // 4EFD20(source, lane), the course-light copy the request manager runs (521930). Lane != 0 copies two vectors to
@@ -937,8 +953,10 @@ void native_race_requests_map(NativeRuntimeContext& c,PcRaceMemory& m){
     if(!t.requests_heap)t.requests_heap=std::make_unique<GuestHeap>(NativeRaceTraffic::RequestsHeapBase,NativeRaceTraffic::RequestsHeapSize);
     t.requests_heap->map(m);
     if(t.requests_cells.empty()){
+        // 85B338..: 5217E0's function-local statics 85B338 / 85B33C and their guard 85B340 (.bss, zero), writable over the
+        // read-only EXE range 85AF00..85B3FF (run-0311 latched at 5217F8 when the cell started at 85B340).
         static constexpr std::pair<std::uint32_t,std::uint32_t> Cells[]{{0x84d900u,0x80u},{0x850b80u,0x20u},{0x854d00u,0x40u},
-            {0x856940u,0x10u},{0x8572a0u,0x28u},{0x85b340u,0x180u}};
+            {0x856940u,0x10u},{0x8572a0u,0x28u},{0x85b338u,0x188u}};
         std::vector<std::uint8_t> data(0x100u);
         std::memcpy(data.data(),exe_image_bytes(0x64f000u,0x100u),0x100u);
         t.requests_cells.emplace_back(0x64f000u,std::move(data));
