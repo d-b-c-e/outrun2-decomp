@@ -170,7 +170,7 @@ inline bool g_pc_allow_character_selection=false;
 //   0 off (the PC: seven groups);
 //   1 on, unlocked with Holly 1 (group 7 opens as group 6 does);
 //   2 on, unlocked once Holly 1 itself reaches rank A (grade >= 4);
-//   3 as 2, and the menu draws and reaches it only once it is unlocked.
+//   3 as 2, and the menu draws and reaches it only once it is unlocked (frontend_categories.cpp).
 // Group 7 grades from the fourth course lane (frontend_profiles.hpp), requests its courses there (frontend_requests.cpp)
 // and sets up as Holly with request course set 2 (Req_Course_MIX_PSP) instead of 3 (pc_common_control.cpp 4EEB50). The
 // lane is optional: absent or malformed, group 7 stays locked and unrequestable in every mode. No save change: its results

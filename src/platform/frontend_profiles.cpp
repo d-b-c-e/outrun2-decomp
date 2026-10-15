@@ -180,7 +180,7 @@ std::int32_t frontend_unlock_notice_499730(PcLicense& p,const std::array<int,7>&
     put32(p.data()+0x11c,seen|bit);p[0x3f4]|=2u;return notice;
 }
 bool frontend_category_picture_4e8b20(const PcLicense& p,const LicenseProgressTables& tables,unsigned selected,unsigned& result){
-    if(selected>=7)return false;
+    if(selected>7||(selected==7&&!g_pc_enable_holly_course2))return false;   // group 7: EnableHollyCourse2's menu
     result=0;for(int group=2;group>=0;--group){int grade{};
         if(!frontend_group_grade_4e82a0(p,tables,unsigned(group),grade))return false;
         if(grade!=7&&grade>=4){result=unsigned(group+1)*4;break;}}

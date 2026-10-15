@@ -1,4 +1,5 @@
 #include "frontend_course_fixture.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -82,7 +83,13 @@ int main(int argc,char** argv){
         // EnableHollyCourse2's evidence: whether the retail fourth lane (Holly's MIX 2 set) is valid, and its course types.
         std::fprintf(stderr,"retail fourth lane: present=%d types",int(progress.championship_present[3]));
         for(const auto type:progress.championship_types[3])std::fprintf(stderr," %u",unsigned(type));
-        std::fprintf(stderr,"\n");
+        // A type shared with lanes 0..2 shares its result nibbles at licence +36E (the PC's and Tweaks' semantics).
+        unsigned shared=0;
+        for(const auto type:progress.championship_types[3])for(unsigned lane=0;lane<3;++lane)
+            if(std::find(progress.championship_types[lane].begin(),progress.championship_types[lane].end(),type)!=
+               progress.championship_types[lane].end()){std::fprintf(stderr,"%s%u(lane %u)",shared++?" ":"; shared with lanes 0..2: ",
+                   unsigned(type),lane);break;}
+        std::fprintf(stderr,"%s\n",shared?"":"; shared with lanes 0..2: none");
         unsigned total=0;for(auto n:progress.category_counts)total+=n;
         req(total==94,"forty original categories cover all ninety-four retail races");
         req(frontend_license_completion_447400(license,progress,completion)&&completion==0,"new license has zero retail progress");

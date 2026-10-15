@@ -2030,7 +2030,8 @@
     // are the frontend's (4E8620 loads them): the types +1C of their first 15 records.
     std::uint32_t mission_grade_4e8230(std::uint32_t kind,std::uint32_t profile){
         const auto& t=c.event_function36.frontend_category_progress;
-        if(kind>=t.championship_present.size()||!t.championship_present[kind])return 7;
+        // Sets 0..2 as the PC's callers pass them; set 3 (Holly's MIX 2) only with EnableHollyCourse2 (Tweaks' 4E83E0).
+        if(kind>(g_pc_enable_holly_course2?3u:2u)||!t.championship_present[kind])return 7;
         std::int32_t sum=0;
         for(std::uint32_t i=0;i<15u;++i)
             sum+=std::int32_t(stage_score_4e9fd0(i,t.championship_types[kind][i],profile));
@@ -2041,6 +2042,7 @@
     // 3: 25..39, 4..6: mission sets 0..2), profile 0 = 7C23E0; 7 when none.
     std::uint32_t group_grade_4e82a0(std::uint32_t kind,std::uint32_t profile){
         if(!profile)profile=0x7c23e0u;
+        if(kind==7u&&g_pc_enable_holly_course2)return mission_grade_4e8230(3u,profile);   // Tweaks' 4E82B4 / 4E83E0
         if(kind>6u)return 7;
         if(kind>=4u)return mission_grade_4e8230(kind-4u,profile);
         static constexpr std::uint32_t from[4]={0,5,14,25},to[4]={5,14,25,40};
