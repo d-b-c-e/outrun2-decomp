@@ -728,6 +728,7 @@ int main(int argc,char** argv){
                 auto step=[&](std::uint32_t kind,std::uint32_t subtype){
                     std::fill(block.begin()+Rec,block.begin()+Table+0x40u,std::uint8_t(0));
                     put32(block,Rec+0x58u,B+Obj);put32(block,Rec+8u,1u);                   // state 1, its object
+                    put32(block,Rec+0x68u,0x3f800000u);put32(block,Rec+0x6cu,0x40000000u);put32(block,Rec+0x70u,7u);   // cleared by state 3
                     put32(block,Obj,kind);put32(block,Obj+4u,subtype);
                     put32(block,Car+0x5cu,1u);const float speed=12.5f;std::memcpy(block.data()+Car+0x1f8u,&speed,4);
                     put32(block,0x7660u,B+Car);put32(block,0x759cu,0u);
@@ -741,13 +742,17 @@ int main(int argc,char** argv){
                 request.start_mode.manager_state_7f94c0=1u;
                 auto lines=traffic.routed[0x5217c0u];
                 require(step(3u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines+1u&&get32(Rec+8u)==3u&&get32(0x759cu)==3u&&
-                        getf(Rec+0x5cu)==12.5f&&getf(Rec+0x64u)==12.5f&&get32(Rec+0x70u)==0u&&request_matrices.depth==0&&
+                        getf(Rec+0x5cu)==12.5f&&getf(Rec+0x64u)==12.5f&&get32(Rec+0x68u)==0u&&get32(Rec+0x6cu)==0u&&
+                        get32(Rec+0x70u)==0u&&request_matrices.depth==0&&
                         voice.entries_7f1998[0].id==0xe8&&voice.entries_7f1998[0].duration==0x3c&&voice.entries_7f1998[0].priority==9,
                         "505850 state 3: 5217C0 runs as a traffic service and pushes the voice line E8 / 3C / 9 on the HUD queue");
                 lines=traffic.routed[0x5217c0u];
                 require(step(0x10u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines&&get32(Rec+8u)==3u&&
                         voice.entries_7f1998[0].id!=0xe8,
                         "505850 state 3: a kind-0x10 object with the caller's subtype (EBX 0 here) skips 5217C0");
+                lines=traffic.routed[0x5217c0u];
+                require(step(0x10u,1u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines+1u&&voice.entries_7f1998[0].id==0xe8,
+                        "505850 state 3: a kind-0x10 object with another subtype still pushes the voice line (both must match)");
                 std::fprintf(stderr,"request record 505850: state 3, 5217C0 voice line and the kind-0x10 skip checked\n");
             }
         }
