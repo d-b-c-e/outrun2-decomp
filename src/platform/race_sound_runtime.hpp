@@ -57,7 +57,7 @@ std::string native_race_sound_status(const NativeRuntimeContext&);
 // [Audio] AllowHorn (pc_screen.hpp; Tweaks' AudioHooks_Update), once per tick from 453BB0's input step on the final
 // (possibly replayed) input: in GAME (mode 16) it queues 0x1BC | SND_LOOP on the race SE queue 9563E8 every tick while
 // held (the queue drops a copy still pending); otherwise, if it had, 0x1BC | SND_STOP, kept pending until 424940 takes it
-// (event 383 closed or paused, or a full ring, refuses it) or ClearAllSound ends every effect. Audio only: no RNG, no
-// record bit.
+// (event 383 closed or paused, or a full ring, refuses it), even across ClearAllSound (a loop still queued plays after
+// 424700's clear). Audio only: no RNG, no record bit.
 void native_race_horn(NativeRuntimeContext&,bool held);
 }

@@ -75,7 +75,7 @@ struct Binding final : RaceSoundServices {
     void pc_42f0d0(std::uint32_t command)override{
         if(s.effect&&s.effect(command))++s.played[command];else ++s.refused[command];
     }
-    void pc_427630()override{++s.clear_alls;c.pc_sound.clear_all_427630();if(s.stop_all)s.stop_all();s.horn_active=false;}   // the horn's loop stops with every effect
+    void pc_427630()override{++s.clear_alls;c.pc_sound.clear_all_427630();if(s.stop_all)s.stop_all();}
 };
 void latch(NativeRaceSound& s,std::uint32_t pc,const std::string& why){
     s.last_error=why;
@@ -176,7 +176,9 @@ void native_race_horn(NativeRuntimeContext& c,bool held){
     auto& s=c.race.sound;
     if(held&&c.mode_state.current==16u){s.horn_active=true;(void)race_se_queued(c,0x1bcu|0x800u);return;}   // every tick, as Tweaks
     // The stop stays pending until 424940 takes it, so a release while event 383 is closed or paused, or the ring is
-    // full, still stops the loop later (sana #129986). ClearAllSound (427630, also from 424790) ends it too.
+    // full, still stops the loop later (sana #129986). ClearAllSound (427630) does not end the obligation: 424700 clears
+    // and then flushes the ring in one callback (pause_clear_424b10, then flush_se_4249a0), so a loop still queued plays
+    // after the clear (lola #130449). A stop sent after a clear stops nothing, which is harmless.
     if(s.horn_active&&race_se_queued(c,0x1bcu|0x8000u))s.horn_active=false;
 }
 }
