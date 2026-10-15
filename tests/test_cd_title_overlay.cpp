@@ -24,7 +24,7 @@ void timing(){
     check(t.sample(4,1,true)==5&&t.remaining==0&&t.sample(5,1,true)==0,"last update fades then expires");
     t.changed();check(t.sample(6,~0u,true)==255&&t.remaining==0,"large update count saturates instead of wrapping");
     t.changed();check(t.sample(7,1,false)==0&&t.remaining==0&&t.sample(8,1,true)==0,"lost HUD ownership clears, does not resume");
-    for(const auto mode:{0u,13u,17u,19u,32u})check(!cd_title_race_owned(mode,false,true),"menu/loading/pause/goal do not own title");
+    for(const auto mode:{0u,13u,17u,18u,19u,32u})check(!cd_title_race_owned(mode,false,true),"menu/loading/pause/goal do not own title");
     check(cd_title_race_owned(16,false,true),"GAME visible HUD owns title");
     check(!cd_title_race_owned(16,true,true),"existing panel/focus/entry block clears title");
     check(!cd_title_race_owned(16,false,false),"hidden native HUD does not own title");

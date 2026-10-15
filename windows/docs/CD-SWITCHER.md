@@ -72,7 +72,8 @@ during those last 45. Existing display-only 120 Hz frames do not age it, and
 multiple queue flushes in one rendered frame do not duplicate it. It clears on
 leaving GAME16, opening F6, keyboard focus clear, race entry blocking, native
 HUD hide or host teardown; it does not carry a hidden title into a menu/race.
-No new input, font load, audio request, HUD style mutation or global hook exists.
+There is no new input/audio path, separate font loader, HUD style mutation or
+global hook. The existing HUD queue retains ownership of its lazy font bank.
 
 The existing Tweaks keys are accepted, in original 640x480 UI coordinates:
 
