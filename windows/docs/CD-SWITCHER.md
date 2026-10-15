@@ -94,7 +94,16 @@ longer titles end in `...`, control/non-ASCII bytes display as `?`. The catalog'
 512-byte title and file path remain unchanged. Missing fonts/glyphs submit
 nothing while the timer expires; no fallback renderer or font resource is made.
 
+The title also fits the available horizontal HUD space using the recovered
+font producer's actual advances, bearings, spacing and kerning. It preserves
+the track prefix and shortens the title with three complete dots before the
+renderer would clip a source cell or its scaled extent at x0/640. If the prefix
+and dots cannot fit at the configured position and scale, it submits nothing
+while the timer ages. It does not shrink text, move the position, change the
+shared font renderer or edit the catalog. Vertical placement remains configured.
+
 Partial Tweaks parity remains: startup shuffle, default track catalog and
 analog-direction aliases are not implemented. Scoped CD request/open/current
-evidence does not establish audible/physical quality, and this new title source
-has no compile, fixture-run, rendered or visual-acceptance claim yet.
+evidence does not establish audible/physical quality. The base title source
+passed its affected compile/link and41 synthetic checks; this width-aware
+follow-up is not compiled or run yet. Rendered/visual acceptance remains open.

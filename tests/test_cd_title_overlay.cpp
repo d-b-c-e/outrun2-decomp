@@ -72,5 +72,51 @@ void font_path(){
     check(!cd_title_glyphs(cd,&pack,4,1,true,glyphs)&&glyphs.size()==count,"unsupported glyph refuses atomically without altering other draws");
     check(cd.tracks[0].path=="not-a-title.ogg"&&cd.tracks[0].title=="Actual title","display never changes path/catalog title");
 }
+bool inside_hud(const FrontendFont& font,const std::vector<FrontendGlyph>& glyphs){
+    return std::all_of(glyphs.begin(),glyphs.end(),[&](const FrontendGlyph& g){
+        return g.right-g.left==font.width&&g.x>=0.f&&g.x+float(g.right-g.left)*g.scale_x<=640.f;
+    });
 }
-int main(){timing();transaction();labels_and_options();font_path();std::printf("CD title overlay: %u checks PASS (synthetic font/timer/ownership only)\n",checks);}
+std::string glyph_text(const FrontendFont& font,const std::vector<FrontendGlyph>& glyphs){
+    std::string text;
+    for(const auto& g:glyphs)text+=char(font.first+unsigned(g.top/font.height)*16u+unsigned(g.left/font.width));
+    return text;
+}
+void viewport_ellipsis(){
+    Player p;CdSwitcher cd{true,{{"unchanged.ogg","100% %s"}},0,&p,Player::play};
+    FrontendFontPack pack;auto& f=pack.fonts[2];f.width=32;f.height=32;f.first=32;f.token=7;
+    f.metrics.assign(96,{0,32});
+    cd.title.options=cd_title_options(true,2,0.3f,0.5f,375,450);
+    std::vector<FrontendGlyph> glyphs;
+    cd.title.changed();
+    check(cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&glyph_text(f,glyphs)=="#01.100%%s"&&inside_hud(f,glyphs),"fitting literal title remains whole with original font layout");
+    check(glyphs.front().x==375.f&&glyphs.front().y==450.f&&glyphs.front().scale_x==0.3f&&glyphs.front().scale_y==0.5f,"width fitting preserves configured position and scale");
+    cd.tracks[0].title=std::string(512,'A');cd.title.changed();glyphs.clear();
+    check(cd_title_glyphs(cd,&pack,2,1,true,glyphs)&&glyph_text(f,glyphs).starts_with("#01.")&&glyph_text(f,glyphs).ends_with("...")&&glyphs.size()<98&&inside_hud(f,glyphs),"long title retains full prefix and three complete dots inside viewport");
+    check(cd.tracks[0].title==std::string(512,'A')&&cd.tracks[0].path=="unchanged.ogg"&&p.calls==0,"width ellipsis does not modify catalog or audio");
+    cd.title.options=cd_title_options(true,2,1.f,0.5f,407,450);cd.title.changed();glyphs.clear();
+    check(cd_title_glyphs(cd,&pack,3,1,true,glyphs)&&glyph_text(f,glyphs)=="#01...."&&glyphs.back().x+32.f==640.f&&inside_hud(f,glyphs),"complete prefix and three dots can end exactly at viewport edge");
+    cd.title.options.x=408;cd.title.changed();const auto edge_count=glyphs.size();
+    check(!cd_title_glyphs(cd,&pack,4,1,true,glyphs)&&glyphs.size()==edge_count,"one pixel less than the prefix and ellipsis needs refuses without clipped dots");
+    // Variable advances, bearings, spacing and kerning use the recovered draw
+    // path, rather than assuming cell count times scale is the text width.
+    f.metrics.assign(96,{-7,17});f.metrics['.'-32]={0,4};f.spacing_x=1.f;
+    f.kerning.assign(96*96,0);f.kerning[std::size_t('A'-32)*96+std::size_t('.'-32)]=3;
+    f.kerning[std::size_t('.'-32)*96+std::size_t('.'-32)]=1;
+    cd.title.options=cd_title_options(true,2,0.3f,0.5f,375,450);cd.title.changed();glyphs.clear();
+    check(cd_title_glyphs(cd,&pack,5,1,true,glyphs)&&glyph_text(f,glyphs).ends_with("...")&&inside_hud(f,glyphs),"proportional metrics bearings spacing and cut-boundary kerning remain bounded");
+    cd.title.options=cd_title_options(true,2,2.f,0.5f,600,450);cd.title.changed();
+    const auto kept=glyphs.size();
+    check(!cd_title_glyphs(cd,&pack,6,1,true,glyphs)&&glyphs.size()==kept&&cd.title.remaining==119,"insufficient space for prefix and ellipsis refuses atomically while timer ages");
+    f.metrics.assign(96,{7,17});f.kerning.clear();cd.title.options=cd_title_options(true,2,1.f,0.5f,0,450);cd.title.changed();
+    check(!cd_title_glyphs(cd,&pack,7,1,true,glyphs)&&glyphs.size()==kept,"left-bearing clipping cannot produce a partial prefix");
+    std::uint32_t frame=8;
+    for(const int width:{8,32,128})for(const float scale:{0.05f,0.3f,1.f,2.f})for(const int x:{0,375,600,639}){
+        f.width=std::int16_t(width);f.spacing_x=0;f.metrics.assign(96,{0,std::int8_t(width-1)});
+        cd.title.options=cd_title_options(true,2,scale,0.5f,x,450);cd.title.changed();glyphs.clear();
+        const bool drawn=cd_title_glyphs(cd,&pack,frame++,1,true,glyphs);
+        check(cd.title.remaining==119&&((drawn&&!glyphs.empty()&&inside_hud(f,glyphs))||(!drawn&&glyphs.empty())),"cell/scale/position boundaries submit only complete horizontally bounded glyphs");
+    }
+}
+}
+int main(){timing();transaction();labels_and_options();font_path();viewport_ellipsis();std::printf("CD title overlay: %u checks PASS (synthetic font/timer/ownership only)\n",checks);}
