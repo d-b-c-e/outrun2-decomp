@@ -811,6 +811,9 @@ struct Run {
         }
         if(t.requests_heap&&translated_crt_call(m(),*t.requests_heap,k,eax)){routed(pc);return eax;}   // the request manager's new / delete
         if(pc==0x45bcd0u){routed(pc);native_race_hud_voice_pump_45bcd0(c);return 0u;}
+        // 45BD30(id, duration, priority): the voice queue push of the request manager (4FB390, 4FEA00, 5072F0, 507620)
+        // on the HUD's voice queue, as the race end routes it.
+        if(pc==0x45bd30u){routed(pc);return native_race_hud_voice_45bd30(c,std::int32_t(a[0]),std::int16_t(a[1]),std::int16_t(a[2]));}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
         // frontend sprite pool (as the network screens' resources)
         if(pc>=0x465160u&&pc<=0x4659f0u){
