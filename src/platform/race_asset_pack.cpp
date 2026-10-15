@@ -276,16 +276,24 @@ bool frontend_license_progress_tables(const RaceAssetPack* races,
         next.category_counts[lane]=static_cast<std::uint8_t>(count);
     }
     next.categories_ready=true;
-    for(std::size_t lane=0;lane<next.championship_types.size();++lane){
+    const auto lane_types=[&](std::size_t lane,std::array<std::uint32_t,15>& types){
         const auto& table=courses[lane];
         if(table.count<15u||table.count>table.records.size()/CourseRecordBytes)return false;
         for(std::size_t i=0;i<15u;++i){
             const auto type=u32(table.records.data()+i*CourseRecordBytes+0x1cu);
             if(type>=driving::PcCoursePrimaryDescriptorCountR078)return false;
-            next.championship_types[lane][i]=type;
+            types[i]=type;
         }
+        return true;
+    };
+    // Groups 4..6 need lanes 0..2, as on PC. Lane 3 (Holly's MIX 2 set, EnableHollyCourse2's group 7) is optional:
+    // an absent or malformed table only leaves it not present, which keeps group 7 locked and unrequestable.
+    for(std::size_t lane=0;lane<3;++lane){
+        if(!lane_types(lane,next.championship_types[lane]))return false;
         next.championship_present[lane]=true;
     }
+    std::array<std::uint32_t,15> holly2{};
+    if(lane_types(3,holly2)){next.championship_types[3]=holly2;next.championship_present[3]=true;}
     out=next;return true;
 }
 

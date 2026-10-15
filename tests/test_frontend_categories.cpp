@@ -1,4 +1,5 @@
 #include "platform/frontend_categories.hpp"
+#include "platform/pc_screen.hpp"
 #include <cstdio>
 #include <cstdlib>
 using namespace outrun::platform;
@@ -32,6 +33,25 @@ int main(){
             if(open){CHECK(Bytes(c.object.data(),c.object.size()).u32(4)==(group<4?0x3b:0x3c));CHECK(r.u32(0x20c)==(0xfffff8ff|(group<<8)));}
             tick(0);tick(8);CHECK(result==2&&r.u32(0x20c)==0xffe008ff);tick(0);
         }
+    }
+    {   // EnableHollyCourse2: group 7 grades the fourth lane and unlocks per mode; 0 keeps the PC's seven groups.
+        for(unsigned lane=0;lane<4;++lane)for(unsigned i=0;i<15;++i)tables.championship_types[lane][i]=lane*15+i;
+        tables.championship_present.fill(true);
+        const auto lane_grade=[&](unsigned lane,unsigned g){for(unsigned i=0;i<15;++i){const unsigned type=lane*15+i;
+            profile[0x36e+type*2]=profile[0x36f+type*2]=std::uint8_t(g|(g<<4));}};
+        const auto unlocked=[&](unsigned group){bool open{};CHECK(frontend_category_unlocked_4e8410(profile,tables,group,open));return open;};
+        lane_grade(0,7);lane_grade(1,4);lane_grade(2,3);lane_grade(3,2);             // groups 4..7: none, A, B, C
+        for(int mode=1;mode<=3;++mode){g_pc_enable_holly_course2=mode;int got{};
+            CHECK(frontend_group_grade_4e82a0(profile,tables,7,got)&&got==2);
+            CHECK(unlocked(6)&&unlocked(7)==(mode==1));}   // mode 1 opens as group 6 (group 5's A); 2 and 3 need Holly 1's A
+        lane_grade(2,4);
+        for(int mode=1;mode<=3;++mode){g_pc_enable_holly_course2=mode;CHECK(unlocked(7));}
+        tables.championship_present[3]=false;                                      // no valid MIX 2 lane
+        for(int mode=1;mode<=3;++mode){g_pc_enable_holly_course2=mode;int got{};
+            CHECK(frontend_group_grade_4e82a0(profile,tables,7,got)&&got==7&&!unlocked(7));}
+        tables.championship_present[3]=true;g_pc_enable_holly_course2=0;
+        {int got{};CHECK(!frontend_group_grade_4e82a0(profile,tables,7,got));}CHECK(!unlocked(7));
+        g_pc_enable_holly_course2=3;
     }
     CHECK(frontend_categories_suspend_4e8a30(c,s));for(unsigned layer=0;layer<21;++layer)CHECK(pool.used(layer)==0);
     c.selected_84b7f0=0;CHECK(frontend_categories_construct_4e8130(c,repeat));CHECK(frontend_categories_init_4e8760(c,s));

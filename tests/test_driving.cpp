@@ -986,6 +986,14 @@ int main(){try{
     require(st73.event_config_7f94c4==std::array<std::uint32_t,5>{{0u,0u,0u,0u,0u}}&&st73.primary_mode_78024c==1u&&st73.route_state_780258==5u,"r073 4eeb50 cfg5 fields");
     st73={};require(runtime_route_config_4eeb50(6u,2u,3u,st73,sv73),"r073 4eeb50 cfg6");
     require(st73.event_config_7f94c4==std::array<std::uint32_t,5>{{3u,1u,1u,3u,2u}}&&st73.primary_mode_78024c==0u&&st73.route_state_780258==5u,"r073 4eeb50 cfg6 fields");
+    // EnableHollyCourse2: group 7 is refused as on the PC unless the caller sets the flag; then it is group 6 with set 2.
+    st73={};st73.route_state_780258=0x55u;require(!runtime_route_config_4eeb50(7u,2u,3u,st73,sv73)&&st73.route_state_780258==0x55u&&
+        st73.event_config_7f94c4==std::array<std::uint32_t,5>{},"4eeb50 group 7 without EnableHollyCourse2 unchanged");
+    st73={};st73.holly_course2=true;require(runtime_route_config_4eeb50(7u,2u,3u,st73,sv73),"4eeb50 group 7 with EnableHollyCourse2");
+    require(st73.event_config_7f94c4==std::array<std::uint32_t,5>{{2u,1u,1u,3u,2u}}&&st73.primary_mode_78024c==0u&&st73.route_state_780258==5u,
+        "4eeb50 group 7: Holly's set up with Req_Course_MIX_PSP (64F040[2])");
+    st73={};st73.holly_course2=true;require(runtime_route_config_4eeb50(6u,2u,3u,st73,sv73)&&
+        st73.event_config_7f94c4==std::array<std::uint32_t,5>{{3u,1u,1u,3u,2u}},"4eeb50 group 6 unchanged with the flag");
     std::array<std::uint8_t,0x300> pr73{};Bytes rp73(pr73.data(),pr73.size());
     st73={};tr73={};rp73.put32(0x208u,1u|(1u<<2));runtime_prepare_4eec80(rp73,st73,sv73);
     require(st73.primary_mode_78024c==0u&&tr73.sel_n==1u&&tr73.sel_cat==0u&&tr73.sel_idx==1u,"r073 4eec80 branch1 select");

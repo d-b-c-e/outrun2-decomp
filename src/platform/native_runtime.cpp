@@ -1494,6 +1494,8 @@ void native_commit_prepare(void* user,std::uint32_t pc_entry,driving::Bytes obje
     auto ps=start.frontend_prepare;
     ps.primary_mode_78024c=start.course_preset;ps.route_state_780258=c.game_mode.game_variant;
     ps.selection_active_836374=start.selection_active_836374?1u:0u;
+    // EnableHollyCourse2: group 7 only with the setting on and the fourth lane valid, as the menu, grade and requests gate it.
+    ps.holly_course2=g_pc_enable_holly_course2!=0&&st.frontend_category_progress.championship_present[3];
     driving::PcRuntimePrepareServices services{};services.user=&c;
     services.count_entries=[](void* u,std::uint32_t category)->std::uint32_t{      // 495930
         auto& s=static_cast<NativeRuntimeContext*>(u)->start_mode;
