@@ -1,6 +1,7 @@
 #include "enhancements/frame_rate.hpp"
 #include "runtime/game_host.hpp"
 #include "platform/cd_switcher.hpp"
+#include "platform/cd_title_overlay.hpp"
 #include "platform/bulk_fallback.hpp"
 #include "driving/pc_driving.hpp"
 #include "platform/embedded_exe_data.hpp"
@@ -1228,6 +1229,16 @@ void attach_pc_scene(GameHost& host,pf::NativeRuntimeContext& context,pf::Retail
         return b.state==2u&&b.textures.size()>9u?b.textures[9]:0u;};
     scene.leaf_hook=[&context,&scene,&host](std::uint32_t pc,std::uint32_t a){
         if(pc==0x42d710u&&host.presenter)host.presenter->scene_to_frame();   // 2D layer at full resolution
+        if(pc==0x42d710u&&pf::cd_switcher().enabled&&pf::cd_switcher().title.options.enabled){
+            bool visible=context.mode_state.current==16u&&context.race_hud&&context.race_hud->navi_initialized;
+            if(visible){std::uint32_t flag{};
+                std::memcpy(&flag,context.race_hud->navi.g842800.data()+(pf::PcNaviDisplayFlag-0x842800u),sizeof flag);
+                visible=pf::cd_title_race_owned(context.mode_state.current,false,flag!=0u);}
+            std::vector<pf::FrontendGlyph> glyphs;
+            if(pf::cd_title_glyphs(pf::cd_switcher(),context.event_function36.frontend_fonts,scene.frames,
+                                  outrun::enhancements::display_ticks(),visible,glyphs))
+                pf::native_sprite2d_glyph_records(context,scene.flush_context().device,glyphs);
+        }
         if(pc==0x4bfa20u||pc==0x49a650u)return pf::native_race_end_layer_invoke(context,pc);   // 448FD0 layer callbacks
         if(pf::native_course_pass_leaf(context,scene,pc,a))return true;                // 40BD80 / 40BE70 course passes
         if(pc==0x4c50a0u){
@@ -1323,7 +1334,7 @@ void close_frontend(GameHost& host,pf::NativeRuntimeContext& context,FrontendSes
     if(fe.license_owners)fe.license_owners->reset();state.license_owners=nullptr;
     state.frontend_effect=nullptr;state.frontend_effect_user=nullptr;
     state.music_play=nullptr;state.music_stop=nullptr;state.music_user=nullptr;host.menu_audio.stop_music();
-    if(pf::cd_switcher().user==&host){pf::cd_switcher().play=nullptr;pf::cd_switcher().user=nullptr;}
+    if(pf::cd_switcher().user==&host){pf::cd_switcher().title.clear();pf::cd_switcher().play=nullptr;pf::cd_switcher().user=nullptr;}
     state.frontend_choice_service=nullptr;state.frontend_choice_service_user=nullptr;
     host.menu_audio.bind_driver(nullptr);context.pc_sound.ready=false;
     audio_thread().stop();audio_main_release();

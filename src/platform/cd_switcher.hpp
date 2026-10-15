@@ -3,6 +3,7 @@
 // All state and callbacks run on the game thread; the audio callback takes its
 // existing audio lock. Off/unbound: both recovered race call sites fall through.
 #include "platform/music_stream.hpp"
+#include "platform/cd_title.hpp"
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -75,6 +76,7 @@ using CdPlay=bool(*)(void*,const CdTrack&,std::size_t,bool loop);
 struct CdSwitcher {
     bool enabled{};std::vector<CdTrack> tracks;std::size_t cursor{};
     void* user{};CdPlay play{};
+    CdTitleState title{};
     bool select(std::size_t index){
         if(!enabled||tracks.empty()||!play)return false;
         if(index>=tracks.size())index=0;
@@ -86,7 +88,9 @@ struct CdSwitcher {
         std::size_t index=cursor<tracks.size()?cursor:0;
         if(action.previous)index=index?index-1:tracks.size()-1;
         if(action.next)index=index+1==tracks.size()?0:index+1;
-        return select(index); // simultaneous keyboard keys: previous, then next
+        if(!select(index))return false;
+        title.changed(); // only a successful manual change, never initial/race select
+        return true; // simultaneous keyboard keys: previous, then next
     }
 };
 inline CdSwitcher& cd_switcher(){static CdSwitcher state;return state;}

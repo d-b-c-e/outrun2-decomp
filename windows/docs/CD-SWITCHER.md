@@ -2,13 +2,16 @@
 
 Off unless `[CDSwitcher] SwitcherEnable = true`. Ordinary play only: test,
 recording and playback processes keep it off. No settings or Controls schema
-is written. This source slice is not yet compiled or qualified in a game.
+is written. The prior db91 source/candidate60C4 passed scoped default-off and
+request/open/current-track runtime checks; the title overlay below is a new
+source change, not compiled or rendered-qualified yet.
 
 ```ini
 [CDSwitcher]
 SwitcherEnable = true
 TrackNext = Back
 TrackPrevious = RS+Back
+SwitcherDisplayTitle = false
 
 [CDTracks]
 01_Splash_wave.ogg = Splash Wave
@@ -55,7 +58,42 @@ turn a pad disconnect into a track switch. Wheel Controls actions are not new sw
 Analog stick direction aliases are refused. A bad combination disables this
 slice instead of silently changing its meaning.
 
-Partial Tweaks parity: title text is stored separately but no title overlay is
-drawn; startup shuffle, default track catalog and analog-direction aliases are
-not implemented. There is no rendered, audible, runtime or physical acceptance
-from this source slice.
+## Optional current-track title (new source)
+
+`SwitcherDisplayTitle = true` opts into the existing game-font/HUD renderer.
+It defaults to false here (Tweaks defaults it to true while its whole switcher
+is off). The whole switcher must also be enabled in an ordinary process.
+Only a successful manual next/previous change starts the display; a failed
+open, initial race selection or original menu/start music does not. The line
+is `#NN. Title`, from the actual current catalog cursor, never the audio path.
+
+Like Tweaks, it lasts 120 game updates, full opacity until 45 remain and fading
+during those last 45. Existing display-only 120 Hz frames do not age it, and
+multiple queue flushes in one rendered frame do not duplicate it. It clears on
+leaving GAME16, opening F6, keyboard focus clear, race entry blocking, native
+HUD hide or host teardown; it does not carry a hidden title into a menu/race.
+No new input, font load, audio request, HUD style mutation or global hook exists.
+
+The existing Tweaks keys are accepted, in original 640x480 UI coordinates:
+
+```ini
+[CDSwitcher]
+SwitcherDisplayTitle = true
+SwitcherTitleFont = 2
+SwitcherTitleFontSizeX = 0.3
+SwitcherTitleFontSizeY = 0.5
+SwitcherTitlePositionX = 375
+SwitcherTitlePositionY = 450
+```
+
+Font is clamped to 0..9, scale to 0.05..2 (nonfinite values use the defaults),
+and position to x0..639/y0..479. The recovered renderer keeps its clipping and
+font glyph rules. Display is one literal line with at most 96 title bytes;
+longer titles end in `...`, control/non-ASCII bytes display as `?`. The catalog's
+512-byte title and file path remain unchanged. Missing fonts/glyphs submit
+nothing while the timer expires; no fallback renderer or font resource is made.
+
+Partial Tweaks parity remains: startup shuffle, default track catalog and
+analog-direction aliases are not implemented. Scoped CD request/open/current
+evidence does not establish audible/physical quality, and this new title source
+has no compile, fixture-run, rendered or visual-acceptance claim yet.

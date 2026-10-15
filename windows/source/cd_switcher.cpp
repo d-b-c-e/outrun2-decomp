@@ -22,6 +22,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     const bool cleared=desktop_key_clears()!=s.clears;s.clears=desktop_key_clears();
     const bool blocked=!race||!s.in_race||desktop_panel_open()||cleared;
     s.in_race=race;
+    if(!platform::cd_title_race_owned(rt?rt->mode_state.current:0u,blocked,true))platform::cd_switcher().title.clear();
     const auto action=s.edges.step(desktop_key(s.z),desktop_key(s.x),pad.held,pad.connected,
                                    s.previous,s.next,blocked);
     if(!blocked)(void)platform::cd_switcher().change(action);
@@ -29,7 +30,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
 }
 }
 void cd_switcher_configure(const Ini& settings,bool test_or_playback,bool recording){
-    auto& core=platform::cd_switcher();core.enabled=false;core.tracks.clear();core.cursor=0;
+    auto& core=platform::cd_switcher();core.enabled=false;core.tracks.clear();core.cursor=0;core.title={};
     if(!settings.flag("CDSwitcher","SwitcherEnable",false))return;
     if(test_or_playback||recording){std::printf("settings: CDSwitcher off in test, playback or recording process\n");return;}
     auto catalog=platform::parse_cd_tracks(settings.section_lines("CDTracks"));
@@ -42,7 +43,13 @@ void cd_switcher_configure(const Ini& settings,bool test_or_playback,bool record
     if(!s.z||!s.x||s.z>0x7fu||s.x>0x7fu){std::printf("settings: CDSwitcher off: layout has no plain Z/X keys\n");return;}
     s.clears=desktop_key_clears();s.edges={};s.in_race=false;s.configured=true;
     core.tracks=std::move(catalog.tracks);core.enabled=true;
-    std::printf("settings: experimental CDSwitcher: %zu ordered tracks, Z/X press or pad release, GAME only; input still reaches game; title overlay and startup shuffle not implemented\n",core.tracks.size());
+    core.title.options=platform::cd_title_options(settings.flag("CDSwitcher","SwitcherDisplayTitle",false),
+        settings.integer("CDSwitcher","SwitcherTitleFont",2),settings.number("CDSwitcher","SwitcherTitleFontSizeX",0.3f),
+        settings.number("CDSwitcher","SwitcherTitleFontSizeY",0.5f),settings.integer("CDSwitcher","SwitcherTitlePositionX",375),
+        settings.integer("CDSwitcher","SwitcherTitlePositionY",450));
+    std::printf("settings: experimental CDSwitcher: %zu ordered tracks, Z/X press or pad release, GAME only; input still reaches game; startup shuffle not implemented\n",core.tracks.size());
+    if(core.title.options.enabled)std::printf("settings: experimental CD title: 120 updates/45 fade, GAME HUD only, font %u, scale %.2f/%.2f, position %d/%d\n",
+        core.title.options.font,double(core.title.options.scale_x),double(core.title.options.scale_y),core.title.options.x,core.title.options.y);
 }
 void cd_switcher_wrap_input_filter(){
     if(!s.configured)return;

@@ -1,0 +1,76 @@
+// Synthetic font/track/clock records only. No retail assets, decoder, device,
+// game window, hardware, renderer setup, or input injection.
+#include "platform/cd_title_overlay.hpp"
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+using namespace outrun::platform;
+namespace {
+unsigned checks{};
+void check(bool ok,const char* message){++checks;if(!ok){std::fprintf(stderr,"CD title FAIL: %s\n",message);std::exit(1);}}
+struct Player {
+    bool fail{};unsigned calls{};
+    static bool play(void* p,const CdTrack&,std::size_t,bool){auto& s=*static_cast<Player*>(p);++s.calls;return !s.fail;}
+};
+void timing(){
+    CdTitleState t;t.changed();check(t.remaining==0&&t.sample(0,1,true)==0,"display defaults off");
+    t.options.enabled=true;t.changed();
+    check(t.remaining==120,"manual title starts at 120 updates");
+    check(t.sample(0,0,true)==255&&t.remaining==120,"120 Hz display-only frame does not age title");
+    check(t.sample(0,50,true)==0&&t.remaining==120,"multiple flushes in one render frame do not repeat or age");
+    check(t.sample(1,75,true)==255&&t.remaining==45,"first 75 updates full opacity");
+    check(t.sample(2,1,true)==255&&t.remaining==44,"fade starts at 45 remaining");
+    check(t.sample(3,43,true)==249&&t.remaining==1,"44 remaining fades, game-update batch advances");
+    check(t.sample(4,1,true)==5&&t.remaining==0&&t.sample(5,1,true)==0,"last update fades then expires");
+    t.changed();check(t.sample(6,~0u,true)==255&&t.remaining==0,"large update count saturates instead of wrapping");
+    t.changed();check(t.sample(7,1,false)==0&&t.remaining==0&&t.sample(8,1,true)==0,"lost HUD ownership clears, does not resume");
+    for(const auto mode:{0u,13u,17u,19u,32u})check(!cd_title_race_owned(mode,false,true),"menu/loading/pause/goal do not own title");
+    check(cd_title_race_owned(16,false,true),"GAME visible HUD owns title");
+    check(!cd_title_race_owned(16,true,true),"existing panel/focus/entry block clears title");
+    check(!cd_title_race_owned(16,false,false),"hidden native HUD does not own title");
+}
+void transaction(){
+    Player p;CdSwitcher cd{true,{{"first.ogg","One"},{"second.ogg","Two"}},0,&p,Player::play};
+    cd.title.options.enabled=true;
+    check(cd.select(1)&&cd.title.remaining==0,"initial/race selection does not arm title");
+    check(cd.change({false,true})&&cd.cursor==0&&cd.title.remaining==120,"successful manual wrap arms actual current title");
+    (void)cd.title.sample(1,20,true);p.fail=true;
+    check(!cd.change({false,true})&&cd.cursor==0&&cd.title.remaining==100,"failed open preserves cursor and timer, does not refresh");
+    p.fail=false;check(cd.change({true,true})&&cd.cursor==0&&cd.title.remaining==120,"simultaneous action one successful open refreshes once");
+    const auto calls=p.calls;cd.enabled=false;
+    check(!cd.change({false,true})&&p.calls==calls,"off does not add playback or arm title");
+    cd.enabled=true;cd.play=nullptr;
+    check(!cd.change({false,true})&&p.calls==calls,"unbound audio cannot display a new selected title");
+}
+void labels_and_options(){
+    check(cd_title_label(0,"100% %s")=="#01. 100% %s","title percent signs are literal, not a format");
+    check(cd_title_label(255,"")=="#256. ","empty title keeps bounded track number");
+    check(cd_title_label(256,"invalid").empty(),"index outside catalog bound refused");
+    check(cd_title_label(1,std::string("A\n\t")+char(0xff))=="#02. A???","control/non-ASCII bytes cannot produce extra lines");
+    const auto long_title=cd_title_label(255,std::string(512,'A'));
+    check(long_title.size()==102&&long_title.substr(long_title.size()-3)=="...","long title has fixed display bound; catalog is separate");
+    const auto o=cd_title_options(true,99,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity(),-1,9999);
+    check(o.font==9&&o.scale_x==0.3f&&o.scale_y==0.5f&&o.x==0&&o.y==479,"invalid finite settings normalized without NaN casts");
+    const auto c=cd_title_options(true,-1,-3.f,8.f,9999,-1);
+    check(c.font==0&&c.scale_x==0.05f&&c.scale_y==2.f&&c.x==639&&c.y==0,"finite font scale/position bounds");
+}
+void font_path(){
+    Player p;CdSwitcher cd{true,{{"not-a-title.ogg","Actual title"}},0,&p,Player::play};
+    FrontendFontPack pack;auto& f=pack.fonts[2];f.width=8;f.height=8;f.first=32;f.token=7;
+    f.metrics.assign(96,{0,8});
+    std::vector<FrontendGlyph> glyphs;
+    check(!cd_title_glyphs(cd,&pack,0,1,true,glyphs)&&glyphs.empty()&&p.calls==0,"off adds no glyph/audio work");
+    cd.title.options=cd_title_options(true,2,0.3f,0.5f,375,450);cd.title.changed();
+    check(cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&!glyphs.empty(),"production recovered font producer creates title glyphs");
+    check(glyphs.front().token==7&&glyphs.front().x==375.f&&glyphs.front().y==450.f&&glyphs.front().color==0xffffffffu&&glyphs.front().mode==4,"game font/style/priority/location and full alpha preserved");
+    check(glyphs.front().scale_x==0.3f&&glyphs.front().scale_y==0.5f&&p.calls==0,"drawing uses configured scale without any audio request");
+    const auto count=glyphs.size();
+    check(!cd_title_glyphs(cd,&pack,1,1,true,glyphs)&&glyphs.size()==count,"second flush adds no duplicate glyphs");
+    check(!cd_title_glyphs(cd,&pack,2,1,false,glyphs)&&cd.title.remaining==0,"ownership loss submits nothing and clears timer");
+    cd.title.changed();check(!cd_title_glyphs(cd,nullptr,3,1,true,glyphs)&&cd.title.remaining==119,"missing font ages without new resource/queue path");
+    f.metrics.resize(1);cd.title.changed();
+    check(!cd_title_glyphs(cd,&pack,4,1,true,glyphs)&&glyphs.size()==count,"unsupported glyph refuses atomically without altering other draws");
+    check(cd.tracks[0].path=="not-a-title.ogg"&&cd.tracks[0].title=="Actual title","display never changes path/catalog title");
+}
+}
+int main(){timing();transaction();labels_and_options();font_path();std::printf("CD title overlay: %u checks PASS (synthetic font/timer/ownership only)\n",checks);}
