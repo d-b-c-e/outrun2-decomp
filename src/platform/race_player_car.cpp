@@ -237,7 +237,9 @@ void common_service(void* user,std::uint32_t pc){
     case 0x004a0000u:driving::make_force_work_tire_4a0000(e,W,P,f.wheels,m);return;
     case 0x00517410u:driving::action_force2(W.sub(0xf0,0x1f0),e.f32(0xdbc),m);return;
     case 0x004a2fa0u:driving::rear_grip_ctrl(e,W,P,{f.volume(1),f.volume(2),f.old_volume(1),f.old_volume(2)});return;
-    case 0x004a3310u:driving::slip_angle_ctrl(e,W,P,{c.start_mode.manager_state_7f94c0,w.slip_assist_800aac});return;
+    case 0x004a3310u:{                                                          // 46C470: fld [800AAC], the manager's road Mu
+        float assist;std::memcpy(&assist,race_requests_road_mu_800aac(c),4u);
+        driving::slip_angle_ctrl(e,W,P,{c.start_mode.manager_state_7f94c0,assist});return;}
     case 0x004a3950u:driving::cornering_ctrl(e,W,P,m);return;
     case 0x004a7ec0u:{
         advance.transition_allowed=c.race.area_state_7d2e80>9u;                 // 44BE50(0)
@@ -535,14 +537,16 @@ bool race_car_cbw_coli_wall_5041b0(NativeRuntimeContext& c,driving::PcMatrixStac
         return true;
     }catch(const std::exception& ex){error=ex.what();return false;}
 }
+std::uint8_t* race_requests_road_mu_800aac(NativeRuntimeContext& c){
+    return native_race_traffic(c).requests_7f9460.data()+0x764cu;
+}
 driving::RoadMuSource race_player_road_mu(NativeRuntimeContext& c){
     driving::RoadMuSource source{};
     source.service_available=c.start_mode.manager_state_7f94c0!=0u;             // 55A930: the manager's +60
     if(source.service_available){
         // 46C450: mov ecx,7F9460; call 4FC390. The manager block stays valid (and keeps the
         // value its 481250 init wrote) after the traffic module latches on another service.
-        auto& requests=native_race_traffic(c).requests_7f9460;
-        source.context=requests.data()+0x764cu;
+        source.context=race_requests_road_mu_800aac(c);
         source.lookup=driving::pc_manager_road_mu_lookup;
     }
     return source;
