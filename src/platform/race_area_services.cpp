@@ -121,15 +121,16 @@ std::uint32_t race_objects_open_4f0d10(const PcRaceMemory& m,std::uint32_t lane,
     }while(!below(r+4u));
     return opened;
 }
-void race_objects_copy_4efd20(const PcRaceMemory& m,std::uint32_t e,std::uint32_t lane){
+std::uint32_t race_objects_copy_4efd20(const PcRaceMemory& m,std::uint32_t e,std::uint32_t lane){
     if(lane!=0u){
         for(std::uint32_t k=0;k<6u;++k)m.put32(0x6a5dc4u+k*4u,m.u32(e+k*4u));
-        return;
+        return e+0xcu;                                       // EAX: the source + C (4EFD48)
     }
     std::uint32_t d=0x84bd08u;
     for(std::uint32_t n=0;m.u16(e)!=0xffffu&&n<7u;++n,e+=12u,d+=12u)
         for(std::uint32_t k=0;k<12u;k+=4u)m.put32(d+k,m.u32(e+k));
     m.put16(d,0xffffu);
+    return e;                                                // EAX: the source advanced past the rows copied
 }
 }
 // ---- course-prog: end ----

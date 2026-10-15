@@ -820,9 +820,7 @@ struct Run {
         // the AREA's light words 6A5DC4..; lane 0 copies up to seven 12-byte rows to START's table 84BD08 and the FFFF end
         // mark. Both targets are mapped to their owners above. EAX: the source + C, or advanced past the rows copied.
         if(pc==0x4efd20u){routed(pc);
-            std::uint32_t eax=a[0]+0xcu;
-            if(a[1]==0u){eax=a[0];for(unsigned n=0;n<7u&&m().u16(eax)!=0xffffu;++n)eax+=12u;}
-            race_objects_copy_4efd20(m(),a[0],a[1]);
+            const auto eax=race_objects_copy_4efd20(m(),a[0],a[1]);   // one pass, in the stock read/write order
             if(a[1]!=0u)native_race_area(c).light_words_written=true;
             return eax;}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
