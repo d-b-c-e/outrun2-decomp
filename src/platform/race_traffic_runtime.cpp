@@ -824,6 +824,9 @@ struct Run {
         // 45BD30(id, duration, priority): the voice queue push of the request manager (4FB390, 4FEA00, 5072F0, 507620)
         // on the HUD's voice queue, as the race end routes it.
         if(pc==0x45bd30u){routed(pc);return native_race_hud_voice_45bd30(c,std::int32_t(a[0]),std::int16_t(a[1]),std::int16_t(a[2]));}
+        // 5217C0 (thiscall on the request manager, ECX unused, no stack arguments; 505850 state 3 at 505AAF): the fixed
+        // voice line push 9, push 3C, push E8, call 45BD30, add esp,C, ret, with 45BD30's EAX.
+        if(pc==0x5217c0u){routed(pc);return native_race_hud_voice_45bd30(c,0xe8,0x3c,9);}
         // 41BD40: jmp 49A650, a bare RET in this build (the request objects' virtual display, 481A40): EAX unchanged.
         if(pc==0x41bd40u){routed(pc);return k.eax;}
         // 4EFD20(source, lane), the course-light copy the request manager runs (521930). Lane != 0 copies two vectors to

@@ -713,6 +713,43 @@ int main(int argc,char** argv){
                         "4FC240: without traffic events only +7640 is set");
                 std::fprintf(stderr,"request cars 4FC240: 470240 route, non-request car and no events checked\n");
             }
+            {   // 505850(record) (thiscall, RET 4): the request record's state step. From state 1 or 2 with the player car on a
+                // place ([+7660] +5C) it enters state 3 (505C88 -> 505A51): +759C = 3, 4FCD40, 4FE760, the player's +1F8 into
+                // record +5C / +64, +68..+70 cleared, 4FC0B0; then, unless the record's object is kind 0x10 with subtype EBX,
+                // 5217C0: the fixed voice line 45BD30(E8, 3C, 9). run-0142 latched the traffic module there (5217C0 not
+                // ported). Record, object and player car are scratch in the request block; 4FC0B0's first record ends it.
+                auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;auto& voice=native_race_hud(request).voice;
+                struct Restore{std::vector<std::uint8_t>& block;const std::vector<std::uint8_t> saved;NaviVoiceQueue& voice;const NaviVoiceQueue kept;
+                    ~Restore(){std::memcpy(block.data(),saved.data(),saved.size());voice=kept;}} restore{block,block,voice,voice};
+                // Scratch above the manager's sprite resources that 4FCD40 / 4FE760 touch (up to +6048).
+                constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase,Rec=0x6800u,Obj=0x6900u,Car=0x6a00u,Table=0x6c00u;
+                auto get32=[&](std::size_t o){std::uint32_t v;std::memcpy(&v,block.data()+o,4);return v;};
+                auto getf=[&](std::size_t o){float v;std::memcpy(&v,block.data()+o,4);return v;};
+                auto step=[&](std::uint32_t kind,std::uint32_t subtype){
+                    std::fill(block.begin()+Rec,block.begin()+Table+0x40u,std::uint8_t(0));
+                    put32(block,Rec+0x58u,B+Obj);put32(block,Rec+8u,1u);                   // state 1, its object
+                    put32(block,Obj,kind);put32(block,Obj+4u,subtype);
+                    put32(block,Car+0x5cu,1u);const float speed=12.5f;std::memcpy(block.data()+Car+0x1f8u,&speed,4);
+                    put32(block,0x7660u,B+Car);put32(block,0x759cu,0u);
+                    put32(block,0x7630u,B+Table);put32(block,0x7634u,0);put32(block,0x7638u,0);put32(block,0x763cu,0);
+                    block[Table+8u]=0xff;block[Table+9u]=0xff;                               // record 0: a negative cs ends 4FC0B0
+                    put32(block,0x164u,0u);voice=NaviVoiceQueue{};                           // an open, idle voice queue
+                    std::uint32_t eax=0u;
+                    const bool ran=native_race_requests_call(request,request_matrices,0x00505850u,{B+Rec},eax,B);
+                    if(!ran)std::fprintf(stderr,"505850: latched=%d fault=%X %s\n",int(traffic.latched),unsigned(traffic.fault),traffic.error.c_str());
+                    return ran;};
+                request.start_mode.manager_state_7f94c0=1u;
+                auto lines=traffic.routed[0x5217c0u];
+                require(step(3u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines+1u&&get32(Rec+8u)==3u&&get32(0x759cu)==3u&&
+                        getf(Rec+0x5cu)==12.5f&&getf(Rec+0x64u)==12.5f&&get32(Rec+0x70u)==0u&&request_matrices.depth==0&&
+                        voice.entries_7f1998[0].id==0xe8&&voice.entries_7f1998[0].duration==0x3c&&voice.entries_7f1998[0].priority==9,
+                        "505850 state 3: 5217C0 runs as a traffic service and pushes the voice line E8 / 3C / 9 on the HUD queue");
+                lines=traffic.routed[0x5217c0u];
+                require(step(0x10u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines&&get32(Rec+8u)==3u&&
+                        voice.entries_7f1998[0].id!=0xe8,
+                        "505850 state 3: a kind-0x10 object with the caller's subtype (EBX 0 here) skips 5217C0");
+                std::fprintf(stderr,"request record 505850: state 3, 5217C0 voice line and the kind-0x10 skip checked\n");
+            }
         }
         {   // 4BEC9B / 4BECD2: variant-5 dispatch boundaries, before any sprite renderer.
             NaviPubGlobals globals;PcRaceMemory memory;globals.map(memory);
