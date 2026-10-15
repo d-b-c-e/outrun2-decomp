@@ -715,7 +715,8 @@ int main(int argc,char** argv){
             }
             {   // 505850(record) (thiscall, RET 4): the request record's state step. From state 1 or 2 with the player car on a
                 // place ([+7660] +5C) it enters state 3 (505C88 -> 505A51): +759C = 3, 4FCD40, 4FE760, the player's +1F8 into
-                // record +5C / +64, +68..+70 cleared, 4FC0B0; then, unless the record's object is kind 0x10 with subtype EBX,
+                // record +5C / +64, +68..+70 cleared, 4FC0B0; then, unless the record's object is kind 0x10 with subtype EBX
+                // (5 on every path into the table: 50592F mov ebx,5; c217-0205 found my first assumption of 0 wrong),
                 // 5217C0: the fixed voice line 45BD30(E8, 3C, 9). run-0142 latched the traffic module there (5217C0 not
                 // ported). Record, object and player car are scratch in the request block; 4FC0B0's first record ends it.
                 auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;auto& voice=native_race_hud(request).voice;
@@ -747,11 +748,11 @@ int main(int argc,char** argv){
                         voice.entries_7f1998[0].id==0xe8&&voice.entries_7f1998[0].duration==0x3c&&voice.entries_7f1998[0].priority==9,
                         "505850 state 3: 5217C0 runs as a traffic service and pushes the voice line E8 / 3C / 9 on the HUD queue");
                 lines=traffic.routed[0x5217c0u];
-                require(step(0x10u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines&&get32(Rec+8u)==3u&&
+                require(step(0x10u,5u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines&&get32(Rec+8u)==3u&&
                         voice.entries_7f1998[0].id!=0xe8,
-                        "505850 state 3: a kind-0x10 object with the caller's subtype (EBX 0 here) skips 5217C0");
+                        "505850 state 3: a kind-0x10 object with subtype EBX (5) skips 5217C0");
                 lines=traffic.routed[0x5217c0u];
-                require(step(0x10u,1u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines+1u&&voice.entries_7f1998[0].id==0xe8,
+                require(step(0x10u,0u)&&!traffic.latched&&traffic.routed[0x5217c0u]==lines+1u&&voice.entries_7f1998[0].id==0xe8,
                         "505850 state 3: a kind-0x10 object with another subtype still pushes the voice line (both must match)");
                 std::fprintf(stderr,"request record 505850: state 3, 5217C0 voice line and the kind-0x10 skip checked\n");
             }
