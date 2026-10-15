@@ -153,6 +153,7 @@ void racers_out(NativeRuntimeContext& c,NativeRaceTraffic& t){
     r.special_80fb28=get32(b+0x28);r.v80fb2c=get32(b+0x2c);
     c.start_mode.scene_owner_special_driver_80fb28=std::int32_t(r.special_80fb28);
 }
+void map_course_world_pc(PcRaceMemory& m,const CourseWorldRuntime& world);
 void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
     OR2_PERF_ZONE("traffic map_memory");
     auto& m=t.memory;m.clear();
@@ -214,6 +215,10 @@ void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
             put32(t.cells_780228.data()+k*4u,at);
         }
         m.map(0x780228u,t.cells_780228.data(),t.cells_780228.size());}
+    // 780100..: the course collision roots in PC layout, as the LAN cars map them. The request objects' display
+    // (50DBE0 -> 520BD0) reaches 5209A0, whose first course read is [780110 + part * 4]; an unloaded lane's roots
+    // are 0 there, as the PC leaves them. A world without its transform leaves them unmapped.
+    if(world.query_ready())map_course_world_pc(m,world);
     // 5E3140: the driving parameter arena (5051D0 stores 5E3140 + 4 * column in car +2B4)
     // (a copy: the native leaves take mutable views; nothing writes it)
     if(c.game_mode.driving_data&&c.game_mode.driving_data->parameter_arena.size()==DrivingParameterArenaBytes){
@@ -852,11 +857,15 @@ struct Run {
         // 43D920(&first, &last, place, hint) (cdecl), GetColiPnumByCsLen: the course run carrying the place's cs length
         // (part 0: 43D4D0 with the hint, other parts: 43D6E0), the driving core's lookup on the selected course world as
         // the player car's CheckChickenDriver runs it (5209A0 calls it). EAX: the run's polygon count; the outputs keep
-        // the values the lookup leaves.
+        // the values the lookup leaves. 43D4D0 (43D4F2) / 43D6E0 (43D6FB) return 0 before writing the outputs when the
+        // part's root [780140 + part * 4] is 0, which is a part of an unloaded lane (a loaded COLI0200 lane always has
+        // its runs header there); a part outside the four lanes or a view of another lane stays a lookup failure.
         if(pc==0x43d920u){routed(pc);
+            auto& world=c.start_mode.scene_owner_course_world;
+            const std::uint32_t part=m().u32(a[2]);
+            if(part<4u&&!world.lane_loaded(part))return 0u;
             std::int32_t first=m().i32(a[0]),last=m().i32(a[1]);
-            const auto n=driving::find_selected_course_run(c.start_mode.scene_owner_course_world.tables(),m().bytes(a[2],10u),
-                                                           std::int32_t(a[3]),first,last);
+            const auto n=driving::find_selected_course_run(world.tables(),m().bytes(a[2],10u),std::int32_t(a[3]),first,last);
             m().put32(a[0],std::uint32_t(first));m().put32(a[1],std::uint32_t(last));
             return std::uint32_t(n);}
         // 465160..4659F0: sprite resources (0xA0) inside the request manager's objects, on the
