@@ -10,10 +10,24 @@ namespace outrun::platform {
 // (Ogg Vorbis), played on the single stream object 95B24C (a new request
 // closes the previous stream; 401030 / 401050 close it). The volume word
 // 95B240 is .bss 0 (0 dB, unattenuated) and a stream is only started while it
-// is above -10000. Decoding is libvorbisfile; the device side is the shared
+// is above -10000. Ogg decoding is libvorbisfile; optional replacements use
+// static FFmpeg. The device side is the shared
 // 48 kHz stereo mix of MenuAudio (linear resampling from the file rate).
 const char* music_track_name_771ad8(unsigned track);   // nullptr outside 0..0x42
 constexpr unsigned MusicTrackCount=0x43u;
+
+// Experimental replacement policy, set once by the desktop startup settings.
+// Qualification defaults are off (Tweaks defaults both on). No file is rewritten.
+struct MusicReplacementPolicy { bool allow_wav{},allow_flac{}; };
+enum class MusicFileFormat { Vorbis,Wav,Flac };
+void set_music_replacement_policy(MusicReplacementPolicy policy);
+MusicReplacementPolicy music_replacement_policy();
+MusicFileFormat select_music_file(MusicReplacementPolicy policy,bool wav_exists,bool flac_exists);
+std::string music_replacement_name(const std::string& original,MusicFileFormat format);
+// Selected replacement failures must not retry another extension. Checks magic,
+// the 64 MiB input bound and unsupported FLAC custom-loop comments before decode.
+bool validate_music_file(MusicFileFormat format,const std::vector<std::uint8_t>& bytes,std::string& error);
+bool music_replacement_decoder_available(MusicFileFormat format);
 
 class MusicStream {
 public:
@@ -22,7 +36,8 @@ public:
     MusicStream(const MusicStream&)=delete;
     MusicStream& operator=(const MusicStream&)=delete;
     // Takes the whole file (the retail Sound folder); false with the reason
-    // when the file is not an Ogg Vorbis stream or no decoder was built.
+    // when the file is invalid or its decoder was not built. WAV/FLAC use an
+    // optional static FFmpeg backend; Ogg keeps the existing Vorbis route.
     bool open(std::vector<std::uint8_t> file,bool loop,std::string& error);
     void stop();
     bool playing()const;

@@ -1,8 +1,21 @@
 #include "platform/music_stream.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <cstring>
 #if defined(OR2_HAVE_VORBIS)
 #include <vorbis/vorbisfile.h>
+#endif
+#if defined(OUTRUN_WITH_FFMPEG)
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/error.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
+#include <libswresample/swresample.h>
+}
 #endif
 
 namespace outrun::platform {
@@ -27,8 +40,109 @@ constexpr const char* Tracks771ad8[MusicTrackCount]{
     "SEL_26_Night_Flight_Prototype.ogg","SEL_27_Life_was_a_Bore_Instrumental.ogg","SEL_28_Night_Flight_Instrumental.ogg",
     "OR2ED1.ogg","OR2ED2.ogg","OR2ED3A.ogg","OR2ED3B.ogg","OR2ED4.ogg","OR2ED5.ogg"};
 bool fail(std::string& e,const char* m){e=m;return false;}
+constexpr std::size_t MaxMusicBytes=64u*1024u*1024u;
+std::atomic<unsigned> replacement_policy{0};
+bool magic(const std::vector<std::uint8_t>& b,std::size_t at,const char* s,std::size_t n){
+    return at<=b.size()&&n<=b.size()-at&&std::memcmp(b.data()+at,s,n)==0;
+}
+std::uint32_t little32(const std::vector<std::uint8_t>& b,std::size_t at){
+    return std::uint32_t(b[at])|(std::uint32_t(b[at+1])<<8)|(std::uint32_t(b[at+2])<<16)|(std::uint32_t(b[at+3])<<24);
+}
+bool wav_chunks(const std::vector<std::uint8_t>& b,std::string& error){
+    const auto length=std::size_t(little32(b,4));
+    if(length<4||length>b.size()-8)return fail(error,"music: truncated RIFF container");
+    const auto end=length+8;std::size_t at=12;bool format=false,data=false;
+    for(unsigned chunk=0;at<end&&chunk<1024;++chunk){
+        if(end-at<8)return fail(error,"music: truncated WAV chunk header");
+        const auto size=std::size_t(little32(b,at+4));
+        const bool is_format=magic(b,at,"fmt ",4),is_data=magic(b,at,"data",4);at+=8;
+        if(size>end-at)return fail(error,"music: truncated WAV chunk");
+        if(is_format){if(size<16)return fail(error,"music: short WAV format");format=true;}
+        if(is_data){if(!size)return fail(error,"music: empty WAV PCM");data=true;}
+        at+=size;
+        if(size&1u){if(at==end)return fail(error,"music: missing WAV chunk padding");++at;}
+    }
+    return (at==end&&format&&data)||fail(error,"music: missing WAV format/data or too many chunks");
+}
+bool loop_key(const std::uint8_t* p,std::size_t n){
+    for(const char* key:{"LOOPSTART=","LOOPLENGTH=","LOOPEND="}){
+        const std::size_t len=std::strlen(key);if(n<len)continue;
+        std::size_t i=0;for(;i<len;++i){const auto c=p[i];if((c>='a'&&c<='z'?c-32:c)!=key[i])break;}
+        if(i==len)return true;
+    }
+    return false;
+}
+// Native FLAC metadata is length delimited. Do not scan compressed frames for
+// strings (false positives), or let unbounded metadata reach the demuxer.
+bool flac_metadata(const std::vector<std::uint8_t>& b,std::string& error){
+    std::size_t at=4;bool last=false;
+    for(unsigned block=0;!last&&block<128;++block){
+        if(at>b.size()||b.size()-at<4)return fail(error,"music: truncated FLAC metadata");
+        last=(b[at]&128)!=0;const unsigned type=b[at]&127;
+        const std::size_t n=(std::size_t(b[at+1])<<16)|(std::size_t(b[at+2])<<8)|b[at+3];at+=4;
+        if(n>b.size()-at||at+n>1024u*1024u)return fail(error,"music: FLAC metadata exceeds bound or is truncated");
+        if(block==0&&(type!=0||n!=34))return fail(error,"music: missing FLAC STREAMINFO");
+        if(type==4){
+            std::size_t p=at;const auto end=at+n;
+            auto u32=[&](std::uint32_t& v){
+                if(end-p<4)return false;
+                v=std::uint32_t(b[p])|(std::uint32_t(b[p+1])<<8)|(std::uint32_t(b[p+2])<<16)|(std::uint32_t(b[p+3])<<24);p+=4;return true;
+            };
+            std::uint32_t len=0,count=0;
+            if(!u32(len)||len>end-p)return fail(error,"music: invalid FLAC comments");
+            p+=len;
+            if(!u32(count)||count>4096)return fail(error,"music: invalid FLAC comment count");
+            for(std::uint32_t i=0;i<count;++i){
+                if(!u32(len)||len>end-p)return fail(error,"music: truncated FLAC comment");
+                if(loop_key(b.data()+p,len))return fail(error,"music: custom FLAC loop metadata unsupported (parity pending)");
+                p+=len;
+            }
+        }
+        at+=n;
+    }
+    if(!last)return fail(error,"music: too many FLAC metadata blocks");
+    return true;
+}
+#if defined(OUTRUN_WITH_FFMPEG)
+bool pcm_codec(AVCodecID id){
+    return id==AV_CODEC_ID_PCM_U8||id==AV_CODEC_ID_PCM_S16LE||id==AV_CODEC_ID_PCM_S24LE||
+        id==AV_CODEC_ID_PCM_S32LE||id==AV_CODEC_ID_PCM_F32LE;
+}
+bool ff_fail(std::string& e,const char* what,int code){
+    char why[AV_ERROR_MAX_STRING_SIZE]{};av_strerror(code,why,sizeof why);
+    e=std::string("music: ")+what+": "+why;return false;
+}
+#endif
 }
 const char* music_track_name_771ad8(unsigned track){return track<MusicTrackCount?Tracks771ad8[track]:nullptr;}
+void set_music_replacement_policy(MusicReplacementPolicy p){replacement_policy.store((p.allow_wav?1u:0u)|(p.allow_flac?2u:0u));}
+MusicReplacementPolicy music_replacement_policy(){const auto p=replacement_policy.load();return {(p&1)!=0,(p&2)!=0};}
+MusicFileFormat select_music_file(MusicReplacementPolicy p,bool wav,bool flac){
+    return p.allow_flac&&flac?MusicFileFormat::Flac:p.allow_wav&&wav?MusicFileFormat::Wav:MusicFileFormat::Vorbis;
+}
+std::string music_replacement_name(const std::string& original,MusicFileFormat f){
+    if(f==MusicFileFormat::Vorbis)return original;
+    const auto dot=original.find_last_of('.');return original.substr(0,dot)+(f==MusicFileFormat::Flac?".flac":".wav");
+}
+bool validate_music_file(MusicFileFormat f,const std::vector<std::uint8_t>& b,std::string& error){
+    error.clear();
+    if(b.empty()||b.size()>MaxMusicBytes)return fail(error,"music: empty input or input exceeds 64 MiB");
+    if(f==MusicFileFormat::Vorbis)return magic(b,0,"OggS",4)||fail(error,"music: selected Ogg has wrong signature");
+    if(f==MusicFileFormat::Wav)return ((magic(b,0,"RIFF",4)&&magic(b,8,"WAVE",4))||fail(error,"music: selected WAV has wrong signature"))&&wav_chunks(b,error);
+    return (magic(b,0,"fLaC",4)||fail(error,"music: selected FLAC has wrong signature"))&&flac_metadata(b,error);
+}
+bool music_replacement_decoder_available(MusicFileFormat f){
+    if(f==MusicFileFormat::Vorbis)return MusicStream::decoder_available();
+#if defined(OUTRUN_WITH_FFMPEG)
+    if(!av_find_input_format(f==MusicFileFormat::Flac?"flac":"wav"))return false;
+    if(f==MusicFileFormat::Flac)return avcodec_find_decoder(AV_CODEC_ID_FLAC)!=nullptr;
+    for(const auto id:{AV_CODEC_ID_PCM_U8,AV_CODEC_ID_PCM_S16LE,AV_CODEC_ID_PCM_S24LE,AV_CODEC_ID_PCM_S32LE,AV_CODEC_ID_PCM_F32LE})
+        if(!avcodec_find_decoder(id))return false;
+    return true;
+#else
+    return false;
+#endif
+}
 
 struct MusicStream::Impl {
     std::vector<std::uint8_t> file;
@@ -38,6 +152,131 @@ struct MusicStream::Impl {
     std::vector<std::int16_t> pending;   // decoded source frames (stereo) not yet consumed
     std::size_t base{};                  // index of pending[0] (frames)
     double position{};                   // source frame position of the next output frame
+    bool replacement{};
+#if defined(OUTRUN_WITH_FFMPEG)
+    AVFormatContext* format{};
+    AVIOContext* io{};
+    AVCodecContext* codec{};
+    AVPacket* packet{};
+    AVFrame* frame{};
+    SwrContext* convert{};
+    int stream{-1};
+    AVSampleFormat input_format{AV_SAMPLE_FMT_NONE};
+    bool draining{},finished{};
+    std::uint64_t decoded_since_seek{};
+    std::uint64_t expected_samples{};
+    static int read_memory(void* user,std::uint8_t* out,int n){
+        auto& s=*static_cast<Impl*>(user);
+        if(n<=0)return AVERROR(EINVAL);
+        const auto take=std::min(std::size_t(n),s.file.size()-s.read_at);
+        if(!take)return AVERROR_EOF;
+        std::memcpy(out,s.file.data()+s.read_at,take);s.read_at+=take;return int(take);
+    }
+    static std::int64_t seek_memory(void* user,std::int64_t offset,int whence){
+        auto& s=*static_cast<Impl*>(user);if(whence==AVSEEK_SIZE)return std::int64_t(s.file.size());
+        whence&=~AVSEEK_FORCE;
+        std::int64_t base=0;
+        if(whence==SEEK_CUR)base=std::int64_t(s.read_at);
+        else if(whence==SEEK_END)base=std::int64_t(s.file.size());
+        else if(whence!=SEEK_SET)return AVERROR(EINVAL);
+        if(offset < -base || offset>std::int64_t(s.file.size())-base)return AVERROR(EINVAL);
+        s.read_at=std::size_t(base+offset);return std::int64_t(s.read_at);
+    }
+    bool open_replacement(MusicFileFormat selected,std::string& error){
+        if(!music_replacement_decoder_available(selected))return fail(error,"music: WAV/FLAC decoder unavailable in this build");
+        auto* buffer=static_cast<unsigned char*>(av_malloc(32768));
+        if(!buffer)return fail(error,"music: AVIO allocation failed");
+        io=avio_alloc_context(buffer,32768,0,this,&Impl::read_memory,nullptr,&Impl::seek_memory);
+        if(!io){av_free(buffer);return fail(error,"music: AVIO context allocation failed");}
+        format=avformat_alloc_context();if(!format)return fail(error,"music: format allocation failed");
+        format->pb=io;format->flags|=AVFMT_FLAG_CUSTOM_IO;
+        format->probesize=1024*1024;format->max_analyze_duration=AV_TIME_BASE;format->max_streams=1;
+        int rc=avformat_open_input(&format,nullptr,av_find_input_format(selected==MusicFileFormat::Flac?"flac":"wav"),nullptr);
+        if(rc<0)return ff_fail(error,"open replacement",rc);
+        rc=avformat_find_stream_info(format,nullptr);if(rc<0)return ff_fail(error,"replacement stream info",rc);
+        if(format->nb_streams!=1||format->streams[0]->codecpar->codec_type!=AVMEDIA_TYPE_AUDIO)
+            return fail(error,"music: replacement must contain exactly one audio stream");
+        stream=0;const auto* parameters=format->streams[0]->codecpar;
+        if((selected==MusicFileFormat::Flac&&parameters->codec_id!=AV_CODEC_ID_FLAC)||
+           (selected==MusicFileFormat::Wav&&!pcm_codec(parameters->codec_id)))
+            return fail(error,"music: selected container has unsupported codec");
+        const auto* decoder=avcodec_find_decoder(parameters->codec_id);
+        if(!decoder)return fail(error,"music: selected replacement codec unavailable");
+        codec=avcodec_alloc_context3(decoder);if(!codec)return fail(error,"music: codec allocation failed");
+        rc=avcodec_parameters_to_context(codec,parameters);if(rc<0)return ff_fail(error,"codec parameters",rc);
+        codec->thread_count=1;codec->err_recognition=AV_EF_CRCCHECK|AV_EF_EXPLODE;
+        rc=avcodec_open2(codec,decoder,nullptr);if(rc<0)return ff_fail(error,"open replacement codec",rc);
+        if(codec->ch_layout.nb_channels<1||codec->ch_layout.nb_channels>2||codec->sample_rate<8000||codec->sample_rate>192000)
+            return fail(error,"music: unsupported replacement layout");
+        rate=std::uint32_t(codec->sample_rate);channels=std::uint32_t(codec->ch_layout.nb_channels);
+        const auto* audio=format->streams[stream];
+        if(audio->duration>0&&audio->duration!=AV_NOPTS_VALUE){
+            const auto samples=av_rescale_q(audio->duration,audio->time_base,AVRational{1,int(rate)});
+            if(samples>0)expected_samples=std::uint64_t(samples);
+        }
+        packet=av_packet_alloc();frame=av_frame_alloc();
+        if(!packet||!frame)return fail(error,"music: decode allocation failed");
+        replacement=true;return true;
+    }
+    // Returns one bounded source chunk, or finished=true. No audio device here.
+    bool refill_replacement(std::uint64_t& loops,std::string& error){
+        for(unsigned work=0;work<128;++work){
+            const int got=avcodec_receive_frame(codec,frame);
+            if(got==0){
+                if(frame->nb_samples<=0||frame->nb_samples>65536||frame->sample_rate!=int(rate)||
+                   av_channel_layout_compare(&frame->ch_layout,&codec->ch_layout)!=0)
+                    return fail(error,"music: replacement frame bounds/layout changed");
+                const auto sample_format=static_cast<AVSampleFormat>(frame->format);
+                if(!convert){
+                    input_format=sample_format;
+                    int rc=swr_alloc_set_opts2(&convert,&codec->ch_layout,AV_SAMPLE_FMT_S16,int(rate),
+                                              &codec->ch_layout,sample_format,int(rate),0,nullptr);
+                    if(rc<0)return ff_fail(error,"replacement PCM converter",rc);
+                    rc=swr_init(convert);if(rc<0)return ff_fail(error,"replacement PCM converter init",rc);
+                }else if(input_format!=sample_format)return fail(error,"music: replacement sample format changed");
+                const int capacity=swr_get_out_samples(convert,frame->nb_samples);
+                if(capacity<=0||capacity>65568)return fail(error,"music: replacement PCM chunk exceeds bound");
+                std::vector<std::int16_t> pcm(std::size_t(capacity)*channels);
+                std::uint8_t* output=reinterpret_cast<std::uint8_t*>(pcm.data());
+                const int count=swr_convert(convert,&output,capacity,const_cast<const std::uint8_t**>(frame->extended_data),frame->nb_samples);
+                av_frame_unref(frame);
+                if(count<0)return ff_fail(error,"replacement PCM conversion",count);
+                if(count==0)continue;
+                if(pending.size()+std::size_t(count)*2u>262144u)return fail(error,"music: replacement pending PCM exceeds bound");
+                if(channels==2)pending.insert(pending.end(),pcm.begin(),pcm.begin()+std::ptrdiff_t(count*2));
+                else for(int i=0;i<count;++i){pending.push_back(pcm[std::size_t(i)]);pending.push_back(pcm[std::size_t(i)]);}
+                decoded_since_seek+=std::uint64_t(count);
+                if(expected_samples&&decoded_since_seek>expected_samples)return fail(error,"music: decoded replacement exceeds declared samples");
+                return true;
+            }
+            if(got==AVERROR_EOF){
+                if(!decoded_since_seek||(expected_samples&&decoded_since_seek!=expected_samples))
+                    return fail(error,"music: empty or truncated replacement PCM");
+                if(!loop){finished=true;return true;}
+                const auto start=format->streams[stream]->start_time;
+                const int rc=av_seek_frame(format,stream,start==AV_NOPTS_VALUE?0:start,AVSEEK_FLAG_BACKWARD);
+                if(rc<0)return ff_fail(error,"replacement loop seek",rc);
+                avcodec_flush_buffers(codec);swr_free(&convert);input_format=AV_SAMPLE_FMT_NONE;
+                draining=false;decoded_since_seek=0;++loops;continue;
+            }
+            if(got!=AVERROR(EAGAIN))return ff_fail(error,"replacement decode",got);
+            if(draining)return fail(error,"music: replacement decoder stalled while draining");
+            const int read=av_read_frame(format,packet);
+            if(read==AVERROR_EOF){
+                const int rc=avcodec_send_packet(codec,nullptr);draining=true;
+                if(rc<0&&rc!=AVERROR_EOF)return ff_fail(error,"replacement drain",rc);
+                continue;
+            }
+            if(read<0)return ff_fail(error,"replacement packet read",read);
+            if(packet->stream_index!=stream){av_packet_unref(packet);continue;}
+            if(packet->flags&AV_PKT_FLAG_CORRUPT){av_packet_unref(packet);return fail(error,"music: corrupt replacement packet");}
+            if(packet->size<0||packet->size>1024*1024){av_packet_unref(packet);return fail(error,"music: replacement packet exceeds bound");}
+            const int rc=avcodec_send_packet(codec,packet);av_packet_unref(packet);
+            if(rc<0)return ff_fail(error,"replacement packet decode",rc);
+        }
+        return fail(error,"music: replacement decode work exceeds bound");
+    }
+#endif
 #if defined(OR2_HAVE_VORBIS)
     OggVorbis_File vf{};
     static std::size_t read(void* p,std::size_t size,std::size_t n,void* user){
@@ -51,9 +290,16 @@ struct MusicStream::Impl {
 #endif
     void close(){
 #if defined(OR2_HAVE_VORBIS)
-        if(open)ov_clear(&vf);
+        if(open&&!replacement)ov_clear(&vf);
 #endif
-        open=false;ended=false;pending.clear();base=0;position=0;file.clear();read_at=0;
+#if defined(OUTRUN_WITH_FFMPEG)
+        swr_free(&convert);av_frame_free(&frame);av_packet_free(&packet);avcodec_free_context(&codec);
+        avformat_close_input(&format);
+        // avformat does not own custom AVIO; it may have replaced its buffer.
+        if(io){av_freep(&io->buffer);avio_context_free(&io);}
+        stream=-1;input_format=AV_SAMPLE_FMT_NONE;draining=false;finished=false;decoded_since_seek=0;expected_samples=0;
+#endif
+        open=false;replacement=false;ended=false;pending.clear();base=0;position=0;file.clear();read_at=0;
     }
 };
 MusicStream::MusicStream():impl_(new Impl){}
@@ -67,6 +313,19 @@ bool MusicStream::decoder_available(){
 }
 bool MusicStream::open(std::vector<std::uint8_t> file,bool loop,std::string& error){
     auto& s=*impl_;s.close();
+    error.clear();
+    const bool flac=magic(file,0,"fLaC",4),wav=magic(file,0,"RIFF",4);
+    if(flac||wav){
+        const auto selected=flac?MusicFileFormat::Flac:MusicFileFormat::Wav;
+        if(!validate_music_file(selected,file,error))return false;
+#if defined(OUTRUN_WITH_FFMPEG)
+        s.file=std::move(file);s.loop=loop;
+        if(!s.open_replacement(selected,error)){s.close();return false;}
+        s.open=true;stats.rate=s.rate;stats.channels=s.channels;++stats.opens;return true;
+#else
+        return fail(error,"music: WAV/FLAC decoder unavailable in this build");
+#endif
+    }
 #if defined(OR2_HAVE_VORBIS)
     s.file=std::move(file);s.read_at=0;
     const ov_callbacks cb{&Impl::read,&Impl::seek,nullptr,&Impl::tell};
@@ -110,6 +369,28 @@ bool MusicStream::refill(std::string& error){
 }
 bool MusicStream::mix_add(double* acc,std::size_t frames,double gain,std::string& error){
     auto& s=*impl_;
+#if defined(OUTRUN_WITH_FFMPEG)
+    if(s.open&&s.replacement){
+        if(frames>96000u||(!acc&&frames)){s.close();return fail(error,"music: replacement mix request exceeds bound");}
+        const double step=double(s.rate)/48000.0;
+        for(std::size_t f=0;f<frames;++f){
+            const auto index=std::size_t(s.position);
+            while(!s.finished&&(index+2u-s.base)*2u>s.pending.size()){
+                const auto consumed=std::min(index-s.base,s.pending.size()/2u);
+                if(consumed){s.pending.erase(s.pending.begin(),s.pending.begin()+std::ptrdiff_t(consumed*2u));s.base+=consumed;}
+                if(!s.refill_replacement(stats.loops,error)){s.close();return false;}
+            }
+            const auto have=s.pending.size()/2u;
+            if(index-s.base>=have){++stats.ends;s.close();break;}
+            const auto i0=index-s.base,i1=std::min(i0+1u,have-1u);
+            const double fraction=s.position-double(index);
+            for(std::size_t c=0;c<2;++c)
+                acc[f*2u+c]+=(s.pending[i0*2u+c]+(s.pending[i1*2u+c]-s.pending[i0*2u+c])*fraction)*gain;
+            s.position+=step;++stats.frames;
+        }
+        return true;
+    }
+#endif
     if(!s.open||s.ended)return true;
     const double step=double(s.rate)/48000.0;
     for(std::size_t f=0;f<frames;++f){

@@ -1,6 +1,36 @@
 cmake_minimum_required(VERSION 3.16)
 project(OutRunSwitch_r155 LANGUAGES CXX)
 
+# Narrow offline-only fixture: configure/build no game, renderer or audio device.
+# Separate invocation: -DOR2_MUSIC_FIXTURE_ONLY=ON
+# -DOR2_MUSIC_FFMPEG_ROOT=<isolated audio-enabled 7.1.1 install prefix>.
+option(OR2_MUSIC_FIXTURE_ONLY "Build only owned PCM music replacement fixtures" OFF)
+if(OR2_MUSIC_FIXTURE_ONLY)
+    enable_testing()
+    set(OR2_MUSIC_FFMPEG_ROOT "" CACHE PATH "Optional static audio-enabled FFmpeg install")
+    set(OR2_MUSIC_FIXTURE_DIR "" CACHE PATH "Generated owned FLAC/WAV fixture directory")
+    add_executable(test_music_stream tests/test_music_stream.cpp src/platform/music_stream.cpp)
+    target_include_directories(test_music_stream PRIVATE src)
+    target_compile_features(test_music_stream PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(test_music_stream PRIVATE /W4 /WX /EHsc)
+    else()
+        target_compile_options(test_music_stream PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    if(OR2_MUSIC_FFMPEG_ROOT)
+        target_include_directories(test_music_stream PRIVATE "${OR2_MUSIC_FFMPEG_ROOT}/include")
+        target_compile_definitions(test_music_stream PRIVATE OUTRUN_WITH_FFMPEG=1)
+        foreach(_library avformat avcodec swresample avutil)
+            target_link_libraries(test_music_stream PRIVATE "${OR2_MUSIC_FFMPEG_ROOT}/lib/lib${_library}.a")
+        endforeach()
+        if(WIN32)
+            target_link_libraries(test_music_stream PRIVATE bcrypt ole32 user32)
+        endif()
+    endif()
+    add_test(NAME music_stream COMMAND test_music_stream "${OR2_MUSIC_FIXTURE_DIR}")
+    return()
+endif()
+
 # One portable in-memory decoder for Switch, Mac, PS5, Xbox and host tools.
 set(OR2_PECOMPACT_SOURCE src/ports/pecompact_memory.cpp)
 # Xbox port (xbox/, Windows only).

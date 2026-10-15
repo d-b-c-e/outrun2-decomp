@@ -22,6 +22,7 @@
 #include "platform/race_draw_distance.hpp"
 #include "platform/race_particles.hpp"
 #include "platform/race_input.hpp"
+#include "platform/music_stream.hpp"
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -495,6 +496,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // [Audio] AllowHorn, the Tweaks key (on unless set false, as there): the controls contract's "horn" action sounds the
     // horn in the race (pc_screen.hpp; race_sound_runtime.cpp native_race_horn).
     outrun::platform::g_pc_allow_horn=settings.flag("Audio","AllowHorn",true);
+    // Experimental qualification defaults off; Tweaks defaults these on.
+    // Read once, no INI writes or per-frame filesystem work.
+    const outrun::platform::MusicReplacementPolicy music_policy{
+        settings.flag("Audio","AllowWAV",false),settings.flag("Audio","AllowFLAC",false)};
+    outrun::platform::set_music_replacement_policy(music_policy);
+    if(music_policy.allow_wav||music_policy.allow_flac)
+        std::printf("settings: experimental music replacements WAV=%d FLAC=%d; custom FLAC loops unsupported\n",
+                    int(music_policy.allow_wav),int(music_policy.allow_flac));
     if(!outrun::platform::g_pc_allow_horn)std::printf("settings: the horn off ([Audio] AllowHorn = false)\n");
     // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).

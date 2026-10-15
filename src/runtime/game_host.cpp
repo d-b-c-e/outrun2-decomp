@@ -228,6 +228,7 @@ bool menu_effect(void* user,unsigned id){
 }
 // 401000 (channel, track, loop): one stream (95B24C); a new request closes
 // the previous one. The volume 95B240 is .bss 0 (> -10000: always started).
+bool read_music_file(GameHost& s,const char* name,std::vector<std::uint8_t>& bytes,std::string& error);
 bool menu_music_play(void* user,unsigned,unsigned track,unsigned loop){
     auto& s=*static_cast<GameHost*>(user);
     std::lock_guard<std::recursive_mutex> audio_lock(audio_mutex());
@@ -236,8 +237,10 @@ bool menu_music_play(void* user,unsigned,unsigned track,unsigned loop){
     const char* name=pf::music_track_name_771ad8(track);
     std::vector<std::uint8_t> bytes;std::string e;
     if(!name){e="music: track "+std::to_string(track)+" outside 771AD8";}
-    else if(s.retail&&read_sound_file(s,name,bytes,e)&&s.menu_audio.play_music(std::move(bytes),loop!=0u,e)){
+    else if(s.retail&&read_music_file(s,name,bytes,e)&&s.menu_audio.play_music(std::move(bytes),loop!=0u,e)){
         ++s.music_starts;s.music_track=track;return true;}
+    if(e.empty())e="music: retail Sound folder unavailable";
+    std::fprintf(stderr,"music: track %u refused: %s\n",track,e.c_str());
     ++s.music_failures;s.music_error=e;return false;
 }
 bool menu_music_stop(void* user,unsigned){
@@ -283,6 +286,42 @@ bool read_sound_file(GameHost& s,const char* name,std::vector<std::uint8_t>& byt
     }
     if(found.empty()){error=std::string("Sound/")+name+" missing";return false;}
     return pf::retail_asset_read_relative(*s.retail,"Sound/"+found,bytes,64u*1024u*1024u,&error);
+}
+
+namespace {
+bool read_music_file(GameHost& s,const char* name,std::vector<std::uint8_t>& bytes,std::string& error){
+    const auto policy=pf::music_replacement_policy();
+    // Defaults-off takes the exact original path; effects never use replacement lookup.
+    if(!policy.allow_wav&&!policy.allow_flac)
+        return read_sound_file(s,name,bytes,error)&&pf::validate_music_file(pf::MusicFileFormat::Vorbis,bytes,error);
+    const auto dir=pf::retail_asset_path(*s.retail,"Sound");
+    std::vector<std::string> names;
+#ifdef _WIN32
+    std::error_code ec;
+    for(const auto& entry:std::filesystem::directory_iterator(dir,ec))names.push_back(entry.path().filename().string());
+    if(ec){error="music: cannot enumerate Sound folder";return false;}
+#else
+    bool opened=false;names=pf::directory_names(dir,&opened);
+    if(!opened){error="music: cannot enumerate Sound folder";return false;}
+#endif
+    // Existence is independent of read/decode success. An unreadable, oversized
+    // or corrupt winning file must refuse this request, never silently use Ogg.
+    auto exists=[&](const std::string& wanted){
+        for(const auto& candidate:names){
+            if(candidate.size()!=wanted.size())continue;
+            if(std::equal(candidate.begin(),candidate.end(),wanted.begin(),[](char a,char b){
+                return std::tolower(static_cast<unsigned char>(a))==std::tolower(static_cast<unsigned char>(b));}))return true;
+        }
+        return false;
+    };
+    const auto wav=pf::music_replacement_name(name,pf::MusicFileFormat::Wav);
+    const auto flac=pf::music_replacement_name(name,pf::MusicFileFormat::Flac);
+    const auto format=pf::select_music_file(policy,policy.allow_wav&&exists(wav),policy.allow_flac&&exists(flac));
+    const auto selected=pf::music_replacement_name(name,format);
+    if(format!=pf::MusicFileFormat::Vorbis)std::printf("music: selected Sound/%s (no format fallback)\n",selected.c_str());
+    if(!read_sound_file(s,selected.c_str(),bytes,error))return false;
+    return pf::validate_music_file(format,bytes,error);
+}
 }
 
 // ---------------------------------------------------------------- runtime callbacks
