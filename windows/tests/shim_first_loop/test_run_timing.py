@@ -13,17 +13,21 @@ def check(ok, what):
     if not ok: failures.append(what)
 
 
-def simulate(startup, race_entry, replay_timeout, playback_end_at=None, step=0.2):
+def simulate(startup, race_entry, replay_timeout, playback_end_at=None, step=0.2, horn=False):
     """The run loop's timing on a fake clock: the menus until race_entry, then the race phase. Returns (why the loop
-    ended, the fake time it ended). R1 when replay_timeout is None: its steer holds end it, 3.5 s each."""
-    start = 1000.0; budget = run.race_budget(replay_timeout); race_at = None; phase = "menus"; phase_at = 0.0; now = start
+    ended, the fake time it ended). R1 when replay_timeout is None: its steer holds end it, 3.5 s each; with horn, then
+    the horn step (HORN_SECONDS)."""
+    start = 1000.0; budget = run.race_budget(replay_timeout, horn); race_at = None; phase = "menus"; phase_at = 0.0; now = start
     while now < run.loop_deadline(start, startup, race_at, budget):
         now += step
         if phase == "menus":
             if now - start >= race_entry: race_at = now; phase, phase_at = ("replay" if replay_timeout is not None else "steer-right"), now
             continue
         if phase == "steer-right" and now - phase_at > 3.5: phase, phase_at = "steer-left", now
-        elif phase == "steer-left" and now - phase_at > 3.5: return "end", now - start
+        elif phase == "steer-left" and now - phase_at > 3.5:
+            if horn: phase, phase_at = "horn", now
+            else: return "end", now - start
+        elif phase == "horn" and now - phase_at > run.HORN_SECONDS: return "end", now - start
         elif phase == "replay" and run.replay_due(now, phase_at, replay_timeout,
                                                   playback_end_at is not None and now - race_at >= playback_end_at):
             return "end", now - start
@@ -48,6 +52,84 @@ finally:
 # R1 entering the race at the end of its startup budget still runs both steer holds.
 why, at = simulate(180, 179, None)
 check(why == "end" and at > 179 + 7, "late race entry: R1 completes its steer holds (%s at %.1f)" % (why, at))
+# --horn (AllowHorn command path): R1's budget grows by the horn step, a late race entry still sends it, and the
+# replay budgets do not change.
+check(run.race_budget(None, True) == run.R1_RACE_SECONDS + run.HORN_SECONDS + run.RACE_MARGIN, "the horn step's budget")
+check(run.race_budget(bound, True) == run.race_budget(bound), "the horn flag does not change a replay budget")
+why, at = simulate(180, 179, None, horn=True)
+check(why == "end" and at > 179 + 7 + run.HORN_SECONDS, "late race entry: R1 completes its steer holds and the horn step (%s at %.1f)" % (why, at))
+check(run.inject_expiry(0, 180, run.race_budget(None, True)) >= run.loop_deadline(0, 180, 180, run.race_budget(None, True)) + run.INJECT_MARGIN,
+      "inject.on outlives the horn run's latest bound")
+# The horn run's INI: the exact test profile, then the horn on an otherwise unused R12 button, then [Audio] AllowHorn.
+check(run.HORN_INI.startswith(run.PROFILE) and "button 27" not in run.PROFILE, "the horn button is unused by the test profile")
+check(run.HORN_INI[len(run.PROFILE):] == "horn = button 27 %s\n[Audio]\nAllowHorn = true\n" % run.WHEEL, "the horn run's INI delta")
+# The evidence (sana #132448): the LAST race sound line (native_race_sound_status's format); delivery is a positive PLAYED
+# count for both the loop and the stop; refused, missing or x0 is a request only.
+def sound(played="", refused="", missing=""):
+    return ("race sound inits=1 controls=99 destroys=0 skipped=0 ics=0 clear_all=0 comm_trans=0 fade9560cc=1 count955c9c=0"
+            " played:%s refused:%s missing:%s ics(ch/code=value): 1/2=3" % (played, refused, missing))
+ev = run.horn_evidence("x\n%s\n%s\n" % (sound(" 51x2"), sound(" 51x3 9bcx40 81bcx1")))
+check(ev["loop"] and ev["stop"] and ev["played"] == dict(loop=40, stop=1) and ev["refused"] == dict(loop=0, stop=0), "both played: %r" % ev)
+ev = run.horn_evidence("%s\n%s\n" % (sound(" 9bcx40 81bcx1"), sound(" 51x3")))
+check(not ev["loop"] and not ev["stop"], "only the LAST race sound line counts: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx40", " 81bcx1"))
+check(ev["loop"] and not ev["stop"] and ev["refused"]["stop"] == 1, "a refused stop is not delivered: %r" % ev)
+ev = run.horn_evidence(sound("", " 9bcx3 81bcx1"))
+check(not ev["loop"] and not ev["stop"] and ev["refused"] == dict(loop=3, stop=1), "request-only (both refused) is not delivered: %r" % ev)
+ev = run.horn_evidence(sound("", "", " 9bcx1 81bcx1"))
+check(not ev["loop"] and not ev["stop"] and ev["missing"] == dict(loop=1, stop=1), "missing effects are not delivered: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx0 81bcx0"))
+check(not ev["loop"] and not ev["stop"], "x0 counts are not delivered: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx3"))
+check(ev["loop"] and not ev["stop"], "a loop without its stop: %r" % ev)
+ev = run.horn_evidence(sound(" 19bcx3 381bcx1"))
+check(not ev["loop"] and not ev["stop"], "other ids that merely end in 9bc / 81bc are not the horn: %r" % ev)
+ev = run.horn_evidence(sound(" 9bcx3 junk 81bcx1"))
+check(ev.get("malformed") and not ev["loop"] and not ev["stop"], "an unreadable played section is no evidence: %r" % ev)
+ev = run.horn_evidence("race sound inits=1 9bcx3 81bcx1")
+check(not ev["loop"] and not ev["stop"] and ev["played"] is None, "a line without its sections is no evidence: %r" % ev)
+check(run.horn_evidence("nothing")["line"] is None, "no race sound line: no evidence")
+def horn_failures(**horn):
+    return [f for f in run.verdict(dict(errors=[], phase="end", exitCode=0, horn=dict(sentAt=1.0, **horn))) if f.startswith("horn")]
+check(horn_failures(**run.horn_evidence(sound(" 9bcx40 81bcx1"))) == [], "the verdict passes a played loop and stop")
+f = horn_failures(**run.horn_evidence(sound("", " 9bcx3 81bcx1")))
+check(len(f) == 2 and "9BC (loop) not played" in f[0] and "81BC (stop) not played" in f[1] and "refused {'loop': 3, 'stop': 1}" in f[0],
+      "the verdict fails request-only, with the counts: %r" % f)
+# An unresolved close on a --horn run (sana #132311): retained and reported, never killed; never sealed; the verdict fails.
+class Running:
+    pid = 4242
+    def poll(self): return None
+    def kill(self): raise AssertionError("a retained process is killed")
+r = dict(creationTime=7, errors=[], forced=False)
+run.retain(Running(), r)
+check(r["retained"]["pid"] == 4242 and r["retained"]["creationTime"] == 7 and not r["forced"], "retain records pid and creation time: %r" % r)
+check(any(f.startswith("process retained") for f in run.verdict(dict(r, phase="end", exitCode=None))), "the verdict fails a retained process")
+import tempfile
+with tempfile.TemporaryDirectory() as t:
+    (pathlib.Path(t) / "run" / "capture").mkdir(parents=True)
+    run.seal(pathlib.Path(t), Running(), 7, r, None)
+    check(r["seal"] == "no observed exit" and not (pathlib.Path(t) / "run" / "capture" / "exit.json").exists(), "a retained process is not sealed: %r" % r["seal"])
+# The --horn lease order (sana #132742), read from main's source: the early release (right after the cleanup) skips --horn;
+# --horn releases in the finally of the try that holds the seal, the replay and the verdict, unless the process is retained.
+import ast, inspect
+def calls(node, name): return [n for n in ast.walk(node) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name]
+tree = ast.parse(inspect.getsource(run.main))
+parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+exits = []   # each lease("Exit"): (the calls in the body of the try whose finally holds it, its nearest if-test)
+for c in calls(tree, "lease"):
+    if not (c.args and getattr(c.args[0], "value", None) == "Exit"): continue
+    node, guard, owner = c, None, None
+    while node in parents and owner is None:
+        p = parents[node]
+        if isinstance(p, ast.If) and guard is None: guard = ast.unparse(p.test)
+        if isinstance(p, ast.Try) and node in p.finalbody: owner = p
+        node = p
+    body = ast.Module(body=owner.body, type_ignores=[]) if owner else None
+    exits.append(({n for n in ("seal", "replay", "verdict") if body and calls(body, n)}, guard))
+check(len(exits) == 2, "two lease releases in main: %r" % exits)
+check((set(), "leased and (not o.horn)") in exits, "the early release (after the cleanup) skips --horn: %r" % exits)
+check(({"seal", "replay", "verdict"}, "leased and o.horn and (not receipt.get('retained'))") in exits,
+      "--horn releases in the finally after the seal, replay and verdict, unless retained: %r" % exits)
 # No race: the startup budget alone bounds the run.
 why, at = simulate(180, 10_000, bound)
 check(why == "deadline" and 180 <= at < 180.5, "no race: the startup budget ends the run (%s at %.1f)" % (why, at))
