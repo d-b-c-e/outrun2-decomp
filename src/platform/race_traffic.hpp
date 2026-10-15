@@ -27,13 +27,18 @@ ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float ha
 constexpr std::uint32_t TrafficStackBase=0x7ffc0000u,TrafficStackSize=0x4000u;
 struct PcTrafficState {
     static constexpr std::uint32_t BlockBase=0x800a00u,BlockEnd=0x80fb00u;   // 80FB00.. = RacerSetupState
+    // 800A00..800AF7 is the tail of the C2C request manager 7F9460 (its last field +7694; 46C370 / 46C470 /
+    // 46C55A address 800A64 / 800AAC / 800ABC as its fields), which the requests block owns. The module's own
+    // words start at 800AF8 (the 0x38-byte records 800AF8..). Mapping only those keeps one owner per address:
+    // mapped over the manager, the block received 481250's road Mu +764C while its readers saw the manager's.
+    static constexpr std::uint32_t OwnBase=0x800af8u;
     static constexpr std::uint32_t AppearBase=0x84bd00u,AppearEnd=0x84ce80u;   // 4EF890 copies of 6A5DF8..
     static constexpr std::uint32_t TailBase=0x80fb30u,TailEnd=0x80fb50u;       // 80FB48 (racers .bss tail)
     std::vector<std::uint8_t> block=std::vector<std::uint8_t>(BlockEnd-BlockBase);
     std::vector<std::uint8_t> appear=std::vector<std::uint8_t>(AppearEnd-AppearBase);
     std::vector<std::uint8_t> stack=std::vector<std::uint8_t>(TrafficStackSize);
-    void map(PcRaceMemory& m){m.map(BlockBase,block.data(),block.size());m.map(AppearBase,appear.data(),appear.size());
-        m.map(TrafficStackBase,stack.data(),stack.size());}
+    void map(PcRaceMemory& m){m.map(OwnBase,block.data()+(OwnBase-BlockBase),block.size()-(OwnBase-BlockBase));
+        m.map(AppearBase,appear.data(),appear.size());m.map(TrafficStackBase,stack.data(),stack.size());}
 };
 // Race manager hooks.
 void traffic_init_47dac0(PcRaceContext&);

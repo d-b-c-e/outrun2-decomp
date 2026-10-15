@@ -292,11 +292,10 @@ int main(int argc,char** argv){
                 }
             }
             {   // The request manager's road Mu +764C (800AAC). gated-run-2000: the wheels hit road kind 2 and
-                // GetRoadMu's 4FC390 returned the manager's +764C, read from the raw block, as 0 with [7F94C0] = 1.
-                // START_Init's variant-5 path (49DBC2: 46C2B0(1), then 46C2D0(-1) -> 482B90 -> 481250) stores
-                // [62806C] = 1.0 there through the traffic module's memory, where the traffic state block
-                // 800A00.. is mapped after the manager block 7F9460..800B60. Report what the translated write
-                // reached and what the player car's reader (race_player_road_mu: the raw block) sees.
+                // GetRoadMu's 4FC390 returned the manager's +764C as 0 with [7F94C0] = 1. START_Init's variant-5
+                // path (49DBC2: 46C2B0(1), then 46C2D0(-1) -> 482B90 -> 481250) stores [62806C] = 1.0 there through
+                // the traffic module's memory. mu-fixture-2018 (before the fix): the traffic state block mapped over
+                // the manager's tail 800A00..800AF7 took that write (mapped 1, raw 0, separate storage).
                 auto& traffic=native_race_traffic(request);
                 auto raw_mu=[&]{float v;std::memcpy(&v,traffic.requests_7f9460.data()+0x764cu,4u);return v;};
                 request.start_mode.manager_state_7f94c0=1u;
@@ -310,6 +309,21 @@ int main(int argc,char** argv){
                 require(reset&&!traffic.latched,"START's 46C2D0(-1) runs on the request manager");
                 require(mapped_mu==1.0f,"481250 stores [62806C] = 1.0 at the manager's mapped road Mu 800AAC");
                 require(same_storage&&raw_mu()==1.0f,"the player car's road Mu reader sees the manager's mapped +764C");
+                // The consumers of 800AAC: GetRoadMu (46C450 -> 4FC390 on a road kind 2 wheel) and 46C470 (fld [800AAC],
+                // SlipAngleCtrl's assist) both read the requests block through one accessor.
+                const auto road=race_player_road_mu(request);
+                require(road.service_available&&road.lookup&&road.context==race_requests_road_mu_800aac(request)&&
+                        road.lookup(road.context,0u,2u)==1.0f,"GetRoadMu's manager lookup gives the manager's road Mu 1.0 on road kind 2");
+                float assist;std::memcpy(&assist,race_requests_road_mu_800aac(request),4u);
+                require(assist==1.0f,"46C470's slip assist reads the manager's road Mu 1.0");
+                // One owner per address at the boundary: the manager's last field 800AF4 is the requests block's,
+                // and the traffic module's 0x38-byte records 0 (800AF8..) and 1 (800B30.., across 800B60) are whole
+                // in the traffic state block.
+                require(traffic.memory.at(0x800af4u,4u)==traffic.requests_7f9460.data()+0x7694u,
+                        "the manager's last field 800AF4 is the requests block's");
+                require(traffic.memory.at(0x800af8u,0x38u)==traffic.state.block.data()+(0x800af8u-PcTrafficState::BlockBase)&&
+                        traffic.memory.at(0x800b30u,0x38u)==traffic.state.block.data()+(0x800b30u-PcTrafficState::BlockBase),
+                        "traffic records 0 and 1 (800AF8..800B67) are whole in the traffic state block");
             }
         }
         auto unready_storage=std::make_unique<NativeRuntimeContext>();

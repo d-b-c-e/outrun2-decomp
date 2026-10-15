@@ -41,7 +41,6 @@ struct RaceCarWorld {
     std::uint8_t slot_7dd138{};
     std::uint32_t clock_7f1938{};
     std::uint8_t gate_8361b4{};
-    float slip_assist_800aac{};              // 46C470
     std::array<std::uint8_t,8*0x78> vibrate_841bd0{};
     std::array<std::uint8_t,0x3c> ghost_83db30{};
     std::uint32_t stage_base_841fa4{};
@@ -86,6 +85,10 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
 // 46C450 -> 4FC390 on the manager 7F9460, from its road Mu +764C (481250 sets 1.0).
 // The context points into c's request manager block.
 driving::RoadMuSource race_player_road_mu(NativeRuntimeContext& c);
+// The manager's road Mu +764C (800AAC) in its requests block, the one owner of that address: 481250
+// (1.0), 50B574 and 50B67B write it; 4FC390 (through race_player_road_mu) and 46C470 (SlipAngleCtrl's
+// assist) read it.
+std::uint8_t* race_requests_road_mu_800aac(NativeRuntimeContext& c);
 // EXE crash tables 5E08E8 / 5E0988 (4A2400 AdvanceCrashState), shared with the traffic cars.
 const driving::PcCrashTables& race_crash_tables();
 // 4A6EA0 (pc) / 4A2270 crash entry over another car's event (traffic cars).
