@@ -24,6 +24,73 @@ void le(std::vector<std::uint8_t>& out,std::uint32_t value,unsigned count){
     for(unsigned i=0;i<count;++i)out.push_back(std::uint8_t(value>>(8u*i)));
 }
 void text(std::vector<std::uint8_t>& out,const char* value){out.insert(out.end(),value,value+4);}
+std::vector<std::uint8_t> add_flac_comments(const std::vector<std::uint8_t>& file,const std::vector<std::vector<std::string>>& blocks){
+    check(file.size()>=4&&std::memcmp(file.data(),"fLaC",4)==0,"test requires native owned FLAC");
+    std::vector<std::uint8_t> out{'f','L','a','C'};std::size_t at=4;bool last=false;
+    while(!last){
+        check(at<=file.size()&&file.size()-at>=4,"owned FLAC metadata header");
+        last=(file[at]&128)!=0;const auto type=file[at]&127;
+        const std::size_t size=(std::size_t(file[at+1])<<16)|(std::size_t(file[at+2])<<8)|file[at+3];at+=4;
+        check(size<=file.size()-at,"owned FLAC metadata size");
+        if(type!=4){out.push_back(std::uint8_t(type));out.insert(out.end(),file.begin()+std::ptrdiff_t(at-3),file.begin()+std::ptrdiff_t(at+size));}
+        at+=size;
+    }
+    for(std::size_t block=0;block<blocks.size();++block){
+        std::vector<std::uint8_t> payload;le(payload,0,4);le(payload,std::uint32_t(blocks[block].size()),4);
+        for(const auto& comment:blocks[block]){le(payload,std::uint32_t(comment.size()),4);payload.insert(payload.end(),comment.begin(),comment.end());}
+        check(payload.size()<16777216u,"test metadata fits FLAC block");
+        out.push_back(std::uint8_t(block+1u==blocks.size()?132:4));
+        out.push_back(std::uint8_t(payload.size()>>16));out.push_back(std::uint8_t(payload.size()>>8));out.push_back(std::uint8_t(payload.size()));
+        out.insert(out.end(),payload.begin(),payload.end());
+    }
+    out.insert(out.end(),file.begin()+std::ptrdiff_t(at),file.end());return out;
+}
+std::vector<std::uint8_t> metadata_flac(std::uint64_t frames){
+    std::vector<std::uint8_t> out{'f','L','a','C',128,0,0,34};out.resize(42);
+    out[21]=std::uint8_t((frames>>32)&15);
+    for(unsigned i=0;i<4;++i)out[22+i]=std::uint8_t(frames>>(24u-i*8u));return out;
+}
+void custom_loop_metadata_checks(){
+    check(!music_flac_loop_points_enabled(),"custom loop default off");
+    MusicFlacLoopPoints points;std::string error;const auto base=metadata_flac(257);
+    const auto valid=add_flac_comments(base,{{"LOOPSTART=3","LOOPEND=34"}});
+    check(!parse_music_flac_loop_points(valid,false,points,error)&&error.find("disabled")!=std::string::npos,"custom metadata requires explicit opt-in");
+    auto expect=[&](std::vector<std::string> tags,std::uint64_t start,std::uint64_t end,bool length){
+        check(parse_music_flac_loop_points(add_flac_comments(base,{tags}),true,points,error),error);
+        check(points.enabled&&points.start==start&&points.end_exclusive==end&&points.length_compatibility==length&&points.total_frames==257,"exact custom metadata semantics");
+    };
+    expect({"loopstart=3","LoopEnd=34"},3,34,false);
+    expect({"LOOPSTART=3","LOOPLENGTH=31"},3,33,true);
+    expect({"LOOPEND=99","LOOPLENGTH=31","LOOPSTART=3"},3,33,true);
+    expect({"LOOPLENGTH=31","LOOPSTART=3","LOOPEND=99"},3,33,true);
+    expect({"LOOPSTART=1","loopstart=3","LOOPLENGTH=22","looplength=31","LOOPEND=34","loopend=99"},3,33,true);
+    expect({"LOOPSTART=3","LOOPEND=10","LOOPEND=34"},3,34,false);
+    expect({"LOOPSTART=0","LOOPLENGTH=2"},0,1,true);
+    expect({"LOOPSTART=256","LOOPLENGTH=2"},256,257,true);
+    expect({"LOOPSTART=0","LOOPEND=257"},0,257,false);
+    auto refuse=[&](std::vector<std::string> tags){
+        check(!parse_music_flac_loop_points(add_flac_comments(base,{tags}),true,points,error),"invalid custom metadata must refuse");
+        check(!points.enabled&&!error.empty(),"invalid points never enabled");
+    };
+    for(const auto& value:std::vector<std::string>{"","-1","+3"," 3","3 ","3x","18446744073709551616","000000000000000000003",std::string("3\0x",3)})
+        refuse({"LOOPSTART="+value,"LOOPEND=34"});
+    refuse({"LOOPSTART=x","LOOPSTART=3","LOOPEND=34"});
+    refuse({"LOOPSTART=3","LOOPLENGTH=x","LOOPLENGTH=31"});
+    refuse({"LOOPSTART=3","LOOPEND=x","LOOPLENGTH=31"});
+    refuse({"LOOPSTART=18446744073709551615","LOOPLENGTH=2"});
+    refuse({"LOOPSTART=18446744073709551615","LOOPLENGTH=0"});
+    refuse({"LOOPSTART=3","LOOPLENGTH=0"});refuse({"LOOPSTART=3","LOOPLENGTH=1"});
+    refuse({"LOOPSTART=3"});refuse({"LOOPLENGTH=31"});refuse({"LOOPEND=34"});
+    refuse({"LOOPLENGTH=31","LOOPEND=34"});
+    refuse({"LOOPSTART=3","LOOPEND=3"});refuse({"LOOPSTART=4","LOOPEND=3"});refuse({"LOOPSTART=0","LOOPEND=258"});
+    check(!parse_music_flac_loop_points(add_flac_comments(metadata_flac(0),{{"LOOPSTART=0","LOOPEND=1"}}),true,points,error),"unknown source sample count refuses custom points");
+    check(!parse_music_flac_loop_points(add_flac_comments(base,{{"LOOPSTART=3"},{"LOOPEND=34"}}),true,points,error),"split custom metadata blocks refuse");
+    check(!parse_music_flac_loop_points(add_flac_comments(base,{{"ARTIST=owned"},{"LOOPSTART=3","LOOPEND=34"}}),true,points,error),"custom loops require one comment block");
+    check(parse_music_flac_loop_points(add_flac_comments(base,{{"LOOPSTARTX=3"}}),true,points,error)&&!points.enabled,"unrecognized tag is not approximated");
+    set_music_flac_loop_points_enabled(true);set_music_replacement_policy({true,false});
+    check(music_flac_loop_points_enabled()&&music_replacement_policy().allow_wav,"loop opt-in independent of format policy");
+    set_music_flac_loop_points_enabled(false);set_music_replacement_policy({});
+}
 std::vector<std::uint8_t> wav(unsigned rate,unsigned channels,unsigned bits,bool floating=false,std::size_t frames=SourceFrames){
     std::vector<std::uint8_t> out;const auto bytes=std::uint32_t(frames*channels*(bits/8u));
     text(out,"RIFF");le(out,36u+bytes+(bytes&1u),4);text(out,"WAVE");text(out,"fmt ");le(out,16,4);
@@ -91,6 +158,75 @@ NumericResult decode_numeric(std::vector<std::uint8_t> bytes,unsigned rate,unsig
         check(stream.stats.ends==1,"exact one end");
     }
     return result;
+}
+NumericResult render_custom_loop(const std::vector<std::uint8_t>& bytes,unsigned rate,unsigned channels,
+                                std::uint64_t start,std::uint64_t end,std::size_t outputs,std::array<std::size_t,4> chunks){
+    MusicStream stream;std::string error;NumericResult result;
+    check(stream.open(bytes,true,error),error);
+    check(stream.stats.rate==rate&&stream.stats.channels==channels,"custom decoded layout");
+    auto physical=[&](std::uint64_t logical){return logical<end?logical:start+(logical-end)%(end-start);};
+    std::size_t output=0;
+    for(std::size_t call=0;output<outputs&&call<outputs+1u;++call){
+        const auto count=std::min(chunks[call%4u],outputs-output);std::vector<double> pcm(count*2u);
+        const auto before=stream.stats.frames;
+        check(stream.mix_add(pcm.data(),count,0.5,error),error);
+        check(stream.stats.frames-before==count,"custom loop emitted exact requested frames");
+        for(std::size_t f=0;f<count;++f,++output){
+            const auto timestamp=std::uint64_t(output)*rate,index=timestamp/48000u;
+            const auto a=physical(index),b=physical(index+1u);const double fraction=double(timestamp%48000u)/48000.0;
+            for(unsigned c=0;c<2;++c){const auto channel=channels==1?0u:c;
+                const double expected=(sample(std::size_t(a),channel)+(sample(std::size_t(b),channel)-sample(std::size_t(a),channel))*fraction)*0.5;
+                check(std::abs(pcm[f*2u+c]-expected)<0.0001,"custom intro/end-exclusive/wrap/interpolation sample mismatch");
+                result.pcm.push_back(pcm[f*2u+c]);
+            }
+        }
+    }
+    const auto lookahead=(std::uint64_t(outputs-1u)*rate)/48000u+1u;
+    const auto expected_loops=lookahead<end?0u:1u+(lookahead-end)/(end-start);
+    std::printf("custom count rate=%u channels=%u start=%llu endExclusive=%llu output=%zu loops=%llu expectedLoops=%llu\n",
+                rate,channels,static_cast<unsigned long long>(start),static_cast<unsigned long long>(end),output,
+                static_cast<unsigned long long>(stream.stats.loops),static_cast<unsigned long long>(expected_loops));
+    check(output==outputs&&stream.playing()&&stream.stats.ends==0,"custom loop remains active");
+    check(stream.stats.loops==expected_loops,"custom exact loop count including lookahead");
+    result.loops=stream.stats.loops;stream.stop();check(!stream.playing(),"custom stop");return result;
+}
+void custom_loop_decode_checks(const std::string& retained,const std::string& focused){
+    check(!retained.empty()&&!focused.empty(),"owned retained/focused fixture directories required");
+    check(music_replacement_decoder_available(MusicFileFormat::Flac),"actual FLAC decoder required");
+    set_music_flac_loop_points_enabled(true);
+    const auto small=load(retained+"/mono-48000-s16.flac");
+    auto pair=[&](const std::vector<std::uint8_t>& bytes,unsigned rate,unsigned channels,std::uint64_t start,std::uint64_t end,
+                  std::size_t outputs,std::array<std::size_t,4> chunks){
+        const auto a=render_custom_loop(bytes,rate,channels,start,end,outputs,chunks);
+        const auto b=render_custom_loop(bytes,rate,channels,start,end,outputs,{{509,1,3,31}});
+        check(a.pcm==b.pcm&&a.loops==b.loops,"custom PCM/loop count independent of chunks");
+    };
+    pair(add_flac_comments(small,{{"LOOPSTART=3","LOOPEND=34"}}),48000,1,3,34,1003,{{33,1,1,31}});
+    pair(add_flac_comments(small,{{"LOOPSTART=1","loopstart=3","LOOPLENGTH=31","LOOPEND=99"}}),48000,1,3,33,1003,{{32,1,1,31}});
+    pair(add_flac_comments(small,{{"LOOPSTART=10","LOOPLENGTH=2"}}),48000,1,10,11,111,{{10,1,1,31}});
+    pair(add_flac_comments(small,{{"LOOPSTART=113","LOOPEND=257"}}),48000,1,113,257,1003,{{256,1,1,31}});
+    pair(add_flac_comments(small,{{"LOOPSTART=0","LOOPEND=257"}}),48000,1,0,257,1003,{{257,1,3,31}});
+    const auto fractional=add_flac_comments(load(retained+"/mono-8000-u8.flac"),{{"LOOPSTART=3","LOOPLENGTH=31"}});
+    pair(fractional,8000,1,3,33,1503,{{197,1,1,31}});
+    // loop=false deliberately retains the entire file, including samples after END.
+    decode_numeric(add_flac_comments(small,{{"LOOPSTART=3","LOOPLENGTH=31"}}),48000,1,"tagged-nonloop",16);
+    const auto long_flac=load(focused+"/stereo-44100-block1024.flac");
+    MusicFlacLoopPoints points;std::string error;
+    check(parse_music_flac_loop_points(long_flac,true,points,error)&&points.total_frames==20017,"owned multiblock source length");
+    check(long_flac.size()>12&&((unsigned(long_flac[10])<<8)|long_flac[11])==1024,"owned FLAC fixed block size 1024");
+    pair(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=13123"}}),44100,2,1137,13123,43003,{{14282,1,3,31}});
+    pair(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=20017"}}),44100,2,1137,20017,65003,{{21786,1,3,31}});
+    decode_numeric(add_flac_comments(long_flac,{{"LOOPSTART=1137","LOOPEND=13123"}}),44100,2,"tagged-multiblock-nonloop",24,20017,{{4096,31,1,3}});
+    MusicStream stream;
+    check(stream.open(add_flac_comments(small,{{"LOOPSTART=3","LOOPEND=34"}}),true,error),"custom lifecycle open");
+    std::vector<double> active(140);check(stream.mix_add(active.data(),70,1.0,error)&&stream.stats.loops>0,"custom lifecycle traversed a wrap");
+    const auto previous_loops=stream.stats.loops;
+    check(!stream.open(add_flac_comments(small,{{"LOOPSTART=3","LOOPLENGTH=1"}}),true,error)&&!stream.playing(),"invalid custom reopen closes previous owner");
+    check(stream.open(small,false,error),"untagged reopen clears custom state");
+    std::vector<double> pcm(600);check(stream.mix_add(pcm.data(),300,1.0,error)&&!stream.playing(),"untagged nonloop still ends");
+    check(stream.stats.loops==previous_loops,"custom state cannot leak into untagged reopen");
+    set_music_flac_loop_points_enabled(false);
+    check(!stream.open(add_flac_comments(small,{{"LOOPSTART=3","LOOPEND=34"}}),true,error)&&error.find("disabled")!=std::string::npos,"disabled policy still refuses tags");
 }
 #endif
 void policy_and_validation(){
@@ -198,7 +334,16 @@ void replacement_checks(const std::string& dir){
 }
 }
 int main(int argc,char** argv){
-    try{policy_and_validation();replacement_checks(argc>1?argv[1]:"");
+    try{
+        if(argc>1&&std::string(argv[1])=="--flac-loops-only"){
+            custom_loop_metadata_checks();
+#if defined(OUTRUN_WITH_FFMPEG)
+            check(argc==4,"--flac-loops-only requires retained and focused owned fixture directories");
+            custom_loop_decode_checks(argv[2],argv[3]);
+#else
+            throw std::runtime_error("custom loop numeric fixture requires optional FFmpeg decoder");
+#endif
+        }else{policy_and_validation();replacement_checks(argc>1?argv[1]:"");}
         std::printf("music_stream: %u checks PASS; owned numeric PCM only; no audible acceptance\n",checks);return 0;
     }catch(const std::exception& e){std::fprintf(stderr,"music_stream: FAIL after %u checks: %s\n",checks,e.what());return 1;}
 }

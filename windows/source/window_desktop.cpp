@@ -501,9 +501,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     const outrun::platform::MusicReplacementPolicy music_policy{
         settings.flag("Audio","AllowWAV",false),settings.flag("Audio","AllowFLAC",false)};
     outrun::platform::set_music_replacement_policy(music_policy);
+    const bool flac_loop_points=settings.flag("Audio","AllowFLACLoopPoints",false);
+    outrun::platform::set_music_flac_loop_points_enabled(flac_loop_points);
     if(music_policy.allow_wav||music_policy.allow_flac)
-        std::printf("settings: experimental music replacements WAV=%d FLAC=%d; custom FLAC loops unsupported\n",
-                    int(music_policy.allow_wav),int(music_policy.allow_flac));
+        std::printf("settings: experimental music replacements WAV=%d FLAC=%d custom FLAC loop points=%d (Tweaks exclusive LENGTH-1; loop requests only)\n",
+                    int(music_policy.allow_wav),int(music_policy.allow_flac),int(flac_loop_points));
     if(!outrun::platform::g_pc_allow_horn)std::printf("settings: the horn off ([Audio] AllowHorn = false)\n");
     // [Misc] DefaultManualTransmission, the Tweaks key (off unless set true, as there; Tweaks reads it from [Controls],
     // which here is the controls contract): the transmission menu starts on Manual (pc_screen.hpp).

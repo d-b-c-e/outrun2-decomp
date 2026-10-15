@@ -25,9 +25,21 @@ MusicReplacementPolicy music_replacement_policy();
 MusicFileFormat select_music_file(MusicReplacementPolicy policy,bool wav_exists,bool flac_exists);
 std::string music_replacement_name(const std::string& original,MusicFileFormat format);
 // Selected replacement failures must not retry another extension. Checks magic,
-// the 64 MiB input bound and unsupported FLAC custom-loop comments before decode.
+// the 64 MiB input bound and configured, bounded FLAC loop comments before decode.
 bool validate_music_file(MusicFileFormat format,const std::vector<std::uint8_t>& bytes,std::string& error);
 bool music_replacement_decoder_available(MusicFileFormat format);
+// Separate opt-in config; does not change MusicReplacementPolicy/Stats/object ABI.
+void set_music_flac_loop_points_enabled(bool enabled);
+bool music_flac_loop_points_enabled();
+struct MusicFlacLoopPoints {
+    bool enabled{},length_compatibility{};
+    std::uint64_t total_frames{},start{},end_exclusive{};
+};
+// Strict bounded native-FLAC comments. Last duplicate wins only when every value
+// is valid. LENGTH overrides END and deliberately retains Tweaks' exclusive
+// end=start+length-1 quirk; LENGTH<2 and invalid/unknown ranges refuse.
+bool parse_music_flac_loop_points(const std::vector<std::uint8_t>& bytes,bool allow,
+                                 MusicFlacLoopPoints& points,std::string& error);
 
 class MusicStream {
 public:
@@ -38,6 +50,8 @@ public:
     // Takes the whole file (the retail Sound folder); false with the reason
     // when the file is invalid or its decoder was not built. WAV/FLAC use an
     // optional static FFmpeg backend; Ogg keeps the existing Vorbis route.
+    // Opted-in valid FLAC points apply only to loop=true: intro [0,end), then
+    // [start,end). loop=false retains full-file playback after tag validation.
     bool open(std::vector<std::uint8_t> file,bool loop,std::string& error);
     void stop();
     bool playing()const;
