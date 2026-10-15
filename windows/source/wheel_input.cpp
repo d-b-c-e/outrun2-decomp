@@ -184,9 +184,8 @@ void bind_present_devices(bool initial){
 bool bound_missing(){
     std::size_t applicable=0;
     for(const auto& e:g.section.bound)if(!unavailable_reason(e.action))++applicable;
-    std::vector<WheelBoundDevice> bound;bound.reserve(g.bound.size());
-    for(const auto& b:g.bound)bound.push_back({b.device&&b.device->device,b.device&&b.device->connected});
-    return wheel_bound_missing(applicable,bound);
+    return wheel_bound_missing(applicable,g.bound,[](const Bound& b){return b.device&&b.device->device;},
+                               [](const Bound& b){return b.device&&b.device->connected;});
 }
 void rescan(const char* reason){
     const auto t0=WheelClock::now();

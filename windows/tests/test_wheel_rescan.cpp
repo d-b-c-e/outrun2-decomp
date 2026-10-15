@@ -1,21 +1,27 @@
 // The native wheel path's rescan policy (source/wheel_rescan.hpp): a rig whose bound devices are all open and
-// connected never rescans; a device change rescans at the next input sample; a binding without an open, connected
-// device (absent, refused to open, lost) rescans every 2 s. No device, no game.
+// connected rescans only on device changes; a device change rescans at the next input sample; a binding without an
+// open, connected device (absent, refused to open, lost) rescans every 2 s. No device, no game.
 #include "wheel_rescan.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 namespace {
 int checks=0;
 void check(bool v,const char* what){++checks;if(!v){std::fprintf(stderr,"wheel rescan: FAIL: %s\n",what);std::exit(1);}}
 using namespace outrun::desktop;
+// A bound action's device as wheel_input.cpp reads it: a DirectInput handle, and whether its last read succeeded.
+struct Bound { bool handle{},connected{}; };
+bool missing(std::size_t applicable,const std::vector<Bound>& bound){
+    return wheel_bound_missing(applicable,bound,[](const Bound& b){return b.handle;},[](const Bound& b){return b.connected;});
+}
 }
 int main(){
-    const WheelBoundDevice live{true,true},lost{true,false},closed{false,false};
-    check(!wheel_bound_missing(0,{}),"no applicable binding: nothing missing");
-    check(!wheel_bound_missing(3,{live,live,live}),"every binding applied, open and connected: nothing missing");
-    check(wheel_bound_missing(3,{live,live}),"a binding not applied (its device absent at the rescan or refused to open)");
-    check(wheel_bound_missing(2,{live,lost}),"a device whose read failed (lost) since its last rescan");
-    check(wheel_bound_missing(2,{closed,live}),"a lost device the rescan closed");
+    const Bound live{true,true},lost{true,false},closed{false,false};
+    check(!missing(0,{}),"no applicable binding: nothing missing");
+    check(!missing(3,{live,live,live}),"every binding applied, open and connected: nothing missing");
+    check(missing(3,{live,live}),"a binding not applied (its device absent at the rescan or refused to open)");
+    check(missing(2,{live,lost}),"a device whose read failed (lost) since its last rescan");
+    check(missing(2,{closed,live}),"a lost device the rescan closed");
 
     const auto t0=WheelClock::now(),due=t0+WheelMissingRescan;
     for(const auto at:{t0,due,due+std::chrono::seconds(60)})
