@@ -27,8 +27,40 @@ using namespace outrun::platform;
 using namespace outrun::switch_runtime;
 using outrun::driving::Bytes;
 #define CHECK(x) do {if(!(x)){std::fprintf(stderr,"line %d: %s (%s)\n",__LINE__,#x,error.c_str());std::exit(1);}}while(0)
+// Host gate reachability only. Shared by the full renderer fixture and the
+// focused raw-retail mode, which requires no generated reference packs.
+static std::vector<FrontendGlyph> check_level_select_gate(
+    const FrontendFontPack& fonts,std::string& error){
+    auto runtime=std::make_unique<NativeRuntimeContext>();auto& state=runtime->event_function36;
+    runtime->mode_state.current=32u;state.state2_selector_child_state=27u;
+    CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    state.network_screens[27]=0x0e001000u;
+    CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    FrontendTextStyle style;FrontendTextCursor cursor;
+    CHECK(frontend_text_draw(fonts.fonts[0],style,cursor,"Level Select",state.network_widgets.glyphs_));
+    CHECK(!state.network_widgets.glyphs().empty());
+    CHECK(state.state2_ui_finalize_calls==0u&&state.frontend_menu_token==0u);
+    CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,false));
+    state.network_screens[27]=0u;CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    state.network_screens[27]=0x0e001000u;state.state2_selector_child_state=28u;
+    CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    state.state2_selector_child_state=27u;runtime->mode_state.current=13u;
+    CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+    state.state2_ui_finalize_calls=1u;
+    CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,false));
+    return state.network_widgets.glyphs();
+}
 int main(int argc,char** argv){
-    std::string error;CHECK(argc==5);SwitchRenderer renderer;
+    std::string error;
+    if(argc==3&&std::string(argv[1])=="--level-select-gate"){
+        RetailAssetStore store;store.root=argv[2];
+        FrontendFontPack fonts;CHECK(build_retail_font_pack(store,fonts,&error));
+        CHECK(!check_level_select_gate(fonts,error).empty());
+        std::printf("PASS level-select host gate reachability (raw retail fonts; no renderer/pixel qualification)\n");
+        return 0;
+    }
+    CHECK(argc==5);SwitchRenderer renderer;
     namespace fs=std::filesystem;
     const auto root=fs::temp_directory_path()/("outrun-menu-render-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     CHECK(fs::create_directory(root));
@@ -77,32 +109,10 @@ int main(int argc,char** argv){
         CHECK(switch_renderer_draw(renderer));CHECK(!pool.get(h)->allocated);
     }
     FrontendTextTable table;CHECK(table.load(argv[4],&error));FrontendUiResources ui{pool};
-    // The opted-in key27 network owner emits its own font widgets and has no
-    // common 443FF0 scene/finalize. Exercise the exact host admission predicate
-    // with real decoded font output, not a synthetic key27 state alone.
-    {
-        auto runtime=std::make_unique<NativeRuntimeContext>();auto& state=runtime->event_function36;
-        runtime->mode_state.current=32u;state.state2_selector_child_state=27u;
-        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        state.network_screens[27]=0x0e001000u;
-        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        FrontendTextStyle style;FrontendTextCursor cursor;
-        CHECK(frontend_text_draw(fonts->fonts[0],style,cursor,"Level Select",state.network_widgets.glyphs_));
-        CHECK(!state.network_widgets.glyphs().empty());
-        CHECK(state.state2_ui_finalize_calls==0u&&state.frontend_menu_token==0u);
-        CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,false));
-        state.network_screens[27]=0u;CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        state.network_screens[27]=0x0e001000u;state.state2_selector_child_state=28u;
-        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        state.state2_selector_child_state=27u;runtime->mode_state.current=13u;
-        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
-        state.state2_ui_finalize_calls=1u;
-        CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,false));
-        CHECK(switch_renderer_set_frontend_glyphs(renderer,state.network_widgets.glyphs()));
-        CHECK(switch_renderer_draw(renderer)); // Host fixture only; no GPU pixel claim.
-        CHECK(switch_renderer_set_frontend_glyphs(renderer,{}));
-    }
+    const auto level_select_glyphs=check_level_select_gate(*fonts,error);
+    CHECK(switch_renderer_set_frontend_glyphs(renderer,level_select_glyphs));
+    CHECK(switch_renderer_draw(renderer)); // Host fixture only; no GPU pixel claim.
+    CHECK(switch_renderer_set_frontend_glyphs(renderer,{}));
     // Production owner routing, not direct calls to the menu routine. This
     // state-3 fixture supplies only the mode/connected-device entry conditions;
     // native factory, virtual control/display and retail widgets run together.
