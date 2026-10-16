@@ -352,7 +352,10 @@ std::uint32_t race_area_ending_44d410(PcRaceContext& c){
     Port p(c);auto& m=c.m;
     const std::uint32_t over=m.u32(0x6368c4u);
     if(over!=None)return over;
-    const std::uint32_t mode=m.u32(0x780258u),car=m.u32(0x799d18u);
+    // Tweaks replaces EAX at 44D429, including the mode3 C2C branch below.
+    // This is a local selector mode; never write the actual race mode back.
+    const std::uint32_t mode=g_pc_highway_anim_sets.select(g_pc_random_highway_anim_sets,m.u32(0x780258u));
+    const std::uint32_t car=m.u32(0x799d18u);
     auto ratio=[&](bool num_first){
         const float a=float(m.i32(0x7d3088u)),b=float(m.i32(0x7d3094u));(void)num_first;return a/b;};
     if(mode==3||mode==4){
@@ -362,9 +365,11 @@ std::uint32_t race_area_ending_44d410(PcRaceContext& c){
         if(a<0||b<0)return None;
         return m.u32(std::uint32_t(a*7+b)*4u+0x6366b8u);
     }
-    // Vary only the table row. The forced override and C2C path above never advance feature randomness;
-    // every event-condition branch below still uses the actual mode, unlike Tweaks' EAX replacement.
-    const auto row=g_pc_highway_animation_rows.select(g_pc_random_highway_animation_rows,mode);
+    // The exact mode-substitution option takes precedence over the separate row
+    // variant. With it off, Rows keeps its original native-mode/C2C behavior and
+    // independent stream; with it on, Rows must not consume any random state.
+    const auto row=g_pc_random_highway_anim_sets?mode:
+        g_pc_highway_animation_rows.select(g_pc_random_highway_animation_rows,mode);
     const std::uint32_t t=row*0x1cu+0x6366b8u;
     auto at=[&](std::uint32_t k){return m.u32(t+k);};
     if(m.u32(0x7d3074u)||m.u32(0x7d3078u))return at(0);

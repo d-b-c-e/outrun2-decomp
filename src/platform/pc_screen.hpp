@@ -76,6 +76,23 @@ struct PcHighwayAnimationRows {
 };
 inline bool g_pc_random_highway_animation_rows=false;
 inline PcHighwayAnimationRows g_pc_highway_animation_rows;
+// [Misc] RandomHighwayAnimSets (Tweaks' key, off by default): 44D429 replaces the
+// selector's local mode with 0..3 BEFORE its C2C branch, table and event conditions.
+// Keep the actual game mode and CRT RNG untouched. A separate v1 xorshift32 stream
+// gives equal cold-start call sequences equal results instead of Tweaks' per-call
+// random_device/mt19937 entropy. Do not reset it during area/menu/settings reloads.
+struct PcHighwayAnimSets {
+    static constexpr unsigned Version=1;
+    static constexpr std::uint32_t InitialState=0x4f523253u;
+    std::uint32_t state=InitialState;
+    std::uint32_t select(bool enabled,std::uint32_t native_mode){
+        if(!enabled)return native_mode;
+        state^=state<<13;state^=state>>17;state^=state<<5;
+        return state>>30;
+    }
+};
+inline bool g_pc_random_highway_anim_sets=false;
+inline PcHighwayAnimSets g_pc_highway_anim_sets;
 // [Bugfixes] HideOnlineSigninText (the Tweaks key, off by default there since its b3c1825 and here; hooks_bugfixes.cpp;
 // Tweaks' code default is still true, its shipped INI sets false): the remnants of the online service on the menus.
 // - 443256 (JNE to JMP): 443110 never opens the 4400D3 sign-in status box at +C48 (pc_signin_box_call_skipped,

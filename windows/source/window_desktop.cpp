@@ -460,6 +460,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     if(outrun::platform::g_pc_random_highway_animation_rows)
         std::printf("settings: highway animation table rows on (v%u, fixed initial state %08X; native conditions and C2C retained)\n",
             outrun::platform::PcHighwayAnimationRows::Version,unsigned(outrun::platform::PcHighwayAnimationRows::InitialState));
+    // Tweaks' distinct mode replacement also changes event conditions and the
+    // selector's C2C path. Read the recorded startup Misc key without resetting
+    // the separate process stream. It takes precedence over the row-only key.
+    outrun::platform::g_pc_random_highway_anim_sets=settings.flag("Misc","RandomHighwayAnimSets",false);
+    if(outrun::platform::g_pc_random_highway_anim_sets)
+        std::printf("settings: highway animation sets on (v%u, fixed initial state %08X; local modes 0..3, takes precedence over table rows)\n",
+            outrun::platform::PcHighwayAnimSets::Version,unsigned(outrun::platform::PcHighwayAnimSets::InitialState));
     // [Bugfixes] HideOnlineSigninText, the Tweaks key (off unless set true, as in its INI): no sign-in status box or text
     // and no SIGN-IN help-bar button on the menus (pc_screen.hpp).
     outrun::platform::g_pc_hide_online_signin_text=settings.flag("Bugfixes","HideOnlineSigninText",false);
