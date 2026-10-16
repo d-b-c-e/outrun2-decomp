@@ -5,6 +5,7 @@
 // folder, like the original one; settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
+#include "enhancements/fast_load.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
 #include "ffb_shadow_live.hpp"
@@ -390,6 +391,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }
         if(edge!=128u)std::printf("settings: car reflection %ux%u\n",edge,edge);
         outrun::platform::car_reflection_edge()=edge;}
+    // Experimental loading-only Tweaks mode 2; no INI writes or mode-3 streaming.
+    {   const auto value=settings.text("Performance","FramerateFastLoad","0");
+        auto& fast_load=outrun::enhancements::fast_load();
+        if(!fast_load.configure(value))
+            std::printf("settings: FramerateFastLoad = %.32s refused (only 0 or 2 supported); off\n",value.c_str());
+        if(fast_load.enabled())
+            std::printf("settings: experimental FramerateFastLoad 2 (loading frames only; normal pacing resumes at START stage 65; runtime unqualified)\n");}
     // [Graphics] TransparencySupersampling, the Tweaks key: alpha-to-coverage for alpha-tested edges under MSAA. Off when
     // absent.
     {   const bool on=settings.flag("Graphics","TransparencySupersampling",false);

@@ -416,6 +416,13 @@ target_link_libraries(test_frontend_progress PRIVATE outrun_native_runtime ${OR2
 add_test(NAME frontend_progress COMMAND test_frontend_progress)
 add_test(NAME owned_frontend_progress COMMAND test_frontend_progress
   "${OR2_PC_ASSET_ROOT}")
+add_executable(test_fast_load tests/test_fast_load.cpp)
+target_link_libraries(test_fast_load PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
+target_compile_features(test_fast_load PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(test_fast_load PRIVATE /W4 /WX)
+endif()
+add_test(NAME fast_load COMMAND test_fast_load)
 add_executable(test_race_horn tests/test_race_horn.cpp)   # [Audio] AllowHorn (race_sound_runtime.cpp)
 target_link_libraries(test_race_horn PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
 add_test(NAME race_horn COMMAND test_race_horn)

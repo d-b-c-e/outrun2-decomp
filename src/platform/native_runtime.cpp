@@ -2,6 +2,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/race_sound_runtime.hpp"   // AllowHorn (native_input_step_453bb0)
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/fast_load.hpp"
 #include "platform/race_variant_owners.hpp"
 #include "platform/pc_input_devices.hpp"
 #include "platform/pc_network.hpp"
@@ -4810,6 +4811,8 @@ std::int64_t native_frame_platform_clock_query(void* user,std::uint32_t import_a
 }
 
 std::uint32_t run_native_frame_loop(NativeRuntimeContext& c,const NativeRuntimeLoopServices& s){
+    auto& fast_load=enhancements::fast_load();
+    const enhancements::FastLoadBinding fast_load_binding(fast_load,c.mode_state.current,c.start_mode.stage);
     c.loop_setup_state.system_token=c.primary_system_token;
     driving::runtime_loop_setup_417a20(c.loop_setup_state,s.setup);
     c.loop_cleanup_state.handle_8a89f4=c.loop_setup_state.handle_8a89f4;
@@ -4832,6 +4835,7 @@ std::uint32_t run_native_frame_loop(NativeRuntimeContext& c,const NativeRuntimeL
     }
 
     for(;;){
+        fast_load.begin_frame();
         auto fs=s.frame;
         driving::PcRuntimeTimingServices417890 native_timing{};
         NativeFramePlatformBridge frame_bridge{};
@@ -4858,18 +4862,38 @@ std::uint32_t run_native_frame_loop(NativeRuntimeContext& c,const NativeRuntimeL
         // Port enhancement: frames without a tick above 60 Hz (enhancements/frame_rate.hpp).
         static const driving::PcRuntimeTickHooks417c7b display_hooks{true,enhancements::display_before_tick,
             [](const driving::PcRuntimeTimingState417890* t,std::uint32_t updates){
+                if(enhancements::fast_load().loading_frame()){
+                    // No interpolation of accelerated loading ticks. If the
+                    // last tick reached stage 65, clear its replay history so
+                    // the first ordinary display-only frame cannot replay a
+                    // loading pose backwards. The next tick records normally.
+                    if(!enhancements::fast_load().active())enhancements::display_before_tick();
+                    enhancements::display_after_ticks(1.f,updates);
+                    return;
+                }
                 // The sub-tick time left in the 417890 accumulator, as a blend between the last two ticks.
                 const double f=t&&t->frequency_8a8c98>0?double(t->accumulator_8a8cd0)*60.0/double(t->frequency_8a8c98):1.0;
                 enhancements::display_after_ticks(float(f),updates);}};
         // 417C7B tests the live [78026C] for its one-tick modes (0x18 / 0x20 /
         // 0x24); this loop keeps the mode of its setup there, which suits one
         // tick per frame but would keep a race at one tick per frame.
-        if(enhancements::display_frames()){fs.ticks=&display_hooks;c.frame_state.mode_78026c=c.mode_state.current;}
+        if(enhancements::display_frames()||fast_load.loading_frame()){fs.ticks=&display_hooks;c.frame_state.mode_78026c=c.mode_state.current;}
         const auto result=driving::runtime_frame_step_417c7b(c.frame_state,fs);
         ++c.completed_frames;
         if(result.platform_wait_before_next_frame){
             if(s.platform&&runtime_platform_ready(*s.platform))runtime_platform_wait_pc_guard(*s.platform);
             if(s.platform_wait)s.platform_wait(s.user); // optional observer/legacy hook
+        }
+        if(fast_load.end_frame()){
+            // Use the existing clock after the restored Present/wait. Do not
+            // turn time spent loading into catch-up updates at stage 65.
+            auto& timing=c.timing_state;
+            if(fs.timing_services&&fs.timing_services->query){
+                const auto& clock=*fs.timing_services;
+                timing.current_counter_8a8ca0=clock.query(clock.user,0x5960fcu);
+                timing.previous_counter_8a8c90=timing.current_counter_8a8ca0;
+            }
+            timing.accumulator_8a8cd0=0;
         }
         bool keep_running=true;
         if(s.platform&&runtime_platform_ready(*s.platform))keep_running=runtime_platform_poll(*s.platform);

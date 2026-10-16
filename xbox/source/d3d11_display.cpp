@@ -1,4 +1,5 @@
 #include "d3d11_display.hpp"
+#include "enhancements/fast_load.hpp"
 #include "display_fit.hpp"
 #include "frame_profile.hpp"
 #include "native_window.hpp"
@@ -209,6 +210,7 @@ namespace { unsigned g_refresh=0,g_interval=1; }
 // after it (romi 26392, nene 26370). Timed as the frame profile's acquire bucket (the vsync wait moves here from
 // Present). Not alertable, so an APC cannot end it early. A no-op with latency 0 (the plain chain).
 void wait_for_frame_latency(){
+    if(!enhancements::fast_load().wait_for_latency())return;
     if(!g_latency_wait)return;
     ProfileScope prof(profile_key(ProfileRenderer,0,ProfAcquire));
     ++g_latency_waits;
@@ -239,7 +241,7 @@ bool D3D11Display::present(std::string& error){
     // The desktop's overlay (the F6 panel), on the whole back buffer before the screenshot: what the player sees.
     if(const auto overlay=present_overlay())overlay(g.device.Get(),g.context.Get(),g.target.Get(),g.width,g.height);
     screenshot(g);
-    const HRESULT hr=g.swap_chain->Present(g_interval,0);
+    const HRESULT hr=g.swap_chain->Present(enhancements::fast_load().present_interval(g_interval),0);
     if(FAILED(hr)){error="Present failed (HRESULT "+std::to_string(unsigned(hr))+")";return false;}
     // A closed window (WM_CLOSE: the X button, Alt+F4, a test harness) is not a failed frame. It stops the application,
     // which then exits normally (code 0); only a failed Present fails the frame (render_failed, code 3). It used to

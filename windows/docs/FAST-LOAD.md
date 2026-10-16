@@ -1,0 +1,34 @@
+# Optional loading-only fast load
+
+Source candidate, based on cumulative `c5d3a9f`. Default **off**; not built or runtime qualified in this slice.
+
+Set this manually in `OutRunDesktop.ini` for a future qualified run:
+
+```ini
+[Performance]
+FramerateFastLoad = 2
+```
+
+Absent or `0` keeps normal behavior. Only `0` and `2` are accepted. Other values, including Tweaks modes `1` and `3`, are logged and turn the option off. The existing INI reader strips surrounding whitespace and comments. No settings file is written by this feature. The startup snapshot/playback merger already retains `[Performance]` (only `[Window]` and `[Triple]` come from the current rig); no new snapshot format is introduced.
+
+## Mode 2 behavior
+
+This follows the loading-only intent of pinned OutRun2006Tweaks `51acc201`: bypass loading presentation waits and run one update per loading frame. It uses the existing native frame loop, clock, display interpolation hooks, graphics frame-latency wait, and swap-chain Present. It adds no timer, generic limiter, second frame loop, repeated file-service call, graphics device reset, or `FramerateUnlockExperimental` option.
+
+- Loading means native START mode **13**, progress **less than 65**. `NativeStartModeState.stage` maps PC `0x8367A8`. Tweaks tests `!=65`; the native START stages advance through 64 to 65 and use `<65` for their loading picture.
+- At the beginning of each frame the native loop snapshots whether it is a loading frame. Such a frame takes the existing cooperative single-update path at both configured 60 and 120 Hz. Loading is drawn at its current tick pose, without interpolating accelerated ticks.
+- The existing pre-input frame-latency wait is skipped only for an accelerated frame whose **live** mode/progress is still loading. Present uses interval `0` under that same condition. The configured ordinary present interval is retained, including changes made through the existing video settings path.
+- If the final loading tick reaches stage 65 or leaves START, the live gate restores normal Present **within that frame**. The next input sample uses the ordinary latency wait. Ordinary pacing resumes at stage 65 while still in START, which already owns the race camera/countdown.
+- That final loading tick completes once, including its existing mode/event ordering. Its interpolation replay history is cleared before ordinary drawing resumes. After restored Present and the original small PC guard, the existing clock is sampled and its accumulator rebased once. Loading time does not become a backlog of gameplay updates; subsequent 60/120 Hz timing uses the existing policy.
+- A scoped binding releases the native context pointers and override when its loop exits, including an early exit. Setup screens and later teardown presentation remain paced normally.
+
+The original logical `44FBA0` file-service call stays in its original once-per-frame location. Tweaks mode 3's in-game streaming behavior is outside this feature.
+
+## Focused checks and remaining gates
+
+Authored, **not executed**:
+
+- Root CTest `fast_load`: exact gate matrix; invalid/off configuration; stage-64 to 65 and mode-abort restoration; scoped cleanup; production native loop at 60/120 Hz with a synthetic existing clock; one loading update per frame; same-frame Present restoration; accumulator rebase after a simulated long final-loading Present; no replay of loading history on the first ordinary display-only frame; original file-service call count; enabled/disabled ordinary service order and timing comparisons for stage 65, gameplay, pause, and frontend modes.
+- Desktop CTest `fast_load_config`: production `Ini::load_text` parsing, missing key, modes 0/2, whitespace/comment/case handling, unsupported/malformed values, and preservation of unrelated Controls/Window values. It creates no settings file.
+
+A fresh shared build/test slot is required to compile and run those fixtures and the desktop candidate. Graphics wait/Present execution, visible stage-65 transition, the 60/120 settings, loading abort/close, and ordinary gameplay pacing still require bounded runtime qualification. Source alone establishes no load-time improvement, VSync/scanout result, visual acceptance, input behavior, or physical feedback result. Existing frozen `55B9` packaging remains separate and unchanged.

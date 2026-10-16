@@ -1,4 +1,5 @@
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/fast_load.hpp"
 #include "runtime/game_host.hpp"
 #include "platform/cd_switcher.hpp"
 #include "platform/cd_title_overlay.hpp"
@@ -491,7 +492,9 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     // Force the single-update path while the real input/audio/render services
     // are still explicit boundaries.
     // Above 60 Hz (enhancements/frame_rate.hpp) frames run 0, 1 or more ticks.
-    if(pc==0x455c20u)return enhancements::display_frames()?1u:2u;
+    // Opt-in fast loading reuses that cooperative single-update path only
+    // for frames that began in START before stage 65.
+    if(pc==0x455c20u)return enhancements::fast_load().cooperative_level(enhancements::display_frames());
     if(pc!=0x449050u||!s.presenter)return 0u;
     auto& p=*s.presenter;
     auto& mixer=audio_thread();

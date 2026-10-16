@@ -26,6 +26,13 @@ target_compile_definitions(control_publish PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN 
 target_compile_options(control_publish PRIVATE /W4 /WX /EHsc)
 
 # The bindings store, the legacy import, the settings writer and test injection, without a game or devices.
+add_executable(test_fast_load_config tests/test_fast_load_config.cpp source/desktop_settings.cpp)
+target_include_directories(test_fast_load_config PRIVATE source ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_fast_load_config PRIVATE cxx_std_17)
+target_compile_definitions(test_fast_load_config PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_fast_load_config PRIVATE /W4 /WX)
+add_test(NAME fast_load_config COMMAND test_fast_load_config)
+
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)
 target_compile_features(test_desktop_controls PRIVATE cxx_std_17)

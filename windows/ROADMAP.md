@@ -137,7 +137,8 @@ needed in a native build.
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
-| | FramerateFastLoad, FramerateUnlockExperimental | ⬜ | |
+| | FramerateFastLoad | 🟡 | Default-off mode 2 source candidate: existing frame-latency wait/Present bypass only in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Focused transition/config fixtures authored but unrun; no build/runtime or load-time claim. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
+| | FramerateUnlockExperimental | ⬜ | |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
 | | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); ordinary DirectInput rescans every two seconds and reopens the saved instance GUID, built but not checked at the rig |
