@@ -159,6 +159,12 @@ cases and changed catalog assertion (3/3), and private generation/parsing matche
 bundled OutRun rows. Original result/logs: hub artifacts/outrun-menu-settings-build-20261016/build-01.
 Rendered controls/persistence remain unqualified; earlier graphics/music passes stand.
 
+Character-appearance exposure follow-up: F6 Advanced Controls and Wheelkit @6 Controls
+offer the existing UseHiDefCharacters (Graphics, On) and RestoreJPClarissa (Misc, Off)
+choices for the next start. These are independent saved policies; model selection and
+asset loading are unchanged. New source is pending focused generator/build/preservation
+checks; existing source and visual qualifications retain their original scope.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |

@@ -133,6 +133,7 @@ struct Values {
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
+    bool hidef_characters{true},jp_clarissa{};   // existing Graphics/Misc character appearance, next start only
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -249,6 +250,18 @@ void page_controls(bool advanced){
         if(v.hide_signin&&v.menu_miles)
             dbce::panel::Status("Menu Miles at next start","hidden with sign-in text; the saved Miles choice is kept");
         dbce::panel::Text("Menu and license choices apply at the next game start.");
+        dbce::panel::Heading("Character appearance");
+        {const bool before=v.hidef_characters;
+         if(dbce::panel::OffOn("High definition characters",&v.hidef_characters,
+             "On (default): uses the high definition Alberto, Jennifer and Clarissa character sets during gameplay. "
+             "Off uses their standard sets. Applies at the next game start."))
+             keep(&v.hidef_characters,before,[&]{return save("Graphics","UseHiDefCharacters",v.hidef_characters?"true":"false");});}
+        {const bool before=v.jp_clarissa;
+         if(dbce::panel::OffOn("Japanese Clarissa model",&v.jp_clarissa,
+             "Off by default. Uses Clarissa's Japanese model in OutRun 2 SP arcade mode and its ending. Works with "
+             "either character detail choice. Applies at the next game start."))
+             keep(&v.jp_clarissa,before,[&]{return save("Misc","RestoreJPClarissa",v.jp_clarissa?"true":"false");});}
+        dbce::panel::Text("Character appearance choices apply at the next game start.");
     }
 }
 void page_ffb(bool advanced){
@@ -586,6 +599,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.license_character=settings.flag("Misc","AllowCharacterSelection",false);
     v.menu_miles=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
+    v.hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
+    v.jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
     p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
     p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
