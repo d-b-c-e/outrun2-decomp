@@ -33,8 +33,14 @@ starting another race does not reshuffle. No files or settings are rewritten.
 Disabled, empty and single-entry lists request no entropy. If host entropy is
 unavailable, the list remains ordered and startup logs that shuffle was refused.
 The game's RNG, saves, input records and existing test/record/playback exclusion
-are unchanged. Source and existing fixture extension are present; the affected
-compile and `cd_switcher` run for this shuffle follow-up are pending.
+are unchanged. ClangCL Release `OutRunDesktop` + `test_cd_switcher` and only
+`cd_switcher` pass at `db36dc5` (263 synthetic checks, 1/1 test, zero skipped).
+This retains the prior 601-check GOAL result without rerunning it. Hub evidence:
+`artifacts/outrun-cd-startup-shuffle-20261016/build-01` (logs, JUnit, copied
+LastTest, result and executable). SHA-256
+`b6752576aab6f71492b9c988e26a4ae77ef6e044ad0f8e8216f58b0db994e426`,
+23,869,440 bytes. Lease released, children quiescent and process environment
+restored. No game/install; startup shuffle runtime acceptance remains pending.
 
 The previously listed "default catalog" gap was a packaging distinction:
 Tweaks ships 28 entries in `OutRun2006Tweaks.ini`; its `Settings::CDTracks`
