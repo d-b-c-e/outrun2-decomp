@@ -151,11 +151,11 @@ Each site placed by the call it precedes in the EXE (objdump of OR2006C2C.exe ar
 - **Not in 2b:**
   - the C2C speech bubbles, in translated code (`F_4fc830` ... `F_4fe760`) and in `mission_manager_control_496a30`;
   - the GF request bubble (`banner_open_460970` / `banner_460ad0`);
-  - the C2C goal results (481A40, not ported).
+  - rendered C2C goal-result acceptance (the existing 481A40 reconstruction is now connected to GOAL in source).
 - **Evidence:** a build plus the unchanged default path (`put_shift()` is 0 outside mode 1); test_triple_screens 591
   and test_d3d11_vertex_path 407 pass. No HUD fixture exists for these routines, so mode 1's rendered positions await
   the visual check (step 4).
-## Step 2c: the remaining C2C sites (hand-reconstructed and translated positions built; 481A40 not ported)
+## Step 2c: the remaining C2C sites (request reconstruction reused by GOAL; rendered results pending)
 
 From objdump of OR2006C2C.exe around each site; "R" is right by the spacing, unrounded for floats and rounded for
 ints.
@@ -192,8 +192,28 @@ ints.
     first three 465860 calls shift the x argument by 80 in mode 1; all other arguments and the nearby unlisted 4653C0
     call are unchanged. Logs: `artifacts/outrun-c2c-ui-20261014/{real-dispatch-build,real-dispatch-test}.log` in the
     coordination hub. Other translated callers and rendered C2C placement still await qualification.
-- **C2C hearts / fruit** (481A86 / 481A8B / 481B76): scope switches inside 481A40, the C2C goal results, which the
-  decomp does not run yet (`EndUnported`). Nothing to do until that path is ported.
+- **C2C hearts / fruit** (481A86 / 481A8B / 481B76), October 16 source follow-up:
+  - The old unported description was stale: `native_race_requests_display_481a40` already reconstructs the canonical
+    request manager's display for NAVI, including ordered calls to the real translated children. The GOAL service
+    `46C220` in `race_end_runtime.cpp` still took the translated-only path and rejected 481A40; it now reuses that
+    existing reconstruction through the current GAD display capture.
+  - Local Tweaks `hooks_uiscaling.cpp` supplies the exact hooks. Read-only original-artifact verification used
+    `E:/Games/OutRunShimTest-20261011/OR2006C2C.exe`, SHA-256
+    `68ceb386829066f8455b9d027320af962584321f3e2e8a79c72841495a6134c3`, opened with REA and decoded over the bounded
+    481A40..481BB9 range with the existing LLVM objdump. 481A86 loads the virtual table; 481A88 calls slot +14;
+    481A8B resumes the list. 481B76 calls 4FDC10, followed by 4FDF90, optional 4FE440, then 4FC800.
+  - Fruit virtual submissions capture `off`; after a successful fruit call 481A8B resumes `detect`; 481B76 captures
+    the heart/result tail as `off`. Early/hidden branches retain the incoming scope. RAII restores it on success,
+    exceptions and failed children. No guessed sprite, substituted child or new result-display implementation is used.
+  - The existing `NativeHeartBinding` has an optional submission-index/scope sidecar. This avoids changing the generic
+    draw record or older captures. Both NAVI and GAD replay restore the captured scope before the existing 428A10 /
+    row / digit service records its deferred SPRANI draw. Models use the existing model sink and renderer executor.
+  - UIScalingMode 0/2 still supply zero spacing; stock arguments, matrices, records and order remain unchanged.
+    There is no renderer, camera, timer, save, input, RNG, settings-contract or default-mode change.
+  - The existing `test_course_asset_pack` fixture is extended for the actual variant-5 GAD GOAL dispatch, retained
+    stock frame advancement/clock/RNG, fruit and real translated heart-tail scope capture, and scope/fault restoration.
+    Its virtual fruit draw-only test leaf is explicitly synthetic; it does not claim authored fruit art or rendered pixels.
+    Affected compile and that one fixture remain pending; rendered C2C GOAL acceptance remains unqualified.
 ## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
 
 - **Setup:** one bounded run per mode with the same exe (6547538, `ui1`), muted, in the perf copy. Window
@@ -299,6 +319,6 @@ ints.
 | 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (18) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | source bridge in `race_translated.cpp` and the 18-site return-PC table in `c2c_ui_spacing.hpp`; generated code unchanged, visual check pending |
 | 460A21 set_icon_work (GF request bubble) | `banner_open_460970` +B1, race_traffic_heart_setup.inc | hand | the heart code lives in `race_traffic_*.inc` (a first scan of .cpp files missed it) |
 | 460D40 / 460FBC ctrl_icon_work | `banner_460ad0` +270 / +4EC, race_traffic_heart_meter.inc | hand | the function's PC extent is to be confirmed |
-| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | inside 481A40, the C2C request manager's GOAL results (7F9460 method) | **not ported** | race_end_runtime.cpp runs it only if translated, and it is not (`EndUnported` "neither native nor translated"); nothing to map until that path is ported |
+| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | canonical native request display 481A40, reached from GAD GOAL 46C220 | hand + existing translated children | Source connects the existing reconstruction, captures off/detect/off scopes per deferred submission, and reuses NAVI/GAD draw services. Affected compile/fixture pending; rendered placement unqualified. |
 
-- **Open:** C2C rendered positions and goal results (481A40 is not ported); the translated positional bridge is in source.
+- **Open:** C2C rendered positions and goal-result acceptance. The canonical reconstruction, GOAL route, deferred fruit/heart scopes and translated positional bridge are in source; this follow-up still needs its affected compile/fixture.

@@ -1,6 +1,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/race_traffic_runtime.hpp"
 #include "platform/race_hud_runtime.hpp"
+#include "platform/race_end_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_player_car.hpp"
 #include "platform/race_ghosts.hpp"
@@ -449,21 +450,24 @@ int main(int argc,char** argv){
                 std::fill(block.begin(),block.end(),0);request.start_mode.manager_state_7f94c0=1;
                 put32(block,0x16cu,0);put32(block,0x3a24u,123); // one stock row; inactive child resources
                 struct Overlay{std::uint32_t mode{16};std::array<std::uint8_t,0x80> scratch{};std::size_t mark{};} overlay;
-                std::vector<RaceHudDraw> draws;NativeHeartBinding binding;
-                binding.user=&overlay;binding.display=true;binding.draws=&draws;
+                std::vector<RaceHudDraw> draws;std::map<std::size_t,UiSpacing> spacing;NativeHeartBinding binding;
+                binding.user=&overlay;binding.display=true;binding.draws=&draws;binding.spacing=&spacing;
                 binding.map=[](void* user,PcRaceMemory& m){auto& o=*static_cast<Overlay*>(user);o.mark=m.mark();
                     m.map(0x78026cu,reinterpret_cast<std::uint8_t*>(&o.mode),4);
                     m.map(0x0dfe2000u,o.scratch.data(),o.scratch.size());};
                 std::uint32_t missing{},fault{};std::string error;
                 const auto depth=request_matrices.depth;const auto offset=request_matrices.current_offset;
                 const auto latched=traffic.latched;
-                auto display=[&](){draws.clear();const bool ok=native_race_requests_display_481a40(
+                auto display=[&](){draws.clear();spacing.clear();const auto caller=ui_spacing_scope();
+                    const bool ok=native_race_requests_display_481a40(
                         request,request_matrices,binding,missing,fault,error);
                     for(const auto field:{0x74u,0x78u,0x16cu,0x5800u,0x764cu})
                         require(traffic.memory.at(NativeRaceTraffic::RequestsBase+field,4)==block.data()+field,
                                 "request HUD reads the canonical request owner, including the old NAVI overlap");
-                    require(request_matrices.depth==depth&&request_matrices.current_offset==offset&&traffic.latched==latched,
-                            "request display preserves matrix state and the independent traffic latch");
+                    require(request_matrices.depth==depth&&request_matrices.current_offset==offset&&traffic.latched==latched&&
+                            ui_spacing_scope()==caller,
+                            "request display preserves matrices, independent traffic latch and caller spacing on every exit");
+                    require(spacing.size()==draws.size(),"each request display submission retains its own deferred spacing scope");
                     traffic.memory.release(overlay.mark);return ok;};
                 for(const int value:{74,-74,3700}){
                     put32(block,0x5800u,std::uint32_t(value));put32(block,0x74u,value==74?0u:value<0?1u:2u);
@@ -519,6 +523,66 @@ int main(int argc,char** argv){
                                                "and leaves the request block and the draws as without the object");
                     }
                     block=start;scratch_put(0x44u,0u);scratch_put(0x48u,0u);
+                }
+                {   // Tweaks 481A86/A8B brackets the virtual fruit display; 481B76 disables the remaining hearts/tail.
+                    // SYNTHETIC vtable leaf: the real 429530 submission handler with no arguments. This isolates the
+                    // fruit capture boundary without claiming that token 0 is authored fruit artwork or rendered.
+                    const auto start=block;
+                    scratch_put(0x74u,0x429530u);put32(block,0x78u,0x0dfe2000u);
+                    put32(block,0x3a18u,1u);put32(block,0x75f8u,2u); // real translated 4FDC10: two labels + heart row
+                    const auto setup=block;
+                    std::vector<RaceHudDraw> ordinary;
+                    for(const auto caller:{UiSpacing::off,UiSpacing::detect,UiSpacing::left,UiSpacing::right}){
+                        block=setup;const UiSpacingGuard scope(caller);
+                        const bool ok=display();
+                        if(!ok)std::fprintf(stderr,"request spacing child failure %08x/%08x: %s\n",missing,fault,error.c_str());
+                        require(ok&&draws.size()>4u,"request fruit marker, stock rows/gauge/digits and real heart tail execute");
+                        require(draws[0].pc==0x429530u&&spacing.at(0)==UiSpacing::off,
+                                "virtual fruit submission is unspaced between 481A86 and 481A8B");
+                        for(std::size_t i=1;i<4u;++i)require(spacing.at(i)==UiSpacing::detect,
+                                "481A8B restores detect for the stock row, gauge and digits");
+                        for(std::size_t i=4;i<draws.size();++i)require(spacing.at(i)==UiSpacing::off,
+                                "481B76 captures the real translated heart/result tail unspaced");
+                        if(ordinary.empty())ordinary=draws;
+                        else{
+                            bool same=ordinary.size()==draws.size();
+                            for(std::size_t i=0;same&&i<draws.size();++i)same=ordinary[i].pc==draws[i].pc&&ordinary[i].args==draws[i].args&&
+                                ordinary[i].matrix==draws[i].matrix&&ordinary[i].record==draws[i].record;
+                            require(same,"scope changes preserve every stock draw argument, matrix, record and submission order");
+                        }
+                        for(const unsigned mode:{0u,1u,2u})for(const auto& entry:spacing){
+                            const float shift=ui_spacing_shift(entry.second,100.f,mode==1u?80.f:0.f);
+                            require(mode==1u?(shift==(entry.second==UiSpacing::detect?-80.f:0.f)):shift==0.f,
+                                    "retained per-record scopes shift only mode 1; modes 0 and 2 have zero spacing");
+                        }
+                    }
+                    block=start;
+                }
+                {   // Production GOAL dispatch: gad_display -> variant 5 498D53 -> 46C220 -> canonical 481A40.
+                    const auto saved_mode=request.mode_state.current,saved_variant=request.game_mode.game_variant;
+                    const auto saved_updates=request.frame_state.updates_95af48;auto& h=native_race_hud(request);
+                    const auto saved_gad=h.gad;const auto saved_end=request.race_end;const auto start=block;
+                    request.mode_state.current=19u;request.game_mode.game_variant=5u;request.frame_state.updates_95af48=1u;
+                    h.gad.put32(0x836694u,0u);h.gad.put16(0x836630u,17u);put32(block,0x78u,0u);
+                    std::vector<RaceHudDraw> goal;std::vector<FrontendGlyph> glyphs;std::map<std::size_t,UiSpacing> scopes;
+                    NativeHeartBinding output;output.spacing=&scopes;
+                    const auto routed=traffic.routed[0x481a40u];const auto clock=request.race.clock.time_842110;
+                    const auto random=request.event_function36.pc_crt_random_state;
+                    {const UiSpacingGuard scope(UiSpacing::off);
+                     const bool ok=native_race_end_gad_display(request,goal,glyphs,missing,&output);
+                     if(!ok)std::fprintf(stderr,"GOAL request failure %08x: %s\n",missing,native_race_end(request).error.c_str());
+                     require(ok&&missing==0u,
+                             "real variant-5 GOAL dispatcher reaches the existing canonical native request display");
+                     require(ui_spacing_scope()==UiSpacing::off,"GOAL request display restores the caller scope");}
+                    require(traffic.routed[0x481a40u]==routed+1u&&goal.size()==3u&&scopes.size()==goal.size(),
+                            "GOAL invokes one request display and retains its three stock submissions");
+                    require(h.gad.u32(0x836630u)%0x10000u==18u&&request.race.clock.time_842110==clock&&
+                            request.event_function36.pc_crt_random_state==random,
+                            "GOAL advances its original display frame once without changing the race clock or random state");
+                    require(native_race_end(request).request_display==nullptr&&native_race_end(request).hud_draws==nullptr&&
+                            native_race_end(request).hud_glyphs==nullptr,"GOAL releases every borrowed capture binding");
+                    request.mode_state.current=saved_mode;request.game_mode.game_variant=saved_variant;
+                    request.frame_state.updates_95af48=saved_updates;h.gad=saved_gad;request.race_end=saved_end;block=start;
                 }
                 scratch_put(0x74u,0xdead0042u);
                 require(!display()&&missing==0xdead0042u&&fault==0&&!error.empty()&&draws.empty(),

@@ -18,6 +18,7 @@
 #include "driving/pc_matrix_stack.hpp"
 #include "driving/pc_common_control.hpp"
 #include "platform/race_hud_navi.hpp"   // RaceHudDraw
+#include "platform/ui_spacing.hpp"
 #include <memory>
 #include <array>
 #include <map>
@@ -124,6 +125,9 @@ struct NativeHeartBinding {
     bool display{};
     std::vector<PcVehicleDrawCall>* models{};
     PcSceneRenderer* renderer{};
+    // Optional per-submission scope for the canonical request display's deferred 2D calls.
+    // Indices address the supplied draws vector; absent preserves every older capture path.
+    std::map<std::size_t,UiSpacing>* spacing{};
 };
 bool native_race_traffic_heart(NativeRuntimeContext&,driving::PcMatrixStack&,std::uint32_t pc,NativeHeartBinding&);
 // 46C220 -> 481A40: request HUD display on the canonical manager/heap. Reuses the

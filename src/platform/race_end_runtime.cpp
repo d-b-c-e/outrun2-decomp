@@ -831,14 +831,20 @@ template<class F> bool run_end(NativeRuntimeContext& c,F&& body,driving::PcMatri
         case 0x4bb7c0u:return 0u;   // the 2C00E0 / 2C00E1 marks of the players with 455B60 != 0: 455B60 is always 0, nothing is drawn
         // the C2C request manager 7F9460 (race end mode 5, 49947B / 498D53; its block and heap are
         // mapped here): 46C440 = 481760 ([7F9460+5808]), 46C420 = 5000E0(0) then 4FE290, 46C220 =
-        // 481A40 (the GOAL results), run as the translated originals until their native port
-        case 0x46c440u:case 0x46c420u:case 0x46c220u:{
+        // 481A40 (GOAL results) reuses the canonical native request display below; other methods retain translation
+        case 0x46c220u:{
+            if(!e.request_display)throw EndUnported(k.pc,"request results outside a GAD display");
+            std::uint32_t missing{},fault{};std::string error;
+            if(!native_race_requests_display_481a40(c,matrices,*e.request_display,missing,fault,error))
+                throw EndUnported(missing?missing:0x481a40u,error+(fault?" at "+hex(fault):""));
+            return 0u;   // 498D53 ignores EAX; the canonical request display owns every side effect
+        }
+        case 0x46c440u:case 0x46c420u:{
             auto run=[&](std::uint32_t pc,std::initializer_list<std::uint32_t> args)->std::uint32_t{
                 PcRaceCall s{};s.pc=pc;s.ecx=0x7f9460u;for(auto v:args)s.args[s.argc++]=v;
                 if(!bulk_translated(pc))throw EndUnported(pc,"7F9460 manager method neither native nor translated");
                 return bulk_call(m,ctx.service,s,&matrices,&c.event_function36.pc_crt_random_state);};
             if(k.pc==0x46c440u)return run(0x481760u,{});
-            if(k.pc==0x46c220u)return run(0x481a40u,{});
             (void)run(0x5000e0u,{0u});return run(0x4fe290u,{});}
         case 0x45bd30u:return native_race_hud_voice_45bd30(c,std::int32_t(a[0]),std::int16_t(a[1]),std::int16_t(a[2]));
         case 0x49a060u:case 0x497900u:case 0x48c5f0u:
@@ -1179,13 +1185,25 @@ NativeRaceEnd& native_race_end(NativeRuntimeContext& c){
 bool native_race_end_mode_active(std::uint32_t mode){
     return mode==1u||mode==2u||mode==3u||mode==4u||mode==5u||mode==8u||mode==7u||mode==9u||mode==10u||mode==11u||mode==12u||mode==19u||mode==20u||mode==21u||mode==22u||mode==23u||mode==24u||mode==25u||mode==26u||mode==27u||mode==28u||mode==29u||mode==30u||mode==31u||mode==33u||mode==34u||mode==35u||mode==36u;
 }
-bool native_race_end_gad_display(NativeRuntimeContext& c,std::vector<RaceHudDraw>& draws,std::vector<FrontendGlyph>& glyphs,std::uint32_t& missing){
+bool native_race_end_gad_display(NativeRuntimeContext& c,std::vector<RaceHudDraw>& draws,std::vector<FrontendGlyph>& glyphs,
+                                 std::uint32_t& missing,NativeHeartBinding* request){
     auto& e=native_race_end(c);
     if(e.fault){missing=0x4998c0u;return false;}
-    e.hud_draws=&draws;e.hud_glyphs=&glyphs;missing=0;
-    const bool ok=run_end(c,[](PcRaceContext& ctx){gad_display_4998c0(ctx);},nullptr,&missing);
-    e.hud_draws=nullptr;e.hud_glyphs=nullptr;
-    return ok;
+    NativeHeartBinding binding=request?*request:NativeHeartBinding{};
+    auto& hud=native_race_hud(c);binding.user=&hud;
+    binding.map=[](void* user,PcRaceMemory& m){
+        auto& h=*static_cast<NativeRaceHudRuntime*>(user);
+        m.map(0x842800u,h.navi.g842800.data(),h.navi.g842800.size());
+        m.map(0x688b00u,h.navi.g688b00.data(),h.navi.g688b00.size());
+        // Never overlay the old NAVI 7F9400 band on the canonical request manager.
+    };
+    binding.display=true;binding.draws=&draws;
+    struct Restore {
+        NativeRaceEnd& e;std::vector<RaceHudDraw>* draws;std::vector<FrontendGlyph>* glyphs;NativeHeartBinding* request;
+        ~Restore(){e.hud_draws=draws;e.hud_glyphs=glyphs;e.request_display=request;}
+    } restore{e,e.hud_draws,e.hud_glyphs,e.request_display};
+    e.hud_draws=&draws;e.hud_glyphs=&glyphs;e.request_display=&binding;missing=0;
+    return run_end(c,[](PcRaceContext& ctx){gad_display_4998c0(ctx);},nullptr,&missing);
 }
 bool native_arcade_display_callback(std::uint32_t callback){
     switch(callback){

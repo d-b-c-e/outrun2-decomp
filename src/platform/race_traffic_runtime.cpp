@@ -321,6 +321,10 @@ struct Run {
     PcRaceContext* ctx{};
     NativeHeartBinding* heart{};
     PcSceneRenderer* renderer{};   // course object displays (4082B0 / 410740 / 4107A0)
+    void capture_draw(const RaceHudDraw& draw){
+        if(heart->spacing)(*heart->spacing)[heart->draws->size()]=ui_spacing_scope();
+        heart->draws->push_back(draw);
+    }
     void routed(std::uint32_t pc){++t.routed[pc];t.last_routed_pc=pc;}
     [[noreturn]] void missing(std::uint32_t pc,const std::string& why){++t.missing[pc];throw TrafficUnported(pc,why);}
     PcRaceMemory& m(){return t.memory;}
@@ -700,7 +704,7 @@ struct Run {
                 if(m().u8(a[3]+15u)&&text[14])missing(pc,"4BC990 text longer than 15 characters");
                 std::memcpy(&d.args[3],text,16);
             }
-            heart->draws->push_back(d);return 0u;}
+            capture_draw(d);return 0u;}
         case 0x43fa00u:routed(pc);return c.frame_state.updates_95af48;      // [780278]
         case 0x450250u:{routed(pc);   // 450250(stage, result): the stage key a result leads to
             const std::uint16_t preset=std::uint16_t(m().u32(0x78024cu));
@@ -715,7 +719,7 @@ struct Run {
             routed(pc);RaceHudDraw d;d.pc=pc;for(unsigned q=0;q<6;++q)d.args[q]=a[q];
             const std::uint32_t mp=pc==0x428ac0u?a[1]:pc==0x4289e0u?a[2]:0u;
             if(mp)for(unsigned q=0;q<16;++q)d.matrix[q]=m().f32(mp+q*4u);
-            if(heart&&heart->draws&&(pc==0x4289e0u||(heart->display&&pc==0x429530u)))heart->draws->push_back(d);   // a Heart Attack display (45CA70, 462CD0)
+            if(heart&&heart->draws&&(pc==0x4289e0u||(heart->display&&pc==0x429530u)))capture_draw(d);   // a Heart Attack display (45CA70, 462CD0)
             else if(t.object_draws.size()<4096u)t.object_draws.push_back(d);
             return 0u;}
         // ---- Heart Attack (464D20 and its display callbacks) ----
@@ -1293,6 +1297,8 @@ bool native_race_requests_display_481a40(NativeRuntimeContext& c,driving::PcMatr
     missing=0;fault=0;error.clear();
     if(!display.display||!display.draws){missing=0x481a40u;error="request display needs an ordered draw capture";return false;}
     auto& t=native_race_traffic(c);
+    // Tweaks switches within 481A40; restore the caller even on a failed child or an early branch.
+    const UiSpacingGuard restore_spacing(ui_spacing_scope());
     const auto depth=matrices.depth;const auto offset=matrices.current_offset;
     Run run{c,t,matrices};run.heart=&display;run.renderer=display.renderer;
     try{
@@ -1301,7 +1307,7 @@ bool native_race_requests_display_481a40(NativeRuntimeContext& c,driving::PcMatr
         PcRaceContext ctx{t.memory,matrices,[&](const PcRaceCall& k){return run(k);},display.models};run.ctx=&ctx;
         auto& m=ctx.m;constexpr std::uint32_t B=NativeRaceTraffic::RequestsBase;
         auto call=[&](std::uint32_t pc,std::uint32_t self){PcRaceCall k{};k.pc=pc;k.ecx=self;return run(k);};
-        auto emit=[&](std::uint32_t pc,const std::array<std::uint32_t,7>& args){RaceHudDraw d;d.pc=pc;d.args=args;display.draws->push_back(d);};
+        auto emit=[&](std::uint32_t pc,const std::array<std::uint32_t,7>& args){RaceHudDraw d;d.pc=pc;d.args=args;run.capture_draw(d);};
         ++t.routed[0x481a40u];
         if(m.u32(B+0x7604u)||m.u32(B+0x7628u)){                         // 481BA0 hide/status display
             call(0x4fe0d0u,B);call(0x4fe360u,B);
@@ -1310,7 +1316,9 @@ bool native_race_requests_display_481a40(NativeRuntimeContext& c,driving::PcMatr
                 std::uint32_t node=m.u32(list+0xcu);m.put32(list+0x14u,node);
                 while(node){
                     const auto object=m.u32(node);if(!object)break;
-                    call(m.u32(m.u32(object)+0x14u),object);           // original virtual display, no guessed substitute
+                    {const UiSpacingGuard fruit(UiSpacing::off);     // Tweaks 481A86 -> virtual display at 481A88
+                     call(m.u32(m.u32(object)+0x14u),object);}
+                    ui_spacing_scope()=UiSpacing::detect;             // Tweaks 481A8B resumes spacing
                     const auto current_list=m.u32(B+0x78u);
                     node=m.u32(current_list+0x14u);if(!node)break;
                     node=m.u32(node+4u);m.put32(current_list+0x14u,node);
@@ -1328,7 +1336,8 @@ bool native_race_requests_display_481a40(NativeRuntimeContext& c,driving::PcMatr
             if(token)emit(0x429530u,{token,0,0,0,std::uint32_t(frame),0,0});
             char text[16]{};std::snprintf(text,sizeof text,"%4d",int(value)); // [5B4A28], 5802DD
             RaceHudDraw digits;digits.pc=0x4bc990u;digits.args[0]=10u;digits.args[1]=0x206u;digits.args[2]=0x1b2u;
-            std::memcpy(&digits.args[3],text,sizeof text);display.draws->push_back(digits);
+            std::memcpy(&digits.args[3],text,sizeof text);run.capture_draw(digits);
+            ui_spacing_scope()=UiSpacing::off;                        // Tweaks 481B76: 4FDC10 and the remaining tail
             call(0x4fdc10u,B);call(0x4fdf90u,B);
             if(m.u32(B+0x154u))call(0x4fe440u,B);
         }

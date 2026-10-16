@@ -190,10 +190,14 @@ void heart_map(void* user,PcRaceMemory& m){
     auto& h=*static_cast<HeartUser*>(user);
     native_race_hud_map_heart(*h.c,m);
 }
-void replay_hud_draws(HeartUser& h,const std::vector<RaceHudDraw>& draws){
+void replay_hud_draws(HeartUser& h,const std::vector<RaceHudDraw>& draws,
+                      const std::map<std::size_t,UiSpacing>* spacing=nullptr){
     auto& o=*h.o;
     auto& pool=h.c->event_function36.frontend_sprites;
-    for(const auto& d:draws){
+    for(std::size_t index=0;index<draws.size();++index){
+        const auto& d=draws[index];UiSpacing scope=ui_spacing_scope();
+        if(spacing){const auto at=spacing->find(index);if(at!=spacing->end())scope=at->second;}
+        const UiSpacingGuard capture(scope);   // 428A10 retains this draw's scope until its deferred render
         if(d.pc==0x4289e0u){   // 428A10 (scale 1, s = argument 4, angle 0) like 4289B0
             o.navi_draws.push_back(d);
             sprani_draw_428a10(pool,o.sprani,*h.st,d.args[0],&d.matrix,d.args[1],std::int32_t(d.args[3]),1.0f,bf(d.args[4]),0.0f,o.navi_scene_draws,o.navi_blend);
@@ -240,11 +244,11 @@ bool request_hud_run(void* user,std::uint32_t pc,std::uint32_t& value){
         value=h.c->start_mode.manager_state_7f94c0&&kind==1u?1u:0u;return true;
     }
     if(pc!=0x46c220u){note(o,pc);return false;}
-    std::vector<RaceHudDraw> draws;std::vector<PcVehicleDrawCall> models;
-    NativeHeartBinding b{user,request_hud_map,&draws};b.display=true;b.models=&models;b.renderer=h.renderer;
+    std::vector<RaceHudDraw> draws;std::vector<PcVehicleDrawCall> models;std::map<std::size_t,UiSpacing> spacing;
+    NativeHeartBinding b{user,request_hud_map,&draws};b.display=true;b.models=&models;b.renderer=h.renderer;b.spacing=&spacing;
     std::uint32_t missing{},fault{};std::string error;
     const bool ok=native_race_requests_display_481a40(*h.c,*h.st,b,missing,fault,error);
-    rebuild(*h.c,o);replay_hud_draws(h,draws);
+    rebuild(*h.c,o);replay_hud_draws(h,draws,&spacing);
     if(!models.empty()){
         if(!h.renderer){note(o,0x405360u);return false;}
         try{(void)native_race_draw_list_execute(*h.c,*h.renderer,models);}
@@ -485,11 +489,23 @@ bool native_race_hud_display(NativeRuntimeContext& c,PcSceneRenderer& r,std::uin
             // through 428A10 and executed like the NAVI ones.
             ++o.gad_displays;std::uint32_t missing{};
             std::vector<RaceHudDraw> draws;std::vector<FrontendGlyph> glyphs;
-            if(!native_race_end_gad_display(c,draws,glyphs,missing))note(o,missing?missing:0x4998c0u);
+            std::vector<PcVehicleDrawCall> models;std::map<std::size_t,UiSpacing> spacing;
+            NativeHeartBinding request;request.models=&models;request.renderer=&r;request.spacing=&spacing;
+            if(!native_race_end_gad_display(c,draws,glyphs,missing,&request))note(o,missing?missing:0x4998c0u);
+            if(!models.empty())(void)native_race_draw_list_execute(c,r,models);   // same request-display model sink as NAVI
             if(draws.empty()){native_sprite2d_glyph_records(c,device,glyphs);break;}   // 42CCC0 -> 42CFE0 into the 2D queue
             o.navi_draws.clear();o.navi_scene_draws.clear();o.navi_blend=native_sprite2d(c).state.blend_9564e0;
             auto& pool=c.event_function36.frontend_sprites;
-            for(const auto& d:draws){
+            GroundUser ground{&c,&r};NaviPubServices request_services;bool request_ready=false;
+            HeartUser request_user{&c,&o,&st,&request_services,&r};
+            for(std::size_t index=0;index<draws.size();++index){
+                const auto& d=draws[index];const auto at=spacing.find(index);
+                const UiSpacingGuard capture(at==spacing.end()?ui_spacing_scope():at->second);
+                if(at!=spacing.end()&&(d.pc==0x4bb9e0u||d.pc==0x4bc990u||d.pc==0x4295d0u||d.pc==0x4289e0u)){
+                    if(!request_ready){rebuild(c,o);request_services=navi_services(c,o,st,ground);request_ready=true;}
+                    replay_hud_draws(request_user,{d});   // expand the stock request rows/digits at their original position
+                    continue;
+                }
                 o.navi_draws.push_back(d);
                 if(d.pc==0x4289b0u){                                 // 49A060 pause sprite (NULL matrix)
                     sprani_draw_428a10(pool,o.sprani,st,d.args[0],d.args[4]?nullptr:&d.matrix,d.args[1],std::int32_t(d.args[3]),1.0f,1.0f,0.0f,o.navi_scene_draws,o.navi_blend);

@@ -29,6 +29,7 @@
 #include <string>
 namespace outrun::platform {
 class PcSceneRenderer;
+struct NativeHeartBinding;
 struct NativeRaceEnd {
     PcRaceEndState state{};
     std::map<std::uint32_t,std::uint32_t> routed,released;
@@ -75,6 +76,7 @@ struct NativeRaceEnd {
     std::uint32_t fault{};std::string error;
     std::string bank_error;
     bool bank_pending_failed{};
+    NativeHeartBinding* request_display{};   // borrowed only during the GAD display, never a second request owner
 };
 NativeRaceEnd& native_race_end(NativeRuntimeContext&);
 // The OutRun2SP button services 4165C0 (rankings.dat) / 4F3CC0 (tables); false for other PCs.
@@ -95,7 +97,9 @@ bool native_bulk_event_invoke(NativeRuntimeContext&,std::uint32_t callback,std::
 int native_race_end_lan_results_4985e4(NativeRuntimeContext&,std::uint32_t& done_83670c);
 // GAD_PUB display 4998C0 (gad_display_4998c0): its 429530 draws are appended
 // to `draws`; false with `missing` = the first unported display callee.
-bool native_race_end_gad_display(NativeRuntimeContext&,std::vector<RaceHudDraw>& draws,std::vector<FrontendGlyph>& glyphs,std::uint32_t& missing);
+// An optional request binding carries the existing renderer/model sink and per-draw UI scope.
+bool native_race_end_gad_display(NativeRuntimeContext&,std::vector<RaceHudDraw>& draws,std::vector<FrontendGlyph>& glyphs,
+                                 std::uint32_t& missing,NativeHeartBinding* request=nullptr);
 // OUTRUN2SP arcade screens: the event-4 display callbacks (4BF3F0, 4C1FA0, 4C2420, 4C22C0,
 // 4C1E80, 4C22E0, 4BEE80), name entry 4B4F20 and C2C unlock notice 498010;
 // their draws and original-font captions are appended.
