@@ -4,8 +4,10 @@
 // existing audio lock. Off/unbound: both recovered race call sites fall through.
 #include "platform/music_stream.hpp"
 #include "platform/cd_title.hpp"
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <random>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,6 +37,18 @@ inline CdCatalog parse_cd_tracks(const std::vector<std::string>& lines){
         out.tracks.push_back({std::string(path),std::string(title)});
     }
     return out;
+}
+// Tweaks shuffles once when loading the catalog, not on race entry or change.
+// Entropy belongs to the host startup only: never use the game's RNG/state.
+// Obtain it before touching the list so an unavailable source keeps its order.
+template<class Seed>
+bool shuffle_cd_tracks(std::vector<CdTrack>& tracks,bool enabled,Seed seed){
+    if(!enabled||tracks.size()<2u)return true;
+    std::uint32_t value{};
+    try{value=seed();}catch(...){return false;}
+    std::mt19937 random(value);
+    std::shuffle(tracks.begin(),tracks.end(),random);
+    return true;
 }
 // Low bits use runtime::PadButton's platform-neutral layout (host_platform.hpp).
 // These extra bits belong only to the switcher's derived sample, never a host,

@@ -35,6 +35,45 @@ void catalog(){
     check(!parse_cd_tracks({std::string(1024*1024+1,' ')}).error.empty(),"section byte bound");
     check(!parse_cd_tracks({std::string("bad\0path=t",10)}).error.empty(),"embedded NUL refused");
 }
+void startup_shuffle(){
+    const auto original=parse_cd_tracks({"z.ogg=Z","a.ogg=First","a.ogg=Second","b.ogg=","z.ogg=Z"}).tracks;
+    auto sequence=[](const auto& tracks){
+        std::vector<std::pair<std::string,std::string>> out;
+        for(const auto& track:tracks)out.emplace_back(track.path,track.title);
+        return out;
+    };
+    unsigned entropy_calls{};auto seed=[&](){++entropy_calls;return 197677u;};
+    auto listed=original;
+    check(shuffle_cd_tracks(listed,false,seed)&&entropy_calls==0&&sequence(listed)==sequence(original),
+          "default/off preserves exact catalog order without requesting entropy");
+    std::vector<CdTrack> empty,single{{"only.ogg","Only"}};
+    check(shuffle_cd_tracks(empty,true,seed)&&empty.empty()&&entropy_calls==0,"empty catalog requests no entropy");
+    check(shuffle_cd_tracks(single,true,seed)&&single[0].path=="only.ogg"&&single[0].title=="Only"&&entropy_calls==0,
+          "single track remains unchanged without requesting entropy");
+    auto shuffled=original,repeated=original;
+    check(shuffle_cd_tracks(shuffled,true,seed)&&entropy_calls==1,"enabled startup shuffle requests one private host seed");
+    check(shuffle_cd_tracks(repeated,true,seed)&&entropy_calls==2&&sequence(shuffled)==sequence(repeated),
+          "injected seed reproduces the same startup order without depending on a particular library permutation");
+    const auto before=sequence(original),after=sequence(shuffled);
+    check(std::multiset(before.begin(),before.end())==std::multiset(after.begin(),after.end()),
+          "shuffle preserves path/title pairs, duplicate multiplicity and empty titles");
+    // An individual valid shuffle may keep its input order. The bounded fixed
+    // seed set catches an accidental no-op without requiring every call to move.
+    bool moved=false,ok=true;
+    for(std::uint32_t value=0;value<16u;++value){
+        auto probe=original;ok=shuffle_cd_tracks(probe,true,[&]{return value;})&&ok;
+        moved=moved||sequence(probe)!=before;
+    }
+    check(ok&&moved,"enabled shuffling can change order across a fixed set of host seeds");
+    auto unavailable=original;
+    check(!shuffle_cd_tracks(unavailable,true,[]()->std::uint32_t{throw 1;})&&sequence(unavailable)==sequence(original),
+          "unavailable startup entropy reports refusal before touching listed order");
+    Player player;CdSwitcher switcher{true,shuffled,0,&player,Player::play};
+    check(switcher.select(0)&&player.path==shuffled[0].path&&!player.loop,"initial selection uses the startup permutation through existing playback");
+    check(switcher.change({false,true})&&switcher.cursor==1&&player.path==shuffled[1].path&&
+          sequence(switcher.tracks)==after&&entropy_calls==2,
+          "manual selection keeps the same permutation without another shuffle or entropy request");
+}
 void resolve(){
     std::set<std::string> files;
     auto exists=[&](const std::string& path){return files.count(path)!=0;};
@@ -234,4 +273,4 @@ void race(){
     s={};
 }
 }
-int main(){catalog();resolve();edges();cursor();actual_pad_adapter();analog_pad_adapter();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}
+int main(){catalog();startup_shuffle();resolve();edges();cursor();actual_pad_adapter();analog_pad_adapter();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}

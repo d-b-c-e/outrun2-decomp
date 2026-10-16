@@ -9,6 +9,7 @@ compiles; the title overlay's narrower qualification is described below.
 ```ini
 [CDSwitcher]
 SwitcherEnable = true
+SwitcherShuffleTracks = false
 TrackNext = Back
 TrackPrevious = RS+Back
 SwitcherDisplayTitle = false
@@ -23,6 +24,23 @@ paths, original order, case and duplicate entries are retained. Comments begin
 with `#` or `;` after whitespace. Empty titles are allowed. An invalid section
 disables the catalog: at most 256 entries, 4096 lines, 1 MiB of section text,
 4095 bytes per path and 512 bytes per title. No catalog means no override.
+
+`SwitcherShuffleTracks = true` shuffles that in-memory list once during ordinary
+startup, like Tweaks `hooks_audio.cpp` (`random_device`, a private `mt19937`,
+then `std::shuffle`). The default is false and keeps the listed order. Paths
+and titles move together, including duplicate entries; selecting a track or
+starting another race does not reshuffle. No files or settings are rewritten.
+Disabled, empty and single-entry lists request no entropy. If host entropy is
+unavailable, the list remains ordered and startup logs that shuffle was refused.
+The game's RNG, saves, input records and existing test/record/playback exclusion
+are unchanged. Source and existing fixture extension are present; the affected
+compile and `cd_switcher` run for this shuffle follow-up are pending.
+
+The previously listed "default catalog" gap was a packaging distinction:
+Tweaks ships 28 entries in `OutRun2006Tweaks.ini`; its `Settings::CDTracks`
+starts empty and no INI disables its switcher. There is no hardcoded fallback
+to reproduce. This native slice continues to use the owner's explicit
+`[CDTracks]`; it does not discover/copy music, create a list or replace config.
 
 Files resolve first as written (relative to the process working directory or
 absolute), then in the retail `Sound` folder. Existing enabled same-stem FLAC
@@ -136,8 +154,7 @@ their scaled metric ink width plus one UI unit (or one scale unit above 1x),
 rounded up. This keeps word gaps and ellipsis dots distinct at the defaults.
 Normal letter kerning, font/scale/position and all other HUD text stay unchanged.
 
-Partial Tweaks parity remains: startup shuffle and default track catalog
-are not implemented. Scoped CD request/open/current
+Scoped CD request/open/current
 evidence does not establish audible/physical quality. The width-aware title
 passed its affected compile/link and98 synthetic checks; its sampled visual
 run confirmed timing and center placement with tight-space/dot findings. This
