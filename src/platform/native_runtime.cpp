@@ -2286,7 +2286,16 @@ void native_game_load_course(NativeGameModeState& game,std::uint32_t course_mode
     if(!game.course_assets)return;
     ++game.course_load_calls;
     game.course_load={};
+    // 635F34/635F38/7D33B0 are persistent level-selection globals consumed
+    // by 44D720, not derived course-loader state. START must keep the
+    // selection committed by 4E7800 while rebuilding the loaded course.
+    const auto resource=game.course_runtime.resource_type_635f34;
+    const auto source=game.course_runtime.resource_source_635f38;
+    const auto secondary=game.course_runtime.fallback_gate_7d33b0;
     game.course_runtime={};
+    game.course_runtime.resource_type_635f34=resource;
+    game.course_runtime.resource_source_635f38=source;
+    game.course_runtime.fallback_gate_7d33b0=secondary;
     // Capacity for any \\Scripts\\bin\\csc_data_*.bin course file.
     game.course_work.assign(std::max<std::size_t>(game.course_assets->course_blob.size(),0x10000u),0u);
     game.course_matrix_stack.fill(0u);

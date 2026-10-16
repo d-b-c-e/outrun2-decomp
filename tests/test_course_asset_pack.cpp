@@ -866,6 +866,30 @@ int main(int argc,char** argv){
         require(native_runtime_request_mode(start,13u)&&native_runtime_mode_control(start,{}),"START enters original course-loading mode");
         require(start.mode_state.current==13u&&start.start_mode.stage==2u&&start.start_mode.course_load_attempts==1u&&start.start_mode.course_load_success==1u&&start.game_mode.course_load_success==1u,"START stage 0 loads real course before requesting 2F/2");
         require(start.start_mode.resource_id==LoaderAssetStartLoadingId&&start.start_mode.resource_ready==1u&&start.start_mode.event_open_count==1u,"START stage 2 retains PC readiness gate and does not open event 185 early");
+        for(const auto secondary:{0u,1u}){
+            auto selected_storage=std::make_unique<NativeRuntimeContext>();
+            auto& selected=*selected_storage;
+            selected.mode_descriptors[13u]=start.mode_descriptors[13u];
+            selected.event_function36.loader_assets=&start_resources;
+            require(native_runtime_attach_course_assets(selected,real),"selected START attaches owned course data");
+            auto& course=selected.game_mode.course_runtime;
+            course.resource_type_635f34=10u;
+            course.resource_source_635f38=secondary?10u:0u;
+            course.fallback_gate_7d33b0=secondary;
+            require(native_runtime_request_mode(selected,13u)&&native_runtime_mode_control(selected,{}),
+                    "selected START enters the original course-loading mode");
+            require(course.resource_type_635f34==10u&&course.resource_source_635f38==(secondary?10u:0u)&&
+                    course.fallback_gate_7d33b0==secondary,
+                    "START preserves committed level and secondary selection globals");
+            require(selected.game_mode.course_load_success==1u&&course.active_count_7d33c4==1&&
+                    course.selected_copy_active&&selected.game_mode.course_matrix_ready,
+                    "selected START builds one selected course instead of the default course tree");
+            outrun::driving::Bytes record(course.selected_7d30a8.data(),course.selected_7d30a8.size());
+            require(record.u32(0x1cu)==10u&&record.u32(0x20u)==(secondary?10u:0u)&&
+                    record.u32(0x14u)==real.descriptors.primary[10u].token&&
+                    record.u32(0x18u)==real.descriptors.secondary_tokens[secondary?10u:0u],
+                    "selected START resolves the committed primary and secondary descriptors");
+        }
         // 49BA80 world ids come from 44DBB0 on the live 7D30BC descriptor
         // (scene_owner_49ba80 + native_scene_owner_service).
     }
