@@ -258,9 +258,18 @@ prompt routing, geometry and rendering algorithms are unchanged. Help notes
 loading/memory costs and pack-dependent prompt artwork. Lola owns the matching
 Wheelkit @6 Cameras catalog/writer exposure and its affected preservation checks.
 Prior loader/pack/render evidence remains scoped to its original candidates;
-this addition has no new runtime/asset acceptance. The incremental native build
-and paired affected settings/catalog checks are pending. No game, pack download,
-owner install, provider retry, native canonical merge or public push.
+this addition has no new runtime/asset acceptance. Native 553fdb1 incremental
+OutRunDesktop built successfully; Wheelkit 82faef2 passed all five affected
+settings/catalog cases (four explicit one-key save/exact-backup cases preserving
+folder and other-toggle policy, plus the catalog assertion; zero failed/skipped).
+Private @6 catalog generation/parsing matched all 71 bundled OutRun rows. Native
+app 278B44A9 (23,832,064 bytes); original logs/result/TRX: hub
+artifacts/outrun-texture-settings-build-20261016/build-01. Exact lease released
+after owned-process cleanup and environment restoration, before docs/integration.
+No loader suite was repeated. Lola owns Wheelkit docs/ordinary integration;
+native remains private. Rendered F6/persistence, pack cold-loading and runtime
+visual behavior remain unqualified. No game, pack download, owner install,
+provider retry, native canonical merge or public push.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
