@@ -122,6 +122,7 @@ struct Values {
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
+    bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -169,6 +170,11 @@ void page_controls(bool){
          "DefaultManualTransmission. Its opening animation still shows Automatic briefly."))
          keep(&v.manual_default,before,[&]{return save("Misc","DefaultManualTransmission",v.manual_default?"true":"false");});}
     if(v.manual_default!=v.manual_default_start)dbce::panel::Text("The choice applies at the next game start.");
+    {const bool before=v.allow_horn;
+     if(dbce::panel::OffOn("Horn",&v.allow_horn,
+         "Allows the car horn during a race. Applies at the next game start."))
+         keep(&v.allow_horn,before,[&]{return save("Audio","AllowHorn",v.allow_horn?"true":"false");});}
+    if(v.allow_horn!=v.allow_horn_start)dbce::panel::Text("The horn choice applies at the next game start.");
 }
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
@@ -450,6 +456,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
+    v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     if(p.player_model==ffb::player::Model::Legacy){
