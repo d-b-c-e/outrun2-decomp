@@ -1,7 +1,7 @@
 #include "platform_api.hpp"
 #include "native_window.hpp"
 #include "platform/retail_asset_store.hpp"
-#include "platform/ui_prompt_family.hpp"
+#include "platform/pc_pmt_loader.hpp"
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <algorithm>
@@ -74,8 +74,12 @@ void read_pad(outrun::ps5::PadSample& sample){
     if(pick<0)return;
     const auto selected=pads.GetAt(std::uint32_t(pick));
     const auto r=selected.GetCurrentReading();
-    const auto id=identity(selected); // existing cached WGI identity; no second enumeration/reader
-    outrun::platform::texture_replacement_set_pad_family(outrun::platform::ui_prompt_family_for_identity(id.known,id.vid,id.pid));
+    // Only enabled UI replacements need presentation identity. Unknown IDs
+    // retry through WGI every 2 s; keep that work out of the default-off path.
+    if(outrun::platform::ui_texture_replacement_enabled()){
+        const auto id=identity(selected); // existing cache, separate from input isolation in choose_pad
+        outrun::platform::texture_replacement_set_pad_family(outrun::platform::ui_prompt_family_for_identity(id.known,id.vid,id.pid));
+    }
     sample.connected=true;
     sample.left_x=axis(r.LeftThumbstickX,false);sample.left_y=axis(r.LeftThumbstickY,true);
     sample.right_x=axis(r.RightThumbstickX,false);sample.right_y=axis(r.RightThumbstickY,true);
