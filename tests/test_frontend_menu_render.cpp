@@ -33,6 +33,8 @@ static std::vector<FrontendGlyph> check_level_select_gate(
     const FrontendFontPack& fonts,std::string& error){
     auto runtime=std::make_unique<NativeRuntimeContext>();auto& state=runtime->event_function36;
     runtime->mode_state.current=32u;state.state2_selector_child_state=27u;
+    // Key27 owns widgets without a common scene; a fresh context defaults to the title token.
+    state.frontend_menu_token=0u;
     CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
     state.network_screens[27]=0x0e001000u;
     CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
