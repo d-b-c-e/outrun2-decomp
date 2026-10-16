@@ -36,14 +36,21 @@ inline CdCatalog parse_cd_tracks(const std::vector<std::string>& lines){
     }
     return out;
 }
-// Masks use runtime::PadButton's platform-neutral layout (host_platform.hpp).
-// Analog-direction aliases are deliberately refused in this slice.
+// Low bits use runtime::PadButton's platform-neutral layout (host_platform.hpp).
+// These extra bits belong only to the switcher's derived sample, never a host,
+// game input or recording record. Tweaks game.hpp supplies the alias names.
+enum CdStickBits : std::uint64_t {
+    CdLsUp=1ull<<16,CdLsDown=1ull<<17,CdLsLeft=1ull<<18,CdLsRight=1ull<<19,
+    CdRsUp=1ull<<20,CdRsDown=1ull<<21,CdRsLeft=1ull<<22,CdRsRight=1ull<<23
+};
 inline bool parse_cd_combo(std::string_view text,std::uint64_t& mask){
     mask=0;if(text.size()>128u)return false;
     struct Named { const char* name;unsigned bit; };
     static constexpr Named names[]={{"a",0},{"b",1},{"x",2},{"y",3},{"ls",4},{"rs",5},
         {"lb",6},{"rb",7},{"lt",8},{"rt",9},{"start",10},{"back",11},
-        {"left",12},{"up",13},{"right",14},{"down",15}};
+        {"left",12},{"up",13},{"right",14},{"down",15},
+        {"ls-up",16},{"ls-down",17},{"ls-left",18},{"ls-right",19},
+        {"rs-up",20},{"rs-down",21},{"rs-left",22},{"rs-right",23}};
     while(true){
         const auto plus=text.find('+');const auto token=cd_trim(text.substr(0,plus));
         std::string key(token);for(auto& ch:key)ch=char(std::tolower(static_cast<unsigned char>(ch)));

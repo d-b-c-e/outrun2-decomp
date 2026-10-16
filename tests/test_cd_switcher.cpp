@@ -61,7 +61,7 @@ void edges(){
     check(parse_cd_combo(" Back ",back)&&back==(1ull<<11),"Back mask");
     check(parse_cd_combo(" rS + bAcK ",previous)&&previous==(back|(1ull<<5)),"case-insensitive combo");
     check(!parse_cd_combo("RS+unknown",bad)&&bad==0,"invalid combo atomic refusal");
-    check(!parse_cd_combo("",bad)&&!parse_cd_combo("Back+",bad)&&!parse_cd_combo("ls-up",bad),"empty/trailing/unsupported analog aliases refused");
+    check(!parse_cd_combo("",bad)&&!parse_cd_combo("Back+",bad)&&!parse_cd_combo("ls-diagonal",bad),"empty/trailing/unknown aliases refused");
     CdEdges e;auto step=[&](bool z,bool x,std::uint64_t pad=0,bool connected=true,bool block=false){return e.step(z,x,pad,connected,previous,back,block);};
     check(!step(false,false).next,"initial neutral arms");
     check(step(false,true).next&&!step(false,true).next&&!step(false,false).next,"X one press; hold and release no repeats");
@@ -127,6 +127,77 @@ void actual_pad_adapter(){
     (void)step(Share,true,true);check(!step(Share).next&&!step(0).next,"actual held pad crossing race/panel boundary is disarmed");
     (void)step(Share);check(step(0).next,"actual fresh pad press/release after boundary works");
 }
+void analog_pad_adapter(){
+    using namespace outrun::ps5;using outrun::desktop::cd_switcher_pad_sample;
+    struct Direction {
+        const char* name;std::int32_t NativeInputState::* axis;std::uint8_t PadSample::* raw;
+        int sign,deadzone;std::uint8_t extreme;
+    };
+    const Direction directions[]={
+        {"ls-up",&NativeInputState::left_stick_y,&PadSample::left_y,1,7849,0},
+        {"ls-down",&NativeInputState::left_stick_y,&PadSample::left_y,-1,7849,255},
+        {"ls-left",&NativeInputState::left_stick_x,&PadSample::left_x,-1,7849,0},
+        {"ls-right",&NativeInputState::left_stick_x,&PadSample::left_x,1,7849,255},
+        {"rs-up",&NativeInputState::right_stick_y,&PadSample::right_y,1,8689,0},
+        {"rs-down",&NativeInputState::right_stick_y,&PadSample::right_y,-1,8689,255},
+        {"rs-left",&NativeInputState::right_stick_x,&PadSample::right_x,-1,8689,0},
+        {"rs-right",&NativeInputState::right_stick_x,&PadSample::right_x,1,8689,255}};
+    std::uint64_t back{},seen{};check(parse_cd_combo("Back",back),"analog modifier Back parses");
+    for(const auto& direction:directions){
+        std::uint64_t bit{},combo{};
+        check(parse_cd_combo(direction.name,bit)&&parse_cd_combo(std::string(direction.name)+" + BACK",combo)&&
+              combo==(bit|back)&&cd_bit_count(bit)==1u&&!(seen&bit)&&!(bit&0xffffu),
+              "all eight direction aliases are distinct switcher-local bits and accept digital modifiers");
+        seen|=bit;
+        NativeInputState boundary{};boundary.connected=true;
+        for(const int offset:{-1,0,1}){
+            boundary.*direction.axis=direction.sign*(direction.deadzone+offset);
+            check(cd_switcher_pad_sample(boundary).held==(offset>0?bit:0u),
+                  "Tweaks strict signed threshold: exact deadzone and inside are neutral, one past is held");
+        }
+        DualSenseInput adapter;PadSample sample;sample.connected=true;
+        auto read=[&](){return cd_switcher_pad_sample(adapter.update(sample,16));};
+        const auto neutral=read();check(neutral.connected&&neutral.held==0,"actual neutral stick sample arms");
+        sample.*direction.raw=direction.extreme;
+        const auto native=adapter.update(sample,16);const auto held=cd_switcher_pad_sample(native);
+        check(held.held==bit&&native.raw_buttons_held==0&&(native.*direction.axis)*direction.sign>direction.deadzone,
+              "actual DualSense axis sign selects only its direction without synthesizing native button bits");
+        sample.buttons=Share;auto pad=read();check(pad.held==combo,"actual stick plus Back combination");
+        CdEdges edges;Player player;
+        CdSwitcher switcher{true,{{"a.ogg","A"},{"b.ogg","B"}},0,&player,Player::play};
+        auto step=[&](CdPadSample p,bool blocked=false){
+            return edges.step(false,false,p.held,p.connected,combo,back,blocked);
+        };
+        (void)step(neutral);check(!switcher.change(step(pad)),"stick combo waits for release");
+        check(!switcher.change(step(pad)),"held stick combo does not repeat");
+        sample.buttons=0;sample.*direction.raw=128;pad=read();
+        const auto release=step(pad);
+        check(release.previous&&!release.next&&switcher.change(release)&&switcher.cursor==1&&player.calls==1&&!player.loop,
+              "actual stick and digital release favors the more specific combo and plays one wrapped selection");
+        check(!switcher.change(step(pad))&&player.calls==1,"neutral after release does not replay");
+        sample.buttons=Share;sample.*direction.raw=direction.extreme;pad=read();(void)step(pad);
+        sample.connected=false;pad=read();
+        const auto unplug=step(pad);check(!unplug.previous&&!unplug.next&&pad.held==0,"stick disconnect is not a release");
+        sample.connected=true;pad=read();(void)step(pad,true);
+        check(!switcher.change(step(pad)),"held stick crossing race/panel boundary remains disarmed");
+        sample.buttons=0;sample.*direction.raw=128;pad=read();
+        check(!switcher.change(step(pad)),"boundary release only rearms");
+        sample.buttons=Share;sample.*direction.raw=direction.extreme;pad=read();(void)step(pad);
+        sample.*direction.raw=128;pad=read();const auto axis_release=step(pad);
+        check(axis_release.previous&&!axis_release.next,"stick leaving combo alone releases while Back remains held");
+    }
+    NativeInputState disconnected{};disconnected.raw_buttons_held=Share;disconnected.left_stick_x=32767;
+    check(cd_switcher_pad_sample(disconnected).held==0,"stale axes and buttons on a disconnected record are ignored");
+    NativeInputState diagonal{};diagonal.connected=true;diagonal.left_stick_x=7850;diagonal.left_stick_y=7850;
+    check(cd_switcher_pad_sample(diagonal).held==(CdLsRight|CdLsUp),"diagonal axes use independent thresholds");
+    std::uint64_t previous{};(void)parse_cd_combo("RS+Back",previous);CdEdges defaults;
+    (void)defaults.step(false,false,CdLsRight,true,previous,back,false);
+    (void)defaults.step(false,false,CdLsRight|back,true,previous,back,false);
+    const auto stock=defaults.step(false,false,CdLsRight,true,previous,back,false);
+    check(stock.next&&!stock.previous,"unrelated held steering direction preserves default Back release selection");
+    std::uint64_t mixed{};check(parse_cd_combo(" lS-Up + rS-rIgHt ",mixed)&&cd_bit_count(mixed)==2u,
+                              "mixed-case directions from both sticks combine");
+}
 struct Script {
     PcRaceMemory memory;std::array<std::uint8_t,0x58> records{};
     std::array<std::uint8_t,4> table{},camera{},car{},mode{};std::array<std::uint8_t,0x30> scene{};
@@ -163,4 +234,4 @@ void race(){
     s={};
 }
 }
-int main(){catalog();resolve();edges();cursor();actual_pad_adapter();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}
+int main(){catalog();resolve();edges();cursor();actual_pad_adapter();analog_pad_adapter();race();std::printf("CDSwitcher: %u checks PASS (synthetic behavior only)\n",checks);}

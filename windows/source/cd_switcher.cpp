@@ -38,7 +38,7 @@ void cd_switcher_configure(const Ini& settings,bool test_or_playback,bool record
         std::printf("settings: CDSwitcher off: %s\n",catalog.error.empty()?"no CDTracks":catalog.error.c_str());return;}
     if(!platform::parse_cd_combo(settings.text("CDSwitcher","TrackPrevious","RS+Back"),s.previous)||
        !platform::parse_cd_combo(settings.text("CDSwitcher","TrackNext","Back"),s.next)){
-        std::printf("settings: CDSwitcher off: invalid digital pad combination\n");return;}
+        std::printf("settings: CDSwitcher off: invalid pad combination\n");return;}
     s.z=MapVirtualKeyW('Z',MAPVK_VK_TO_VSC)&0xffu;s.x=MapVirtualKeyW('X',MAPVK_VK_TO_VSC)&0xffu;
     if(!s.z||!s.x||s.z>0x7fu||s.x>0x7fu){std::printf("settings: CDSwitcher off: layout has no plain Z/X keys\n");return;}
     s.clears=desktop_key_clears();s.edges={};s.in_race=false;s.configured=true;

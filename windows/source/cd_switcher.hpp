@@ -1,5 +1,6 @@
 #pragma once
 #include "input/dual_sense.hpp"
+#include "platform/cd_switcher.hpp"
 #include "runtime/host_platform.hpp"
 #include <utility>
 namespace outrun::desktop {
@@ -16,7 +17,20 @@ inline CdPadSample cd_switcher_pad_sample(const platform::NativeInputState& inpu
         {Options,runtime::PadPlus},{Share,runtime::PadMinus},{Left,runtime::PadLeft},{Up,runtime::PadUp},
         {Right,runtime::PadRight},{Down,runtime::PadDown}};
     CdPadSample sample{0,input.connected};
-    if(sample.connected)for(const auto& entry:mapping)if(input.raw_buttons_held&entry.first)sample.held|=entry.second;
+    if(!sample.connected)return sample;
+    for(const auto& entry:mapping)if(input.raw_buttons_held&entry.first)sample.held|=entry.second;
+    // Tweaks hooks_input.cpp PadUpdate uses strict XInput deadzone comparisons.
+    // The existing native axes already have XInput's sign/range (positive Y up).
+    // Read them before wheel/shim filters; never poll, rescale or write input.
+    struct Axis { std::int32_t value,deadzone;std::uint64_t positive,negative; };
+    const Axis axes[]={{input.left_stick_x,7849,platform::CdLsRight,platform::CdLsLeft},
+        {input.left_stick_y,7849,platform::CdLsUp,platform::CdLsDown},
+        {input.right_stick_x,8689,platform::CdRsRight,platform::CdRsLeft},
+        {input.right_stick_y,8689,platform::CdRsUp,platform::CdRsDown}};
+    for(const auto& axis:axes){
+        if(axis.value>axis.deadzone)sample.held|=axis.positive;
+        if(axis.value< -axis.deadzone)sample.held|=axis.negative;
+    }
     return sample;
 }
 class Ini;

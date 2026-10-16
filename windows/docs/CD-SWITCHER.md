@@ -55,8 +55,25 @@ native gamepad sample, normalized from its actual DualSense raw-bit layout to
 the host pad layout used by combination names. The pad connection is captured
 before wheel/shim filters update their own connection state, so a wheel cannot
 turn a pad disconnect into a track switch. Wheel Controls actions are not new switcher bindings.
-Analog stick direction aliases are refused. A bad combination disables this
-slice instead of silently changing its meaning.
+Stick-direction names also accept `ls-up`, `ls-down`, `ls-left`, `ls-right`,
+`rs-up`, `rs-down`, `rs-left` and `rs-right`, combined with those buttons or
+each other (for example `RS-Up+Back`). Like Tweaks `hooks_input.cpp`, each
+signed axis independently uses a strict threshold: greater than 7849 or less
+than -7849 for the left stick, 8689/-8689 for the right. Positive Y is up.
+Exactly at the threshold is neutral; diagonal axes can hold two directions.
+These are switcher-local bits derived from the existing native pad sample
+before wheel/shim filters, with the same release/specificity/disarm rules.
+They never become game button bits, a new Controls action or recorded input.
+A bad combination disables this slice instead of silently changing its meaning.
+
+October 16 source follow-up: the cumulative tracker had incorrectly marked the
+whole catalog/switcher unimplemented, despite the existing catalog, race music
+boundary, manual selection and title source above. This slice adds only those
+eight missing in-race stick aliases and extends the existing `test_cd_switcher`
+adapter/edge fixture. Default Back/RS+Back and Z/X, off-by-default activation,
+test/record/playback exclusion, audio/decoder/loop and title behavior remain as
+before. Affected desktop/fixture compile and `cd_switcher` run are pending;
+physical-controller and audible acceptance remain unqualified for this slice.
 
 ## Optional current-track title (new source)
 
@@ -109,8 +126,8 @@ their scaled metric ink width plus one UI unit (or one scale unit above 1x),
 rounded up. This keeps word gaps and ellipsis dots distinct at the defaults.
 Normal letter kerning, font/scale/position and all other HUD text stay unchanged.
 
-Partial Tweaks parity remains: startup shuffle, default track catalog and
-analog-direction aliases are not implemented. Scoped CD request/open/current
+Partial Tweaks parity remains: startup shuffle and default track catalog
+are not implemented. Scoped CD request/open/current
 evidence does not establish audible/physical quality. The width-aware title
 passed its affected compile/link and98 synthetic checks; its sampled visual
 run confirmed timing and center placement with tight-space/dot findings. This
