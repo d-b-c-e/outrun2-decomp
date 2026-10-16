@@ -153,8 +153,11 @@ Source-only menus/license follow-up, October 16: F6 Advanced Controls and Wheelk
 Controls expose the existing AllowCharacterSelection (Misc, Off), ShowOutRunMilesOnMenu
 (Misc, On) and HideOnlineSigninText (Bugfixes, Off) choices, saved for the next start.
 Hide sign-in also hides the menu Miles line; the independent saved Miles choice is kept.
-Menu navigation, sign-in rendering and license/save consumers are unchanged. These new
-controls are unbuilt/unrun; earlier graphics/music passes remain scoped to their inputs.
+Menu navigation, sign-in rendering and license/save consumers are unchanged. Native
+103e44f built successfully; Wheelkit92c8b75 passed the two sign-in/Miles preservation
+cases and changed catalog assertion (3/3), and private generation/parsing matched all56
+bundled OutRun rows. Original result/logs: hub artifacts/outrun-menu-settings-build-20261016/build-01.
+Rendered controls/persistence remain unqualified; earlier graphics/music passes stand.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
