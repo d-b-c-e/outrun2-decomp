@@ -24,6 +24,7 @@ Snapshot tick(std::uint64_t i){
     f.steering=std::int32_t(i*7%255)-127;f.accelerator=std::uint32_t(i*13%256);f.brake=std::uint32_t(i*5%256);
     f.shift_up=i%3==0;f.shift_down=i%4==1;f.menu_left=i%5==0;f.menu_right=i%5==1;f.menu_up=i%5==2;f.menu_down=i%5==3;
     f.menu_confirm=i%7==0;f.menu_cancel=i%7==3;f.start=i%9==0;
+    f.level_select_shift=i%3==1;
     f.frontend.feature_mask=std::uint32_t(0x2004u+i);f.frontend.device_held=std::uint32_t(i&0xffu);
     for(std::size_t k=0;k<f.frontend.axes.size();++k)f.frontend.axes[k]=std::int16_t(int(i*31+k*1000)%30000-15000);
     f.connected=true;f.pc_input_layer=true;f.pc_record_used=i%2==0;f.pc_overlay=i%6==0;f.pc_overlay_yield=i%6==1;
@@ -49,6 +50,9 @@ int run(){
     {const auto s=tick(4);const auto c=game_channels(s);
      for(const char* k:{"final.pcDrive","final.pcAxis01","final.pcAxis03","final.pcAxis17","final.pcAxis18"})check(c.count(k)==1,std::string("channel ")+k);
      const auto r=decoded_replay(c);
+     check(r.input.level_select_shift==s.consumed.level_select_shift,"consumed replay decodes the independent Shift modifier");
+     auto before_shift=c;before_shift.erase("final.levelSelectShift");
+     check(!decoded_replay(before_shift).input.level_select_shift,"a pre-alias tape replays with Shift released");
      check(r.pc_drive==s.pc_drive&&r.input.pc_device.axes_94[0x17]==s.consumed.pc_device.axes_94[0x17]&&r.input.pc_device.axes_94[0x01]==s.consumed.pc_device.axes_94[0x01],
            "decoded_replay round-trips pcDrive and the extra axes");
      auto old=c;old.erase("final.pcDrive");
@@ -79,17 +83,18 @@ int run(){
          replay.apply(in,drive);
          const auto& want=recorded[i].consumed;
          if(!(in.steering==want.steering&&in.accelerator==want.accelerator&&in.menu_confirm==want.menu_confirm&&in.frontend.feature_mask==want.frontend.feature_mask&&
-              in.pc_device.buttons_04==want.pc_device.buttons_04&&in.pc_device.axes_94==want.pc_device.axes_94&&drive==recorded[i].pc_drive&&replay.last_row()==std::int64_t(i)))
+              in.pc_device.buttons_04==want.pc_device.buttons_04&&in.pc_device.axes_94==want.pc_device.axes_94&&in.level_select_shift==want.level_select_shift&&drive==recorded[i].pc_drive&&replay.last_row()==std::int64_t(i)))
              check(false,"tick "+std::to_string(i)+" plays row "+std::to_string(i));
      }
      check(replay.ended()&&replay.played()==40,"all rows played");
      pf::NativeInputState in{};in.steering=50;in.accelerator=200;in.menu_confirm=true;in.connected=true;in.pc_input_layer=true;bool drive=true;
-     replay.apply(in,drive);
-     check(in.steering==0&&in.accelerator==0&&!in.menu_confirm&&in.connected&&in.pc_input_layer&&!drive&&replay.last_row()==-1,"after the last row: neutral, never the live input");}
+     in.level_select_shift=true;replay.apply(in,drive);
+     check(in.steering==0&&in.accelerator==0&&!in.menu_confirm&&!in.level_select_shift&&in.connected&&in.pc_input_layer&&!drive&&replay.last_row()==-1,"after the last row: neutral, never the live input");}
     {ConsumedReplay refused(nullptr,"a tape recorded before the replay seam");
      pf::NativeInputState in{};in.steering=50;in.start=true;in.connected=true;bool drive=true;
+     in.level_select_shift=true;
      refused.apply(in,drive);
-     check(!refused.admitted()&&refused.ended()&&in.steering==0&&!in.start&&in.connected&&!drive,"a refused tape holds neutral from the first tick");}
+     check(!refused.admitted()&&refused.ended()&&in.steering==0&&!in.start&&!in.level_select_shift&&in.connected&&!drive,"a refused tape holds neutral from the first tick");}
 
     // 4. The seam fixture: the race update's two readers (453640 switches, 453860 analogue) over the recorded and the
     //    replayed ticks give the same records, for the keyboard table (pcDrive) and every joystick configuration.

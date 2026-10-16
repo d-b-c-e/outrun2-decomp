@@ -10,6 +10,7 @@
 #include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
 #include "hud_toggle.hpp"
+#include "level_select_input.hpp"
 #include "cd_switcher.hpp"
 #include "display_fit.hpp"
 #include "renderer.hpp"
@@ -581,6 +582,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // A playback process is as a latched one here: no telemetry, the software force stream into its home, no device
     // output, no saves; and its panel never opens (the badge only).
     const bool test_like=plan.latched||playback;
+    // Preserve the native records: the level menu's Shift modifier is separate
+    // final input, captured in ordinary recordings and supplied by consumed replay.
+    outrun::desktop::level_select_input_configure(outrun::platform::g_pc_enable_level_select,test_like);
+    outrun::desktop::level_select_wrap_input_filter();
     const std::string private_home=plan.latched?fence::utf8(plan.run_root):playback?session::utf8(intake.home):std::string();
     outrun::desktop::telemetry_configure(settings,test_like);
     outrun::desktop::telemetry_wrap_input_filter();

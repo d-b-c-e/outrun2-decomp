@@ -23,11 +23,14 @@ int main(){
     const auto one=base();
     const auto c1=channels(one);
     check(!prefixed(c1,"final.")&&!prefixed(c1,"keyboard."),"an @1 row has no final.* or keyboard.* channel");
+    {auto unconsumed=one;unconsumed.consumed.level_select_shift=true;
+     check(channels(unconsumed)==c1,"the new modifier cannot change any @1 capture channel");}
     check(std::string(CaptureContract)=="dbce.shim.outrun-capture@1\n"&&std::string(CaptureContract2)=="dbce.shim.outrun-capture@2\n","the two contracts");
 
     auto two=base();two.has_consumed=true;
     auto& f=two.consumed;
     f.steering=-77;f.accelerator=200;f.brake=13;f.shift_up=true;f.menu_left=true;f.menu_confirm=true;f.start=true;f.horn=true;
+    f.level_select_shift=true;
     f.frontend.feature_mask=0x2004u;f.frontend.device_held=0x80u;f.frontend.axes={-5,6,-7,8};f.connected=true;
     f.pc_input_layer=true;f.pc_record_used=true;f.pc_overlay=true;f.pc_overlay_yield=true;
     f.pc_device.buttons_04=0x182u;f.pc_device.axes_94[0x0e]=-12000;f.pc_device.axes_94[0x0d]=255;f.pc_device.axes_94[0x0c]=17;
@@ -76,6 +79,15 @@ int main(){
           g.pc_device.axes_94[0x0e]==-12000&&g.pc_device.axes_94[0x0d]==255&&g.pc_device.axes_94[0x0c]==17,"the PC layer's record round-trips");
     check(d.keyboard.enter&&!d.keyboard.esc&&d.keyboard.up&&d.keyboard.right&&d.keyboard.any&&d.keyboard.drives,"the keyboard provenance round-trips");
     check(g.horn&&c2.at("final.horn")==1.0,"the horn action round-trips (final.horn)");
+    check(g.level_select_shift&&c2.at("final.levelSelectShift")==1.0,"the separate level-menu Shift modifier round-trips");
+    {auto released=two;released.consumed.level_select_shift=false;
+     auto only_shift=channels(released);only_shift.erase("final.levelSelectShift");
+     auto held=c2;held.erase("final.levelSelectShift");
+     check(only_shift==held,"Shift changes no original frame, adapter, PC, pad, keyboard or consumed signal");
+     check(!decoded_consumed(only_shift).input.level_select_shift,"old rows without Shift default released");
+     for(const double bad_shift:{-1.0,0.5,2.0}){auto bad_value=c2;bad_value["final.levelSelectShift"]=bad_shift;
+      bool refused=false;try{(void)decoded_consumed(bad_value);}catch(const std::exception&){refused=true;}
+      check(refused,"a nonboolean level-menu Shift value is refused");}}
     {auto old=c2;old.erase("final.horn");check(!decoded_consumed(old).input.horn,"a row recorded before the horn decodes it as released");
      old=c2;old["final.horn"]=2;bool refused=false;try{(void)decoded_consumed(old);}catch(const std::exception&){refused=true;}
      check(refused,"an out-of-range horn value is refused");}

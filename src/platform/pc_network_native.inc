@@ -92,7 +92,8 @@ bool network_native(NativeRuntimeContext& c,State& s,std::uint32_t pc,std::uint3
                     // The preceding cdecl 4035F0 left its argument 3 on the
                     // PC stack, where 440DF0 consumes it (RET 4).
                     (void)x.net.call(0x440df0u,{3u},owner);}};
-            eax=level_select_update_4e7800(driving::Bytes(net.m.at(ecx,0x130e5u,true),0x130e5u),true,services);
+            eax=level_select_update_4e7800(driving::Bytes(net.m.at(ecx,0x130e5u,true),0x130e5u),true,services,
+                                         c.input_state.level_select_shift);
             return true;
         }
     case 0x454670u:net.tick_454670();eax=0;return true;

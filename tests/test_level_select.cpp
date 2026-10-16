@@ -31,7 +31,7 @@ struct Screen {
             check(table<2u&&index<20u,"bounded classification table access");++s.table_reads;return s.table.at(table);},
         [](void* p,std::int32_t course,bool secondary){auto& s=*static_cast<Screen*>(p);s.order+='C';
             ++s.commits;s.committed=course;s.secondary=secondary;}};}
-    std::uint32_t tick(bool on=true){return level_select_update_4e7800(object(),on,services());}
+    std::uint32_t tick(bool on=true,bool shift=false){return level_select_update_4e7800(object(),on,services(),shift);}
 };
 void mapping(){
     // Authored row -> course mapping independently enumerated from the PC's
@@ -49,6 +49,10 @@ void mapping(){
         const bool alternate=expected[row]>=10&&expected[row]<=29;
         check(s.tick()==1u&&s.secondary==alternate&&bool(s.object().u8(0x130e4u))==alternate,"LS alternate allowed only for the classification range");
         check(s.table_reads==(alternate?2u:0u)&&s.mask==0x110u,"no out-of-range table lookup, local alias mask");
+        s=Screen{};s.object().put32(0x34u,row);s.action=0u;
+        check(s.tick(true,true)==1u&&s.secondary==alternate&&bool(s.object().u8(0x130e4u))==alternate,
+              "recorded Shift follows the same classification on all 66 rows");
+        check(s.held==0u&&s.mask==0x110u,"Shift never rewrites the native held switch record");
     }
 }
 void actions(){
@@ -57,6 +61,8 @@ void actions(){
         check(s.tick(on)==0u&&s.object().u8(0x130e4u)==unsigned(on),"off keeps native X-only mask; on also accepts LS");
         s.held=0x10u;check(s.tick(on)==0u&&s.object().u8(0x130e4u)==1u,"native X remains accepted");
         s.held=0u;check(s.tick(on)==0u&&s.object().u8(0x130e4u)==0u,"release clears alternate immediately");
+        check(s.tick(on,true)==0u&&s.object().u8(0x130e4u)==unsigned(on),"Shift alias is enabled only by the level-select option");
+        check(s.tick(on,false)==0u&&s.object().u8(0x130e4u)==0u,"Shift release clears the alternate without a native switch edge");
     }
     Screen s;s.object().put32(0x34u,20u);s.held=0x100u;s.action=0u;
     check(s.tick()==1u&&s.order=="AS01C"&&s.secondary,"native callback and table/commit order");
@@ -64,6 +70,10 @@ void actions(){
     check(s.tick()==1u&&!s.secondary&&s.object().u8(0x130e4u)==0u,"first table refuses alternate");
     s=Screen{};s.object().put32(0x34u,20u);s.held=0x100u;s.action=0u;s.table[1]=false;
     check(s.tick()==1u&&!s.secondary&&s.object().u8(0x130e4u)==1u,"second table gates committed secondary, not highlight");
+    s=Screen{};s.object().put32(0x34u,20u);s.action=0u;s.table[0]=false;
+    check(s.tick(true,true)==1u&&!s.secondary&&s.object().u8(0x130e4u)==0u,"Shift cannot bypass the first classification");
+    s=Screen{};s.object().put32(0x34u,20u);s.action=0u;s.table[1]=false;
+    check(s.tick(true,true)==1u&&!s.secondary&&s.object().u8(0x130e4u)==1u,"Shift cannot bypass the second classification");
     for(const auto action:{1u,3u,5u,12u,~0u}){
         s=Screen{};s.object().put32(0x34u,21u);s.action=action;
         const auto expected=action==1u?2u:0u;

@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/desktop_sett
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
@@ -248,6 +248,12 @@ target_include_directories(test_hud_toggle PRIVATE source ${PROJECT_SOURCE_DIR}/
 target_compile_features(test_hud_toggle PRIVATE cxx_std_17)
 target_compile_options(test_hud_toggle PRIVATE /W4 /WX)
 add_test(NAME hud_toggle COMMAND test_hud_toggle)
+# Level Select's real normalized desktop publisher, with synthetic backend/panel owners.
+add_executable(test_level_select_input tests/test_level_select_input.cpp source/level_select_input.cpp)
+target_include_directories(test_level_select_input PRIVATE source ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/xbox/source)
+target_compile_features(test_level_select_input PRIVATE cxx_std_17)
+target_compile_options(test_level_select_input PRIVATE /W4 /WX /EHsc)
+add_test(NAME level_select_input COMMAND test_level_select_input)
 # The native wheel path's rescan policy (source/wheel_rescan.hpp): device changes and missing bindings only.
 add_executable(test_wheel_rescan tests/test_wheel_rescan.cpp)
 target_include_directories(test_wheel_rescan PRIVATE source)

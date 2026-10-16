@@ -70,6 +70,7 @@ inline rec::Channels consumed_channels(const Snapshot& s){
     c["final.menuLeft"]=f.menu_left;c["final.menuRight"]=f.menu_right;c["final.menuUp"]=f.menu_up;c["final.menuDown"]=f.menu_down;
     c["final.menuConfirm"]=f.menu_confirm;c["final.menuCancel"]=f.menu_cancel;c["final.start"]=f.start;
     c["final.horn"]=f.horn;
+    c["final.levelSelectShift"]=f.level_select_shift;
     c["final.featureMask"]=f.frontend.feature_mask;c["final.deviceHeld"]=f.frontend.device_held;
     for(std::size_t i=0;i<f.frontend.axes.size();++i)c["final.frontAxis"+std::to_string(i)]=f.frontend.axes[i];
     c["final.connected"]=f.connected;
@@ -150,6 +151,11 @@ inline Consumed decoded_consumed(const rec::Channels& c){
     f.menu_left=b("final.menuLeft");f.menu_right=b("final.menuRight");f.menu_up=b("final.menuUp");f.menu_down=b("final.menuDown");
     f.menu_confirm=b("final.menuConfirm");f.menu_cancel=b("final.menuCancel");f.start=b("final.start");
     f.horn=c.count("final.horn")?b("final.horn"):false;   // AllowHorn's action; rows recorded before it have none
+    if(c.count("final.levelSelectShift")){
+        const double shift=rec::number(c,"final.levelSelectShift",0,1);
+        if(shift!=0.0&&shift!=1.0)throw std::runtime_error("final.levelSelectShift is not 0 or 1");
+        f.level_select_shift=shift==1.0;
+    } // Older rows have no Shift alias: released, never filled from live input.
     f.frontend.feature_mask=std::uint32_t(rec::number(c,"final.featureMask",0,UINT32_MAX));
     f.frontend.device_held=std::uint32_t(rec::number(c,"final.deviceHeld",0,UINT32_MAX));
     for(std::size_t i=0;i<f.frontend.axes.size();++i)f.frontend.axes[i]=std::int16_t(rec::number(c,("final.frontAxis"+std::to_string(i)).c_str(),INT16_MIN,INT16_MAX));

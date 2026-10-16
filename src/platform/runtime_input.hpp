@@ -45,6 +45,9 @@ struct NativeInputState {
     std::int32_t left_stick_y{};
     std::int32_t right_stick_x{};
     std::int32_t right_stick_y{};
+    // Window-delivered Shift for the opt-in level menu only. Separate from the
+    // PC/switch/pad records; consumed recording/replay carries this modifier.
+    bool level_select_shift{};
 };
 
 using NativeInputSample = void(*)(void* user,NativeInputState& state);
