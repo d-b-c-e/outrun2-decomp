@@ -165,7 +165,7 @@ void analog_pad_adapter(){
         sample.buttons=Share;auto pad=read();check(pad.held==combo,"actual stick plus Back combination");
         CdEdges edges;Player player;
         CdSwitcher switcher{true,{{"a.ogg","A"},{"b.ogg","B"}},0,&player,Player::play};
-        auto step=[&](CdPadSample p,bool blocked=false){
+        auto step=[&](auto p,bool blocked=false){
             return edges.step(false,false,p.held,p.connected,combo,back,blocked);
         };
         (void)step(neutral);check(!switcher.change(step(pad)),"stick combo waits for release");
