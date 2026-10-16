@@ -177,8 +177,18 @@ All modes retain the valid fourth-course-lane gate and do not edit license progr
 The native startup consumer and its integer-prefix/fallback behavior are unchanged;
 Wheelkit reads the same effective value without rewriting the saved INI. Explicit
 edits reuse existing one-key writers and apply at the next start, outside rig profiles.
-Source only: build, affected settings/catalog checks, rendered F6 and persistence
-are pending; earlier music/graphics/menu/character results remain valid.
+Offline qualification passed on native dd38948 / Wheelkit 609885e: incremental
+OutRunDesktop built successfully and the six affected settings/catalog cases passed
+(17 integer grammar/boundary inputs in one read fixture, four save/backup roundtrips,
+one catalog preservation assertion; zero failed/skipped). Private @6 generation and
+parsing matched all 60 bundled OutRun rows. Native app B18AD831 (23,819,776 bytes);
+original logs, result.json and affected.trx are in hub
+artifacts/outrun-holly-settings-build-20261016/build-01. The exact shared lease was
+released with environment restored and owned processes quiescent. One initial
+worktree-path typo stopped preflight before lease/build and was corrected; the
+original failed evidence is retained. No game/install/provider/publication. Earlier
+music/graphics/menu/character passes stand; rendered F6, persistence and the actual
+unlocked course route remain unqualified.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
