@@ -169,6 +169,17 @@ and fast-forwarded into clean canonical main from5efc986; the native candidate r
 private. Original logs/result: hub artifacts/outrun-character-appearance-build-20261016/build-01.
 Rendered appearance and F6 persistence remain unqualified; prior suite passes stand.
 
+Holly MIX 2 availability source follow-up, October 16: F6 Advanced Controls and
+Wheelkit @6 Controls expose existing Misc.EnableHollyCourse2 modes 0..3 through
+one descriptive choice. Default 3 shows and unlocks MIX 2 at Holly 1 grade A;
+mode 2 shows the locked tile earlier, mode 1 unlocks with Holly 1 and 0 is Off.
+All modes retain the valid fourth-course-lane gate and do not edit license progress.
+The native startup consumer and its integer-prefix/fallback behavior are unchanged;
+Wheelkit reads the same effective value without rewriting the saved INI. Explicit
+edits reuse existing one-key writers and apply at the next start, outside rig profiles.
+Source only: build, affected settings/catalog checks, rendered F6 and persistence
+are pending; earlier music/graphics/menu/character results remain valid.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
