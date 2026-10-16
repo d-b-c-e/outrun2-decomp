@@ -119,6 +119,8 @@ struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
+    bool scene_textures{},ui_textures{};   // existing default-off Graphics startup flags
+    std::string texture_folder{"textures"};   // saved base folder, shown only; the native loader validates it
     std::string shadow_opacity{"1"};   // raw setting: arbitrary custom values stay intact until an explicit preset edit
     bool screen_edge_cull{true},screen_edge_cull_start{true};   // [Graphics] ScreenEdgeCullFix
     int anisotropic{},reflection{1},draw_ahead{},draw_behind{};   // reflection: index of 64..4096, default 128
@@ -456,6 +458,16 @@ void page_cameras(bool advanced){
                 v.shadow_opacity=values[selected];
         }
     }
+    dbce::panel::Heading("Texture replacements");
+    graphics_flag("Scene texture replacements",&v.scene_textures,"SceneTextureReplacement",
+        "Off by default. Uses an existing Tweaks texture pack for cars, stages and other scene textures. "
+        "Packs can increase loading time and memory use. Applies at the next game start.");
+    graphics_flag("UI texture replacements",&v.ui_textures,"UITextureReplacement",
+        "Off by default. Uses an existing Tweaks texture pack for menus, HUD and button prompts. "
+        "Prompt artwork depends on the pack. Packs can increase loading time and memory use. Applies at the next game start.");
+    dbce::panel::Status("Saved texture base folder",v.texture_folder.c_str());
+    dbce::panel::Text("Packs are read from <game folder>/<base folder>/load; the default is textures/load. "
+        "Invalid or external base paths use textures. Folder settings apply at the next start.");
     dbce::panel::Text("Graphics detail changes apply at the next game start.");
 }
 void page_telemetry(bool advanced){
@@ -649,6 +661,9 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.particle_fix=settings.flag("Bugfixes","FixParticleRendering",true);
     v.bunki_fix=settings.flag("Bugfixes","FixRightSideBunkiAnimations",true);
     v.shadow_opacity=settings.text("Graphics","CarBaseShadowOpacity","1");
+    v.scene_textures=settings.flag("Graphics","SceneTextureReplacement",false);
+    v.ui_textures=settings.flag("Graphics","UITextureReplacement",false);
+    v.texture_folder=settings.text("Graphics","TextureBaseFolder","textures");
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle

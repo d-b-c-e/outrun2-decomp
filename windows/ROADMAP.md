@@ -248,6 +248,20 @@ Qualified Wheelkit source is on main; native remains private. No consumer suite 
 repeated. Rendered F6/persistence and visual effects remain unqualified; no game,
 install, provider retry or publication.
 
+Texture replacement exposure batch, October 16: F6 Advanced Cameras exposes the
+existing Graphics.SceneTextureReplacement and UITextureReplacement flags, both
+Off by default and explicit one-key edits for the next start. The saved
+TextureBaseFolder is shown without editing it; the existing consumer alone
+validates game-relative paths, falls back to textures for invalid paths and
+loads <game folder>/<base folder>/load. Folder, lookup, pack selection, decoder,
+prompt routing, geometry and rendering algorithms are unchanged. Help notes
+loading/memory costs and pack-dependent prompt artwork. Lola owns the matching
+Wheelkit @6 Cameras catalog/writer exposure and its affected preservation checks.
+Prior loader/pack/render evidence remains scoped to its original candidates;
+this addition has no new runtime/asset acceptance. The incremental native build
+and paired affected settings/catalog checks are pending. No game, pack download,
+owner install, provider retry, native canonical merge or public push.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
