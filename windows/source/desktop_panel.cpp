@@ -460,11 +460,13 @@ void page_cameras(bool advanced){
     }
     dbce::panel::Heading("Texture replacements");
     graphics_flag("Scene texture replacements",&v.scene_textures,"SceneTextureReplacement",
-        "Off by default. Uses an existing Tweaks texture pack for cars, stages and other scene textures. "
-        "Packs can increase loading time and memory use. Applies at the next game start.");
+        "Off by default. Uses an existing Tweaks pack for cars, stages and other scene textures from the saved "
+        "TextureBaseFolder/load folder (textures/load by default). Packs can increase loading time and memory use. "
+        "Applies at the next game start.");
     graphics_flag("UI texture replacements",&v.ui_textures,"UITextureReplacement",
-        "Off by default. Uses an existing Tweaks texture pack for menus, HUD and button prompts. "
-        "Prompt artwork depends on the pack. Packs can increase loading time and memory use. Applies at the next game start.");
+        "Off by default. Uses an existing Tweaks pack for menus, HUD and button prompts from the saved "
+        "TextureBaseFolder/load folder (textures/load by default). Prompt artwork depends on the pack. "
+        "Packs can increase loading time and memory use. Applies at the next game start.");
     dbce::panel::Status("Saved texture base folder",v.texture_folder.c_str());
     dbce::panel::Text("Packs are read from <game folder>/<base folder>/load; the default is textures/load. "
         "Invalid or external base paths use textures. Folder settings apply at the next start.");
