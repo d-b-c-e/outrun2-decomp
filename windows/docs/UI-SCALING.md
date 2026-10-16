@@ -213,7 +213,12 @@ ints.
   - The existing `test_course_asset_pack` fixture is extended for the actual variant-5 GAD GOAL dispatch, retained
     stock frame advancement/clock/RNG, fruit and real translated heart-tail scope capture, and scope/fault restoration.
     Its virtual fruit draw-only test leaf is explicitly synthetic; it does not claim authored fruit art or rendered pixels.
-    Affected compile and that one fixture remain pending; rendered C2C GOAL acceptance remains unqualified.
+    Cached ClangCL Release build of `OutRunDesktop` + `test_course_asset_pack` passed at `e4d9886`; only
+    `owned_request_course_phase` ran and passed (1/1, zero skipped). Original logs and copied LastTest output are in
+    hub `artifacts/outrun-c2c-goal-spacing-20261016/build-01`; executable SHA-256
+    `fa72409308227f596016b58ae6e83f74a577cafac969f3baaa61007b29b26e76` (23,865,856 bytes).
+    The shared lease was released with children quiescent and process environment restored. No game/UI/install;
+    rendered C2C GOAL acceptance remains unqualified.
 ## Step 4, race route only: mode 1 against mode 2 (sana 40590 / 40633; 2026-10-12)
 
 - **Setup:** one bounded run per mode with the same exe (6547538, `ui1`), muted, in the perf copy. Window
@@ -319,6 +324,6 @@ ints.
 | 4FC84E ... 4FE8B1 C2C GF bubbles, rank emoji, rank text (18) | `F_4fc830`, `F_4fc9a0`, `F_4fcd40`, `F_4fd4e0`, `F_4fe760`, bulk_tr.cpp | translated | source bridge in `race_translated.cpp` and the 18-site return-PC table in `c2c_ui_spacing.hpp`; generated code unchanged, visual check pending |
 | 460A21 set_icon_work (GF request bubble) | `banner_open_460970` +B1, race_traffic_heart_setup.inc | hand | the heart code lives in `race_traffic_*.inc` (a first scan of .cpp files missed it) |
 | 460D40 / 460FBC ctrl_icon_work | `banner_460ad0` +270 / +4EC, race_traffic_heart_meter.inc | hand | the function's PC extent is to be confirmed |
-| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | canonical native request display 481A40, reached from GAD GOAL 46C220 | hand + existing translated children | Source connects the existing reconstruction, captures off/detect/off scopes per deferred submission, and reuses NAVI/GAD draw services. Affected compile/fixture pending; rendered placement unqualified. |
+| 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | canonical native request display 481A40, reached from GAD GOAL 46C220 | hand + existing translated children | Source connects the existing reconstruction, captures off/detect/off scopes per deferred submission, and reuses NAVI/GAD draw services. Affected Release build and owned_request_course_phase pass at e4d9886; rendered placement unqualified. |
 
-- **Open:** C2C rendered positions and goal-result acceptance. The canonical reconstruction, GOAL route, deferred fruit/heart scopes and translated positional bridge are in source; this follow-up still needs its affected compile/fixture.
+- **Open:** C2C rendered positions and goal-result acceptance. The canonical reconstruction, GOAL route, deferred fruit/heart scopes and translated positional bridge are in source; the affected build and one owned course fixture pass, with no rendered-result claim.
