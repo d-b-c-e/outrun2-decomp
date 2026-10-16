@@ -117,6 +117,7 @@ Letterbox lb;
 struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
+    bool screen_edge_cull{true},screen_edge_cull_start{true};   // [Graphics] ScreenEdgeCullFix
     bool auto_resolution{true},auto_resolution_start{true};   // [Window] AutoDetectResolution
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
@@ -321,6 +322,12 @@ void page_cameras(bool advanced){
          keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});}
     if(v.letterbox>0&&v.ui_scaling==0)dbce::panel::Status("Letterboxing now","inactive: [Graphics] UIScalingMode is 0 (stretched)");
     if(v.letterbox!=v.letterbox_start)dbce::panel::Text("The choice applies at the next game start.");
+    {const bool before=v.screen_edge_cull;
+     if(dbce::panel::OffOn("Widescreen object visibility",&v.screen_edge_cull,
+         "On (default): cones, course objects and gates use the wider screen bounds. Off: these objects use the original "
+         "4:3 visibility bounds. Both choices behave the same at 4:3. Applies at the next game start."))
+         keep(&v.screen_edge_cull,before,[&]{return save("Graphics","ScreenEdgeCullFix",v.screen_edge_cull?"true":"false");});}
+    if(v.screen_edge_cull!=v.screen_edge_cull_start)dbce::panel::Text("The choice applies at the next game start.");
     // [Window] AutoDetectResolution (renderer.hpp g_auto_detect_height), read at start, so it applies at the next start.
     {const bool before=v.auto_resolution;
      if(dbce::panel::OffOn("Resolution from the display",&v.auto_resolution,
@@ -497,6 +504,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
     {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
+    v.screen_edge_cull=v.screen_edge_cull_start=settings.flag("Graphics","ScreenEdgeCullFix",true);   // as window_desktop.cpp
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
