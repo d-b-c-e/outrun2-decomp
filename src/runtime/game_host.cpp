@@ -13,6 +13,7 @@
 #include "platform/race_area_runtime.hpp"
 #include "platform/frontend_ui_resources.hpp"
 #include "platform/pc_screen.hpp"   // race AREA/SKY (events 390/391)
+#include "platform/pc_network.hpp"  // read-only key-27/28 native menu observation
 #include "platform/race_ghosts_runtime.hpp"   // Time Attack ghosts
 #include "platform/race_end_runtime.hpp"      // race end modes 19..35
 #include "platform/race_traffic_runtime.hpp"  // the C2C request manager (event 0x190)
@@ -919,25 +920,48 @@ void live_log(GameHost& s){
 // frontend/race route signature changes, so a key script can wait for the page a press belongs to instead of a
 // fixed time. Read-only: mode 78026C, the state2 page key, frontend stack pushes and PC confirms, the menu cursor,
 // the START stage, GO (GAME with 8367BC <= 60, CommonPlCar's start hold released) and [780248]. At most 4000 lines.
+// Key 27/28 use their actual network screen's +34 row, not frontend_menu_index.
+// The optional suffix records produced widgets, the level alternate flag and
+// committed course globals. It does not assert rendered pixels or readiness.
 void route_state_note(const GameHost& s){
     static const char* path=std::getenv("OR2_ROUTE_STATE");
     if(!path||!*path||!s.runtime)return;
     static std::FILE* file=std::fopen(path,"ab");
-    static std::array<std::int64_t,8> last{{-1,-1,-1,-1,-1,-1,-1,-1}};
+    static std::array<std::int64_t,13> last{};
     static unsigned lines=0;
     if(!file||lines>=4000u)return;
     const auto& r=*s.runtime;const auto& f=r.event_function36;
-    const std::array<std::int64_t,8> now{{r.mode_state.current,f.state2_selector_child_state,f.frontend_stack_pushes,
-        f.frontend_menu_confirms,f.frontend_menu_index,r.start_mode.stage,
-        (r.mode_state.current==16u&&r.game_mode.start_countdown<=60)?1:0,r.start_mode.game_flag_780248}};
-    if(now==last)return;
+    std::int64_t index=f.frontend_menu_index,alternate=-1,widgets=-1;
+    const auto key=f.state2_selector_child_state;
+    if(r.mode_state.current==32u&&(key==27u||key==28u)){
+        index=-1;
+        const auto object=f.network_screens[key];
+        const auto size=key==27u?0x130e5u:0x38u;
+        if(object)if(auto* bytes=pf::native_network_view(object,size)){
+            const driving::Bytes menu(bytes,size);
+            const auto row=menu.i32(0x34u);
+            if(menu.u32(8u)==key&&row>=0&&row<=(key==27u?65:29)){
+                index=row;
+                if(key==27u)alternate=menu.u8(0x130e4u);
+                widgets=(!f.network_widgets.glyphs().empty()||!f.network_widgets.images().empty()||
+                         !f.network_widgets.icons().empty())?1:0;
+            }
+        }
+    }
+    const auto& course=r.game_mode.course_runtime;
+    const std::array<std::int64_t,13> now{{r.mode_state.current,key,f.frontend_stack_pushes,
+        f.frontend_menu_confirms,index,r.start_mode.stage,
+        (r.mode_state.current==16u&&r.game_mode.start_countdown<=60)?1:0,r.start_mode.game_flag_780248,
+        widgets,alternate,course.resource_type_635f34,course.resource_source_635f38,course.fallback_gate_7d33b0}};
+    if(lines&&now==last)return;
     last=now;++lines;
     static const auto t0=std::chrono::steady_clock::now();
     const auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-t0).count();
-    std::fprintf(file,"route t=%lld frame=%u mode=%lld child=%lld pushes=%lld confirms=%lld index=%lld start=%lld go=%lld pause=%lld\n",
+    std::fprintf(file,"route t=%lld frame=%u mode=%lld child=%lld pushes=%lld confirms=%lld index=%lld start=%lld go=%lld pause=%lld widgets=%lld alternate=%lld course=%lld source=%lld secondary=%lld\n",
         static_cast<long long>(ms),s.input_samples,static_cast<long long>(now[0]),static_cast<long long>(now[1]),static_cast<long long>(now[2]),
         static_cast<long long>(now[3]),static_cast<long long>(now[4]),static_cast<long long>(now[5]),static_cast<long long>(now[6]),
-        static_cast<long long>(now[7]));
+        static_cast<long long>(now[7]),static_cast<long long>(now[8]),static_cast<long long>(now[9]),
+        static_cast<long long>(now[10]),static_cast<long long>(now[11]),static_cast<long long>(now[12]));
     std::fflush(file);
 }
 

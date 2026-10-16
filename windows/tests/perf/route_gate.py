@@ -20,7 +20,11 @@ pressed blindly afterwards (the caller closes the game).
 import pathlib, re
 
 FIELDS = ("mode", "child", "pushes", "confirms", "index", "start", "go", "pause")
-LINE = re.compile(r"^route t=(\d+) frame=(\d+) " + " ".join(r"%s=(-?\d+)" % f for f in FIELDS) + r"\s*$")
+# Old trace lines remain readable. These observations exist only in the extended
+# native trace; their absence must never masquerade as selected row/course zero.
+MENU_FIELDS = ("widgets", "alternate", "course", "source", "secondary")
+LINE = re.compile(r"^route t=(\d+) frame=(\d+) " + " ".join(r"%s=(-?\d+)" % f for f in FIELDS)
+                  + r"(?: " + " ".join(r"%s=(-?\d+)" % f for f in MENU_FIELDS) + r")?\s*$")
 
 
 class GateError(Exception):
@@ -30,8 +34,8 @@ class GateError(Exception):
 def parse_line(line):
     m = LINE.match(line.strip())
     if not m: return None
-    v = [int(x) for x in m.groups()]
-    return dict(zip(("t", "frame") + FIELDS, v))
+    names = ("t", "frame") + FIELDS + MENU_FIELDS
+    return {name: int(value) for name, value in zip(names, m.groups()) if value is not None}
 
 
 class StateReader:

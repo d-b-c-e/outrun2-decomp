@@ -76,6 +76,15 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(p, "a", encoding="ascii") as f: f.write("ld=7 pushes=0 confirms=0 index=0 start=0 go=0 pause=0\n")
     got = r.poll(); check(len(got) == 1 and r.state["child"] == 7, "the completed line is parsed on the next poll")
     check(rg.parse_line("route t=1 frame=1 mode=32") is None, "a short line is rejected")
+    legacy = rg.parse_line(line(6, child=27))
+    check("course" not in legacy and "alternate" not in legacy, "legacy lines do not invent menu observations")
+    extended = rg.parse_line(line(7, child=27, index=20).rstrip() +
+                             " widgets=1 alternate=1 course=10 source=10 secondary=1\n")
+    check(extended is not None and extended["index"] == 20 and extended["alternate"] == 1 and
+          extended["course"] == 10 and extended["source"] == 10 and extended["secondary"] == 1,
+          "native menu row and committed alternate course suffix are parsed")
+    check(rg.parse_line(line(8).rstrip()+" widgets=1 alternate=1\n") is None,
+          "an incomplete native observation suffix is rejected")
 
     # The whole route on a settled frontend: every press lands, every key is released, no extra press.
     g, recs, err = run(tmp, ROUTE, PLAN)
