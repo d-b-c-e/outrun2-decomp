@@ -17,6 +17,75 @@ A file is offered to the device only if the device's DDS reader takes it (DXT1/3
 kind, every level inside the file); A8B8G8R8 files are converted to A8R8G8B8 first, as Tweaks' loader does. Anything
 else keeps the stock texture and is counted.
 
+## Pad prompt folders (source candidate, unbuilt)
+
+Tweaks reference: local dbce-mods-outrun-2006 commit
+`51acc201d70ebb1ec1151f7fa2ebaa627be915df`, hooks_textures.cpp:623-669,
+plugin.hpp:52-76 and input_manager.cpp:526-542,634-641. It has no INI key
+for prompt family. UITextureReplacement remains the same off-by-default
+boolean here; TextureBaseFolder and existing explicit TextureMatchAnyFolder
+behavior are unchanged. No input setting or owner pack is written.
+
+Only these **post-FXT-remap** UI hashes select a pad folder:
+`455717B2`, `1F77CB88`, `FA7BBB13`, `39229D64`, `ACF61D7C`, `31C58963`.
+The selected physical WGI pad supplies a presentation hint from the existing
+cached identity() function, after the same choose_pad() isolation decision and
+successful existing GetCurrentReading(). No second enumeration/reader is added.
+An unknown identity, unsupported product, no pad or rejected selection supplies
+PC. The shared DualSense-layout PadSample, wheel/shim actions, replay and
+synthesized connected bits never determine this hint. Pad mapping and the input
+filter remain byte-for-byte unchanged.
+
+Conservative first-party identities are supported, not every SDL controller:
+Microsoft045E products028E/02D1/02E0/02EA/02FD/0B12/0B13 -> Xbox;
+Sony054C products0268/05C4/09CC/0BA0/0CE6/0DF2 -> PlayStation;
+Nintendo057E products2006/2007/2008/2009 -> Switch. Exact products are checked;
+an unknown product from the same manufacturer is still PC. These existing
+family facts are in the local Tweaks dependency SDL preview-3.1.8
+`22422f7748d5128135995ed34c8f8012861c7332`, controller_list.h:29,84-87,
+153-154,171,309-321,551-561 (SHA256
+`0D13188EF0B8C0911027419407DAC6F13F1FD4C5DA47023CF1D7AF54B314773C`).
+No SDL dependency or controller database is copied into the decomp.
+
+At an affected lookup, the first non-PC hint latches for that configured
+session, as Tweaks does. Later disconnects/family changes keep that atlas family;
+configure resets it. A preceding ordinary UI or scene texture does not latch.
+The existing first frame services ReadIO453BB0 before display449050/present
+(pc_common_control.cpp:5961-5978; first timing frame returns one tick at5914).
+ReadIO calls GameHost input_sample -> diag.read_pad -> padUpdate -> read_pad,
+so the physical hint exists before the lazy sprite-bank lookup. The setter is
+before map_input/input_filter and any synthetic connected bit. open_frontend
+binds owners/text/audio; it does not eagerly load the prompt sprite banks.
+No new polling point, capture pipeline or hot texture switching is introduced.
+
+For that family (Xbox, PlayStation or Switch; case-insensitive), try:
+
+1. bank/family/index_hash_size.dds
+2. bank/family/hash_size.dds
+3. family/bank/index_hash_size.dds
+4. family/bank/hash_size.dds
+5. family/index_hash_size.dds
+6. family/hash_size.dds
+7. The existing four generic bank-index/bank-hash/root-index/root-hash names.
+
+A missing selected-family folder falls back to the generic names, not another
+family. If no file matches, original stock bytes and behavior remain. As in the
+existing loader, a present but unusable first file fails to stock rather than
+bypassing validation via another file. Existing explicit TextureMatchAnyFolder
+still runs only after the named paths and retains its unambiguous/byte-identical
+same-name policy over all indexed folders; it is a separate non-Tweaks opt-in,
+not automatic pad-family inference. DDS conversion/validation, resource creation,
+FXT remaps and logical stock texel/UV handling reuse the original path.
+
+New cases are authored inside test_pc_sprite_replacement only: conservative
+families/unknown products, six hashes, non-prompt/scene non-latch, first non-PC
+latch/disconnect/configure reset, all ten path positions, missing/other-family
+folders, invalid file, off/stock bytes, and pre-whitelist FXT remapping. Synthetic
+DDS hash-tail inversion supplies exact prompt hashes without retail assets.
+No test, compilation or runtime was executed for this source slice. Lola's
+frozen c5d3a9f checkout, CMake/startup/Shift/highway work and active batch remain
+unchanged. Woden's queued ordinary run takes priority over qualification here.
+
 ## Logical size (UI)
 
 The XST image tables and the SPRANI frames address texels of the stock texture. A sprite texture created from a pack

@@ -43,6 +43,26 @@ std::vector<std::uint8_t> dds32(std::uint32_t w,std::uint32_t h,std::uint8_t see
     }
     return f;
 }
+// A synthetic DDS with an exact prompt/remap hash, without retail art. Leave
+// four bytes after a whole XXH32 lane and invert only its last-word/avalanche
+// steps. Extra DDS bytes are permitted by the existing loader. No brute force.
+std::uint32_t inverse_odd(std::uint32_t a){std::uint32_t x=1;for(unsigned k=0;k<5;++k)x*=2u-a*x;return x;}
+std::uint32_t unxor_right(std::uint32_t x,unsigned n){std::uint32_t y=x;for(unsigned k=n;k<32;k+=n)y^=x>>k;return y;}
+std::uint32_t unavalanche(std::uint32_t x){
+    x=unxor_right(x,16);x*=inverse_odd(3266489917u);x=unxor_right(x,13);
+    x*=inverse_odd(2246822519u);return unxor_right(x,15);
+}
+std::vector<std::uint8_t> prompt_dds(std::uint32_t hash,std::uint32_t width=1,std::uint32_t height=1){
+    auto file=dds32(width,height,0,false);
+    if(file.size()%16u==0u)file.resize(file.size()+4u);
+    CHECK(file.size()%16u==4u);
+    const auto prefix=unavalanche(pmt_xxh32(file.data(),file.size()-4u))+4u;
+    const auto mixed=unavalanche(hash)*inverse_odd(668265263u);
+    const auto before=(mixed>>17)|(mixed<<15);
+    put32(file,file.size()-4u,(before-prefix)*inverse_odd(3266489917u));
+    CHECK(pmt_xxh32(file.data(),file.size())==hash);
+    return file;
+}
 // XST (pc_sprite_bank_load_xst): {meta size, pixel size}, a 0x100-byte meta section (image table at 0x20, entry table
 // at 0x80), the DDS files. An empty texture is an entry without a texture (type 0). Images: {texture, l, t, r, b}.
 std::vector<std::uint8_t> make_xst(const std::vector<std::vector<std::uint8_t>>& textures,const std::vector<std::array<std::uint16_t,5>>& images){
@@ -277,6 +297,84 @@ int main(int argc,char** argv){
         CHECK(r.dev.textures[0].bytes==a&&r.dev.textures[1].bytes==b&&r.dev.textures[2].bytes==c&&r.s.banks[Bank].stock_sizes[1][0]==0);
         CHECK((r.dev.rects[0]==std::array<std::int32_t,4>{2,1,5,3}));
         const auto& s=ui_texture_replacement_stats();CHECK(s.looked==3&&s.replaced==0&&s.failed==1);}
+    // Pad-prompt folders: presentation identity, six exact post-FXT hashes,
+    // session latch, and the real existing lookup/read/stock fallback path.
+    {
+        using F=UiPromptFamily;
+        CHECK(ui_prompt_family_for_identity(false,0x054c,0x0ce6)==F::PC);
+        CHECK(ui_prompt_family_for_identity(true,0x054c,0x0ce6)==F::PlayStation);
+        CHECK(ui_prompt_family_for_identity(true,0x045e,0x0b12)==F::Xbox);
+        CHECK(ui_prompt_family_for_identity(true,0x057e,0x2009)==F::Switch);
+        CHECK(ui_prompt_family_for_identity(true,0x054c,0xffff)==F::PC);
+        CHECK(ui_prompt_family_for_identity(true,0x045e,0xffff)==F::PC);
+        CHECK(ui_prompt_family_for_identity(true,0x057e,0xffff)==F::PC);
+        CHECK(ui_prompt_family_for_identity(true,0x1234,0x2009)==F::PC);
+        const auto source=prompt_dds(0x455717B2u);
+        const std::string pack="spr_prompt_xst",plain="455717B2_1x1.dds",indexed="3_"+plain;
+        const std::vector<std::string> paths={pack+"/PlayStation/"+indexed,pack+"/PlayStation/"+plain,
+            "PlayStation/"+pack+"/"+indexed,"PlayStation/"+pack+"/"+plain,"PlayStation/"+indexed,"PlayStation/"+plain,
+            pack+"/"+indexed,pack+"/"+plain,indexed,plain};
+        auto store=[&](const std::string& path,const std::vector<std::uint8_t>& bytes){
+            fs::create_directories((dir/path).parent_path());std::ofstream out(dir/path,std::ios::binary);
+            out.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));};
+        auto load=[&](const std::vector<std::uint8_t>& stock){
+            PcTextureFileRequest q{};q.data=stock.data();q.size=std::uint32_t(stock.size());
+            Device device;bool replaced=false;
+            CHECK(ui_texture_replacement_create(device,pack,3,q,replaced)!=0);
+            CHECK(device.textures.size()==1);return device.textures[0].bytes;};
+        std::vector<std::vector<std::uint8_t>> choices;
+        for(unsigned k=0;k<paths.size();++k)choices.push_back(dds32(2,2,std::uint8_t(10+k),false));
+        // Remove each higher-priority path in turn: all ten positions, indexed
+        // before plain, both pad/bank layouts, pad root then generic fallback.
+        for(std::size_t first=0;first<paths.size();++first){
+            fs::remove_all(dir);
+            for(std::size_t k=first;k<paths.size();++k)store(paths[k],choices[k]);
+            texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+            CHECK(load(source)==choices[first]);
+        }
+        fs::remove_all(dir);store("Xbox/"+plain,choices[0]);store("Switch/"+plain,choices[1]);store(plain,choices[2]);
+        texture_replacement_configure(false,true,dir.string());
+        CHECK(load(source)==choices[2]); // no physical/known family: generic PC
+        texture_replacement_set_pad_family(F::PlayStation);
+        CHECK(load(source)==choices[2]); // selected family absent: generic, never other pad
+        texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::Xbox);
+        CHECK(load(source)==choices[0]);
+        texture_replacement_set_pad_family(F::Switch);CHECK(load(source)==choices[0]); // first non-PC stays latched
+        texture_replacement_set_pad_family(F::PC);CHECK(load(source)==choices[0]); // disconnect also retains loaded art
+        texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::Switch);
+        CHECK(load(source)==choices[1]); // configure starts a fresh selection
+        fs::remove_all(dir);store("PlayStation/"+plain,choices[0]);
+        texture_replacement_configure(false,true,dir.string());CHECK(load(source)==source); // PC ignores pad-only folder
+        texture_replacement_set_pad_family(F::Xbox);CHECK(load(source)==source); // no matching/generic folder: stock bytes
+        texture_replacement_configure(false,false,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+        CHECK(load(source)==source&&ui_texture_replacement_stats().looked==0); // off stays byte-identical
+        // No pad override for an ordinary UI atlas, even when a family folder
+        // contains its exact hash. Scene calls cannot latch a prompt family.
+        fs::remove_all(dir);const auto normal=dds32(1,1,0x71,false);
+        char normal_name[64];std::snprintf(normal_name,sizeof normal_name,"%X_1x1.dds",pmt_xxh32(normal.data(),normal.size()));
+        CHECK(!ui_prompt_hash(pmt_xxh32(normal.data(),normal.size())));
+        store("PlayStation/"+std::string(normal_name),choices[0]);store(normal_name,choices[1]);
+        texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+        CHECK(load(normal)==choices[1]);
+        UiPromptSelection selection;selection.current=F::Switch;
+        CHECK(selection.folder(false,0x455717B2u)==nullptr&&selection.latched==F::PC);
+        CHECK(selection.folder(true,0x12345678u)==nullptr&&selection.latched==F::PC);
+        for(auto hash:{0x455717B2u,0x1F77CB88u,0xFA7BBB13u,0x39229D64u,0xACF61D7Cu,0x31C58963u}){
+            fs::remove_all(dir);char file[64];std::snprintf(file,sizeof file,"%X_1x1.dds",hash);
+            store("PlayStation/"+std::string(file),choices[0]);
+            texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+            CHECK(load(prompt_dds(hash))==choices[0]);
+        }
+        // FXT remapping precedes the whitelist and the same folder lookup.
+        fs::remove_all(dir);store("PlayStation/1F77CB88_128x128.dds",choices[0]);
+        texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+        CHECK(load(prompt_dds(0x8F1D69D3u,128,128))==choices[0]);
+        // A present but unusable first candidate retains stock, matching the
+        // existing loader; it must not bypass validation via a generic file.
+        fs::remove_all(dir);store(paths[0],std::vector<std::uint8_t>(16));store(plain,choices[0]);
+        texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
+        CHECK(load(source)==source&&ui_texture_replacement_stats().failed==1);
+    }
     texture_replacement_configure(false,false,{});fs::remove_all(dir);
     std::printf("pc sprite replacement: %u checks\n",checks);
     return 0;

@@ -1,5 +1,6 @@
 #include "platform/pc_pmt_loader.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -29,6 +30,7 @@ std::uint32_t pmt_xxh32(const std::uint8_t* p,std::size_t len,std::uint32_t seed
 namespace {
 struct Replacement {
     bool scene{},ui{},any_folder{};std::filesystem::path root;
+    UiPromptSelection prompts;
     std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
     std::map<std::string,int> folders;                   // lower-case first components of those paths
     // TextureMatchAnyFolder: lower-case "<hash>_<w>x<h>.dds" (index prefix dropped) -> its files anywhere in the pack,
@@ -132,7 +134,20 @@ bool find_replacement(bool ui,const std::string& pack,std::uint32_t index,const 
     auto& stats=ui?r.ui_stats:r.stats;
     auto& bank=(ui?r.ui_banks:r.banks)[pack];if(!bank.looked)bank.folder=r.folders.count(stem)!=0;
     ++stats.looked;++bank.looked;
-    for(const std::string& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))}){
+    // Tweaks51acc: six pad-specific paths, only for its six post-FXT prompt
+    // hashes, before the same four generic names. Reuse the indexed file map,
+    // conversion, validation, device creation and stock fallback below.
+    std::array<std::string,10> keys;std::size_t key_count=0;
+    if(const char* pad=r.prompts.folder(ui,hash)){
+        const std::string family(pad);
+        keys={stem+"/"+family+"/"+lower(idx),stem+"/"+family+"/"+lower(name),
+              family+"/"+stem+"/"+lower(idx),family+"/"+stem+"/"+lower(name),
+              family+"/"+lower(idx),family+"/"+lower(name)};
+        key_count=6;
+    }
+    for(const auto& key:{stem+"/"+lower(idx),stem+"/"+lower(name),lower(idx),lower(std::string(name))})keys[key_count++]=key;
+    for(std::size_t k=0;k<key_count;++k){
+        const auto& key=keys[k];
         const auto it=r.files.find(key);if(it==r.files.end())continue;
         if(read_replacement(it->second,out)){abgr_to_argb(out);if(replacement_usable(out,cube))return true;}
         ++stats.failed;++bank.failed;out.clear();return false;
@@ -234,6 +249,7 @@ void pmt_textures_begin_42e850(PcPmtResources& r,PcPmtLoadCursor& c){
     c.texture_95b22c=0;
 }
 void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){texture_replacement_configure(enabled,false,load_folder);}
+void texture_replacement_set_pad_family(UiPromptFamily family){replacement().prompts.current=family;}
 void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder){
     auto& r=replacement();r=Replacement{};r.scene=scene;r.ui=ui;r.any_folder=any_folder;
     if(!scene&&!ui)return;
