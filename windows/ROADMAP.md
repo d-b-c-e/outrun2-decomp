@@ -282,13 +282,21 @@ driving behavior are unchanged. Existing fast_load 361 and fast_load_config 44
 checks passed on product 2984189 (hub
 artifacts/outrun-fast-load-prompts-cumulative-kiki-20261015/QUALIFIED-HOST.md);
 their source/header/fixtures remain identical and results are retained without
-rerunning. Incremental build and paired exposure checks are pending; rendered
-F6/persistence, loading speedup and runtime transition behavior remain unqualified.
+rerunning. Native d35ee48 incremental OutRunDesktop built successfully; Wheelkit
+c36aaeb passed all four affected cases (one read/preservation fixture with 12
+inputs, two explicit one-key/exact-backup writes and the catalog assertion; zero
+failed/skipped). Private @6 generation/parsing matched all 73 bundled OutRun rows.
+Native app B872B574 (23,833,088 bytes); original logs/result/TRX: hub
+artifacts/outrun-fast-load-setting-build-20261016/build-01. Exact lease released
+after owned-process cleanup and environment restoration, before docs/integration.
+Lola owns Wheelkit docs/ordinary canonical integration; native remains private.
+Rendered F6/persistence, loading speedup and runtime transition behavior remain
+unqualified. No game, owner install, provider retry or public push.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
-| | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure source is pending its affected build/settings checks. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
+| | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure passed its incremental native build, four affected settings/catalog checks and 73-row generation/parsing on October 16. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
 | | FramerateUnlockExperimental | ⬜ | |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
