@@ -132,6 +132,7 @@ struct Values {
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
+    bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -230,6 +231,24 @@ void page_controls(bool advanced){
              keep(&v.allow_flac,before,[&]{return save("Audio","AllowFLAC",v.allow_flac?"true":"false");});}
         if(v.allow_wav!=v.allow_wav_start||v.allow_flac!=v.allow_flac_start)
             dbce::panel::Text("The music replacement choices apply at the next game start.");
+        dbce::panel::Heading("Menus and license");
+        {const bool before=v.license_character;
+         if(dbce::panel::OffOn("License character selection",&v.license_character,
+             "Off by default. Allows the character entry in the license editor. Applies at the next game start."))
+             keep(&v.license_character,before,[&]{return save("Misc","AllowCharacterSelection",v.license_character?"true":"false");});}
+        {const bool before=v.hide_signin;
+         if(dbce::panel::OffOn("Hide sign-in text",&v.hide_signin,
+             "Off by default. Hides the menu sign-in status box, text and SIGN-IN help-bar entry. Also hides the menu's "
+             "OutRun Miles line without changing its saved choice. Applies at the next game start."))
+             keep(&v.hide_signin,before,[&]{return save("Bugfixes","HideOnlineSigninText",v.hide_signin?"true":"false");});}
+        {const bool before=v.menu_miles;
+         if(dbce::panel::OffOn("OutRun Miles on the menu",&v.menu_miles,
+             "On by default. Shows the active license's OutRun Miles in the menu's Not Signed In status. Hidden while "
+             "Hide sign-in text is On. Applies at the next game start."))
+             keep(&v.menu_miles,before,[&]{return save("Misc","ShowOutRunMilesOnMenu",v.menu_miles?"true":"false");});}
+        if(v.hide_signin&&v.menu_miles)
+            dbce::panel::Status("Menu Miles at next start","hidden with sign-in text; the saved Miles choice is kept");
+        dbce::panel::Text("Menu and license choices apply at the next game start.");
     }
 }
 void page_ffb(bool advanced){
@@ -564,6 +583,9 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
     v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);
+    v.license_character=settings.flag("Misc","AllowCharacterSelection",false);
+    v.menu_miles=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
+    v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
     p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
     p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp

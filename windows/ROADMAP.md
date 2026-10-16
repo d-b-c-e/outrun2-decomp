@@ -149,6 +149,13 @@ F6 persistence and visual effects remain unqualified; music175 passes were retai
 without repetition and do not validate the graphics additions. UIScalingMode's
 partial layout and texture-pack configuration remain separate work.
 
+Source-only menus/license follow-up, October 16: F6 Advanced Controls and Wheelkit @6
+Controls expose the existing AllowCharacterSelection (Misc, Off), ShowOutRunMilesOnMenu
+(Misc, On) and HideOnlineSigninText (Bugfixes, Off) choices, saved for the next start.
+Hide sign-in also hides the menu Miles line; the independent saved Miles choice is kept.
+Menu navigation, sign-in rendering and license/save consumers are unchanged. These new
+controls are unbuilt/unrun; earlier graphics/music passes remain scoped to their inputs.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
