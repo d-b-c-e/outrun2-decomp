@@ -464,6 +464,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.force_library=ffb_library_present();   // the force add-on beside the game: a file check, never a load
     dbce::panel::Config c;
     c.modName=p.name.c_str();
+    c.modRepositoryUrl="https://github.com/d-b-c-e/outrun2-decomp";
+    c.wheelkitRepositoryUrl="https://github.com/d-b-c-e/dbce-wheelkit";
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing
     for(const auto page:{dbce::panel::PAGE_CONTROLS,dbce::panel::PAGE_FFB,dbce::panel::PAGE_CAMERAS,dbce::panel::PAGE_TELEMETRY})c.pages[page]=true;
     c.drawPage=draw_page;

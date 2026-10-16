@@ -18,3 +18,18 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
 - Hub `artifacts/outrun-f6-pages-20261012/README.md`: Controls, FFB, Cameras and Telemetry rendered muted after Help, with frame stats in Cameras. No save was exercised; the INI was unchanged.
 - The Shim-backend page/status check is recorded in the hub at `artifacts/outrun-candidate-ac68a6f-20261013/regression/f6-ac68a6f-run1` and summarized in [ROADMAP.md](../ROADMAP.md) step 2a. Its muted “Wheel output at the next start” and “This session” labels prove UI rendering only.
 - [TRIPLE-SCREENS.md](TRIPLE-SCREENS.md) and ROADMAP step 3 separate the rig-checked planar span from the experimental projection. Physical wheel output, a three-screen F6 interaction run, and normal keyboard/mouse saving remain open. The muted page checks do not qualify those behaviors.
+
+## Source follow-up: small repository links (October 16)
+
+The separate native Help candidate vendors only the shared panel header and
+implementation from toolkit e8fca59. The desktop adapter supplies the OutRun
+and Wheelkit repository URLs; Help uses the shared secondary font and text-link
+widget, with no large GitHub buttons. URLs open only on an explicit click. The
+existing Help callback and any issue-report action stay separate; this change
+does not implement the still-pending native issue/report flow.
+
+This is uncompiled source on an isolated branch based on 8203db2. The frozen
+D374 course/loading runtime05 candidate stays unchanged and does not contain
+these links. Native compilation, offline Help-frame review and later game
+presentation remain pending. No input, force, INI, recording or device behavior
+changes, owner install, browser opening or runtime test occurred here.

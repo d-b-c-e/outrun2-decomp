@@ -35,6 +35,11 @@ struct Config {
     // not empty, it replaces the triples on/off suffix, so a planar wide view is never called triples. Called on the
     // present thread. Null: triplesOn as before.
     const char *(*displayText)() = nullptr;
+    // Help repository links, drawn as small text hyperlinks. Descriptors must live
+    // as long as the panel; opening a link requires an explicit click. Null/empty
+    // leaves that link out. Issue reporting stays in the mod's own Help action.
+    const char *modRepositoryUrl = nullptr;
+    const char *wheelkitRepositoryUrl = nullptr;
 };
 
 // Called once by the mod before the overlay starts (not from DllMain).
