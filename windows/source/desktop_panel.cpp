@@ -19,6 +19,7 @@
 #include "platform/pc_screen.hpp"
 #include "platform/runtime_input.hpp"
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include "dbce_panel.h"
@@ -118,6 +119,8 @@ struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool screen_edge_cull{true},screen_edge_cull_start{true};   // [Graphics] ScreenEdgeCullFix
+    int anisotropic{},reflection{1},draw_ahead{},draw_behind{};   // reflection: index of 64..4096, default 128
+    bool transparency{},full_vehicle_detail{},no_stage_cull{},depth_precision{};   // existing default-off Graphics flags
     bool auto_resolution{true},auto_resolution_start{true};   // [Window] AutoDetectResolution
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
@@ -156,6 +159,16 @@ bool percent_key(const char* label,int* value,int max,int def,const char* key,co
     const int before=*value;
     if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
     keep(value,before,[&]{return save("FFB",key,fraction(*value));});return true;
+}
+void graphics_flag(const char* label,bool* value,const char* key,const char* help){
+    const bool before=*value;
+    if(dbce::panel::OffOn(label,value,help))
+        keep(value,before,[&]{return save("Graphics",key,*value?"true":"false");});
+}
+void graphics_slider(const char* label,int* value,int max,const char* key,const char* format,const char* help){
+    const int before=*value;
+    if(dbce::panel::Slider(label,value,0,max,0,format,help))
+        keep(value,before,[&]{return save("Graphics",key,std::to_string(*value));});
 }
 void page_controls(bool advanced){
     // The backend this process uses: [Input] Backend = Shim runs the shared input shim and never configures wheel_input.
@@ -336,6 +349,29 @@ void page_cameras(bool advanced){
          "always wins."))
          keep(&v.auto_resolution,before,[&]{return save("Window","AutoDetectResolution",v.auto_resolution?"true":"false");});}
     if(v.auto_resolution!=v.auto_resolution_start)dbce::panel::Text("The choice applies at the next game start.");
+    dbce::panel::Heading("Graphics detail");
+    graphics_slider("Anisotropic filtering",&v.anisotropic,16,"AnisotropicFiltering","%d",
+        "0 (default) and 1 keep the game's filtering. 2-16 sharpen textures viewed at an angle; point-filtered textures stay unchanged.");
+    {static const char* const edges[]{"64","128 (default)","256","512","1024","2048","4096"};
+     static const int pixels[]{64,128,256,512,1024,2048,4096};
+     const int before=v.reflection;
+     if(dbce::panel::Choice("Car reflection resolution",edges,7,&v.reflection,
+         "Pixels per side of the car reflection cube. Higher values use more GPU memory and rendering time."))
+         keep(&v.reflection,before,[&]{return save("Graphics","ReflectionResolution",std::to_string(pixels[v.reflection]));});}
+    graphics_flag("Transparency supersampling",&v.transparency,"TransparencySupersampling",
+        "Off by default. Uses alpha-to-coverage for alpha-tested edges only while MSAA is enabled in the game's Settings.");
+    graphics_flag("Full-detail other cars",&v.full_vehicle_detail,"DisableVehicleLODs",
+        "Off by default. On keeps other cars at their full-detail model even in the distance; this can increase GPU work.");
+    graphics_flag("Draw stage nodes outside the view",&v.no_stage_cull,"DisableStageCulling",
+        "Off by default. On disables stage culling and can substantially increase GPU work.");
+    graphics_slider("Draw distance ahead",&v.draw_ahead,1024,"DrawDistanceIncrease","%d sections",
+        "0 keeps the game's distance for planar views. Adds track sections ahead; existing lods.ini exclusions apply. More sections increase GPU work.");
+    graphics_slider("Draw distance behind",&v.draw_behind,256,"DrawDistanceBehind","%d sections",
+        "0 keeps the game's distance for planar views. Adds track sections behind; some models look wrong from behind. More sections increase GPU work.");
+    dbce::panel::Text("Three projected views use 64 sections ahead and behind where the saved value is 0; their developer overrides still apply.");
+    graphics_flag("Depth precision fix",&v.depth_precision,"FixZBufferPrecision",
+        "Off by default. Adjusts the race camera's near plane by view to reduce distant surface flicker; it can clip very close geometry.");
+    dbce::panel::Text("Graphics detail changes apply at the next game start.");
 }
 void page_telemetry(bool advanced){
     {const bool before=v.telemetry;
@@ -505,6 +541,24 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     v.screen_edge_cull=v.screen_edge_cull_start=settings.flag("Graphics","ScreenEdgeCullFix",true);   // as window_desktop.cpp
+    // Match the startup consumers' accepted ranges and defaults without changing the active renderer.
+    {const auto t=settings.text("Graphics","AnisotropicFiltering");
+     if(!t.empty()&&t.size()<=2u&&std::all_of(t.begin(),t.end(),[](char c){return c>='0'&&c<='9';})){
+         const auto level=unsigned(std::stoul(t));if(level<=16u)v.anisotropic=int(level);}}
+    {const auto t=settings.text("Graphics","ReflectionResolution");
+     if(!t.empty()&&t.size()<=4u&&std::all_of(t.begin(),t.end(),[](char c){return c>='0'&&c<='9';})){
+         const auto edge=unsigned(std::stoul(t));
+         if(edge>=64u&&edge<=4096u&&(edge&(edge-1u))==0u){
+             v.reflection=0;for(auto n=edge;n>64u;n>>=1u)++v.reflection;}}}
+    {auto sections=[&](const char* key,int max){
+         const auto t=settings.text("Graphics",key);if(t.empty())return 0;
+         char* end=nullptr;const long n=std::strtol(t.c_str(),&end,10);
+         return end==t.c_str()||*end||n<0||n>max?0:int(n);};
+     v.draw_ahead=sections("DrawDistanceIncrease",1024);v.draw_behind=sections("DrawDistanceBehind",256);}
+    v.transparency=settings.flag("Graphics","TransparencySupersampling",false);
+    v.full_vehicle_detail=settings.flag("Graphics","DisableVehicleLODs",false);
+    v.no_stage_cull=settings.flag("Graphics","DisableStageCulling",false);
+    v.depth_precision=settings.flag("Graphics","FixZBufferPrecision",false);
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle

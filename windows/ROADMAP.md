@@ -134,6 +134,17 @@ go upstream as small pull requests (first: `tweaks-exe`).
 By section of `OutRun2006Tweaks.ini`. ✅ done · 🟡 partial · ⬜ to do · ➖ not
 needed in a native build.
 
+Source-only Advanced Cameras exposure follow-up, October 16: alongside ScreenEdgeCullFix,
+F6 and Wheelkit @6 now offer the existing AnisotropicFiltering, ReflectionResolution,
+TransparencySupersampling, DisableVehicleLODs, DisableStageCulling, DrawDistanceIncrease,
+DrawDistanceBehind and FixZBufferPrecision settings. Native defaults and accepted ranges
+are retained; edits save for the next start through the existing writers. The draw-distance
+help distinguishes planar zero from the angled-view 64-section fallback. No rendering
+algorithm changed. These controls and their numeric read normalization are UNRUN during
+owner pause191895; generator/parser/build/settings/rendered checks remain pending.
+The earlier music175 passing checks do not validate these additions. UIScalingMode's
+partial layout and texture-pack configuration remain separate work.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
