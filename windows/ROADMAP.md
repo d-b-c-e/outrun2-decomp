@@ -140,9 +140,13 @@ TransparencySupersampling, DisableVehicleLODs, DisableStageCulling, DrawDistance
 DrawDistanceBehind and FixZBufferPrecision settings. Native defaults and accepted ranges
 are retained; edits save for the next start through the existing writers. The draw-distance
 help distinguishes planar zero from the angled-view 64-section fallback. No rendering
-algorithm changed. These controls and their numeric read normalization are UNRUN during
-owner pause191895; generator/parser/build/settings/rendered checks remain pending.
-The earlier music175 passing checks do not validate these additions. UIScalingMode's
+algorithm changed. After owner handback, native5c491fb built successfully; Wheelkit
+product1b139e9/test-sourcee5d0dbe passed16 affected cases (14 screen-edge cases, one
+numeric read/preservation fixture with16 boundary inputs, one catalog preservation case).
+Private catalog generation matched all53 bundled OutRun rows. Original logs/result are
+in hub artifacts/outrun-graphics-settings-build-20261016/build-01. Rendered controls,
+F6 persistence and visual effects remain unqualified; music175 passes were retained
+without repetition and do not validate the graphics additions. UIScalingMode's
 partial layout and texture-pack configuration remain separate work.
 
 | Section | Settings | Status | Notes |
