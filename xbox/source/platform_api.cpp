@@ -1,6 +1,7 @@
 #include "platform_api.hpp"
 #include "native_window.hpp"
 #include "platform/retail_asset_store.hpp"
+#include "platform/ui_prompt_family.hpp"
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <algorithm>
@@ -64,11 +65,17 @@ int choose_pad(const winrt::Windows::Foundation::Collections::IVectorView<wgi::G
 void read_pad(outrun::ps5::PadSample& sample){
     using namespace outrun::ps5;
     sample=PadSample{};
+    // Presentation only. No pad, refused choice or unreadable/unsupported ID
+    // stays generic. Never infer a family from the shared DualSense layout.
+    outrun::platform::texture_replacement_set_pad_family(outrun::platform::UiPromptFamily::PC);
     const auto pads=wgi::Gamepad::Gamepads();
     if(pads.Size()==0)return;
     const int pick=choose_pad(pads);
     if(pick<0)return;
-    const auto r=pads.GetAt(std::uint32_t(pick)).GetCurrentReading();
+    const auto selected=pads.GetAt(std::uint32_t(pick));
+    const auto r=selected.GetCurrentReading();
+    const auto id=identity(selected); // existing cached WGI identity; no second enumeration/reader
+    outrun::platform::texture_replacement_set_pad_family(outrun::platform::ui_prompt_family_for_identity(id.known,id.vid,id.pid));
     sample.connected=true;
     sample.left_x=axis(r.LeftThumbstickX,false);sample.left_y=axis(r.LeftThumbstickY,true);
     sample.right_x=axis(r.RightThumbstickX,false);sample.right_y=axis(r.RightThumbstickY,true);

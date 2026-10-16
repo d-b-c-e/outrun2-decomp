@@ -6,6 +6,7 @@
 // relocation of object fields +04..+38 adds the system base); every device
 // object pointer the PC stores is a PcD3D9Device handle here.
 #include "platform/pc_vertex_shader_setup.hpp"
+#include "platform/ui_prompt_family.hpp"
 #include <map>
 #include <string>
 #include <vector>
