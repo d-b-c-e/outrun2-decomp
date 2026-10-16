@@ -237,8 +237,16 @@ above 2 and spellings outside the preset vocabulary. Common 1.0/1.00 defaults sh
 100% without rewriting. The native finite/nonnegative consumer remains authoritative
 and uncapped; no parser, rendering, camera, asset loading, report or framework change.
 All writes are explicit, one key and next-start; rig profiles do not target them.
-Incremental desktop build, 17 affected settings/catalog cases and 69-row generation
-are pending. Rendered F6/persistence and visual effects remain unqualified.
+Native a6b700e incremental OutRunDesktop built successfully; Wheelkit c47a43d passed
+all 17 affected settings/catalog cases, zero failed/skipped (eight Boolean On/Off
+roundtrips, seven preset writes, one read/Keep fixture with 13 inputs and one catalog
+assertion). Private @6 generation/parsing matched all 69 bundled OutRun rows. Native
+app 480B94D2 (23,828,992 bytes); original logs/result/TRX: hub
+artifacts/outrun-graphics-compatibility-build-20261016/build-01. Exact lease released
+after owned-process cleanup and environment restoration, before docs/integration.
+Qualified Wheelkit source is on main; native remains private. No consumer suite was
+repeated. Rendered F6/persistence and visual effects remain unqualified; no game,
+install, provider retry or publication.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
