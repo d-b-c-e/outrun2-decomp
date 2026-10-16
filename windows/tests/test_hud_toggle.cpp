@@ -32,6 +32,19 @@ int main(){
     check(parse_hud_toggle_key("PAUSE",fake_layout).keys.empty()&&!parse_hud_toggle_key("PAUSE",fake_layout).why.empty(),"Pause is refused with a reason");
     check(parse_hud_toggle_key("BANANA",fake_layout).why.find("unknown key name")!=std::string::npos,"an unknown name is refused");
     check(parse_hud_toggle_key("-",fake_layout).why.find("unknown key name")!=std::string::npos,"a symbol is not a Tweaks name");
+    // F6's complete settings vocabulary: every offered key parses, except a layout can lack a letter/digit.
+    const auto& choices=hud_toggle_setting_choices();
+    check(choices.size()==97u&&choices.front().empty(),"Off plus all 96 supported ASCII key names");
+    for(std::size_t i=1;i<choices.size();++i){
+        const auto parsed=parse_hud_toggle_key(choices[i],+[](char){return 1u;});
+        check(!parsed.keys.empty()&&parsed.why.empty(),"every offered name is accepted by the existing parser");
+        check(hud_toggle_setting_index(choices[i])==int(i),"choices have no duplicates and round-trip");
+    }
+    check(hud_toggle_setting_index(" home ")>=0&&choices[std::size_t(hud_toggle_setting_index(" home "))]=="HOME","case and spaces select the saved key");
+    check(hud_toggle_setting_index("  ")==0,"blank is Off");
+    for(const char* name:{"F6","F8","F11","PAUSE","BANANA","!"})
+        check(hud_toggle_setting_index(name)==-1,"reserved/unsupported saved text keeps its own entry");
+    check(hud_toggle_setting_name(" owner-unknown ")=="OWNER-UNKNOWN","unknown names stay distinct from Off");
     // The edge: a toggle on the release only (Tweaks), once per press; holding does nothing.
     {   HudToggleEdge e;
         check(!e.step(false,false)&&!e.step(true,false)&&!e.step(true,false),"press and hold: nothing yet");

@@ -3,6 +3,7 @@
 #include "desktop_panel.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
+#include "hud_toggle.hpp"
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
 #include "native_window.hpp"
@@ -123,6 +124,7 @@ struct Values {
     int sensitivity{100},dead_zone{};
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
+    std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -175,6 +177,24 @@ void page_controls(bool){
          "Allows the car horn during a race. Applies at the next game start."))
          keep(&v.allow_horn,before,[&]{return save("Audio","AllowHorn",v.allow_horn?"true":"false");});}
     if(v.allow_horn!=v.allow_horn_start)dbce::panel::Text("The horn choice applies at the next game start.");
+    {
+        const auto& keys=hud_toggle_setting_choices();
+        std::vector<const char*> labels;labels.reserve(keys.size()+1);
+        for(const auto& key:keys)labels.push_back(key.empty()?"Off":key.c_str());
+        int selected=hud_toggle_setting_index(v.hud_key);
+        if(selected<0){
+            selected=int(keys.size());labels.push_back("Keep saved value (unsupported)");
+            dbce::panel::Status("Saved HUD key",v.hud_key.c_str(),dbce::panel::Tone::Warning);
+        }
+        if(dbce::panel::Choice("HUD toggle key",labels.data(),int(labels.size()),&selected,
+            "Shows or hides the race HUD when this key is released. Applies at the next game start. "
+            "Off clears the key. Letters and digits depend on the keyboard layout. F6, F8 and F11 are reserved. "
+            "The key still reaches the game; toggling is disabled during recording, playback and tests.")){
+            if(selected>=0&&selected<int(keys.size())&&save("Misc","HudToggleKey",keys[std::size_t(selected)]))
+                v.hud_key=keys[std::size_t(selected)];
+        }
+        if(v.hud_key!=v.hud_key_start)dbce::panel::Text("The HUD key choice applies at the next game start.");
+    }
 }
 void page_ffb(bool advanced){
     const auto status=ffb_status_text();
@@ -457,6 +477,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
+    v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     if(p.player_model==ffb::player::Model::Legacy){

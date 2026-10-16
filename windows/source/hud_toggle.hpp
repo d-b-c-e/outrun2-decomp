@@ -27,12 +27,39 @@ struct HudToggleKey {
 };
 // The scan code the current keyboard layout gives a letter or digit key (MapVirtualKeyW in the game), 0 if none.
 using ScanOfChar=unsigned(*)(char);
-inline HudToggleKey parse_hud_toggle_key(std::string_view text,ScanOfChar scan_of_char){
+// Settings choices cover every supported ASCII name, not a subset of common hotkeys. Empty means Off.
+// Letters/digits still need a usable scan code in the game's keyboard layout at the next start.
+inline const std::vector<std::string>& hud_toggle_setting_choices(){
+    static const std::vector<std::string> choices=[] {
+        std::vector<std::string> result={""};
+        for(char c='A';c<='Z';++c)result.emplace_back(1,c);
+        for(char c='0';c<='9';++c)result.emplace_back(1,c);
+        for(const char* name:{"BACK","TAB","CLEAR","RETURN","SHIFT","CONTROL","MENU","CAPITAL","ESCAPE","SPACE",
+            "PRIOR","NEXT","END","HOME","LEFT","UP","RIGHT","DOWN","INSERT","DELETE","LWIN","RWIN","APPS",
+            "NUMPAD0","NUMPAD1","NUMPAD2","NUMPAD3","NUMPAD4","NUMPAD5","NUMPAD6","NUMPAD7","NUMPAD8","NUMPAD9",
+            "MULTIPLY","ADD","SUBTRACT","DECIMAL","DIVIDE","F1","F2","F3","F4","F5","F7","F9","F10","F12",
+            "F13","F14","F15","F16","F17","F18","F19","F20","F21","F22","F23","F24","SCROLL"})result.emplace_back(name);
+        return result;
+    }();
+    return choices;
+}
+inline std::string hud_toggle_setting_name(std::string_view text){
     while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.front())))text.remove_prefix(1);
     while(!text.empty()&&std::isspace(static_cast<unsigned char>(text.back())))text.remove_suffix(1);
-    if(text.empty())return {};
     std::string name(text);
     for(auto& ch:name)ch=char(std::toupper(static_cast<unsigned char>(ch)));
+    return name;
+}
+// -1 retains an unsupported saved name rather than quietly replacing it with Off.
+inline int hud_toggle_setting_index(std::string_view text){
+    const auto name=hud_toggle_setting_name(text);
+    const auto& choices=hud_toggle_setting_choices();
+    for(std::size_t i=0;i<choices.size();++i)if(choices[i]==name)return int(i);
+    return -1;
+}
+inline HudToggleKey parse_hud_toggle_key(std::string_view text,ScanOfChar scan_of_char){
+    const auto name=hud_toggle_setting_name(text);
+    if(name.empty())return {};
     HudToggleKey k;
     // Tweaks' names (StringToVK): a letter or digit, by the layout, or a virtual-key name, matched here by key position.
     struct Named{const char* name;std::vector<unsigned> keys;};
