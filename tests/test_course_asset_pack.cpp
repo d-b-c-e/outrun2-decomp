@@ -889,6 +889,24 @@ int main(int argc,char** argv){
                     record.u32(0x14u)==real.descriptors.primary[10u].token&&
                     record.u32(0x18u)==real.descriptors.secondary_tokens[secondary?10u:0u],
                     "selected START resolves the committed primary and secondary descriptors");
+            require(course.records_fallback&&course.records_7d33bc==nullptr&&
+                    native_race_area_bind_records(selected),
+                    "selected START binds the synthesized fallback record without a host table pointer");
+            auto& area=native_race_area(selected);
+            require(area.table==course.fallback_record_7d33d8.data()&&area.table_bytes==0x78u,
+                    "AREA keeps the current fallback owner as its one-record table");
+            auto& memory=native_race_area_memory(selected,nullptr,true);
+            require(memory.u32(0x7d33bcu)==RaceAreaTableBase&&memory.u32(0x7d3188u)==0x7d30a8u&&
+                    memory.u32(RaceAreaTableBase+0x1cu)==10u&&
+                    memory.u32(RaceAreaTableBase+0x20u)==(secondary?10u:0u),
+                    "AREA readers resolve the selected course and source through the mapped fallback table");
+            const auto selected_copy=course.selected_7d30a8;
+            course.selected_7d30a8[0x14u]^=1u;
+            require(!native_race_area_bind_records(selected),
+                    "fallback binding still refuses a selected copy with a different descriptor");
+            course.selected_7d30a8=selected_copy;
+            require(native_race_area_bind_records(selected),
+                    "fallback binding recovers when the selected descriptor matches again");
         }
         // 49BA80 world ids come from 44DBB0 on the live 7D30BC descriptor
         // (scene_owner_49ba80 + native_scene_owner_service).

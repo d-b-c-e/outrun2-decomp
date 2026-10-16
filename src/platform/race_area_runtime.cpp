@@ -598,6 +598,12 @@ bool find_table(NativeRuntimeContext& c,NativeRaceAreaRuntime& o){
         if(std::memcmp(data+off+4,rt.selected_7d30a8.data()+4,4)!=0||std::memcmp(data+off+0x14,rt.selected_7d30a8.data()+0x14,8)!=0)return;
         o.table=data;o.table_bytes=size;o.table_source=name;
     };
+    // A non-0x42 selection uses 44D720's single record at 7D33D8.
+    // Its host records_7d33bc is deliberately null (the storage moves with
+    // course_runtime); bind the current owner instead of searching a file
+    // for a synthesized record that the file does not contain.
+    if(rt.records_fallback)try_source(c.game_mode.course_runtime.fallback_record_7d33d8.data(),
+        rt.fallback_record_7d33d8.size(),"44D720 fallback record (7D33D8)");
     if(rt.records_7d33bc)try_source(rt.records_7d33bc,rt.records_bytes,"44D720 record table (7D33BC)");
     auto& sel=c.mission.manager.selection.course_records;
     try_source(sel.data(),sel.size(),"mission selection (44D720 direct records)");

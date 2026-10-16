@@ -72,8 +72,8 @@ struct NativeRaceAreaRuntime {
     bool view_inverse_valid{};
     PcRaceMemory memory;
     // Course record table ([7D33BC] - selected*0x78). Identified at each
-    // rebuild: the mission selection records (44D720 direct) or the 44DA00
-    // course file records, whichever holds the selected 7D30A8 record.
+    // rebuild: the 44D720 fallback record, mission selection records (direct)
+    // or 44DA00 course file records, whichever holds the selected 7D30A8 record.
     std::uint8_t* table{};std::size_t table_bytes{};std::string table_source;
     // Allocations of the 44FD80 mode-7 loader (and of START's 44C310 lanes
     // mirrored at their completion): payload then the 8-byte handle
