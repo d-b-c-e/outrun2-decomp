@@ -14,6 +14,7 @@
 #include "display_fit.hpp"
 #include "renderer.hpp"
 #include "platform/native_runtime.hpp"
+#include "platform/music_stream.hpp"
 #include "platform/frontend_keyboard.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/runtime_input.hpp"
@@ -97,6 +98,7 @@ struct Panel {
     ffb::player::Model player_model{ffb::player::Model::Legacy};
     ffb::producer2::Strengths applied_strengths{};
     std::string model_refusal;
+    bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
     std::string ini,dev,name;
@@ -125,6 +127,7 @@ struct Values {
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
+    bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
@@ -153,7 +156,7 @@ bool percent_key(const char* label,int* value,int max,int def,const char* key,co
     if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
     keep(value,before,[&]{return save("FFB",key,fraction(*value));});return true;
 }
-void page_controls(bool){
+void page_controls(bool advanced){
     // The backend this process uses: [Input] Backend = Shim runs the shared input shim and never configures wheel_input.
     const auto shim=shim_input_status_text();
     dbce::panel::Status("Input",shim.empty()?"Native (the build's own wheel input)":"Shim (the shared input shim, [Input] Backend = Shim)");
@@ -194,6 +197,25 @@ void page_controls(bool){
                 v.hud_key=keys[std::size_t(selected)];
         }
         if(v.hud_key!=v.hud_key_start)dbce::panel::Text("The HUD key choice applies at the next game start.");
+    }
+    if(advanced){
+        dbce::panel::Status("Music decoding",p.wav_decoder?(p.flac_decoder?"WAV and FLAC available":"WAV available; FLAC unavailable"):
+            (p.flac_decoder?"WAV unavailable; FLAC available":"WAV and FLAC unavailable in this build"),
+            p.wav_decoder&&p.flac_decoder?dbce::panel::Tone::Normal:dbce::panel::Tone::Warning);
+        {const bool before=v.allow_wav;
+         if(dbce::panel::OffOn("WAV music replacements",&v.allow_wav,
+             "Experimental. Uses a same-name .wav file in Sound when no enabled .flac replacement exists. "
+             "Requires WAV decoding in this build. A selected replacement that cannot be read does not fall back to Ogg. "
+             "Applies at the next game start."))
+             keep(&v.allow_wav,before,[&]{return save("Audio","AllowWAV",v.allow_wav?"true":"false");});}
+        {const bool before=v.allow_flac;
+         if(dbce::panel::OffOn("FLAC music replacements",&v.allow_flac,
+             "Experimental. Uses a same-name .flac file in Sound before an enabled WAV replacement. "
+             "Requires FLAC decoding in this build. A selected replacement that cannot be read does not fall back to WAV or Ogg. "
+             "Applies at the next game start."))
+             keep(&v.allow_flac,before,[&]{return save("Audio","AllowFLAC",v.allow_flac?"true":"false");});}
+        if(v.allow_wav!=v.allow_wav_start||v.allow_flac!=v.allow_flac_start)
+            dbce::panel::Text("The music replacement choices apply at the next game start.");
     }
 }
 void page_ffb(bool advanced){
@@ -478,6 +500,10 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
+    v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
+    v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);
+    p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
+    p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
     if(p.player_model==ffb::player::Model::Legacy){
