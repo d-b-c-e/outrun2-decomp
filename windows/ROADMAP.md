@@ -162,8 +162,12 @@ Rendered controls/persistence remain unqualified; earlier graphics/music passes 
 Character-appearance exposure follow-up: F6 Advanced Controls and Wheelkit @6 Controls
 offer the existing UseHiDefCharacters (Graphics, On) and RestoreJPClarissa (Misc, Off)
 choices for the next start. These are independent saved policies; model selection and
-asset loading are unchanged. New source is pending focused generator/build/preservation
-checks; existing source and visual qualifications retain their original scope.
+asset loading are unchanged. Native315b561 built successfully; Wheelkit91ac650 passed
+the four cross-section preservation cases and changed catalog assertion (5/5), with
+private generation/parsing matching all58 bundled OutRun rows. Wheelkit was qualified
+and fast-forwarded into clean canonical main from5efc986; the native candidate remains
+private. Original logs/result: hub artifacts/outrun-character-appearance-build-20261016/build-01.
+Rendered appearance and F6 persistence remain unqualified; prior suite passes stand.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
