@@ -35,6 +35,20 @@
 #include <thread>
 #include <vector>
 namespace outrun::runtime {
+// Key 27 owns its translated widget display; 443FF0 deliberately supplies no
+// shared scene token for it. Open presentation only after that real owner has
+// produced a frame, without changing the ordinary UI-finalization gate.
+inline bool level_select_widget_frame_ready(const platform::NativeRuntimeContext& runtime,bool enabled){
+    const auto& frontend=runtime.event_function36;
+    return enabled&&runtime.mode_state.current==32u&&
+        frontend.state2_selector_child_state==27u&&frontend.network_screens[27]!=0u&&
+        (!frontend.network_widgets.glyphs().empty()||!frontend.network_widgets.images().empty()||
+         !frontend.network_widgets.icons().empty());
+}
+inline bool frontend_frame_gate_ready(const platform::NativeRuntimeContext& runtime,bool level_select_enabled){
+    return runtime.event_function36.state2_ui_finalize_calls!=0u||
+        level_select_widget_frame_ready(runtime,level_select_enabled);
+}
 // The launch folder: every file the game reads or writes (original data,
 // GPU cache, SaveGame, logs, autoplay) lives there, nothing else is searched
 // (like the PC executable in its installation folder).

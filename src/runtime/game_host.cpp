@@ -476,8 +476,11 @@ void frontend_frame(GameHost& s){
             else s.movie_uploaded_frame=s.title_movie.decoded_frames();
         }
     }
-    if(!p.set_frontend_token(frontend.frontend_welcome_scene_token?
-                                 frontend.frontend_welcome_scene_token:frontend.frontend_menu_token))s.render_failed=true;
+    const auto scene_token=frontend.frontend_welcome_scene_token?
+                           frontend.frontend_welcome_scene_token:frontend.frontend_menu_token;
+    // Widget-only owners (including key 27) have no common scene. Zero is
+    // absence, not a request for a nonexistent presenter scene.
+    if(scene_token&&!p.set_frontend_token(scene_token))s.render_failed=true;
     if(!p.set_frontend_overlay(frontend.frontend_choice_scene_token,frontend.frontend_choice_scene_frame))s.render_failed=true;
     const bool title_visible=frontend.title_widgets&&frontend.title_widgets->visible();
     if(!p.set_frontend_game_backdrop(title_visible))s.render_failed=true;
@@ -508,7 +511,7 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     if(!p.set_start_loading_visible(start_loading))s.render_failed=true;
     // START's sprite banks load behind its loading picture, as on the PC (native_sprite2d_warm_start_banks).
     if(start_loading&&s.pc_scene)pf::native_sprite2d_warm_start_banks(*s.runtime,s.pc_scene->flush_context().device);
-    if(!s.frontend_gate_open&&s.runtime&&s.runtime->event_function36.state2_ui_finalize_calls!=0u){
+    if(!s.frontend_gate_open&&s.runtime&&frontend_frame_gate_ready(*s.runtime,pf::g_pc_enable_level_select)){
         s.frontend_gate_open=true;s.frontend_visible=true;
         if(!p.set_frontend_visible(true))s.render_failed=true;
     }

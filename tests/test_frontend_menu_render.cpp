@@ -6,6 +6,7 @@
 #include "platform/frontend_vehicle_preview.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/menu_audio.hpp"
+#include "runtime/game_host.hpp"
 #include "platform/retail_gpu_cache.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_soft_d3d9.hpp"
@@ -76,6 +77,32 @@ int main(int argc,char** argv){
         CHECK(switch_renderer_draw(renderer));CHECK(!pool.get(h)->allocated);
     }
     FrontendTextTable table;CHECK(table.load(argv[4],&error));FrontendUiResources ui{pool};
+    // The opted-in key27 network owner emits its own font widgets and has no
+    // common 443FF0 scene/finalize. Exercise the exact host admission predicate
+    // with real decoded font output, not a synthetic key27 state alone.
+    {
+        auto runtime=std::make_unique<NativeRuntimeContext>();auto& state=runtime->event_function36;
+        runtime->mode_state.current=32u;state.state2_selector_child_state=27u;
+        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        state.network_screens[27]=0x0e001000u;
+        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        FrontendTextStyle style;FrontendTextCursor cursor;
+        CHECK(frontend_text_draw(fonts->fonts[0],style,cursor,"Level Select",state.network_widgets.glyphs_));
+        CHECK(!state.network_widgets.glyphs().empty());
+        CHECK(state.state2_ui_finalize_calls==0u&&state.frontend_menu_token==0u);
+        CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,false));
+        state.network_screens[27]=0u;CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        state.network_screens[27]=0x0e001000u;state.state2_selector_child_state=28u;
+        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        state.state2_selector_child_state=27u;runtime->mode_state.current=13u;
+        CHECK(!outrun::runtime::frontend_frame_gate_ready(*runtime,true));
+        state.state2_ui_finalize_calls=1u;
+        CHECK(outrun::runtime::frontend_frame_gate_ready(*runtime,false));
+        CHECK(switch_renderer_set_frontend_glyphs(renderer,state.network_widgets.glyphs()));
+        CHECK(switch_renderer_draw(renderer)); // Host fixture only; no GPU pixel claim.
+        CHECK(switch_renderer_set_frontend_glyphs(renderer,{}));
+    }
     // Production owner routing, not direct calls to the menu routine. This
     // state-3 fixture supplies only the mode/connected-device entry conditions;
     // native factory, virtual control/display and retail widgets run together.
