@@ -217,9 +217,16 @@ explicit edits save one key for the next start, outside rig profiles. No pedal m
 calibration, stored input, recording, event sound consumer or algorithm changes.
 The original pedal_volume and pegasus_sound passes are retained (hub
 artifacts/outrun-fix-pegasus-20261013/run-054105/ctest.log); neither consumer nor
-fixture changes in this batch. Incremental build, four save/backup cases and the
-catalog preservation check are pending. Rendered controls, F6 persistence, physical
-pedal behavior and audible Pegasus behavior remain unqualified by these changes.
+fixture changes in this batch. Native 9f5486d incremental OutRunDesktop built
+successfully; Wheelkit 29f5301 passed all four save/exact-backup cases and the
+existing catalog preservation assertion (5/5, zero failed/skipped). Private @6
+catalog generation/parsing matched all 63 bundled OutRun rows. Native app
+5DA8A909 (23,823,360 bytes). Original logs/result/TRX: hub
+artifacts/outrun-compatibility-settings-build-20261016/build-01. The exact lease
+was released after owned-process cleanup and environment restoration; no old
+consumer suite was rerun. Lola owns canonical Wheelkit integration; native stays
+private. Rendered controls, F6 persistence, physical pedal behavior and audible
+Pegasus behavior remain unqualified by these changes. No game/install/provider/publication.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
