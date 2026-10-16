@@ -3,8 +3,8 @@
 Off unless `[CDSwitcher] SwitcherEnable = true`. Ordinary play only: test,
 recording and playback processes keep it off. No settings or Controls schema
 is written. The prior db91 source/candidate60C4 passed scoped default-off and
-request/open/current-track runtime checks; the title overlay below is a new
-source change, not compiled or rendered-qualified yet.
+request/open/current-track runtime checks. The cumulative desktop source now
+compiles; the title overlay's narrower qualification is described below.
 
 ```ini
 [CDSwitcher]
@@ -72,7 +72,17 @@ boundary, manual selection and title source above. This slice adds only those
 eight missing in-race stick aliases and extends the existing `test_cd_switcher`
 adapter/edge fixture. Default Back/RS+Back and Z/X, off-by-default activation,
 test/record/playback exclusion, audio/decoder/loop and title behavior remain as
-before. Affected desktop/fixture compile and `cd_switcher` run are pending;
+before. ClangCL Release `OutRunDesktop` compiled/linked at `96c92fd` and is
+retained: 23,866,368 bytes, SHA-256
+`514a6e8a116de58e4f9d3dd9f3f9604c4358062b54e775792bc759abff6765b4`.
+The initial fixture compile failed on an unqualified test lambda parameter;
+fixture-only correction `339f901` changes no product source. Its
+`test_cd_switcher` build and only `cd_switcher` pass (253 synthetic checks,
+1/1 test, zero skipped). The prior 601-check GOAL result is retained without
+rerunning. Original failure/logs and desktop are in hub
+`artifacts/outrun-cd-stick-combos-20261016/build-01`; passing continuation,
+JUnit, copied LastTest and result are in `build-02`. Both leases released with
+children quiescent and process environment restored. No game/install;
 physical-controller and audible acceptance remain unqualified for this slice.
 
 ## Optional current-track title (new source)
@@ -131,5 +141,7 @@ are not implemented. Scoped CD request/open/current
 evidence does not establish audible/physical quality. The width-aware title
 passed its affected compile/link and98 synthetic checks; its sampled visual
 run confirmed timing and center placement with tight-space/dot findings. This
-title-only spacing follow-up is not compiled or run yet. Readability acceptance
-remains open; the next visual check should combine with another useful change.
+title-only spacing follow-up is included in the cumulative desktop compile
+above, but was not visually rerun by the stick-alias fixture. Readability
+acceptance remains open; the next visual check should combine with another
+useful change.
