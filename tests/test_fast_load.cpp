@@ -162,6 +162,9 @@ std::vector<std::int64_t> ordinary(unsigned rate,bool enabled,std::uint32_t mode
         return 0;
     }};
     check(pf::run_native_frame_loop(*trace.context,services)==0u,"ordinary comparison exits");
+    if(enabled&&mode==13u&&stage==0u)
+        check(en::fast_load().enabled()&&!en::fast_load().loading()&&!en::fast_load().active()&&en::fast_load().present_interval(2)==2u,
+              "exit while still loading releases binding before context destruction");
     en::set_display_rate(60);en::fast_load().configure("0");
     return trace.values;
 }
@@ -177,9 +180,5 @@ int main(){
         check(ordinary(rate,true,mode,stage)==disabled,"stage 65/gameplay/menu service order and timing match disabled option");
     }
     ordinary(120,true,13,0);
-    en::fast_load().configure("2");
-    check(!en::fast_load().loading()&&!en::fast_load().active()&&en::fast_load().present_interval(2)==2u,
-          "native loop exit while still loading releases binding and presentation override");
-    en::fast_load().configure("0");
     std::printf("fast_load: %u checks passed\n",checks);
 }
