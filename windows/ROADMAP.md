@@ -190,6 +190,19 @@ original failed evidence is retained. No game/install/provider/publication. Earl
 music/graphics/menu/character passes stand; rendered F6, persistence and the actual
 unlocked course route remain unqualified.
 
+Highway animation setting source follow-up, October 16: the existing default-off
+Misc.RandomHighwayAnimSets option is exposed on F6 Advanced Controls and Wheelkit
+@6 Controls as Random highway animation sets. An explicit edit saves only that key
+for the next game start. Help retains experimental status, event conditions and
+precedence over the separate row-only setting without rewriting it. The selector,
+process random stream, actual race mode, recording and all game consumers are unchanged.
+The selector and Rows compatibility checks already passed on c5d3a9f (2679 and 245
+checks; hub artifacts/outrun-cumulative-shift-highway-20261015/QUALIFICATION.json).
+Their source and fixtures remain identical here, so those results are retained;
+original cleanup/readback failure and exit-only closure remain honestly recorded.
+The incremental build and three affected settings/catalog cases are pending.
+Rendered controls, persistence, animations and runtime replay remain unqualified.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |

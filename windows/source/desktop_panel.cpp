@@ -133,6 +133,7 @@ struct Values {
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
+    bool highway_sets{};   // [Misc] RandomHighwayAnimSets, existing default-off startup policy
     int holly_course2{3};   // [Misc] EnableHollyCourse2, existing next-start availability policy
     bool hidef_characters{true},jp_clarissa{};   // existing Graphics/Misc character appearance, next start only
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
@@ -258,6 +259,13 @@ void page_controls(bool advanced){
              "All modes require valid MIX 2 course data; missing or malformed data stays locked. "
              "Does not change license progress. Applies at the next game start."))
              keep(&v.holly_course2,before,[&]{return save("Misc","EnableHollyCourse2",std::to_string(v.holly_course2));});}
+        dbce::panel::Heading("Highway animations");
+        {const bool before=v.highway_sets;
+         if(dbce::panel::OffOn("Random highway animation sets",&v.highway_sets,
+             "Experimental; Off by default. Mixes highway animation sets from other game modes; animations still require "
+             "their event conditions. Overrides the separate row-only option while On, without changing its saved choice. "
+             "Applies at the next game start."))
+             keep(&v.highway_sets,before,[&]{return save("Misc","RandomHighwayAnimSets",v.highway_sets?"true":"false");});}
         dbce::panel::Heading("Character appearance");
         {const bool before=v.hidef_characters;
          if(dbce::panel::OffOn("High definition characters",&v.hidef_characters,
@@ -609,6 +617,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
     v.hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
     v.jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
+    v.highway_sets=settings.flag("Misc","RandomHighwayAnimSets",false);   // identical to the startup consumer
     v.holly_course2=settings.integer("Misc","EnableHollyCourse2",3);
     if(v.holly_course2<0||v.holly_course2>3)v.holly_course2=3;   // identical to the startup consumer
     p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
