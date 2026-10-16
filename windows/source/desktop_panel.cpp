@@ -118,6 +118,8 @@ Letterbox lb;
 struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
+    bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
+    std::string shadow_opacity{"1"};   // raw setting: arbitrary custom values stay intact until an explicit preset edit
     bool screen_edge_cull{true},screen_edge_cull_start{true};   // [Graphics] ScreenEdgeCullFix
     int anisotropic{},reflection{1},draw_ahead{},draw_behind{};   // reflection: index of 64..4096, default 128
     bool transparency{},full_vehicle_detail{},no_stage_cull{},depth_precision{};   // existing default-off Graphics flags
@@ -165,10 +167,10 @@ bool percent_key(const char* label,int* value,int max,int def,const char* key,co
     if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
     keep(value,before,[&]{return save("FFB",key,fraction(*value));});return true;
 }
-void graphics_flag(const char* label,bool* value,const char* key,const char* help){
+void graphics_flag(const char* label,bool* value,const char* key,const char* help,const char* section="Graphics"){
     const bool before=*value;
     if(dbce::panel::OffOn(label,value,help))
-        keep(value,before,[&]{return save("Graphics",key,*value?"true":"false");});
+        keep(value,before,[&]{return save(section,key,*value?"true":"false");});
 }
 void graphics_slider(const char* label,int* value,int max,const char* key,const char* format,const char* help){
     const int before=*value;
@@ -432,6 +434,28 @@ void page_cameras(bool advanced){
     dbce::panel::Text("Three projected views use 64 sections ahead and behind where the saved value is 0; their developer overrides still apply.");
     graphics_flag("Depth precision fix",&v.depth_precision,"FixZBufferPrecision",
         "Off by default. Adjusts the race camera's near plane by view to reduce distant surface flicker; it can clip very close geometry.");
+    dbce::panel::Heading("Graphics compatibility");
+    graphics_flag("Lens flare asset fix",&v.lens_flare_fix,"FixLensFlarePath",
+        "On (default): uses the shipped lens-flare offsets when available, with the original asset fallback. Off uses only the original asset path. Applies at the next game start.","Bugfixes");
+    graphics_flag("Double-sided shading fix",&v.shading_fix,"FixIncorrectShading",
+        "On (default): fixes lighting on affected double-sided materials. Off keeps the original shader mapping. Applies at the next game start.","Bugfixes");
+    graphics_flag("Particle rendering fix",&v.particle_fix,"FixParticleRendering",
+        "On (default): fixes particle size and placement, and the Metropolis fireworks object. Off keeps the original particle behavior. Applies at the next game start.","Bugfixes");
+    graphics_flag("Right-side junction animation fix",&v.bunki_fix,"FixRightSideBunkiAnimations",
+        "On (default): fixes animation visibility on right-side junction models. Off keeps their original visibility behavior. Applies at the next game start.","Bugfixes");
+    {
+        static const char* const values[]{"0","0.25","0.5","0.75","1","1.5","2"};
+        static const char* const labels[]{"Off (0%)","25%","50%","75%","100% (default)","150%","200%","Keep saved value"};
+        int selected=7;
+        for(int i=0;i<7;++i)if(v.shadow_opacity==values[i])selected=i;
+        if(v.shadow_opacity=="1.0"||v.shadow_opacity=="1.00")selected=4;   // common default spellings; no rewrite
+        if(selected==7)dbce::panel::Status("Saved base shadow opacity",v.shadow_opacity.c_str());
+        if(dbce::panel::Choice("Car base shadow opacity",labels,8,&selected,
+            "Flat car-shadow strength: 100% is the default, 0% disables it, and values above 100% strengthen it. Keep saved value preserves custom values and spellings, including values above 200%; the native setting is not capped at 200%. Applies at the next game start.")){
+            if(selected>=0&&selected<7&&save("Graphics","CarBaseShadowOpacity",values[selected]))
+                v.shadow_opacity=values[selected];
+        }
+    }
     dbce::panel::Text("Graphics detail changes apply at the next game start.");
 }
 void page_telemetry(bool advanced){
@@ -620,6 +644,11 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.full_vehicle_detail=settings.flag("Graphics","DisableVehicleLODs",false);
     v.no_stage_cull=settings.flag("Graphics","DisableStageCulling",false);
     v.depth_precision=settings.flag("Graphics","FixZBufferPrecision",false);
+    v.lens_flare_fix=settings.flag("Bugfixes","FixLensFlarePath",true);
+    v.shading_fix=settings.flag("Bugfixes","FixIncorrectShading",true);
+    v.particle_fix=settings.flag("Bugfixes","FixParticleRendering",true);
+    v.bunki_fix=settings.flag("Bugfixes","FixRightSideBunkiAnimations",true);
+    v.shadow_opacity=settings.text("Graphics","CarBaseShadowOpacity","1");
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle

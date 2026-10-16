@@ -228,6 +228,18 @@ consumer suite was rerun. Lola owns canonical Wheelkit integration; native stays
 private. Rendered controls, F6 persistence, physical pedal behavior and audible
 Pegasus behavior remain unqualified by these changes. No game/install/provider/publication.
 
+Remaining graphics compatibility exposure batch, October 16: F6 Advanced Cameras
+and Wheelkit @6 Cameras expose existing FixLensFlarePath, FixIncorrectShading,
+FixParticleRendering and FixRightSideBunkiAnimations (Bugfixes, all default On),
+and CarBaseShadowOpacity (Graphics, default 1). Shadow presets 0/25/50/75/100/150/200%
+reuse Choice with Keep saved value; custom text remains intact, including values
+above 2 and spellings outside the preset vocabulary. Common 1.0/1.00 defaults show
+100% without rewriting. The native finite/nonnegative consumer remains authoritative
+and uncapped; no parser, rendering, camera, asset loading, report or framework change.
+All writes are explicit, one key and next-start; rig profiles do not target them.
+Incremental desktop build, 17 affected settings/catalog cases and 69-row generation
+are pending. Rendered F6/persistence and visual effects remain unqualified.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
