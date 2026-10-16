@@ -1,8 +1,8 @@
 # Optional loading-only fast load
 
-Source candidate, based on cumulative `c5d3a9f`. Default **off**; not built or runtime qualified in this slice.
+The source is based on cumulative `c5d3a9f` and remains default **off**. The existing host policy and INI parsing checks passed on product `2984189` (361 and 44 checks); sources are unchanged and those results are retained. Runtime behavior and loading speedup remain unqualified.
 
-Set this manually in `OutRunDesktop.ini` for a future qualified run:
+F6 Advanced Cameras now offers **Fast loading** as **Off (default)** or **Loading only (experimental)**. The matching Wheelkit @6 Cameras exposure is owned by Lola. Both choices save through the existing one-key writer for the next start; selecting Loading only writes:
 
 ```ini
 [Performance]
@@ -26,9 +26,9 @@ The original logical `44FBA0` file-service call stays in its original once-per-f
 
 ## Focused checks and remaining gates
 
-Authored, **not executed**:
+Retained passing host checks (product `2984189`; `artifacts/outrun-fast-load-prompts-cumulative-kiki-20261015/QUALIFIED-HOST.md` in the portfolio hub):
 
-- Root CTest `fast_load`: exact gate matrix; invalid/off configuration; stage-64 to 65 and mode-abort restoration; scoped cleanup; production native loop at 60/120 Hz with a synthetic existing clock; one loading update per frame; same-frame Present restoration; accumulator rebase after a simulated long final-loading Present; no replay of loading history on the first ordinary display-only frame; original file-service call count; enabled/disabled ordinary service order and timing comparisons for stage 65, gameplay, pause, and frontend modes.
-- Desktop CTest `fast_load_config`: production `Ini::load_text` parsing, missing key, modes 0/2, whitespace/comment/case handling, unsupported/malformed values, and preservation of unrelated Controls/Window values. It creates no settings file.
+- Root CTest `fast_load` (**361 checks passed**): exact gate matrix; invalid/off configuration; stage-64 to 65 and mode-abort restoration; scoped cleanup; production native loop at 60/120 Hz with a synthetic existing clock; one loading update per frame; same-frame Present restoration; accumulator rebase after a simulated long final-loading Present; no replay of loading history on the first ordinary display-only frame; original file-service call count; enabled/disabled ordinary service order and timing comparisons for stage 65, gameplay, pause, and frontend modes.
+- Desktop CTest `fast_load_config` (**44 checks passed**): production `Ini::load_text` parsing, missing key, modes 0/2, whitespace/comment/case handling, unsupported/malformed values, and preservation of unrelated Controls/Window values. It creates no settings file.
 
-A fresh shared build/test slot is required to compile and run those fixtures and the desktop candidate. Graphics wait/Present execution, visible stage-65 transition, the 60/120 settings, loading abort/close, and ordinary gameplay pacing still require bounded runtime qualification. Source alone establishes no load-time improvement, VSync/scanout result, visual acceptance, input behavior, or physical feedback result. Existing frozen `55B9` packaging remains separate and unchanged.
+The new F6/Wheelkit exposure needs one affected incremental desktop/settings/catalog check batch; the unchanged consumer fixtures are not queued for repetition. No game or owner install is part of this source slice. Graphics wait/Present execution, visible stage-65 transition, the 60/120 settings, loading abort/close, and ordinary gameplay pacing still require bounded runtime qualification. Source alone establishes no load-time improvement, VSync/scanout result, visual acceptance, input behavior, or physical feedback result. Existing frozen `55B9` packaging remains separate and unchanged.

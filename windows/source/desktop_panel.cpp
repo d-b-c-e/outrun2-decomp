@@ -116,6 +116,7 @@ Letterbox lb;
 // The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
+    int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, next start only
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
@@ -390,6 +391,12 @@ void page_cameras(bool advanced){
            "Frames that may wait for the display: 1 queues fewer frames, 2 is the default, 3 allows more; "
            "0 uses the plain presentation mode."))
         keep(&v.latency,before,[&]{return save("Window","FrameLatency",std::to_string(v.latency));});
+    {static const char* const modes[]{"Off (default)","Loading only (experimental)"};
+     const int before=v.fast_load;
+     if(dbce::panel::Choice("Fast loading",modes,2,&v.fast_load,
+         "Experimental loading-only mode. Skips display waits while a race loads and restores normal pacing before "
+         "the race starts. Driving frame pacing is unchanged. Applies at the next game start."))
+         keep(&v.fast_load,before,[&]{return save("Performance","FramerateFastLoad",v.fast_load==1?"2":"0");});}
     // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
     // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
     // no row here yet.
@@ -658,6 +665,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.full_vehicle_detail=settings.flag("Graphics","DisableVehicleLODs",false);
     v.no_stage_cull=settings.flag("Graphics","DisableStageCulling",false);
     v.depth_precision=settings.flag("Graphics","FixZBufferPrecision",false);
+    v.fast_load=settings.text("Performance","FramerateFastLoad","0")=="2"?1:0;   // same strict startup policy
     v.lens_flare_fix=settings.flag("Bugfixes","FixLensFlarePath",true);
     v.shading_fix=settings.flag("Bugfixes","FixIncorrectShading",true);
     v.particle_fix=settings.flag("Bugfixes","FixParticleRendering",true);

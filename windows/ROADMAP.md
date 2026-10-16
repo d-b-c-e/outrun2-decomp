@@ -271,10 +271,24 @@ native remains private. Rendered F6/persistence, pack cold-loading and runtime
 visual behavior remain unqualified. No game, pack download, owner install,
 provider retry, native canonical merge or public push.
 
+Loading performance exposure, October 16: existing Performance.FramerateFastLoad
+is offered in F6 Advanced Cameras as Fast loading: Off (default) / Loading only
+(experimental), mapping exactly to 0/2 for the next game start. Only literal 2
+shows enabled after normal INI whitespace/comment parsing; unsupported modes 1/3
+and other text remain Off, without rewriting the file on read. Lola owns matching
+Wheelkit @6 Cameras raw/composite rows and its affected settings/catalog checks.
+The fast-load consumer, frame loop, wait/Present gate, clock, recording and normal
+driving behavior are unchanged. Existing fast_load 361 and fast_load_config 44
+checks passed on product 2984189 (hub
+artifacts/outrun-fast-load-prompts-cumulative-kiki-20261015/QUALIFIED-HOST.md);
+their source/header/fixtures remain identical and results are retained without
+rerunning. Incremental build and paired exposure checks are pending; rendered
+F6/persistence, loading speedup and runtime transition behavior remain unqualified.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
-| | FramerateFastLoad | 🟡 | Default-off mode 2 source candidate: existing frame-latency wait/Present bypass only in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Focused transition/config fixtures authored but unrun; no build/runtime or load-time claim. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
+| | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure source is pending its affected build/settings checks. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
 | | FramerateUnlockExperimental | ⬜ | |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
