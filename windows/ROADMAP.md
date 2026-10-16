@@ -210,6 +210,17 @@ was released with environment restored and owned processes quiescent. Qualified
 Wheelkit source is on main; native remains private. No game/install/provider/publication.
 Rendered controls, persistence, animations and runtime replay remain unqualified.
 
+Gameplay/audio compatibility setting batch, October 16: F6 Advanced Controls and
+Wheelkit @6 Controls expose existing Bugfixes.FixFullPedalChecks and FixPegasusClopping
+as Full pedal press check fix / Pegasus sound loop fix. Both remain On by default;
+explicit edits save one key for the next start, outside rig profiles. No pedal mapping,
+calibration, stored input, recording, event sound consumer or algorithm changes.
+The original pedal_volume and pegasus_sound passes are retained (hub
+artifacts/outrun-fix-pegasus-20261013/run-054105/ctest.log); neither consumer nor
+fixture changes in this batch. Incremental build, four save/backup cases and the
+catalog preservation check are pending. Rendered controls, F6 persistence, physical
+pedal behavior and audible Pegasus behavior remain unqualified by these changes.
+
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |

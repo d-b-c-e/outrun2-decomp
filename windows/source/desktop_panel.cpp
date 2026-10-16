@@ -133,6 +133,7 @@ struct Values {
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
+    bool full_pedal_fix{true},pegasus_sound_fix{true};   // existing default-on Bugfixes, next start only
     bool highway_sets{};   // [Misc] RandomHighwayAnimSets, existing default-off startup policy
     int holly_course2{3};   // [Misc] EnableHollyCourse2, existing next-start availability policy
     bool hidef_characters{true},jp_clarissa{};   // existing Graphics/Misc character appearance, next start only
@@ -259,6 +260,18 @@ void page_controls(bool advanced){
              "All modes require valid MIX 2 course data; missing or malformed data stays locked. "
              "Does not change license progress. Applies at the next game start."))
              keep(&v.holly_course2,before,[&]{return save("Misc","EnableHollyCourse2",std::to_string(v.holly_course2));});}
+        dbce::panel::Heading("Compatibility fixes");
+        {const bool before=v.full_pedal_fix;
+         if(dbce::panel::OffOn("Full pedal press check fix",&v.full_pedal_fix,
+             "On (default): treats nearly full throttle or brake (250-254 out of 255) as a full press for checks such as "
+             "backfire. Calibration, stored input and recordings are unchanged. Off restores the original 255-only checks. "
+             "Applies at the next game start."))
+             keep(&v.full_pedal_fix,before,[&]{return save("Bugfixes","FixFullPedalChecks",v.full_pedal_fix?"true":"false");});}
+        {const bool before=v.pegasus_sound_fix;
+         if(dbce::panel::OffOn("Pegasus sound loop fix",&v.pegasus_sound_fix,
+             "On (default): fixes Pegasus hoofbeats continuing after the event sound is stopped. "
+             "Off keeps the original sound-stop behavior. Applies at the next game start."))
+             keep(&v.pegasus_sound_fix,before,[&]{return save("Bugfixes","FixPegasusClopping",v.pegasus_sound_fix?"true":"false");});}
         dbce::panel::Heading("Highway animations");
         {const bool before=v.highway_sets;
          if(dbce::panel::OffOn("Random highway animation sets",&v.highway_sets,
@@ -617,6 +630,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
     v.hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
     v.jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
+    v.full_pedal_fix=settings.flag("Bugfixes","FixFullPedalChecks",true);
+    v.pegasus_sound_fix=settings.flag("Bugfixes","FixPegasusClopping",true);
     v.highway_sets=settings.flag("Misc","RandomHighwayAnimSets",false);   // identical to the startup consumer
     v.holly_course2=settings.integer("Misc","EnableHollyCourse2",3);
     if(v.holly_course2<0||v.holly_course2>3)v.holly_course2=3;   // identical to the startup consumer
