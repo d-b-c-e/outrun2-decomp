@@ -119,8 +119,10 @@ still skips/reset the CPU pacer and temporarily requests interval 0 through its
 existing gate. The simulation and sound algorithms are unchanged; the existing
 fixed-tick owner is selected for this new presentation consumer too.
 
-Pending qualification: affected cached Release desktop build and only the new
-`presentation_controls` and `presentation_controls_sound` CTests in existing targets.
+Focused qualification passes at `7292710`: cached ClangCL Release desktop and
+the existing affected targets compile; only the two new CTests ran.
+`presentation_controls` passes 224 checks and `presentation_controls_sound`
+passes 241 (465 new checks, 2/2 CTests, zero skipped).
 The first uses synthetic clocks,
 sleep and pause callbacks to exercise the actual wait loop, mode/sync policy,
 invalid/default values, exclusions, uncapped behavior and late-frame/reset behavior.
@@ -130,3 +132,10 @@ The second checks the actual host sound callback for each VSync override and the
 excluded/default compatibility path; it starts no output device or worker.
 The qualified desktop, general-presentation 5,309 and sound 244 checks at `0551df8`
 remain retained. Rendered F6 save, physical CPU/pacing and output behavior remain open.
+
+Original evidence is hub artifacts/outrun-pacing-vsync-20261017/build-01. The desktop
+is 23,976,960 bytes, SHA-256
+`0EDDAAB8C2B9F0654FD117E38867579A03F2ABEB2B39922C37EAAE3C70129F88`.
+Owned children closed, process environment restored and the exact lease was
+released at 2026-10-17T03:03:31.3490990Z, handed directly to Lola before documentation.
+No game, provider or owner installation was used.

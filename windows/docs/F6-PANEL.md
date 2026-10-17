@@ -48,8 +48,11 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   the ordinary selected CPU rate and selects the existing fixed-tick simulation
   and sound path. Both use the existing writer/rollback and are
   ignored in tests, recording and playback. Accurate mode has higher CPU cost.
-  Affected desktop and two new policy/host CTests are pending for this successor;
-  its UI/pacing/scanout are unqualified. See GENERAL-PRESENTATION.md.
+  At `7292710`, affected Release desktop compilation and both new policy/host
+  CTests pass 465 checks (224 controls, 241 sound; zero skipped). Hub
+  artifacts/outrun-pacing-vsync-20261017/build-01 holds the original evidence.
+  Its rendered UI/save, CPU cost, actual pacing/audio and scanout are unqualified.
+  See GENERAL-PRESENTATION.md.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for
   the next ordinary start. Tests, playback and recording suppress extraction. Help describes original DDS output
