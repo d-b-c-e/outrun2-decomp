@@ -33,7 +33,7 @@ struct Fixture {
         const std::vector<std::uint32_t> values(args);return bridge.call(memory,import,[&](unsigned n){return n<values.size()?values[n]:0u;},pop,stats);
     }
     std::uint32_t original_resolve(const std::string& host,unsigned count){
-        text(base,host);TranslatedModule module{network_functions,nullptr,{},nullptr,nullptr,nullptr,nullptr};
+        text(base,host);TranslatedModule module{network_functions,nullptr,{},nullptr,nullptr,nullptr,nullptr,0u,{},nullptr};
         module.special=[&](or2x86::Cpu& cpu,std::uint32_t target){
             if(target<thunk||target>=thunk+80u)return false;
             std::uint32_t popped=0;const auto value=bridge.call(memory,(target-thunk)/4u,[&](unsigned n){return translated_arg(cpu,n);},popped,stats);
