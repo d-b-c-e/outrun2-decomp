@@ -7,6 +7,7 @@
 // object pointer the PC stores is a PcD3D9Device handle here.
 #include "platform/pc_vertex_shader_setup.hpp"
 #include "platform/ui_prompt_family.hpp"
+#include "platform/texture_file_cache.hpp"
 #include <map>
 #include <string>
 #include <vector>
@@ -43,7 +44,8 @@ void pmt_texture_replacement_configure(bool enabled,const std::string& load_fold
 // SceneTextureExtract / UITextureExtract: original validated DDS bytes under the sibling dump folder,
 // only after successful stock creation (or committed CPU preview pack); replacements and existing dumps are kept.
 // Extraction is independently default-off; configure resets its per-session attempts/statistics.
-void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder=false,bool scene_extract=false,bool ui_extract=false);
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder=false,bool scene_extract=false,bool ui_extract=false,bool cache=false);
+TextureFileCacheStats texture_file_cache_stats();
 struct PmtTextureExtractionStats { std::uint32_t written{},existing{},failed{},unsupported{};std::string error; };
 const PmtTextureExtractionStats& pmt_texture_extraction_stats();
 const PmtTextureExtractionStats& ui_texture_extraction_stats();

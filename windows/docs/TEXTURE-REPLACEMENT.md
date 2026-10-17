@@ -87,6 +87,36 @@ assets and synthetic files in isolated TEMP. No game, provider or owner install 
 extraction, actual GPU presentation and rendered F6 interaction remain unqualified; native and Wheelkit exposure
 and the accepted installed candidate remain separate evidence layers.
 
+## Replacement file cache (October 17 source candidate, unbuilt)
+
+`[Graphics] EnableTextureCache = true` enables a read-only in-memory cache of replacement DDS files at the next
+ordinary start. Native default is false; latched tests, playback and recording suppress it. It needs scene or UI
+replacement enabled and is independent of extraction. F6 Cameras Advanced offers **Cache replacement textures**
+through the existing one-key writer and rollback; pack changes need a restart. No disk cache or owner file is written.
+
+Local Tweaks `hooks_textures.cpp` uses a 1280 MiB FileDataCache and, when EnableTextureCache is on, prefetches the
+current scene bank during LoadXmtsetObject Step1 and holds Step3 until completion. Its file cache otherwise exists
+even with that flag off. Native keeps the whole feature opt-in and caps retained original DDS bytes at 128 MiB;
+each file still has the existing 128 MiB read bound. This is a bounded native adaptation, not identical allocation
+or default policy. It caches CPU file bytes, never device handles, decoded texels or GPU resources.
+
+The same indexed paths, lookup precedence and per-request validation/conversion remain. Reads return independent
+byte copies so A8B8G8R8 conversion cannot mutate cached originals. Least-recently-used bytes are evicted before a
+new entry exceeds the cap. A file larger than the cache capacity can still be read uncached; missing, short or
+oversize-for-loader files keep existing stock fallback. Cache allocation/job-start failure keeps ordinary reads.
+Successful cached contents last until reconfiguration/restart; no hot-reload or file-change guarantee is offered.
+
+At scene objects-begin, one owned background job reads only that bank's already-indexed folder, at most one cache
+capacity of input per job. It overlaps object loading. Texture-step returns pending without cursor advance while
+the job is incomplete, so the loading screen keeps rendering; no blocking wait is inserted into the texture step.
+Reconfiguration and destruction join the owned job before freeing its storage. There are no detached workers.
+Shutdown prints cache read/hit/failure/eviction and resident-byte counts. First cold UI-bank loading remains on its
+existing synchronous path; this feature does not claim to remove that stall or establish a performance gain.
+
+The existing PMT fixture adds small-budget eviction, byte-copy/session reset, owned prefetch/destruction,
+uncacheable-size fallback and real scene/UI consumer cases. Qualification is pending one affected desktop build
+and that existing fixture; earlier extraction and rendering evidence stays scoped to its original candidates.
+
 ## Pad prompt folders (qualified offline, runtime pending)
 
 Tweaks reference: local dbce-mods-outrun-2006 commit

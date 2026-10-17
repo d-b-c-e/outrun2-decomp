@@ -14,6 +14,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <chrono>
+#include <thread>
 #include <vector>
 using namespace outrun::platform;
 using outrun::driving::Bytes;
@@ -77,7 +79,12 @@ void synthetic_pmt(PcPmtResources& r,std::vector<std::uint8_t>& video){
 void load_synthetic(PcPmtResources& r,Device& dev){
     PcShaderCache cache{};PcShaderGlobals globals{};PcPmtLoadCursor cur{};
     pmt_objects_begin_42e490(r,cur);CHECK(pmt_objects_step_42e4f0(r,cur,dev,cache,globals));
-    pmt_textures_begin_42e850(r,cur);CHECK(pmt_textures_step_42e8c0(r,cur,dev));
+    pmt_textures_begin_42e850(r,cur);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    bool done=false;
+    do{done=pmt_textures_step_42e8c0(r,cur,dev);if(!done)std::this_thread::yield();}
+    while(!done&&std::chrono::steady_clock::now()<deadline);
+    CHECK(done);
 }
 }
 int main(int argc,char** argv){
@@ -300,6 +307,53 @@ int main(int argc,char** argv){
         CHECK(pmt_texture_extraction_stats().unsupported==4&&!fs::exists(dump)&&!fs::exists(dir/"escape"));
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
+    // Opt-in raw file cache: bounded LRU, owned prefetch, reset, and the unchanged device upload/fallback path.
+    {
+        namespace fs=std::filesystem;
+        const auto root=fs::temp_directory_path()/"or2_texture_file_cache_test";fs::remove_all(root);fs::create_directories(root);
+        const auto file=[](std::uint8_t fill){std::vector<std::uint8_t> f(136,fill);std::memset(f.data(),0,128);std::memcpy(f.data(),"DDS ",4);
+            auto put=[&](unsigned o,std::uint32_t n){std::memcpy(f.data()+o,&n,4);};
+            put(4,124);put(12,4);put(16,4);put(28,1);put(76,32);put(80,4);put(84,0x31545844);return f;};
+        const auto a=file(0x11),b=file(0x22),c=file(0x33);
+        const auto write=[](const fs::path& p,const std::vector<std::uint8_t>& f){fs::create_directories(p.parent_path());
+            std::ofstream out(p,std::ios::binary);out.write(reinterpret_cast<const char*>(f.data()),std::streamsize(f.size()));};
+        const auto pa=root/"a.dds",pb=root/"b.dds",pc=root/"c.dds";write(pa,a);write(pb,b);write(pc,c);
+        std::vector<std::uint8_t> out;
+        {TextureFileCache cache(272);
+         CHECK(cache.read(pa,out)&&out==a&&cache.read(pb,out)&&out==b&&cache.read(pa,out)&&out==a);
+         CHECK(cache.read(pc,out)&&out==c);
+         auto stats=cache.stats();CHECK(stats.reads==3&&stats.hits==1&&stats.evicted==1&&stats.bytes==272&&stats.entries==2);
+         write(pa,c);CHECK(cache.read(pa,out)&&out==a);   // this configured session keeps its original bytes
+         CHECK(cache.read(pb,out)&&out==b&&cache.stats().reads==4&&cache.stats().evicted==2);
+         CHECK(!cache.read(root/"missing.dds",out)&&cache.stats().failed==1);
+         write(root/"short.dds",{1,2,3});CHECK(!cache.read(root/"short.dds",out)&&cache.stats().failed==2);}
+        {TextureFileCache small(128);CHECK(small.read(pa,out)&&out==c&&small.stats().bytes==0&&small.stats().entries==0);
+         CHECK(small.read(pa,out)&&small.stats().reads==2);}   // oversize-for-cache reads still succeed uncached
+        write(pa,a);
+        {TextureFileCache cache(272);cache.prefetch({pa,pb,pc});cache.finish();
+         CHECK(cache.ready()&&cache.stats().prefetched==2&&cache.stats().reads==2&&cache.stats().bytes==272);
+         CHECK(cache.read(pa,out)&&out==a&&cache.read(pb,out)&&out==b&&cache.stats().hits==2);
+         cache.prefetch({pc});cache.finish();CHECK(cache.stats().bytes<=272&&cache.stats().evicted==1);}
+        // The real PMT bank starts prefetch during objects and waits without advancing textures until it completes.
+        const auto load=root/"load";PcPmtResources probe{};std::vector<std::uint8_t> pv;synthetic_pmt(probe,pv);
+        char name[64];std::snprintf(name,sizeof name,"0_%X_4x8.dds",pmt_xxh32(pv.data()+0x20,128));
+        const auto replacement=load/"cs_CACHE_pmt"/name;write(replacement,a);
+        texture_replacement_configure(true,false,load.string(),false,false,false,true);
+        const auto bank=[&](Device& dev){PcPmtResources r{};std::vector<std::uint8_t> v;synthetic_pmt(r,v);r.pack_name="cs_CACHE_pmt";load_synthetic(r,dev);};
+        {Device dev;bank(dev);CHECK(dev.texture_bytes[0]==a&&texture_file_cache_stats().reads==1&&texture_file_cache_stats().hits>=1);}
+        write(replacement,c);
+        {Device dev;bank(dev);CHECK(dev.texture_bytes[0]==a&&texture_file_cache_stats().reads==1);}
+        texture_replacement_configure(true,false,load.string());
+        {Device dev;bank(dev);CHECK(dev.texture_bytes[0]==c&&texture_file_cache_stats().reads==0);}
+        write(replacement,{4,5,6});texture_replacement_configure(true,false,load.string(),false,false,false,true);
+        {Device dev;bank(dev);CHECK(dev.textures.size()==1&&dev.texture_bytes[0].size()==128&&pmt_texture_replacement_stats().failed==1);}
+        // Reconfiguration joins the owned worker before clearing its storage; extraction-only never starts a cache.
+        write(replacement,a);texture_replacement_configure(true,false,load.string(),false,false,false,true);
+        probe.pack_name="cs_CACHE_pmt";PcPmtLoadCursor cursor{};pmt_objects_begin_42e490(probe,cursor);
+        texture_replacement_configure(false,false,load.string(),false,true,false,true);
+        CHECK(texture_file_cache_stats().reads==0&&texture_file_cache_stats().entries==0);
+        pmt_texture_replacement_configure(false,{});fs::remove_all(root);
+    }
     // The START loading picture (ui_texture_replacement_rgba): the sprite banks' lookup for a stock DDS file, then the
     // file's top level as R,G,B,A from the device reader, or nothing (the caller keeps the stock texture).
     {
@@ -334,6 +388,11 @@ int main(int argc,char** argv){
         CHECK(st.looked==3&&st.replaced==1&&st.failed==1&&pmt_texture_replacement_stats().looked==0);
         const auto& bank=ui_texture_replacement_banks().at("spr_LOADING_xst");
         CHECK(bank.folder&&bank.looked==3&&bank.replaced==1&&bank.failed==1);
+        texture_replacement_configure(false,true,dir.string(),false,false,false,true);
+        CHECK(ui_texture_replacement_rgba("spr_LOADING_xst",3,stock.data(),stock.size(),256,w,h,rgba)&&rgba.size()==256);
+        const auto first=rgba;
+        CHECK(ui_texture_replacement_rgba("spr_LOADING_xst",3,stock.data(),stock.size(),256,w,h,rgba)&&rgba==first);
+        CHECK(texture_file_cache_stats().reads==1&&texture_file_cache_stats().hits==1);   // conversion never mutates cached raw bytes
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     std::printf("pc pmt loader: %u checks\n",checks);

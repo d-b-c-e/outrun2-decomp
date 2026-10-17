@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <stdexcept>
 namespace outrun::platform {
@@ -36,6 +37,7 @@ struct Replacement {
     bool scene_extract{},ui_extract{};std::filesystem::path dump;
     std::set<std::string> dump_attempts;
     PmtTextureExtractionStats extraction,ui_extraction;
+    std::unique_ptr<TextureFileCache> file_cache;
     UiPromptSelection prompts;
     std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
     std::map<std::string,int> folders;                   // lower-case first components of those paths
@@ -67,13 +69,8 @@ Replacement& replacement(){static Replacement r;return r;}
 std::string lower(std::string s){for(auto& ch:s)ch=char(std::tolower(static_cast<unsigned char>(ch)));return s;}
 // A replacement file read whole, refused above 128 MB (a 4096x4096 A8R8G8B8 chain is 90 MB).
 bool read_replacement(const std::filesystem::path& path,std::vector<std::uint8_t>& out){
-    try{
-        std::error_code e;const auto n=std::filesystem::file_size(path,e);
-        if(e||n<0x80u||n>(std::uintmax_t(128u)<<20))return false;
-        std::ifstream f(path,std::ios::binary);if(!f)return false;
-        out.resize(std::size_t(n));f.read(reinterpret_cast<char*>(out.data()),std::streamsize(n));
-        return f.gcount()==std::streamsize(n);
-    }catch(...){return false;}   // allocation or stream failure: the stock texture
+    auto& cache=replacement().file_cache;
+    return cache?cache->read(path,out):TextureFileCache::read_file(path,out);
 }
 // A DDS the device's reader (pc_d3dx_texture_from_file) accepts, checked before the device sees it: a file that reader
 // refuses is a device error, and the renderer ends the run on any device error (renderer_present.inc). At least as
@@ -239,6 +236,15 @@ std::uint32_t upload(PcD3D9Device& device,std::uint32_t buffer,const std::uint8_
 }
 }
 void pmt_objects_begin_42e490(PcPmtResources& r,PcPmtLoadCursor& c){
+    auto& textures=replacement();
+    if(textures.scene&&textures.file_cache&&!r.pack_name.empty()){
+        try{
+            const auto prefix=lower(r.pack_name)+"/";std::vector<std::filesystem::path> paths;
+            for(auto it=textures.files.lower_bound(prefix);it!=textures.files.end()&&it->first.compare(0,prefix.size(),prefix)==0;++it)
+                paths.push_back(it->second);
+            if(!paths.empty())textures.file_cache->prefetch(std::move(paths));
+        }catch(...){} // optional prefetch setup cannot abort the bank load
+    }
     auto s=r.view();
     r.object_table_20=0x14;
     s.put32(0x14,0x18);        // the PC stores the absolute pointer system+0x18
@@ -295,7 +301,7 @@ void pmt_textures_begin_42e850(PcPmtResources& r,PcPmtLoadCursor& c){
 }
 void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){texture_replacement_configure(enabled,false,load_folder);}
 void texture_replacement_set_pad_family(UiPromptFamily family){replacement().prompts.current=family;}
-void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder,bool scene_extract,bool ui_extract){
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder,bool scene_extract,bool ui_extract,bool cache){
     auto& r=replacement();r=Replacement{};r.scene=scene;r.ui=ui;r.any_folder=any_folder;
     r.scene_extract=scene_extract;r.ui_extract=ui_extract;
     if(scene_extract||ui_extract){
@@ -309,6 +315,7 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
                 scene_extract?"on":"off",ui_extract?"on":"off",load_folder.c_str());}
     }
     if(!scene&&!ui)return;
+    if(cache)try{r.file_cache=std::make_unique<TextureFileCache>(128u<<20);}catch(...){}
     std::error_code e;r.root=std::filesystem::u8path(load_folder);
     for(std::filesystem::recursive_directory_iterator it(r.root,e),end;!e&&it!=end;it.increment(e)){
         if(!it->is_regular_file(e))continue;
@@ -326,6 +333,9 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
         scene?"on":"off",ui?"on":"off");
 }
 const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
+TextureFileCacheStats texture_file_cache_stats(){
+    const auto& cache=replacement().file_cache;return cache?cache->stats():TextureFileCacheStats{};
+}
 const PmtTextureExtractionStats& pmt_texture_extraction_stats(){return replacement().extraction;}
 const PmtTextureExtractionStats& ui_texture_extraction_stats(){return replacement().ui_extraction;}
 bool ui_texture_extraction_enabled(){return replacement().ui_extract;}
@@ -375,6 +385,8 @@ bool ui_texture_replacement_rgba(const std::string& pack,std::uint32_t index,con
 const PmtTextureReplacementStats& ui_texture_replacement_stats(){return replacement().ui_stats;}
 const std::map<std::string,PmtTextureReplacementBank>& ui_texture_replacement_banks(){return replacement().ui_banks;}
 bool pmt_textures_step_42e8c0(PcPmtResources& r,PcPmtLoadCursor& c,PcD3D9Device& device){
+    // Keep displaying the loading screen while the bank's owned prefetch completes; do not advance its cursor.
+    if(auto& cache=replacement().file_cache;cache&&!cache->ready())return false;
     auto s=r.view();
     const auto count=s.u32(8);
     if(c.texture_95b22c>=count)return true;
