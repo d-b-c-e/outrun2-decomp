@@ -312,9 +312,9 @@ or rendered-result claim. See docs/UI-SCALING.md.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
-| Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
+| Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | Default retains the existing60/120 Settings row and integer-vblank pacing. Opt-in FramerateUnlockExperimental now consumes FramerateLimit0 (no CPU cap) or60..1000 using the existing host clock/sleep and Present0; legacy options framerate preserved. Efficient/accurate mode and independent VSync/tearing controls are not implemented by this adaptation; affected build/fixtures pending. See docs/GENERAL-PRESENTATION.md. |
 | | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure passed its incremental native build, four affected settings/catalog checks and 73-row generation/parsing on October 16. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
-| | FramerateUnlockExperimental | ⬜ | October 16 source boundary: Tweaks permits zero simulation updates per render with arbitrary/uncapped FramerateLimit. Native already has 60 Hz simulation and display-only interpolation, but only 60/120 public rates and integer-vblank Present pacing; no general unlock key is consumed. Audio control/fade servicing is still once per rendered frame, every fourth call, so general unlock would change its cadence. Product/config/F6/Wheelkit remain unchanged; see the source boundary below. |
+| | FramerateUnlockExperimental | 🟡 | Default-off implemented ordinary consumer: zero/multitick60Hz simulation and existing display interpolation, Present0/optional CPU cap, PcSound service at the existing42F330 fixed-update callback only when enabled. Off preserves accepted60/120 and old sound cadence. F6 Cameras Advanced exposes next-start toggle/cap through existing save/rollback; tests/record/playback ignore it. Options frame rate stays preserved; active override removes the live FRAME RATE row. Two focused fixtures plus desktop qualification pending; actual pacing/scanout/audio/input/rendered controls remain unqualified. See docs/GENERAL-PRESENTATION.md. |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
 | | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); ordinary DirectInput rescans every two seconds and reopens the saved instance GUID, built but not checked at the rig |
@@ -378,35 +378,21 @@ or rendered-result claim. See docs/UI-SCALING.md.
 | | FixRightSideBunkiAnimations | 🟡 | on by default as in Tweaks: the right-side branch model's 44F6DC store of the culling flag at +0x90 is skipped (`race_area.cpp`); off preserves the PC store, and the left-side path is unchanged. The `bunki_animation` fixture exercises all four combinations through the production area object loop. Not yet seen in game |
 | | FixParticleRendering | 🟡 | in source since b8c9f8b, on by default as in Tweaks (pc_screen.hpp): draw_418cf0's screen mapping used the full width/height where the Xbox code had half (grass off screen; race_particles_draw.cpp halves sx, sy and the size at 419009 as Tweaks does), and the Metropolis fireworks (44DE10 object 0x630001 had no node list; race_area.cpp draws 0x1A000A with a fixed list as Tweaks does). Not yet seen at the rig |
 
-### General framerate unlock source boundary (October 16)
+### Experimental general presentation successor (October 17)
 
-Read against compiled cumulative `03d124f` plus docs `e6accd7`; no product edit,
-test/build/lease, game, provider retry or install was needed for this readback.
-The existing 60/120 policy and all retained candidate evidence stay unchanged.
+The October16 source-boundary diagnosis is resolved in the opt-in successor:
+Performance.FramerateUnlockExperimental defaultsOff, preserving the current60/120
+consumer and audio cadence. On uses Performance.FramerateLimit0 (no CPU cap) or
+60..1000, Present0 plus the existing host clock/sleep, and the original60Hz
+zero/multitick accumulator/interpolation. PcSound control moves to its existing
+42F330 per-update callback only when enabled; PCM/movie clocks remain unchanged.
+F6 exposes next-start toggle/cap after those real consumers, with the existing
+save/rollback. Normal options.ini framerate remains preserved; the experimental
+cap owns the rate while enabled. Tests/record/playback ignore it. No new clock,
+profiler/framework, topology, tearing or VRR change. This is an adaptation rather
+than full efficient/accurate-limiter/VSync parity; caps below60 are unsupported.
 
-- Local Tweaks `hooks_framerate.cpp` allows `CalcNumUpdatesToRun(60)` to return
-  zero when the key is true, advances animation counters by updates and polls
-  input/sound inside the update loop. Its `FramerateLimit` also accepts arbitrary
-  values or zero for external limiting. Merely enabling the native 120 option
-  would not provide this general contract.
-- Native `src/driving/pc_common_control.cpp:5952` already allows zero-update
-  display frames and keeps input/mode/event calls inside the 60 Hz tick loop.
-  `src/enhancements/frame_rate.cpp` replays display builders with interpolation.
-  The missing general-rate seam is outside that fixed-step policy:
-  `src/enhancements/gpu_backend.cpp:39` accepts only 60/120,
-  `xbox/source/main.cpp:332` offers those rates, and
-  `xbox/source/d3d11_display.cpp:236` rounds to a positive integer vblank interval.
-  At 180 Hz its formula maps a requested 120 to interval 2 (90 presents/second
-  under ideal vblank pacing); this is source arithmetic, not observed scanout.
-- End-to-end timing neutrality is also unestablished: the host render callback
-  `src/runtime/game_host.cpp:521` calls `PcSound::tick_42f330()` on each display,
-  while `src/platform/pc_sound.cpp:327` services its control/fade work every
-  fourth call. Higher rendering therefore changes that service cadence. Fade
-  calculations also use elapsed milliseconds and the mixer has its own sample
-  clock; this finding establishes neither PCM speed nor the reported stutter's
-  cause. Sound-service ownership must be resolved before offering general unlock.
-
-General/unlimited presentation and its audio/input behavior require a focused
-integration decision and later qualification with the existing timing/audio
-evidence in an otherwise useful coordinated runtime slot. No new limiter,
-clock, profiler, framework or misleading F6/Wheelkit unlock control was added.
+Affected desktop plus new general_presentation/presentation_sound fixtures are
+pending one named source batch. Existing monitor32/calibration175/level861/cache351/
+extraction782/CD/course results remain retained. Runtime smoothness, scanout,
+audio/input and physical acceptance remain open. See docs/GENERAL-PRESENTATION.md.

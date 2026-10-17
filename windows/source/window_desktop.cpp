@@ -6,6 +6,7 @@
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
 #include "enhancements/fast_load.hpp"
+#include "enhancements/general_presentation.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
 #include "ffb_shadow_live.hpp"
@@ -421,6 +422,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(edge!=128u)std::printf("settings: car reflection %ux%u\n",edge,edge);
         outrun::platform::car_reflection_edge()=edge;}
     // Experimental loading-only Tweaks mode 2; no INI writes or mode-3 streaming.
+    {
+        const bool requested=settings.flag("Performance","FramerateUnlockExperimental",false);
+        const bool ordinary=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;
+        if(!outrun::enhancements::general_presentation().configure(requested,
+            settings.text("Performance","FramerateLimit","0"),ordinary))
+            std::printf("settings: experimental FramerateLimit refused (0 or 60..1000); ordinary 60/120 policy applies\n");
+        if(requested&&!ordinary)std::printf("settings: experimental presentation ignored in test/record/playback\n");
+    }
     {   const auto value=settings.text("Performance","FramerateFastLoad","0");
         auto& fast_load=outrun::enhancements::fast_load();
         if(!fast_load.configure(value))

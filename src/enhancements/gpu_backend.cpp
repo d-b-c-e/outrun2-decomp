@@ -1,5 +1,6 @@
 #include "enhancements/gpu_backend.hpp"
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/general_presentation.hpp"
 #include <algorithm>
 #include <cstdlib>
 
@@ -28,9 +29,12 @@ void GpuVideoBackend::push()const{
 void GpuVideoBackend::apply(const VideoSettings& s){
     settings_=supported(s);push();
     if(pace_){set_display_rate(settings_.frame_rate);pace_(settings_.frame_rate);}
-    if(!path_.empty())write_options(path_,{{"widescreen",settings_.widescreen?"1":"0"},
-        {"resolution",resolution_key(settings_.resolution)},{"antialiasing",antialiasing_key(settings_.antialiasing)},
-        {"framerate",std::to_string(settings_.frame_rate)}});
+    std::vector<std::pair<std::string,std::string>> values{{"widescreen",settings_.widescreen?"1":"0"},
+        {"resolution",resolution_key(settings_.resolution)},{"antialiasing",antialiasing_key(settings_.antialiasing)}};
+    // Performance's experimental override must not replace the owner's saved
+    // ordinary 60/120 option when another video setting changes.
+    if(!general_presentation_enabled())values.push_back({"framerate",std::to_string(settings_.frame_rate)});
+    if(!path_.empty())write_options(path_,values);
 }
 bool GpuVideoBackend::parse_option(const std::string& key,const std::string& value,VideoSettings& s){
     if(key=="widescreen"){s.widescreen=std::strtoul(value.c_str(),nullptr,10)!=0;return true;}

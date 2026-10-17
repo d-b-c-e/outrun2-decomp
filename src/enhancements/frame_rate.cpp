@@ -1,4 +1,5 @@
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/general_presentation.hpp"
 #include "driving/pc_matrix_stack.hpp"
 #include "driving/pc_wrecker.hpp"
 #include <algorithm>
@@ -25,10 +26,10 @@ State& state(){static State s;return s;}
 std::uint32_t display_rate(){return state().rate;}
 void set_display_rate(std::uint32_t rate){
     auto& s=state();
-    if(rate<=60u){display_before_tick();s.replays.clear();rate=60u;}
+    if(rate<=60u&&!(general_presentation_enabled()&&rate==0u)){display_before_tick();s.replays.clear();rate=60u;}
     s.rate=rate;
 }
-bool display_frames(){return state().rate>60u;}
+bool display_frames(){return general_presentation_enabled()||state().rate>60u;}
 float display_blend(){return state().blend;}
 
 void display_before_tick(){

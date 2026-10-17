@@ -120,6 +120,9 @@ struct Values {
     int monitor_choice{};
     std::vector<std::string> monitor_labels,monitor_paths;
     int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, next start only
+    bool general_presentation{};
+    int presentation_limit{};
+    std::string saved_presentation_limit{"0"};
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
@@ -427,6 +430,24 @@ void page_cameras(bool advanced){
          "Experimental loading-only mode. Skips display waits while a race loads and restores normal pacing before "
          "the race starts. Driving frame pacing is unchanged. Applies at the next game start."))
          keep(&v.fast_load,before,[&]{return save("Performance","FramerateFastLoad",v.fast_load==1?"2":"0");});}
+    {const bool before=v.general_presentation;
+     if(dbce::panel::OffOn("Experimental presentation rate",&v.general_presentation,
+         "Off by default: preserves the normal 60/120 options and pacing. On at the next ordinary start: uses the presentation cap below, "
+         "keeps simulation and sound control on the existing 60 Hz updates, and interpolates display-only frames. "
+         "Experimental: rendered smoothness, audio and input behavior are not runtime-qualified. Ignored in tests, recording and playback."))
+         keep(&v.general_presentation,before,[&]{return save("Performance","FramerateUnlockExperimental",v.general_presentation?"true":"false");});}
+    if(v.general_presentation){
+        static const char* const caps[]{"Uncapped (no CPU cap)","60","90","120","144","165","180","240","360","500","1000","Keep saved custom value"};
+        static const char* const values[]{"0","60","90","120","144","165","180","240","360","500","1000"};
+        const int before=v.presentation_limit;
+        if(dbce::panel::Choice("Presentation cap",caps,12,&v.presentation_limit,
+            "Applies at the next ordinary start only when Experimental presentation rate is On. The saved Performance.FramerateLimit accepts "
+            "0 or an integer from 60 to 1000. Uncapped removes the CPU cap; GPU, compositor and frame-latency waits may still limit delivery. "
+            "This does not change monitor refresh, tearing or VRR. The normal Options frame-rate choice is preserved for when this is Off."))
+            keep(&v.presentation_limit,before,[&]{return save("Performance","FramerateLimit",v.presentation_limit==11?
+                v.saved_presentation_limit:values[v.presentation_limit]);});
+        if(v.presentation_limit==11)dbce::panel::Status("Saved custom cap",v.saved_presentation_limit.c_str());
+    }
     // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
     // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
     // no row here yet.
@@ -720,6 +741,10 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.no_stage_cull=settings.flag("Graphics","DisableStageCulling",false);
     v.depth_precision=settings.flag("Graphics","FixZBufferPrecision",false);
     v.fast_load=settings.text("Performance","FramerateFastLoad","0")=="2"?1:0;   // same strict startup policy
+    v.general_presentation=settings.flag("Performance","FramerateUnlockExperimental",false);
+    v.saved_presentation_limit=settings.text("Performance","FramerateLimit","0");v.presentation_limit=11;
+    {static const char* const values[]{"0","60","90","120","144","165","180","240","360","500","1000"};
+     for(int i=0;i<11;++i)if(v.saved_presentation_limit==values[i])v.presentation_limit=i;}
     v.lens_flare_fix=settings.flag("Bugfixes","FixLensFlarePath",true);
     v.shading_fix=settings.flag("Bugfixes","FixIncorrectShading",true);
     v.particle_fix=settings.flag("Bugfixes","FixParticleRendering",true);

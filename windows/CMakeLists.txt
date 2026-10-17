@@ -40,6 +40,12 @@ target_compile_features(test_startup_monitor PRIVATE cxx_std_17)
 target_compile_options(test_startup_monitor PRIVATE /W4 /WX)
 add_test(NAME startup_monitor COMMAND test_startup_monitor)
 
+# Real host callback/PcSound, synthetic silent PCM and fake output/presenter; no device or game.
+add_executable(test_presentation_sound ${PROJECT_SOURCE_DIR}/tests/test_presentation_sound.cpp)
+target_link_libraries(test_presentation_sound PRIVATE outrun_xbox_core)
+target_compile_options(test_presentation_sound PRIVATE /W4 /WX)
+add_test(NAME presentation_sound COMMAND test_presentation_sound)
+
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)
 target_compile_features(test_desktop_controls PRIVATE cxx_std_17)

@@ -12,6 +12,8 @@ using Microsoft::WRL::ComPtr;
 // output offers it; pace_frames(fps) presents every refresh/fps vblanks.
 unsigned output_refresh();
 void pace_frames(unsigned fps);
+// Experimental general presentation uses interval0 and the existing host sleep
+// for its optional CPU cap; it does not change output refresh or tearing flags.
 void set_frame_latency(unsigned frames);   // the host's frame latency setting (0 = plain chain, 1..3), before the window opens
 void wait_for_frame_latency();   // latency 1..3: the top of a frame, before the input sample (no-op at 0, the plain chain)
 void report_frame_latency();     // its wait and timeout counts, at exit (no-op at latency 0)

@@ -10,10 +10,11 @@
 
 namespace outrun::driving { class Bytes; struct PcMatrixStack; }
 namespace outrun::enhancements {
-// Frames shown per second: 60 (one per tick, as on the PC) or 120.
+// Default frames requested per second: 60 or120. The desktop's opt-in general
+// presentation policy also accepts60..1000 or0 (no CPU cap, not zero frames).
 std::uint32_t display_rate();
 void set_display_rate(std::uint32_t);
-// display_rate() above 60: 417C7B may run frames without a tick.
+// Above60 or opt-in general presentation: 417C7B may run frames without a tick.
 bool display_frames();
 // 634B34 for the display builders: 1.0 during ticks; after them, the time of
 // the frame between the last two ticks (0 = previous tick, 1 = last tick).

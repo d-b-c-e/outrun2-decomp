@@ -1,5 +1,6 @@
 #include "d3d11_display.hpp"
 #include "enhancements/fast_load.hpp"
+#include "enhancements/general_presentation.hpp"
 #include "display_fit.hpp"
 #include "frame_profile.hpp"
 #include "native_window.hpp"
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <chrono>
 namespace outrun::xbox_runtime {
 namespace {
 // Frame latency: 1..3 uses the swap chain's frame latency waitable object with that many frames queued at most,
@@ -203,7 +205,7 @@ void screenshot(Graphics& g){
 // FRAME RATE (enhancements/frame_rate): the output is put at 120 Hz once,
 // when it offers it; 60 / 120 fps are then paced by the present interval,
 // so a change in Settings applies at once without another mode switch.
-namespace { unsigned g_refresh=0,g_interval=1; }
+namespace { unsigned g_refresh=0,g_interval=1;enhancements::PresentationDeadline general_deadline; }
 // The top of a frame with a frame latency of 1..3 (the desktop's default 2): wait until the swap chain takes another frame, so the input sampled
 // next is as recent as the queue allows. Called through GameHost::frame_wait, first in each input sample and before
 // read_pad, so the pad snapshot, the wheel paths (DirectInput in the input filter) and the keyboard are all sampled
@@ -233,6 +235,11 @@ unsigned output_refresh(){
     return g_refresh;
 }
 void pace_frames(unsigned fps){
+    if(enhancements::general_presentation_enabled()){
+        g_interval=0;general_deadline.reset();
+        std::fprintf(stdout,"desktop display: experimental presentation cap %u (0 means no CPU cap); Present interval 0; simulation 60 Hz\n",fps);
+        return;
+    }
     g_interval=std::max(1u,(output_refresh()+fps/2u)/std::max(1u,fps));
     std::fprintf(stdout,"Xbox display: %u fps on a %u Hz output (present interval %u)\n",fps,output_refresh(),g_interval);
 }
@@ -241,6 +248,15 @@ bool D3D11Display::present(std::string& error){
     // The desktop's overlay (the F6 panel), on the whole back buffer before the screenshot: what the player sees.
     if(const auto overlay=present_overlay())overlay(g.device.Get(),g.context.Get(),g.target.Get(),g.width,g.height);
     screenshot(g);
+    if(enhancements::general_presentation_enabled()){
+        if(enhancements::fast_load().active())general_deadline.reset();
+        else{
+            const auto now=std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+            const auto wait=general_deadline.wait_ns(now,enhancements::general_presentation().limit);
+            if(wait)platform_sleep_ns(s64(wait));
+        }
+    }
     const HRESULT hr=g.swap_chain->Present(enhancements::fast_load().present_interval(g_interval),0);
     if(FAILED(hr)){error="Present failed (HRESULT "+std::to_string(unsigned(hr))+")";return false;}
     // A closed window (WM_CLOSE: the X button, Alt+F4, a test harness) is not a failed frame. It stops the application,

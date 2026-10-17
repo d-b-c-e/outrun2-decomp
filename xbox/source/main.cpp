@@ -35,6 +35,7 @@
 #include "d3d11_display.hpp"
 #include "enhancements/gpu_backend.hpp"
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/general_presentation.hpp"
 #include "audio.hpp"
 #include "movie_clock.hpp"
 #include "frame_profile.hpp"
@@ -328,10 +329,16 @@ int or2_xbox_main(int argc,char** argv){
     // Options > Settings enhancement rows: 16:9, 3D resolution, MSAA / FXAA,
     // frame rate. The output goes to 120 Hz once when it offers it; 60 / 120
     // are then paced by the present interval and change live from Settings.
-    outrun::enhancements::GpuVideoBackend video(rt::home()+"/options.ini",g_options.video);
-    if(outrun::xbox_runtime::output_refresh()>=119u)video.set_frame_rates({60,120},[](std::uint32_t fps){outrun::xbox_runtime::pace_frames(fps);});
+    auto video_options=g_options.video;
+    const auto& presentation=outrun::enhancements::general_presentation();
+    if(presentation.enabled)video_options.frame_rate=presentation.limit;
+    outrun::enhancements::GpuVideoBackend video(rt::home()+"/options.ini",video_options);
+    if(presentation.enabled)video.set_frame_rates({presentation.limit},[](std::uint32_t fps){outrun::xbox_runtime::pace_frames(fps);});
+    else if(outrun::xbox_runtime::output_refresh()>=119u)video.set_frame_rates({60,120},[](std::uint32_t fps){outrun::xbox_runtime::pace_frames(fps);});
     else{video.set_frame_rates({60});outrun::xbox_runtime::pace_frames(60u);}
-    std::fprintf(stdout,"[frame-rate] launch rate %u fps\n",unsigned(outrun::enhancements::display_rate()));
+    if(presentation.enabled&&presentation.limit==0u)
+        std::fprintf(stdout,"[frame-rate] experimental uncapped CPU presentation; simulation 60 Hz\n");
+    else std::fprintf(stdout,"[frame-rate] launch rate %u fps\n",unsigned(outrun::enhancements::display_rate()));
     if(!outrun::xbox_runtime::xbox_renderer_initialize(renderer,nullptr,error,&data.start_loading,nullptr,nullptr,nullptr)){
         consoleInit(nullptr);console_live=true;std::printf("OutRunXbox renderer initialization failed.\n\n%s\n\nPress Menu to exit.\n",error.c_str());write_failure_log(5u,"renderer",error.c_str());consoleUpdate(nullptr);wait_for_plus(pad);
         consoleExit(nullptr);
