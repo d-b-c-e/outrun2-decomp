@@ -494,6 +494,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // brake volumes of 250..254 as 255 for the game's full-press checks (race_input.hpp).
     outrun::platform::g_pc_fix_full_pedal_checks=settings.flag("Bugfixes","FixFullPedalChecks",true);
     if(!outrun::platform::g_pc_fix_full_pedal_checks)std::printf("settings: full pedal check fix off (the PC's own 255-only full-press checks)\n");
+    // [Misc] FineSteering (not a Tweaks key; off unless set true): the car's steering word at the analogue steering's full
+    // resolution instead of 255 steps (race_input.hpp). It changes the handling, so its value is logged either way; a
+    // recording's startup INI names it, so its playback reproduces it. A latched (test) process keeps the PC's steps: its
+    // tapes were recorded on them.
+    {   const bool requested=settings.flag("Misc","FineSteering",false);
+        outrun::platform::g_pc_fine_steering=requested&&!plan.latched;
+        if(requested&&plan.latched)std::printf("settings: [Misc] FineSteering not applied in a test process; the PC's 255 steps\n");
+        else std::printf("settings: steering %s\n",outrun::platform::g_pc_fine_steering?
+            "FINE ([Misc] FineSteering = true: the analogue steering unstepped, not stock handling)":"in the PC's 255 steps (stock)");}
     // [Bugfixes] FixIncorrectShading and FixLensFlarePath, the Tweaks keys (on unless set false, as there): double-sided
     // lighting linked as the DOUBLE fragments, and the lens flare offsets read from Media\ (pc_screen.hpp).
     outrun::platform::g_pc_fix_incorrect_shading=settings.flag("Bugfixes","FixIncorrectShading",true);

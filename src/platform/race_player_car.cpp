@@ -412,7 +412,10 @@ void game_service(void* user,std::uint32_t pc){
         W.putf(0x5c,f.parent_state.world_position[0]);W.putf(0x60,f.parent_state.world_position[1]);W.putf(0x64,f.parent_state.world_position[2]);
         {const auto mode=f.game_mode();const auto stale_counter=e.i16(0xd50);
          driving::operation_input_49fad0(e,{mode,f.volume(0),f.volume(1),f.volume(2)});
-         f.steer_written=game_steer_written(mode,stale_counter);return;}
+         f.steer_written=game_steer_written(mode,stale_counter);
+         // FineSteering (race_input.hpp): in GAME, where 49FAD0 just wrote current[0] << 8, the same steering unstepped.
+         if(f.steer_written&&w.fine_steer_valid)e.put16(0x202,std::uint16_t(w.fine_steer_202));
+         return;}
     case 0x0049fb70u:                                                           // 44FE40: race manager time 7D394C
         w.timeup_44fe40=race_time_44fe40(c.race.manager.state);
         driving::control_timeup_braking_49fb70(e,W,P,w.timeup_44fe40);return;
@@ -721,6 +724,10 @@ void race_input_update_453bb0(NativeRuntimeContext& c,const PcInputDevice& devic
     // 7C24CB: steering speed byte of the active license (Options > Controls 4D8890).
     w.steer_option_7c24cb=std::int8_t(c.event_function36.frontend_profiles.active[0xeb]);
     pc_input_switch_453640(w.switch_7d6770,device,cfg);
-    pc_input_analog_453860(w.analog_7d6810,w.steer_filter_7d6884,device,cfg,w.steer_option_7c24cb,std::int32_t(c.mode_state.current));
+    float fine=0.f;
+    pc_input_analog_453860(w.analog_7d6810,w.steer_filter_7d6884,device,cfg,w.steer_option_7c24cb,std::int32_t(c.mode_state.current),
+                           g_pc_fine_steering?&fine:nullptr);
+    w.fine_steer_valid=g_pc_fine_steering&&(cfg.flags&1u)!=0u;                    // FineSteering: the analogue path only
+    w.fine_steer_202=w.fine_steer_valid?pc_input_fine_steer_202(fine):std::int16_t(0);
 }
 }

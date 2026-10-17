@@ -71,7 +71,7 @@ std::int32_t pc_input_digital_steer_4537c0(std::int32_t target,std::int32_t prev
     return step+prev;
 }
 void pc_input_analog_453860(PcInputAnalog& a,float& filter,const PcInputDevice& d,const PcInputConfig& cfg,
-                            std::int8_t option,std::int32_t game_mode){
+                            std::int8_t option,std::int32_t game_mode,float* fine_steer){
     for(unsigned k=0;k<7;++k)a.previous[k]=a.current[k];
     a.current[1]=std::int32_t(std::uint16_t(word_at(d,cfg.accel_axis)));
     a.current[2]=std::int32_t(std::uint16_t(word_at(d,cfg.brake_axis)));
@@ -94,5 +94,6 @@ void pc_input_analog_453860(PcInputAnalog& a,float& filter,const PcInputDevice& 
     a.current[5]=cvttss2si(axis(d.axes_94[(0xbe - 0x94)/2],dz)*127.f);
     a.current[6]=cvttss2si(axis(d.axes_94[(0xc0 - 0x94)/2],dz)*127.f);
     if(!(cfg.flags&1u))a.current[0]=pc_input_digital_steer_4537c0(a.current[0],a.previous[0],option);
+    else if(fine_steer)*fine_steer=steer;                                        // FineSteering (race_input.hpp)
 }
 }

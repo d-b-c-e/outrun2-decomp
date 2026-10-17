@@ -143,6 +143,7 @@ struct Values {
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
+    bool fine_steering{},fine_steering_start{};   // [Misc] FineSteering, default off, next start only
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool level_select{};   // [Misc] EnableLevelSelect, ordinary next-start menu choice
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
@@ -230,6 +231,14 @@ void page_controls(bool advanced){
     {const int before=v.dead_zone;
      if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))
          keep(&v.dead_zone,before,[&]{return save("Wheel","SteeringDeadZone",fraction(v.dead_zone));});}
+    // [Misc] FineSteering (race_input.hpp), read at start, so it applies at the next start.
+    if(advanced){const bool before=v.fine_steering;
+     if(dbce::panel::OffOn("Fine steering",&v.fine_steering,
+         "Experimental; Off by default. The car steers at your wheel's full resolution instead of the original 255 steps. "
+         "Wheels and gamepads only; keyboard steering is unchanged. Changes the handling slightly; recordings note it. "
+         "Ignored in tests. Applies at the next game start."))
+         keep(&v.fine_steering,before,[&]{return save("Misc","FineSteering",v.fine_steering?"true":"false");});
+     if(v.fine_steering!=v.fine_steering_start)dbce::panel::Text("The fine steering choice applies at the next game start.");}
     // [Misc] DefaultManualTransmission (pc_screen.hpp), read at start, so it applies at the next start.
     {const bool before=v.manual_default;
      if(dbce::panel::OffOn("Manual transmission by default",&v.manual_default,
@@ -833,6 +842,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
     v.jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
     v.full_pedal_fix=settings.flag("Bugfixes","FixFullPedalChecks",true);
+    v.fine_steering=v.fine_steering_start=settings.flag("Misc","FineSteering",false);   // identical to the startup consumer
     v.pegasus_sound_fix=settings.flag("Bugfixes","FixPegasusClopping",true);
     v.highway_sets=settings.flag("Misc","RandomHighwayAnimSets",false);   // identical to the startup consumer
     v.holly_course2=settings.integer("Misc","EnableHollyCourse2",3);

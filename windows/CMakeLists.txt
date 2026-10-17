@@ -258,6 +258,13 @@ target_include_directories(test_pedal_volume PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_pedal_volume PRIVATE cxx_std_17)
 target_compile_options(test_pedal_volume PRIVATE /W4 /WX)
 add_test(NAME pedal_volume COMMAND test_pedal_volume)
+# FineSteering (src/platform/race_input.hpp): the unstepped +0x202 word over every steering word, through the game's own
+# 453860 update; the PC's channels unchanged and the digital path untouched.
+add_executable(test_fine_steering tests/test_fine_steering.cpp ${PROJECT_SOURCE_DIR}/src/platform/race_input.cpp)
+target_include_directories(test_fine_steering PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_fine_steering PRIVATE cxx_std_17)
+target_compile_options(test_fine_steering PRIVATE /W4 /WX)
+add_test(NAME fine_steering COMMAND test_fine_steering)
 # FixPegasusClopping (src/platform/pc_screen.hpp): 44BCC0's exact sound requests with the fix on and off.
 add_executable(test_pegasus_sound tests/test_pegasus_sound.cpp)
 target_include_directories(test_pegasus_sound PRIVATE ${PROJECT_SOURCE_DIR}/src)

@@ -34,6 +34,10 @@ struct RaceCarWorld {
     float steer_filter_7d6884{};
     std::uint32_t joystick_config_7d6880{};      // .bss 0: joystick configuration 5A7B50[0]
     std::int8_t steer_option_7c24cb{};           // options steering speed (.bss 0 until the options owner exists)
+    // FineSteering (race_input.hpp; not a PC global): this tick's +0x202 at full resolution, valid only when the setting
+    // is on and 453860 took the analogue path; 49FAD0's GAME write then takes it instead of current[0] << 8.
+    std::int16_t fine_steer_202{};
+    bool fine_steer_valid{};
     // CommRace block 7DE418, slot 7DD138, clock 7F1938 (also the 455F50
     // sample counter), gate byte 8361B4 (495490). The route choices 7D39A0,
     // time 7D394C and flags 7D39F0 are the race manager's (race.manager).

@@ -8,6 +8,7 @@
 // configuration records are the EXE tables 5A7B30 (keyboard) / 5A7B50[n]
 // (joystick): steer/accel/brake axis indices, shift-up/down/view masks, flags.
 #include <array>
+#include <cmath>
 #include <cstdint>
 namespace outrun::platform {
 struct PcInputDevice {                         // 0x8999C0 view
@@ -41,10 +42,27 @@ inline std::int32_t pc_input_volume_current(const PcInputAnalog& a,unsigned chan
 inline std::int32_t pc_input_volume_previous(const PcInputAnalog& a,unsigned channel){  // 453750
     return pc_input_volume_read(a.previous[channel],channel,g_pc_fix_full_pedal_checks);
 }
+// [Misc] FineSteering (not a Tweaks key; off by default; ROADMAP step 6): 453860 truncates the steering to -127..127
+// (current[0], cvttss2si(steer*127)) and 49FAD0 writes the car's +0x202 as that << 8, so a 16-bit wheel reaches the
+// physics in 255 steps. On, on the analogue path only (a joystick configuration, flags bit 0; the keyboard table's
+// digital smoother 4537C0 is unchanged), +0x202 takes lround(steer * 0x7F00) of the same steering value before the
+// step, clamped to full lock +-0x7F00; at k/127 that is the PC's k << 8. The readers of +0x202 (pc_steering.cpp,
+// pc_common_control.cpp's counter-steer and steering history) are continuous in it. current[0], and so the consumed
+// capture, telemetry and the other volume(0) readers, stay as written. race_player_car.cpp applies it in GAME where
+// 49FAD0 wrote the word. A latched (test) process keeps it off; a recording's startup INI names it for its playback.
+inline bool g_pc_fine_steering=false;
+constexpr std::int32_t PcFineSteerFullLock=0x7f00;
+inline std::int16_t pc_input_fine_steer_202(float steer){
+    if(std::isnan(steer))return 0;                                               // neutral
+    const long v=std::lround(double(steer)*double(PcFineSteerFullLock));
+    return std::int16_t(v<-PcFineSteerFullLock?-PcFineSteerFullLock:v>PcFineSteerFullLock?PcFineSteerFullLock:v);
+}
 void pc_input_switch_453640(PcInputSwitchRecord&,const PcInputDevice&,const PcInputConfig&);
 // filter_7d6884: per-player steering filter; option_7c24cb: steering speed
 // option (race table 5A7C30 row); game_mode_78026c selects 5A7C30 (16) or 5A7CF0.
+// fine_steer (FineSteering): on the analogue path, the steering value before its -127..127 step; the digital path
+// leaves it untouched. Null (the default) for the PC's own update.
 void pc_input_analog_453860(PcInputAnalog&,float& filter_7d6884,const PcInputDevice&,const PcInputConfig&,
-                            std::int8_t option_7c24cb,std::int32_t game_mode_78026c);
+                            std::int8_t option_7c24cb,std::int32_t game_mode_78026c,float* fine_steer=nullptr);
 std::int32_t pc_input_digital_steer_4537c0(std::int32_t target,std::int32_t previous,std::int8_t option_7c24cb);
 }
