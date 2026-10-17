@@ -79,10 +79,47 @@ def replay_bound(race_seconds, tape_rows):
     return max(tape_rows / 30 + 15, 2 * race_seconds + 30)
 
 
-def race_budget(replay_timeout, horn=False):
-    """Seconds the race phase may use after race entry: R3 its replay bound, R1 its steer holds (and the horn step with
-    --horn); plus the margin."""
-    return (replay_timeout if replay_timeout is not None else R1_RACE_SECONDS + (HORN_SECONDS if horn else 0.0)) + RACE_MARGIN
+def race_budget(replay_timeout, horn=False, drive=0.0):
+    """Seconds the race phase may use after race entry: R3 its replay bound, R1 its steer holds (or its --drive) and the
+    horn step with --horn; plus the margin."""
+    return (replay_timeout if replay_timeout is not None else (drive or R1_RACE_SECONDS) + (HORN_SECONDS if horn else 0.0)) + RACE_MARGIN
+
+
+# --drive (R1 only; sana 215675, the rendering test's workload): from race entry, one batch every DRIVE_STEP seconds for
+# the given seconds. The throttle is held across steps (each hold outlasts its step); the steering is straight for
+# DRIVE_STRAIGHT seconds, then right, straight, left, straight in turn, so traffic passes on both sides.
+DRIVE_STEP = 2.0
+DRIVE_STRAIGHT = 12.0
+
+
+def drive_batch(step):
+    """--drive: the commands of step `step` (0 at race entry)."""
+    commands = ["inject action throttle 1 ms=%d" % int((DRIVE_STEP + 0.5) * 1000)]
+    k = step - int(DRIVE_STRAIGHT / DRIVE_STEP)
+    if k >= 0 and k % 2 == 0: commands.append("inject action steer %s ms=1500" % ("0.5" if k % 4 == 0 else "-0.5"))
+    return commands
+
+
+# --render (R1 only): the game's render-test.txt beside inject.on (windows/source/render_test.hpp), from "key=value,..."
+# over these keys. The game parses it strictly and refuses the run on anything it does not admit.
+RENDER_KEYS = ("screens", "views", "frames", "every", "after", "scale")
+
+
+def render_request(spec, nonce):
+    """--render: render-test.txt's bytes for this session, or None without a spec. ValueError for a malformed spec."""
+    if not spec: return None
+    lines, seen = ["outrun.render-test@1", "nonce=%s" % nonce], set()
+    for part in spec.split(","):
+        key, sep, value = part.partition("=")
+        if not sep or key not in RENDER_KEYS or key in seen or not value or not value.isalnum():
+            raise ValueError("--render: %r is not one of %s=<value>, each once" % (part, "/".join(RENDER_KEYS)))
+        seen.add(key); lines.append("%s=%s" % (key, value))
+    return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def render_span(spec):
+    """Whether --render asks for a span (screens other than off): the game then runs borderless, not --windowed."""
+    return any(part in ("screens=surround", "screens=separate") for part in (spec or "").split(","))
 
 
 HORN_LOOP, HORN_STOP = 0x9BC, 0x81BC   # 42F0D0 commands: 0x1BC | SND_LOOP and 0x1BC | SND_STOP
@@ -335,6 +372,11 @@ def main():
                    help="consumed playback (consumed_replay.hpp): a saved ordinary recording of this candidate (the folder holding its "
                         "sealed capture\\); its fresh --export-recording is played at the 453BB0 seam from the first input tick, no presses")
     a.add_argument("--seconds", type=int, default=180)
+    a.add_argument("--drive", type=float, default=0.0,
+                   help="R1 only: drive this many seconds (15..120) from race entry instead of the two steer holds (drive_batch)")
+    a.add_argument("--render", default="",
+                   help="R1 only: a rendering test, e.g. screens=separate,views=angled,frames=240,every=3,after=360,scale=2 "
+                        "(render-test.txt; frames land in the run folder's frames)")
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     a.add_argument("--horn", action="store_true", help="R1 only: this run binds horn (R12 button 27) with [Audio] AllowHorn = true "
                    "and holds it 1.5 s after the steer holds; the exit result log's race sound line must show the 9BC loop and the "
@@ -365,6 +407,10 @@ def main():
     consumed = o.consumed_replay is not None
     if consumed and o.replay_of: problems.append("--consumed-replay and --replay-of are exclusive")
     if o.horn and (consumed or o.replay_of): problems.append("--horn is an R1 step only (no --replay-of or --consumed-replay)")
+    if (o.drive or o.render) and (consumed or o.replay_of or o.horn): problems.append("--drive and --render are R1 only (no replay, no --horn)")
+    if o.drive and not 15 <= o.drive <= 120: problems.append("--drive is 15..120 seconds")
+    try: render_request(o.render, "preflight")
+    except ValueError as e: problems.append(str(e))
     if not consumed and (not o.replay_tool or not o.replay_tool.exists()): problems.append("no --replay-tool capture_replay.exe to replay the capture")
     tape = None; tape_rows = 0; tape_source = None; replay_timeout = None; reference = None
     if consumed:   # the same candidate plays its own saved recording, exported fresh from its recording seal (sana 35159)
@@ -400,7 +446,7 @@ def main():
             if not tape_rows: problems.append("--replay-of has no race rows with the run Running")
             if replay_timeout is not None: replay_timeout = replay_bound(replay_timeout, tape_rows)
         except (OSError, ValueError, SystemExit) as e: problems.append("--replay-of unusable: %s" % e)
-    for f in ("inject.on", "inject.txt"):
+    for f in ("inject.on", "inject.txt", "render-test.txt"):
         if (DBCE / f).exists(): problems.append("leftover %s in %s" % (f, DBCE))
     running = subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"], capture_output=True, text=True).stdout
     if "OutRunDesktop.exe" in running: problems.append("OutRunDesktop is already running")
@@ -409,8 +455,8 @@ def main():
                 finalizer=str(o.finalizer), finalizerSha256=sha(o.finalizer) if o.finalizer and o.finalizer.exists() else None,
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
-                replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout, o.horn) if not o.replay_of or replay_timeout is not None else None,
-                horn=o.horn, dbce=str(DBCE), seconds=o.seconds, problems=problems)
+                replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout, o.horn, o.drive) if not o.replay_of or replay_timeout is not None else None,
+                horn=o.horn, drive=o.drive, render=o.render, dbce=str(DBCE), seconds=o.seconds, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
@@ -451,9 +497,14 @@ def main():
                       "sound line (42F0D0 played/refused/missing per command) must show the 9BC loop and the 81BC stop played; "
                       "refused or missing is a request only; not an audible check")
         DBCE.mkdir(parents=True, exist_ok=True)
-        start = time.time(); budget = race_budget(replay_timeout, o.horn)
+        start = time.time(); budget = race_budget(replay_timeout, o.horn, o.drive)
+        if o.render:   # before inject.on, so a latched start always finds it; the game refuses the run if it does not admit it
+            publish("render-test.txt", render_request(o.render, nonce))
+            receipt["render"] = dict(request=o.render, frames=None,
+                label="synthetic input (inject action, the test profile's bindings), not owner play or a physical trial; the frames "
+                      "are the game's own back buffer, written by the latched run into its run folder")
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
-        proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe"), "--windowed"], cwd=str(o.game))
+        proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe")] + ([] if render_span(o.render) else ["--windowed"]), cwd=str(o.game))
         receipt["pid"] = proc.pid; created = creation_time(int(proc._handle)); receipt["creationTime"] = created
         run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
         seen = 0; mode = None; race = False; n = 0; last_press = 0; lines = []
@@ -487,6 +538,7 @@ def main():
             if phase == "menus":
                 if race: race_at = time.time()
                 if race and tape: phase, phase_at = "replay", time.time(); continue   # the shim plays the tape from the race entry
+                if race and o.drive: phase, phase_at, drive_step = "drive", time.time(), 0; batch(drive_batch(0)); continue
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
                 if window_at is None and windows_of(proc.pid): window_at = time.time(); receipt["windowSeconds"] = round(window_at - start, 3)
                 action = next_menu_action(MENU_SCRIPT, None if window_at is None else time.time() - window_at, scripted,
@@ -495,6 +547,10 @@ def main():
                     batch(["inject action %s 1 ms=200" % action]); last_press = time.time()
                     receipt["presses"].append(dict(action=action, mode=mode, at=round(last_press - window_at, 3), scripted=scripted < len(MENU_SCRIPT)))
                     if scripted < len(MENU_SCRIPT): scripted += 1
+            elif phase == "drive":
+                if time.time() - phase_at >= o.drive: phase = "end"; batch(["end"]); break
+                if int((time.time() - phase_at) / DRIVE_STEP) > drive_step:
+                    drive_step = int((time.time() - phase_at) / DRIVE_STEP); batch(drive_batch(drive_step))
             elif phase == "steer-right" and time.time() - phase_at > 3.5:
                 phase, phase_at = "steer-left", time.time(); batch(["inject action steer -0.6 ms=3000", "inject action throttle 1 ms=3000"])
             elif phase == "steer-left" and time.time() - phase_at > 3.5:
@@ -582,6 +638,9 @@ def main():
             receipt["maxConsumedSteer"] = max([abs(int(m.group(9))) for m in sig], default=0)
             receipt["maxConsumedAccel"] = max([int(m.group(10)) for m in sig], default=0)
             receipt["route"] = route_of(receipt, (out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else "")
+            if receipt.get("render") is not None:   # what the game wrote; the pictures are judged by eye, not here
+                frames = out / "run" / "frames"
+                receipt["render"]["frames"] = len(list(frames.glob("frame-*.ppm"))) if frames.is_dir() else 0
             if receipt.get("horn") is not None:
                 receipt["horn"].update(horn_evidence((out / "run" / "runtime.log").read_text(encoding="utf-8", errors="replace") if (out / "run" / "runtime.log").exists() else ""))
             failures = verdict(receipt)

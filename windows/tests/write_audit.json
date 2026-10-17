@@ -1294,5 +1294,29 @@
   "line": "(void)DeleteFileW(claimed.c_str()); // consumed; a claim that cannot be deleted stays inert (only the exact name is taken)",
   "class": "latched-skip",
   "reason": "the claim removed once the copy is in place; session::take, the start's intake of the session request: called only inside if(!plan.latched){ in window_desktop.cpp (guarded), never in a latched process"
+ },
+ {
+  "file": "windows/source/render_test.cpp",
+  "line": "const HANDLE h=CreateFileW((run_root+L\"\\\\render-test.txt\").c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "fence",
+  "reason": "rendering test: the request's bytes kept as a new file in the run folder (load_render_test, called only after prepare_run in a latched process; test_fence.cpp test_render_test)"
+ },
+ {
+  "file": "windows/source/render_test.cpp",
+  "line": "const bool ok=WriteFile(h,bytes.data(),DWORD(bytes.size()),&written,nullptr)&&written==bytes.size();",
+  "class": "fence",
+  "reason": "rendering test: writes the handle opened CREATE_NEW in the run folder just above"
+ },
+ {
+  "file": "windows/source/render_test.cpp",
+  "line": "if(out.frames>0u&&!CreateDirectoryW((run_root+L\"\\\\frames\").c_str(),nullptr)){",
+  "class": "fence",
+  "reason": "rendering test: the run folder's new frames folder (load_render_test; test_fence.cpp test_render_test)"
+ },
+ {
+  "file": "xbox/source/d3d11_display.cpp",
+  "line": "if(std::FILE* f=_wfopen((cap.folder+name).c_str(),L\"wbx\")){",
+  "class": "fence",
+  "reason": "rendering test burst (frame_capture.hpp): cap.folder is set only by render_test_start_capture to <run>\\frames of a latched run that admitted render-test.txt; exclusive (x), at most 300 frames and 1 GiB"
  }
 ]

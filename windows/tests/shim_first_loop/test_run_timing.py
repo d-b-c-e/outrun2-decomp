@@ -191,6 +191,27 @@ check(not run.same_route(r_a, run.route_of(scripted, log.replace("car=0", "car=3
 check(not run.same_route(r_a, run.route_of(scripted, "nothing")), "an unlogged identity is not the same route")
 check(not run.same_route(None, r_b), "no first route")
 
+# --drive and --render (sana 215675): the race budget follows the drive; the throttle is held across steps within the
+# command bounds; straight for 12 s, then right / straight / left / straight; render-test.txt from the spec, strictly.
+check(run.race_budget(None, drive=40.0) == 40.0 + run.RACE_MARGIN and run.race_budget(None) == run.R1_RACE_SECONDS + run.RACE_MARGIN,
+      "the drive sets the R1 race budget")
+check(run.race_budget(25.0, drive=40.0) == 25.0 + run.RACE_MARGIN, "a replay bound is unchanged by --drive")
+steps = [run.drive_batch(k) for k in range(14)]
+check(all(s[0] == "inject action throttle 1 ms=2500" for s in steps), "the throttle is held across steps (2.5 s holds, 2 s apart)")
+check(all(len(s) == 1 for s in steps[:6]), "straight for the first 12 s")
+check(steps[6][1:] == ["inject action steer 0.5 ms=1500"] and len(steps[7]) == 1 and steps[8][1:] == ["inject action steer -0.5 ms=1500"]
+      and len(steps[9]) == 1 and steps[10][1:] == ["inject action steer 0.5 ms=1500"], "then right, straight, left, straight")
+check(all(50 <= int(c.rsplit("ms=", 1)[1]) <= 15000 for s in steps for c in s), "every hold within the 50..15000 ms grammar")
+req = run.render_request("screens=separate,views=angled,frames=240,every=3,after=360,scale=2", "abcdefgh12345678")
+check(req == b"outrun.render-test@1\nnonce=abcdefgh12345678\nscreens=separate\nviews=angled\nframes=240\nevery=3\nafter=360\nscale=2\n",
+      "render-test.txt from the spec: %r" % req)
+check(run.render_request("", "n") is None, "no spec: no render-test.txt")
+for bad in ("screens=separate,screens=off", "nonce=x", "folder=C:\\x", "views", "frames=", "views=angled;x", "frames=1 0"):
+    try: run.render_request(bad, "n"); check(False, "refused: %r" % bad)
+    except ValueError: pass
+check(run.render_span("screens=separate,views=angled") and run.render_span("frames=3,screens=surround") and not run.render_span("screens=off")
+      and not run.render_span(""), "a span only for surround or separate")
+
 print("run timing: %d failure(s)" % len(failures))
 for f in failures: print("  " + f)
 sys.exit(1 if failures else 0)

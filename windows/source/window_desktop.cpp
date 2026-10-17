@@ -34,6 +34,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "render_test.hpp"
 #include "startup_monitor.hpp"
 #include "triple_rig.hpp"
 #include "wheel_input.hpp"
@@ -268,11 +269,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     const auto folder=outrun::xbox_runtime::launch_folder();
     const auto dbce=fence::dbce_folder();
     fence::Plan plan;
+    outrun::desktop::RenderTest render_test;   // a latched run's opt-in rendering test (render_test.hpp); none otherwise
     std::vector<std::string> cleared;
     if(fence::latch_requested(dbce)){
         std::wstring game(folder.size(),L'\0');
         game.resize(std::size_t(MultiByteToWideChar(CP_UTF8,0,folder.data(),int(folder.size()),game.data(),int(game.size()))));
         plan=fence::prepare_run(dbce,game,GetCurrentProcessId());
+        if(plan.refusal.empty()){std::string why;
+            if(!outrun::desktop::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,render_test,why))plan.refusal="render-test.txt: "+why;}
         if(!plan.refusal.empty())return fence::write_refusal(plan,GetCurrentProcessId())?3:4;   // 4: refused, not recorded (a linked folder)
         cleared=fence::clear_development_switches();
         outrun::xbox_runtime::latched_home()=fence::utf8(plan.run_root);
@@ -369,6 +373,17 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
         const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
         outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),plan.latched);}
+    // A latched run's rendering test (render_test.hpp) sets this run's presentation from its own request instead: the
+    // process stays latched in every other respect, and the rig below stays the fixture's (the read needs an unlatched
+    // process).
+    if(render_test.requested){
+        outrun::xbox_runtime::set_triple_screens(render_test.screens);
+        outrun::xbox_runtime::set_triple_projection(render_test.views==outrun::desktop::TripleProjection::angled,false);
+        std::printf("render test: [Triple] Screens = %s, Views = %s from render-test.txt; %u frame(s) every %u after %u at 1/%u "
+                    "scale into the run's frames folder\n",outrun::desktop::triple_screens_name(render_test.screens),
+                    render_test.views==outrun::desktop::TripleProjection::angled?"Angled":"Planar",render_test.frames,
+                    render_test.every,render_test.after,render_test.scale);
+    }
     // [Triple] PanelWidthMm / PanelHeightMm / EyeDistanceMm / SideAngle / BezelMm and MatchGameFov (the portfolio's rig
     // keys, as Wheelkit writes them): read when Angled is asked for in a normal process. A refused value is logged and its
     // default applies; the window logs the rig in use.
@@ -671,6 +686,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::hud_toggle_wrap_input_filter();
     outrun::desktop::cd_switcher_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
     outrun::desktop::cd_switcher_wrap_input_filter();
+    // A rendering test's frame burst (render_test.hpp): into the run folder, armed at the race entry. Nothing otherwise.
+    outrun::desktop::render_test_start_capture(render_test,plan.run_root);
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open

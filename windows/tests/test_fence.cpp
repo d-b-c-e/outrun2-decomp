@@ -3,6 +3,8 @@
 // inventory (every file's bytes and every folder, so a new or missing path also fails) before and after, through
 // success and fault paths, and requires the intended outputs to exist under the run folder.
 #include "test_fence.hpp"
+#include "render_test.hpp"
+#include "frame_capture.hpp"
 #include "enhancements/video.hpp"
 #include "platform/frontend_profiles.hpp"
 #include "system/setup_screen.hpp"
@@ -342,6 +344,73 @@ void test_cache_for_another_range_table(){
     outrun::platform::exe_image_verify_hook()=nullptr;
 }
 
+// The opt-in rendering test (render_test.hpp): a strict request beside inject.on, presentation only, the frames into the
+// run folder; absent, nothing changes. The game tree stays byte-identical in every case.
+void test_render_test(){
+    namespace rt=outrun::desktop;
+    using rt::TripleScreens;using rt::TripleProjection;
+    const std::string head=std::string(rt::RenderTestSchema)+"\nnonce="+Nonce+"\n";
+    rt::RenderTest r;std::string why;
+    check(rt::parse_render_test(head,Nonce,r,why)&&r.requested&&r.screens==TripleScreens::off&&r.views==TripleProjection::planar&&
+          r.frames==0&&r.every==1&&r.after==0&&r.scale==2,"defaults: "+why);
+    check(rt::parse_render_test(head+"screens=separate\r\nviews=angled\r\nframes=300\r\nevery=60\r\nafter=36000\r\nscale=4",Nonce,r,why)&&
+          r.screens==TripleScreens::separate&&r.views==TripleProjection::angled&&r.frames==300&&r.every==60&&r.after==36000&&r.scale==4,
+          "every key, CRLF and no final newline: "+why);
+    check(rt::parse_render_test(head+"screens=surround\nviews=angled\n",Nonce,r,why)&&r.screens==TripleScreens::surround,"angled over surround");
+    const std::vector<std::pair<std::string,std::string>> refused{
+        {head,""},                                                        // no session nonce
+        {"outrun.render-test@2\nnonce="+Nonce+"\n",Nonce},{"nonce="+Nonce+"\n",Nonce},
+        {std::string(rt::RenderTestSchema)+"\n",Nonce},                     // no nonce line
+        {std::string(rt::RenderTestSchema)+"\nnonce=other12345abcdef\n",Nonce},
+        {head+"views=angled\n",Nonce},{head+"screens=off\nviews=angled\n",Nonce},
+        {head+"screens=Separate\n",Nonce},{head+"views=wide\n",Nonce},
+        {head+"frames=301\n",Nonce},{head+"frames=-1\n",Nonce},{head+"frames=\n",Nonce},{head+"frames=1e2\n",Nonce},
+        {head+"every=0\n",Nonce},{head+"every=61\n",Nonce},{head+"after=36001\n",Nonce},
+        {head+"scale=3\n",Nonce},{head+"scale=8\n",Nonce},{head+"frames=1\nframes=2\n",Nonce},
+        {head+"folder=C:\\\\elsewhere\n",Nonce},{head+"screens\n",Nonce},{head+"=separate\n",Nonce},
+        {head+"screens=separate\x01\n",Nonce},{head+"views=planar\xe9\n",Nonce},{head+std::string(1100,'#'),Nonce}};
+    for(const auto& [bytes,nonce]:refused)
+        check(!rt::parse_render_test(bytes,nonce,r,why)&&!r.requested&&!why.empty(),"refused: "+bytes.substr(0,60));
+
+    {   Tree t("render");t.seed_owner();t.session(valid_session());
+        const auto before=inventory(t.game);
+        auto plan=fence::prepare_run(t.dbce.wstring(),t.game.wstring(),5151);
+        check(plan.refusal.empty(),"render: prepared");
+        check(rt::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,r,why)&&!r.requested,"absent: no rendering test");
+        check(!fs::exists(fs::path(plan.run_root)/"render-test.txt")&&!fs::exists(fs::path(plan.run_root)/"frames"),"absent: nothing made");
+        const std::string req=head+"screens=separate\nviews=angled\nframes=12\nevery=3\n";
+        write(t.dbce/"render-test.txt",req);
+        check(rt::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,r,why)&&r.requested&&r.frames==12&&r.every==3,"loaded: "+why);
+        check(read(fs::path(plan.run_root)/"render-test.txt")==req&&fs::is_directory(fs::path(plan.run_root)/"frames"),
+              "the request kept in the run folder, its frames folder made");
+        check(!rt::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,r,why)&&!r.requested,"a second load never overwrites");
+        check(inventory(t.game)==before,"render: the game tree is unchanged");
+    }
+    {   Tree t("render-bad");t.seed_owner();t.session(valid_session());
+        auto plan=fence::prepare_run(t.dbce.wstring(),t.game.wstring(),5252);
+        write(t.dbce/"render-test.txt",head+"frames=5\nscreens=everywhere\n");
+        check(!rt::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,r,why)&&!r.requested&&why.find("screens")!=std::string::npos,
+              "a bad request refuses: "+why);
+        check(!fs::exists(fs::path(plan.run_root)/"render-test.txt")&&!fs::exists(fs::path(plan.run_root)/"frames"),"refused: nothing made");
+        fs::remove(t.dbce/"render-test.txt");fs::create_directories(t.dbce/"render-test.txt");
+        check(!rt::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,r,why),"a folder at the name refuses");
+    }
+    // The present path's burst (frame_capture.hpp): due frames and the box downscale.
+    using outrun::xbox_runtime::frame_capture_due;using outrun::xbox_runtime::frame_capture_rgb;
+    check(!frame_capture_due(4,0,3,2,5)&&frame_capture_due(5,0,3,2,5)&&!frame_capture_due(6,1,3,2,5)&&frame_capture_due(7,1,3,2,5),"due: after, then every");
+    check(!frame_capture_due(9,3,3,2,5)&&!frame_capture_due(5,0,0,2,5)&&!frame_capture_due(5,0,3,0,5),"never past frames, nor with none or every 0");
+    {   std::vector<std::uint8_t> px(4*2*8+8,0);   // 4 x 2 pixels, an 8-byte pad per row
+        for(unsigned y=0;y<2;++y)for(unsigned x=0;x<4;++x){auto* p=&px[y*24+x*4];p[0]=std::uint8_t(10*x);p[1]=std::uint8_t(100+y);p[2]=200;p[3]=255;}
+        unsigned w=0,h=0;
+        const auto one=frame_capture_rgb(px.data(),24,4,2,1,w,h);
+        check(w==4&&h==2&&one.size()==24&&one[3]==10&&one[4]==100&&one[5]==200&&one[21]==30&&one[22]==101,"scale 1: the first three bytes");
+        const auto two=frame_capture_rgb(px.data(),24,4,2,2,w,h);
+        check(w==2&&h==1&&two.size()==6&&two[0]==5&&two[1]==101&&two[2]==200&&two[3]==25,"scale 2: the rounded block mean");
+        const auto four=frame_capture_rgb(px.data(),24,4,2,4,w,h);
+        check(w==1&&h==0&&four.empty(),"scale 4 on 4 x 2: the partial edge block is dropped");
+    }
+}
+
 void test_switches(){
     _putenv_s("OR2_EXE_TRACE","C:\\somewhere\\trace.txt");_putenv_s("OR2_XBOX_SCREENSHOT_DIR","C:\\shots");_putenv_s("KEEP_ME","1");
     SetEnvironmentVariableW(L"OR2_PROCESS_ONLY",L"1");
@@ -356,7 +425,7 @@ void test_switches(){
 int main(){
     // test_cache_for_another_range_table installs an EXE image, after which exe_setup_prepare returns at once: last.
     try{test_latch_and_run();test_fault_paths();test_denied_listing();test_refusal_never_through_a_link();
-        test_refusal_never_into_an_existing_name();test_switches();
+        test_refusal_never_into_an_existing_name();test_render_test();test_switches();
         test_cache_for_another_range_table();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"test fence: "<<checks<<" checks passed\n";

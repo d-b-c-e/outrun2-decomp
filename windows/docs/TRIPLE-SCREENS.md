@@ -414,6 +414,32 @@ sana 37757).**
 - At the rig only after review, muted, in the perf copy: one Angled run with `MatchGameFov = false`, a window clip,
   and the side panels' outer edges checked near 91 degrees.
 
+## Rendering tests (sana 215675, 2026-10-17)
+
+A latched (test) process keeps Screens Off and refuses Angled, so no automated run could show three views. The opt-in
+rendering test (`windows/source/render_test.hpp`) admits presentation only, through the test's own request:
+- **The request:** `render-test.txt` beside `inject.on`, strict, bound to the session's nonce. It sets `screens`, `views`,
+  and a frame burst (`frames` 0..300, `every`, `after` the race entry, `scale` 1/2/4).
+- **Absent:** the test process is unchanged. A malformed request refuses the run before the game initializes (the
+  fence's refusal note).
+- **What stays latched:** the run folder as home, the game folder read only, OR2_ switches cleared, offline, no force
+  output (`ffb_device` refuses a latched process), no gamepad vibration, and the fixture rig with the matched eye.
+  `[Window]` keeps the test defaults.
+- **Frames:** the game's own back buffer, after the overlay, written by `d3d11_display.cpp` `screenshot` into
+  `<run>\frames\frame-NNNN.ppm`. They are exclusive (no overwrite), box-downscaled, and bounded to 300 frames and 1 GiB.
+  The burst is armed by the first race input sample (mode 16/18).
+- **Driver:** `windows/tests/shim_first_loop/run.py --render screens=separate,views=angled,frames=240,every=3,after=360
+  --drive 45`. Input is the shim's application-level `inject action` (throttle held, steering right and left in turn
+  after 12 s). There is no OS input or capture. The game runs borderless (not `--windowed`) when a span is asked for.
+  The frames come back in the evidence copy (`out\run\frames`).
+- **Evidence label:** synthetic test input and the game's own frames. Not owner play, not physical input, not a timing
+  measurement (each captured frame costs a GPU read-back).
+- **Checks:**
+  - `test_fence`: the parse with 25 refusals, the fence step against a real prepared run (game tree byte-identical,
+    exclusive keep and frames folder, refusals), and the burst's due frames and downscale.
+  - `shim_first_loop_timing`: the drive's batches and budget, and the request's bytes.
+  - `write_audit`: the four new writers are classified `fence`.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
