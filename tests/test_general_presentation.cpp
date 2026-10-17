@@ -64,7 +64,8 @@ static void timeline(unsigned rendered_rate,unsigned cap,std::uint32_t mode){
     platform.ticks=[](void* u)->std::uint64_t{return static_cast<Fixture*>(u)->now;};
     platform.frequency=[](void* u)->std::uint64_t{return static_cast<Fixture*>(u)->frequency;};
     platform.sleep_ns=[](void*,std::uint64_t){check(false,"synthetic timeline never sleeps");};
-    platform.main_loop=[](void* u){auto& s=*static_cast<Fixture*>(u);s.now+=60000u;return ++s.frames<s.frame_limit;};
+    platform.main_loop=[](void* u){auto& s=*static_cast<Fixture*>(u);++s.frames;
+        s.now=60000000ull+std::uint64_t(s.frames)*60000u;return s.frames<s.frame_limit;};
     pf::NativeRuntimeLoopServices services{};services.platform=&platform;
     services.setup={&f,[](void*,std::uint32_t,const std::uint32_t*,std::size_t)->std::uint32_t{return 0;}};
     services.cleanup={&f,[](void*,std::uint32_t,std::uint32_t,std::uint32_t){}};
@@ -76,7 +77,12 @@ static void timeline(unsigned rendered_rate,unsigned cap,std::uint32_t mode){
         if(pc==0x43fa20u)++s.control;
         if(pc==0x449050u){++s.draw;const auto ticks=s.c->frame_state.updates_95af48;
             if(!ticks)++s.zero;if(ticks>1)++s.multiple;
-            check(en::display_blend()>=0.f&&en::display_blend()<=1.f,"interpolation remains bounded");}
+            check(en::display_blend()>=0.f&&en::display_blend()<=1.f,"interpolation remains bounded");
+            // Model a little rendering work so the original 1/60000-second
+            // platform guard does not need a real sleep. The next frame's
+            // absolute synthetic deadline still owns the exact render rate.
+            s.now+=s.frequency/60000u;
+        }
         return 0;
     }};
     check(pf::run_native_frame_loop(*f.c,services)==0,"production loop closes normally");
