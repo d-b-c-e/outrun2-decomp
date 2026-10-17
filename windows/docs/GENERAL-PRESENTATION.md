@@ -25,13 +25,14 @@ their writer preserves the owner's saved ordinary options.ini framerate rather
 than overwriting it with the experimental cap. Turning the option off restores
 the normal saved rate on the next start. No owner config is migrated.
 
-The desktop uses Present interval 0 on its existing swap chain. A nonzero cap
+By default, experimental presentation uses Present interval 0 on its existing swap chain. A nonzero cap
 uses nanosecond deadlines from the existing steady clock and platform_sleep_ns,
 with fractional remainders retained; late frames rebase instead of generating
 catch-up presentation bursts. This is a CPU pacing target, not a guarantee of
 exact frame delivery or scanout. GPU, compositor and the existing frame-latency
 wait can still throttle it. There is no new clock, timer thread, profiler,
-busy-wait, tearing flag, refresh switch, VRR implementation or display change.
+tearing flag, refresh switch, VRR implementation or display change. The separate
+accurate limiter described below deliberately uses a processor-pause wait.
 Loading-only fast load skips this cap and resets its deadline; ordinary pacing
 resumes when the existing loading-state gate ends.
 
@@ -39,9 +40,7 @@ Simulation and interpolation reuse 417890/417C7B and the existing display builde
 replays. Experimental mode permits zero-update displays at any cap, including 0;
 slow frames can run multiple 60 Hz updates. Input, events and mode control remain
 inside that existing update loop. No new simulation scheduler or input channel
-is introduced. This is a general presentation adaptation, not exact parity with
-Tweaks' separate efficient/accurate limiter or VSync settings; caps below 60 are
-not offered by this experimental consumer.
+is introduced. Caps below 60 are not offered by this experimental consumer.
 
 The audio ownership gap is resolved for this opt-in path: 417C7B already emits
 42F330 after 453BB0 inside each actual update. The real host now services PcSound
@@ -80,3 +79,45 @@ sound/input behavior and driving are later runtime qualifications.
 
 The existing flip-model presentation semantics and remaining compositor limits
 are described by [Microsoft's Present API](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiswapchain-present).
+
+## Limiter mode and independent VSync successor
+
+The separate successor on qualified `0551df8` adds two next-start ordinary F6
+choices under Cameras Advanced: **Limiter mode** and **VSync**.
+
+```ini
+[Performance]
+FramerateLimitMode = 0
+; Empty or absent retains existing pacing. Explicit values: 0 off, 1 on, 2 half refresh.
+VSync =
+```
+
+Limiter values match the [Tweaks contract](https://github.com/emoose/OutRun2006Tweaks/blob/master/src/hooks_framerate.cpp):
+0 selects efficient sleep/yield waiting, while 1 selects accurate waiting with
+processor pauses until the same deadline. The implementation reuses the existing
+steady clock and host sleep. Efficient mode sleeps most of a wait longer than
+2 ms, leaving 1 ms, and yields for short remainders; it does not introduce Tweaks'
+high-resolution timer or process timer-resolution changes. Accurate mode can
+occupy a CPU core while waiting. Neither setting promises accurate delivered frames.
+
+VSync is independent of the CPU cap and requests DXGI Present intervals 0, 1 or 2.
+The extra empty/absent default preserves this port's ordinary 60/120 integer-vblank
+pacing, or interval 0 when general presentation is enabled. F6's **Existing pacing**
+choice saves an empty value through the existing writer. With general presentation
+off, an explicit VSync override keeps a CPU cap at the ordinary selected 60/120 rate;
+it does not unlock simulation. With general presentation on, its existing cap applies,
+including 0 for no CPU cap. The existing frame-latency wait and compositor remain.
+This does not enable tearing, change monitor refresh or establish VRR/scanout behavior.
+
+Strict parsing accepts only mode 0/1 and VSync empty/0/1/2. An invalid key logs and
+uses its own default, preserving the other valid key. Tests, recording and playback
+ignore both controls, as they ignore general presentation. Loading-only fast load
+still skips/reset the CPU pacer and temporarily requests interval 0 through its
+existing gate. Fixed-tick simulation and sound ownership are unchanged.
+
+Pending qualification: affected cached Release desktop build and only the new
+`presentation_controls` CTest in the existing target. It uses synthetic clocks,
+sleep and pause callbacks to exercise the actual wait loop, mode/sync policy,
+invalid/default values, exclusions, uncapped behavior and late-frame/reset behavior.
+The qualified desktop, general-presentation 5,309 and sound 244 checks at `0551df8`
+remain retained. Rendered F6 save, physical CPU/pacing and output behavior remain open.

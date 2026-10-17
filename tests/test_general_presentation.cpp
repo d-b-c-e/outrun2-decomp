@@ -91,7 +91,53 @@ static void timeline(pf::NativeRuntimeContext& context,unsigned rendered_rate,un
     if(rendered_rate<60u)check(f.multiple>0,"slow rendering runs multiple simulation updates");
     en::general_presentation().configure(false,"0");en::set_display_rate(60);
 }
-int main(){
+static void pacing_controls(){
+    en::PresentationControls p;en::GeneralPresentation general;
+    check(p.configure("0","")&&p.mode==0u&&p.vsync==-1,"absent sync preserves existing pacing");
+    for(const auto mode:{"0","1"})for(const auto sync:{"","0","1","2"}){
+        check(p.configure(mode,sync),"accept exact Tweaks mode/sync values");
+        check(p.mode==unsigned(mode[0]-'0'),"mode consumer uses the selected mode");
+        for(const bool enabled:{false,true})for(const auto cap:{"0","60","144"}){
+            check(general.configure(enabled,cap),"general policy remains separate");
+            const auto interval=p.present_interval(general,2u);
+            const auto expected_sync=sync[0]?unsigned(sync[0]-'0'):(enabled?0u:2u);
+            check(interval==expected_sync,"explicit sync independent of general cap and legacy interval");
+            check(p.cpu_limit(general,120u)==(enabled?general.limit:(sync[0]?120u:0u)),
+                  "explicit sync retains ordinary CPU rate without unlocking simulation");
+        }
+    }
+    for(const auto invalid:{"","-1","2","01","1junk","4294967296"}){
+        check(!p.configure(invalid,"2")&&p.mode==0u&&p.vsync==2,"invalid mode only falls back its own key");
+    }
+    for(const auto invalid:{"-1","3","01","1junk","4294967296"}){
+        check(!p.configure("1",invalid)&&p.mode==1u&&p.vsync==-1,"invalid sync retains mode but uses legacy interval");
+    }
+    check(p.configure("bad","bad",false)&&p.mode==0u&&p.vsync==-1,"test/record/playback ignore both controls");
+    for(const unsigned mode:{0u,1u}){
+        en::PresentationDeadline deadline;std::uint64_t now=1000000000ull;
+        unsigned sleeps=0,yields=0,spins=0;
+        const auto clock=[&]{return now;};
+        const auto sleep=[&](std::uint64_t ns){if(ns){++sleeps;now+=ns;}else{++yields;now+=100000u;}};
+        const auto spin=[&]{++spins;now+=100000u;};
+        deadline.pace(100u,mode,clock,sleep,spin);
+        check(!sleeps&&!yields&&!spins,"first frame has no added wait");
+        deadline.pace(100u,mode,clock,sleep,spin);
+        check(now==1010000000ull,"actual pacer reaches its synthetic deadline");
+        check(mode==0u?(sleeps>0u&&yields>0u&&!spins):(!sleeps&&!yields&&spins>0u),
+              "efficient uses sleep/yield and accurate uses only processor pauses");
+        const auto waits=sleeps+yields+spins;now+=1000000000ull;
+        deadline.pace(100u,mode,clock,sleep,spin);
+        check(sleeps+yields+spins==waits,"late frame rebases without a catch-up wait");
+        deadline.pace(0u,mode,clock,sleep,spin);
+        check(sleeps+yields+spins==waits,"uncapped path never sleeps/yields/spins");
+        deadline.pace(100u,mode,clock,sleep,spin);
+        check(sleeps+yields+spins==waits,"cap resumes fresh after loading/uncapped reset");
+    }
+}
+int main(int argc,char** argv){
+    if(argc==2&&std::string_view(argv[1])=="--pacing-controls"){
+        pacing_controls();std::printf("Presentation controls: %u checks PASS (synthetic clock/sleep/spin only)\n",checks);return 0;
+    }
     policy();
     // The real loop's process-wide network module retains views into its first
     // context. Keep one context alive for all timelines, as the host does;

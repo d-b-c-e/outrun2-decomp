@@ -312,7 +312,7 @@ or rendered-result claim. See docs/UI-SCALING.md.
 
 | Section | Settings | Status | Notes |
 | --- | --- | --- | --- |
-| Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | Default retains the existing60/120 Settings row and integer-vblank pacing. Opt-in FramerateUnlockExperimental now consumes FramerateLimit0 (no CPU cap) or60..1000 using the existing host clock/sleep and Present0; legacy options framerate preserved. Efficient/accurate mode and independent VSync/tearing controls are not implemented by this adaptation; Release desktop and both affected fixtures pass (5,553 checks). See docs/GENERAL-PRESENTATION.md. |
+| Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | Default retains the existing60/120 Settings row and integer-vblank pacing. Opt-in FramerateUnlockExperimental now consumes FramerateLimit0 (no CPU cap) or60..1000 using the existing host clock/sleep and Present0; legacy options framerate preserved. Qualified general-presentation candidate0551df8 retains desktop +5,553 checks. Separate successor implements FramerateLimitMode0 efficient sleep/yield or1 accurate processor-pause waiting and independent VSync0/1/2 (empty/absent preserves existing pacing), with next-start F6 choices. Its affected desktop/policy fixture are pending. No tearing/VRR/topology changes. See docs/GENERAL-PRESENTATION.md. |
 | | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure passed its incremental native build, four affected settings/catalog checks and 73-row generation/parsing on October 16. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
 | | FramerateUnlockExperimental | 🟡 | Default-off implemented ordinary consumer: zero/multitick60Hz simulation and existing display interpolation, Present0/optional CPU cap, PcSound service at the existing42F330 fixed-update callback only when enabled. Off preserves accepted60/120 and old sound cadence. F6 Cameras Advanced exposes next-start toggle/cap through existing save/rollback; tests/record/playback ignore it. Options frame rate stays preserved; active override removes the live FRAME RATE row. Release desktop and two unique focused fixtures pass (5,309 general-presentation plus 244 sound checks); actual pacing/scanout/audio/input/rendered controls remain unqualified. See docs/GENERAL-PRESENTATION.md. |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
@@ -398,3 +398,12 @@ retained from 203bcb8. Original fixture fault and its host-context lifetime fix
 remain in hub artifacts/outrun-general-presentation-20261017/build-01 and build-02. Existing monitor32/calibration175/level861/cache351/
 extraction782/CD/course results remain retained. Runtime smoothness, scanout,
 audio/input and physical acceptance remain open. See docs/GENERAL-PRESENTATION.md.
+
+### Limiter and VSync source successor (October 17)
+
+Separate from qualified0551df8, FramerateLimitMode0/1 and independent VSync0/1/2 now
+have actual existing-pacer/DXGI consumers and ordinary next-start F6 choices.
+Absent/empty VSync preserves existing pacing; an explicit override without general
+unlock retains a CPU cap at the ordinary selected rate. Tests/record/playback ignore
+these keys; simulation/audio are unchanged. Only cached desktop +new policy CTest
+qualification is pending; prior5553 checks are retained. See docs/GENERAL-PRESENTATION.md.

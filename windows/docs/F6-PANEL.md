@@ -41,6 +41,14 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   the original fault and fixture-only lifetime correction. Hub
   artifacts/outrun-general-presentation-20261017/build-01 and build-02 hold evidence.
   Rendered controls/save, actual pacing and audio/physical acceptance remain open.
+  A separate successor adds next-start **Limiter mode** (efficient sleep/yield or
+  accurate processor-pause waiting) and independent **VSync** (existing pacing,
+  Off, On, Half refresh). Existing pacing is the absent/empty default; explicit
+  values request Present intervals 0/1/2. Without general unlock, an override keeps
+  the ordinary selected CPU rate. Both use the existing writer/rollback and are
+  ignored in tests, recording and playback. Accurate mode has higher CPU cost.
+  Affected desktop and the new policy-only CTest are pending for this successor;
+  its UI/pacing/scanout are unqualified. See GENERAL-PRESENTATION.md.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for
   the next ordinary start. Tests, playback and recording suppress extraction. Help describes original DDS output

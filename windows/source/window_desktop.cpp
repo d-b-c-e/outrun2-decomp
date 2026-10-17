@@ -429,6 +429,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             settings.text("Performance","FramerateLimit","0"),ordinary))
             std::printf("settings: experimental FramerateLimit refused (0 or 60..1000); ordinary 60/120 policy applies\n");
         if(requested&&!ordinary)std::printf("settings: experimental presentation ignored in test/record/playback\n");
+        if(!outrun::enhancements::presentation_controls().configure(
+            settings.text("Performance","FramerateLimitMode","0"),settings.text("Performance","VSync",""),ordinary))
+            std::printf("settings: invalid presentation control; FramerateLimitMode needs 0/1, VSync empty/0/1/2; invalid key uses its default\n");
     }
     {   const auto value=settings.text("Performance","FramerateFastLoad","0");
         auto& fast_load=outrun::enhancements::fast_load();

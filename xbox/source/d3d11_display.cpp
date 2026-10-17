@@ -205,7 +205,7 @@ void screenshot(Graphics& g){
 // FRAME RATE (enhancements/frame_rate): the output is put at 120 Hz once,
 // when it offers it; 60 / 120 fps are then paced by the present interval,
 // so a change in Settings applies at once without another mode switch.
-namespace { unsigned g_refresh=0,g_interval=1;enhancements::PresentationDeadline general_deadline; }
+namespace { unsigned g_refresh=0,g_interval=1,g_cpu_cap=0;enhancements::PresentationDeadline general_deadline; }
 // The top of a frame with a frame latency of 1..3 (the desktop's default 2): wait until the swap chain takes another frame, so the input sampled
 // next is as recent as the queue allows. Called through GameHost::frame_wait, first in each input sample and before
 // read_pad, so the pad snapshot, the wheel paths (DirectInput in the input filter) and the keyboard are all sampled
@@ -235,26 +235,27 @@ unsigned output_refresh(){
     return g_refresh;
 }
 void pace_frames(unsigned fps){
-    if(enhancements::general_presentation_enabled()){
-        g_interval=0;general_deadline.reset();
-        std::fprintf(stdout,"desktop display: experimental presentation cap %u (0 means no CPU cap); Present interval 0; simulation 60 Hz\n",fps);
-        return;
-    }
-    g_interval=std::max(1u,(output_refresh()+fps/2u)/std::max(1u,fps));
-    std::fprintf(stdout,"Xbox display: %u fps on a %u Hz output (present interval %u)\n",fps,output_refresh(),g_interval);
+    const auto& general=enhancements::general_presentation();
+    const auto& controls=enhancements::presentation_controls();
+    const auto legacy=general.enabled||controls.vsync>=0?1u:
+        std::max(1u,(output_refresh()+fps/2u)/std::max(1u,fps));
+    g_interval=controls.present_interval(general,legacy);
+    g_cpu_cap=controls.cpu_limit(general,fps);general_deadline.reset();
+    std::fprintf(stdout,"desktop display: selected rate %u, CPU cap %u (0: no CPU cap), limiter %s, Present interval %u\n",
+        fps,g_cpu_cap,controls.mode==1u?"accurate":"efficient",g_interval);
 }
 bool D3D11Display::present(std::string& error){
     auto& g=graphics();
     // The desktop's overlay (the F6 panel), on the whole back buffer before the screenshot: what the player sees.
     if(const auto overlay=present_overlay())overlay(g.device.Get(),g.context.Get(),g.target.Get(),g.width,g.height);
     screenshot(g);
-    if(enhancements::general_presentation_enabled()){
+    if(enhancements::general_presentation_enabled()||enhancements::presentation_controls().vsync>=0){
         if(enhancements::fast_load().active())general_deadline.reset();
         else{
-            const auto now=std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count());
-            const auto wait=general_deadline.wait_ns(now,enhancements::general_presentation().limit);
-            if(wait)platform_sleep_ns(s64(wait));
+            general_deadline.pace(g_cpu_cap,enhancements::presentation_controls().mode,
+                []{return std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());},
+                [](std::uint64_t ns){platform_sleep_ns(s64(ns));},[]{YieldProcessor();});
         }
     }
     const HRESULT hr=g.swap_chain->Present(enhancements::fast_load().present_interval(g_interval),0);

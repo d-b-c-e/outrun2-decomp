@@ -123,6 +123,7 @@ struct Values {
     bool general_presentation{};
     int presentation_limit{};
     std::string saved_presentation_limit{"0"};
+    int presentation_mode{},presentation_vsync{};
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
@@ -432,7 +433,7 @@ void page_cameras(bool advanced){
          keep(&v.fast_load,before,[&]{return save("Performance","FramerateFastLoad",v.fast_load==1?"2":"0");});}
     {const bool before=v.general_presentation;
      if(dbce::panel::OffOn("Experimental presentation rate",&v.general_presentation,
-         "Off by default: preserves the normal 60/120 options and pacing. On at the next ordinary start: uses the presentation cap below, "
+         "Off by default: preserves the normal 60/120 options. An explicit VSync override below can change presentation pacing. On at the next ordinary start: uses the presentation cap below, "
          "keeps simulation and sound control on the existing 60 Hz updates, and interpolates display-only frames. "
          "Experimental: rendered smoothness, audio and input behavior are not runtime-qualified. Ignored in tests, recording and playback."))
          keep(&v.general_presentation,before,[&]{return save("Performance","FramerateUnlockExperimental",v.general_presentation?"true":"false");});}
@@ -448,6 +449,22 @@ void page_cameras(bool advanced){
                 v.saved_presentation_limit:values[v.presentation_limit]);});
         if(v.presentation_limit==11)dbce::panel::Status("Saved custom cap",v.saved_presentation_limit.c_str());
     }
+    {static const char* const modes[]{"Efficient (default)","Accurate (higher CPU use)"};
+     const int before=v.presentation_mode;
+     if(dbce::panel::Choice("Limiter mode",modes,2,&v.presentation_mode,
+         "Applies at the next ordinary start when the CPU cap is active: Experimental presentation rate, or an explicit VSync override. "
+         "Efficient sleeps and yields near the deadline. Accurate waits with processor pauses and can use a full CPU core while waiting. "
+         "Neither mode guarantees exact delivered frames. Ignored in tests, recording and playback."))
+         keep(&v.presentation_mode,before,[&]{return save("Performance","FramerateLimitMode",v.presentation_mode==1?"1":"0");});}
+    {static const char* const sync[]{"Existing pacing (default)","Off","On","Half refresh"};
+     static const char* const values[]{"","0","1","2"};
+     const int before=v.presentation_vsync;
+     if(dbce::panel::Choice("VSync",sync,4,&v.presentation_vsync,
+         "Applies at the next ordinary start, independently of the CPU cap. Existing pacing preserves the normal 60/120 policy or "
+         "experimental interval 0. Off, On and Half refresh request Present intervals 0, 1 and 2. With experimental presentation Off, "
+         "an explicit override retains a CPU cap at the ordinary selected rate. The compositor and frame-latency wait still apply; "
+         "this does not change refresh, enable tearing or implement VRR. Ignored in tests, recording and playback."))
+         keep(&v.presentation_vsync,before,[&]{return save("Performance","VSync",values[v.presentation_vsync]);});}
     // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
     // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
     // no row here yet.
@@ -743,6 +760,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.fast_load=settings.text("Performance","FramerateFastLoad","0")=="2"?1:0;   // same strict startup policy
     v.general_presentation=settings.flag("Performance","FramerateUnlockExperimental",false);
     v.saved_presentation_limit=settings.text("Performance","FramerateLimit","0");v.presentation_limit=11;
+    v.presentation_mode=settings.text("Performance","FramerateLimitMode","0")=="1"?1:0;
+    {const auto sync=settings.text("Performance","VSync","");v.presentation_vsync=sync=="0"?1:sync=="1"?2:sync=="2"?3:0;}
     {static const char* const values[]{"0","60","90","120","144","165","180","240","360","500","1000"};
      for(int i=0;i<11;++i)if(v.saved_presentation_limit==values[i])v.presentation_limit=i;}
     v.lens_flare_fix=settings.flag("Bugfixes","FixLensFlarePath",true);
