@@ -165,12 +165,18 @@ def inject_expiry(start, startup_seconds, budget):
     return int(math.ceil(start + startup_seconds + budget)) + INJECT_MARGIN
 
 
-def next_menu_action(script, since_window, sent, last_press_age, presses):
+def next_menu_action(script, since_menu, sent, last_press_age, presses):
     """The menu press due now, or None: the next script step once its time has come (one per poll, in order), then,
-    MENU_FALLBACK_AFTER seconds past the script's end, the former start/confirm presses 1.5 s apart, 40 presses in all."""
-    if since_window is None or presses >= 40 or last_press_age < MENU_MIN_GAP: return None
-    if sent < len(script): return script[sent][1] if since_window >= script[sent][0] else None
-    if since_window < script[-1][0] + MENU_FALLBACK_AFTER or last_press_age <= 1.5: return None
+    MENU_FALLBACK_AFTER seconds past the script's last press, the former start/confirm presses 1.5 s apart, 40 presses in all.
+    The clock starts when the log first shows the frontend (mode 32), not at the window: render-01 (three angled views at
+    7680x1440) first showed it about 12 s after its window, and the first four steps went to mode 0. A late step also waits
+    its scripted gap after the previous press, so a stall does not send the steps after it back to back."""
+    if since_menu is None or presses >= 40 or last_press_age < MENU_MIN_GAP: return None
+    if sent < len(script):
+        gap = script[sent][0] - script[sent - 1][0] if sent else 0.0
+        return script[sent][1] if since_menu >= script[sent][0] and last_press_age >= gap else None
+    if (since_menu < script[-1][0] + MENU_FALLBACK_AFTER or last_press_age <= 1.5 or
+            presses == len(script) and last_press_age < MENU_FALLBACK_AFTER): return None
     return "start" if (presses - len(script)) % 3 == 0 else "confirm"
 
 
@@ -378,6 +384,8 @@ def main():
                    help="R1 only: a rendering test, e.g. screens=separate,views=angled,frames=240,every=3,after=360,scale=2 "
                         "(render-test.txt; frames land in the run folder's frames)")
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
+    a.add_argument("--lease-held", action="store_true", help="the caller holds the shared rig lease through this run and its "
+                   "evidence (seal, replay, frame conversion) and releases it; run.py neither takes nor releases it")
     a.add_argument("--horn", action="store_true", help="R1 only: this run binds horn (R12 button 27) with [Audio] AllowHorn = true "
                    "and holds it 1.5 s after the steer holds; the exit result log's race sound line must show the 9BC loop and the "
                    "81BC stop as played (refused or missing is a request only; the command path, not an audible check)")
@@ -485,7 +493,8 @@ def main():
         if sha(publisher) != plan["publisherSha256"]: raise RuntimeError("control publisher changed after preflight")
         replace_file(DBCE / name, data, publisher); published[name] = data
     try:
-        lease("Enter", "OutRun shim first loop (latched, no force)"); leased = True
+        if not o.lease_held: lease("Enter", "OutRun shim first loop (latched, no force)")
+        leased = True
         if tape:   # the test copy's ini names the tape for this run only; restored to the exact profile bytes after it
             wrote_ini = True
             ini.write_bytes((PROFILE + "[ShimReplay]\nTape = %s\n%s" % (tape, "Mode = consumed\n" if consumed else "")).encode("utf-8"))
@@ -512,7 +521,7 @@ def main():
             nonlocal n
             n += 1; body = "nonce=%s\nbatch=%d\n%s\n" % (nonce, n, "\n".join(commands))
             publish("inject.txt", body.encode()); receipt["batches"].append(dict(n=n, commands=commands, at=time.time()))
-        phase = "consumed" if consumed else "menus"; phase_at = 0; race_at = None; window_at = None; scripted = 0
+        phase = "consumed" if consumed else "menus"; phase_at = 0; race_at = None; window_at = None; menu_at = None; scripted = 0
         consumed_deadline = start + o.seconds + (replay_timeout or 0)
         while time.time() < (consumed_deadline if consumed else loop_deadline(start, o.seconds, race_at, budget)) and proc.poll() is None:
             time.sleep(0.2)
@@ -541,7 +550,8 @@ def main():
                 if race and o.drive: phase, phase_at, drive_step = "drive", time.time(), 0; batch(drive_batch(0)); continue
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
                 if window_at is None and windows_of(proc.pid): window_at = time.time(); receipt["windowSeconds"] = round(window_at - start, 3)
-                action = next_menu_action(MENU_SCRIPT, None if window_at is None else time.time() - window_at, scripted,
+                if menu_at is None and window_at is not None and mode == 32: menu_at = time.time(); receipt["menuSeconds"] = round(menu_at - start, 3)
+                action = next_menu_action(MENU_SCRIPT, None if menu_at is None else time.time() - menu_at, scripted,
                                           time.time() - last_press, len(receipt["presses"]))
                 if action:
                     batch(["inject action %s 1 ms=200" % action]); last_press = time.time()
@@ -606,7 +616,7 @@ def main():
         finally:
             if leased and receipt.get("retained"):   # --horn: the retained process still runs on the rig; the lease stays with it
                 receipt["retained"]["lease"] = "kept: Rig-Lease -Exit after the process is resolved"
-            elif leased and not o.horn:
+            elif leased and not o.horn and not o.lease_held:
                 try: lease("Exit")
                 except Exception as e: receipt["errors"].append(repr(e))
         try:
@@ -650,7 +660,7 @@ def main():
         finally:
             # --horn (sana #132742): the lease is held through the seal, replay, evidence and receipt, and released only after
             # all of it (also when that work raised); a retained process keeps it. A failed release is added to the receipt.
-            if leased and o.horn and not receipt.get("retained"):
+            if leased and o.horn and not o.lease_held and not receipt.get("retained"):
                 try: lease("Exit")
                 except Exception as e:
                     receipt["errors"].append("lease exit: %r" % e); failures = verdict(receipt)

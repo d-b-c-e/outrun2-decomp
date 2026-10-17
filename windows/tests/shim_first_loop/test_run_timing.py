@@ -127,9 +127,13 @@ for c in calls(tree, "lease"):
     body = ast.Module(body=owner.body, type_ignores=[]) if owner else None
     exits.append(({n for n in ("seal", "replay", "verdict") if body and calls(body, n)}, guard))
 check(len(exits) == 2, "two lease releases in main: %r" % exits)
-check((set(), "leased and (not o.horn)") in exits, "the early release (after the cleanup) skips --horn: %r" % exits)
-check(({"seal", "replay", "verdict"}, "leased and o.horn and (not receipt.get('retained'))") in exits,
+check((set(), "leased and (not o.horn) and (not o.lease_held)") in exits, "the early release (after the cleanup) skips --horn: %r" % exits)
+check(({"seal", "replay", "verdict"}, "leased and o.horn and (not o.lease_held) and (not receipt.get('retained'))") in exits,
       "--horn releases in the finally after the seal, replay and verdict, unless retained: %r" % exits)
+# --lease-held: the caller holds the lease through the evidence, so main neither takes nor releases it.
+enters = [c for c in calls(tree, "lease") if isinstance(c.args[0], ast.Constant) and c.args[0].value == "Enter"]
+check(len(enters) == 1 and ast.unparse(parents[enters[0]].test if isinstance(parents[enters[0]], ast.If) else parents[parents[enters[0]]].test) == "not o.lease_held",
+      "--lease-held skips the Enter: %r" % [ast.unparse(parents[c]) for c in enters])
 # No race: the startup budget alone bounds the run.
 why, at = simulate(180, 10_000, bound)
 check(why == "deadline" and 180 <= at < 180.5, "no race: the startup budget ends the run (%s at %.1f)" % (why, at))
@@ -153,9 +157,10 @@ check(not run.valid_race_seconds(json.loads('{"raceSeconds": Infinity}')["raceSe
 
 # The menu script: in order, one step per poll, only once due; then the former presses after the fallback delay.
 script = run.MENU_SCRIPT
-check(run.next_menu_action(script, None, 0, 99, 0) is None, "no press before the game window appears")
+check(run.next_menu_action(script, None, 0, 99, 0) is None, "no press before the log shows the frontend (mode 32)")
 check(run.next_menu_action(script, 5.9, 0, 99, 0) is None and run.next_menu_action(script, 6.0, 0, 99, 0) == "confirm", "the first step at its time")
-check(run.next_menu_action(script, 30.0, 2, 0.4, 2) == "navDown", "a late poll sends the next unsent step, not a later one")
+check(run.next_menu_action(script, 30.0, 2, 0.4, 2) is None and run.next_menu_action(script, 30.0, 2, 2.0, 2) == "navDown",
+      "a late step waits its scripted gap after the previous press, then sends the next unsent step, not a later one")
 check(run.next_menu_action(script, 30.0, 3, 0.2, 3) is None, "a late scripted step still waits MENU_MIN_GAP after the last press")
 # Late start: the three navDowns all due at once must still go out MENU_MIN_GAP apart, so each 200 ms hold is released.
 sent_at, sent, last = [], 2, -99.0
@@ -166,11 +171,13 @@ for k in range(60):
     elif a_: break
 gaps = [y - x for x, y in zip(sent_at, sent_at[1:])]
 check(len(sent_at) == 3 and all(g >= run.MENU_MIN_GAP - 1e-9 and g - 0.2 >= 0.2 - 1e-9 for g in gaps), "late consecutive navDowns keep a release gap: %r" % gaps)
-check(run.next_menu_action(script, 18.0, 7, 0.5, 7) == "navRight", "OUTRUN mode is a navRight")
+check(run.next_menu_action(script, 18.0, 7, 2.5, 7) == "navRight", "OUTRUN mode is a navRight")
 check([a for _, a in script].count("navDown") == 3 and script[-1] == (28.5, "confirm"), "zero's mapped path: three downs, music confirm last")
 done = len(script)
 check(run.next_menu_action(script, script[-1][0] + run.MENU_FALLBACK_AFTER - 0.1, done, 99, done) is None, "no fallback press before its delay")
 check(run.next_menu_action(script, script[-1][0] + run.MENU_FALLBACK_AFTER, done, 99, done) == "start", "the fallback starts with start")
+check(run.next_menu_action(script, 60, done, 11.9, done) is None and run.next_menu_action(script, 60, done, 12.0, done) == "start",
+      "a late script's last press still gets the whole fallback delay")
 check(run.next_menu_action(script, 60, done, 1.0, done + 1) is None, "fallback presses stay 1.5 s apart")
 check(run.next_menu_action(script, 60, done, 2.0, done + 1) == "confirm", "then confirm, as before")
 check(run.next_menu_action(script, 60, done, 99, 40) is None, "40 presses in all")
