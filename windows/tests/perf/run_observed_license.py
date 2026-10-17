@@ -80,6 +80,9 @@ def main():
     a.add_argument("--run-id", required=True)
     a.add_argument("--port", type=int, default=18765)
     a.add_argument("--seconds", type=float, default=75.0, help="time after observed race entry")
+    a.add_argument("--weave", type=float, default=0.0,
+                   help="seconds to hold the accelerator after race entry, steering right and left in turn after 12 s so "
+                        "traffic passes on both sides (0: the short drive)")
     a.add_argument("--check-only", action="store_true")
     o = a.parse_args()
     game, out = o.game.resolve(), o.result.resolve()
@@ -103,6 +106,7 @@ def main():
     if os.environ.get("DBCE_FFB_MUTE") != "1": problems.append("DBCE_FFB_MUTE=1 required")
     if o.port == 8000 or not 1 <= o.port <= 65535: problems.append("invalid/private telemetry port")
     if not 15 <= o.seconds <= 180: problems.append("seconds outside 15..180")
+    if o.weave and not 15 <= o.weave <= o.seconds: problems.append("weave outside 15..seconds")
     if "OutRunDesktop.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"],
                                              capture_output=True, text=True).stdout:
         problems.append("OutRunDesktop already running")
@@ -257,11 +261,20 @@ def main():
         posted = round(time.monotonic() - start, 3)
         base.post_key(hwnd, "up", False)
         try:
-            time.sleep(3)
-            key("left", 1.5)
-            time.sleep(1.5)
-            key("right", 1.5)
-            time.sleep(2.5)
+            if o.weave:
+                time.sleep(12)
+                side = "right"
+                while time.monotonic() - race_time < o.weave - 4 and proc.poll() is None:
+                    key(side, 1.5)
+                    side = "left" if side == "right" else "right"
+                    time.sleep(2.5)
+                while time.monotonic() - race_time < o.weave and proc.poll() is None: time.sleep(.05)
+            else:
+                time.sleep(3)
+                key("left", 1.5)
+                time.sleep(1.5)
+                key("right", 1.5)
+                time.sleep(2.5)
         finally:
             base.post_key(hwnd, "up", True)
             receipt["keysSent"].extend(({"key": "up", "posted": posted, "up": False},
