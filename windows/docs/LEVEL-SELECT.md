@@ -1,6 +1,7 @@
 # Optional level selection
 
-Native source with an ordinary F6 next-start control; focused qualification of this successor is pending.
+Native source with an ordinary F6 next-start control; the affected desktop build
+and four focused fixtures pass at `b65ff74`.
 This does not change an installed game.
 
 ```ini
@@ -67,11 +68,18 @@ The separate `level_select_input` fixture uses the actual desktop publisher with
 synthetic backend/panel owners: both Shift keys, blocked/focus-cleared state,
 disabled/test/playback policy, no duplicate wrappers and original input fields.
 `outrun_capture2` covers optional-channel compatibility and strict values;
-`consumed_replay` covers recorded modifiers and neutral end-of-tape input. These
-source additions still need their focused fixture qualification. The cumulative native,
-desktop, capture and replay targets must be compiled together against the changed
-input header; do not link old prebuilt input/context objects into this successor.
-Use focused affected checks in a named build slot, not a replay of unrelated
-successful suites. A later useful runtime check
+`consumed_replay` covers recorded modifiers and neutral end-of-tape input.
+The cumulative ClangCL x64 Release desktop and all four affected fixture targets
+build together at `b65ff74`; CTest passes 4/4 with zero skipped: level_select 543,
+level_select_input 92, outrun_capture2 199 and consumed_replay 27 checks (861 total).
+Original logs, result, JUnit and executable are in hub
+`artifacts/outrun-level-select-controls-20261017/build-01`. The executable is
+23,942,144 bytes, SHA-256
+`102719ACC7DA42E40559B1EA6ABC8BED6E891AC4172284E586857731CE533250`.
+Owned children were quiescent, process queries safe, process environment restored
+and the exact lease released at 2026-10-17T01:38:50.8293407Z, before direct handoff
+to the next worker. No game, provider, UI, owner install or unrelated suite ran.
+Earlier passing cache, extraction, CD and course results remain retained.
+A later useful runtime check
 should include the title spacing from 54a853f3; no isolated title replay is
 needed. Existing title timing/placement and audio results remain historical.

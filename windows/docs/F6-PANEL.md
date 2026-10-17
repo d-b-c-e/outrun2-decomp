@@ -12,8 +12,10 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   default-Off startup consumer. It saves through the same one-key writer and failed-save rollback, without changing
   this session. Help covers the original 66-course menu and eligible held Shift/native X/left-stick alternates;
   return history and license progress stay intact. Existing test/playback save/input gates remain. This finishes
-  the missing ordinary control for the existing route; affected compilation and level/input/capture/replay fixtures
-  are pending. Rendered F6 saving, actual course entry and recording/replay acceptance remain unqualified.
+  the missing ordinary control for the existing route. The affected ClangCL x64 Release desktop build at b65ff74
+  passes, with all four level/input/capture/replay CTests passing (861 checks, zero skipped); original evidence is
+  in hub artifacts/outrun-level-select-controls-20261017/build-01. Rendered F6 saving, actual course entry and
+  recording/replay acceptance remain unqualified. No game, provider, UI or owner install ran in this batch.
 - FFB shows status, the legacy Strength/Tweaks-derived advanced effect settings and invert for the default legacy model, and the next-start `[FFB] Output` choice when the add-on is present or already selected. With `outrun-producer@2` selected, it instead shows this session's applied steering/shift percentages and two independent 0–100% controls saved as integer `[FFBProducer2]` keys for the next start. These controls do not retune this session or migrate legacy keys. The output choice never starts/stops output in the current session. Stop FFB/F8 stops the current output and tries to save `Output = none` for the next start; a failed save is reported. The force path is default-off and has no owner-attended physical qualification.
 - Cameras offers Off / Surround / Separate monitors, with the current-view status, and the separate experimental projection choice when triples are selected. The planar span is the Tweaks-parity behavior. The projected-view path remains default-off and is not qualified as three independently rendered, angle-correct views. Advanced choices include frame latency, letterboxing, and resolution from the display; changes save for the next start.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
