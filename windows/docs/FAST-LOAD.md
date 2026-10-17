@@ -2,14 +2,14 @@
 
 The source is based on cumulative `c5d3a9f` and remains default **off**. The existing host policy and INI parsing checks passed on product `2984189` (361 and 44 checks); sources are unchanged and those results are retained. Runtime behavior and loading speedup remain unqualified.
 
-F6 Advanced Cameras now offers **Fast loading** as **Off (default)** or **Loading only (experimental)**. The matching Wheelkit @6 Cameras exposure is owned by Lola. Both choices save through the existing one-key writer for the next start; selecting Loading only writes:
+F6 Advanced Cameras now offers **Fast loading** as **Off (default)**, **Loading only (experimental)** or (October 17, see Mode 1) **Loading only, VSync kept (experimental)**. The matching Wheelkit @6 Cameras exposure is owned by Lola. Both choices save through the existing one-key writer for the next start; selecting Loading only writes:
 
 ```ini
 [Performance]
 FramerateFastLoad = 2
 ```
 
-Absent or `0` keeps normal behavior. Only `0` and `2` are accepted. Other values, including Tweaks modes `1` and `3`, are logged and turn the option off. The existing INI reader strips surrounding whitespace and comments. No settings file is written by this feature. The startup snapshot/playback merger already retains `[Performance]` (only `[Window]` and `[Triple]` come from the current rig); no new snapshot format is introduced.
+Absent or `0` keeps normal behavior. `0`, `1` and `2` are accepted. Other values, including Tweaks mode `3`, are logged and turn the option off. The existing INI reader strips surrounding whitespace and comments. No settings file is written by this feature. The startup snapshot/playback merger already retains `[Performance]` (only `[Window]` and `[Triple]` come from the current rig); no new snapshot format is introduced.
 
 ## Mode 2 behavior
 
@@ -23,6 +23,17 @@ This follows the loading-only intent of pinned OutRun2006Tweaks `51acc201`: bypa
 - A scoped binding releases the native context pointers and override when its loop exits, including an early exit. Setup screens and later teardown presentation remain paced normally.
 
 The original logical `44FBA0` file-service call stays in its original once-per-frame location. Tweaks mode 3's in-game streaming behavior is outside this feature.
+
+## Mode 1 behavior (source only, October 17)
+
+Tweaks mode 1 skips only its frame limiter on load screens and leaves the configured presentation interval alone, so loading runs at the display's refresh with VSync. Here mode 1 uses the same loading gate, one-update path, interpolation handling, clock rebase and scoped binding as mode 2, with two differences while a frame is accelerated:
+
+- The pre-input frame-latency wait is kept.
+- Present uses interval `1` instead of the configured interval, or `0` when that interval is already `0` (VSync off). A 60 Hz display therefore gains nothing; a 120 or 180 Hz display loads at its refresh without tearing.
+
+The CPU deadline pacing of the presentation controls is skipped for accelerated frames in both modes, as before. F6 Advanced Cameras adds **Loading only, VSync kept (experimental)**, which saves `FramerateFastLoad = 1`; the existing two choices keep their saved values. The matching Wheelkit row still lists only `0` and `2`.
+
+Checks added in source: `fast_load` gains a mode-1 policy block (gate, intervals 0/1/3, kept wait, one update, scoped release), the production-loop fixture at 60/120 Hz for mode 1 (interval 1 and kept waits on loading frames) and mode-1 ordinary-pacing comparisons; `fast_load_config` accepts `1`. These are unbuilt and unrun.
 
 ## Focused checks and remaining gates
 

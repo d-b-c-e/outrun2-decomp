@@ -122,7 +122,7 @@ struct Values {
     int vibration{},vibration_strength{7},impulse{},impulse_left{25},impulse_right{25};
     int monitor_choice{};
     std::vector<std::string> monitor_labels,monitor_paths;
-    int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, next start only
+    int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, 2 -> 1, next start only
     bool general_presentation{};
     int presentation_limit{};
     std::string saved_presentation_limit{"0"};
@@ -459,12 +459,14 @@ void page_cameras(bool advanced){
            "Frames that may wait for the display: 1 queues fewer frames, 2 is the default, 3 allows more; "
            "0 uses the plain presentation mode."))
         keep(&v.latency,before,[&]{return save("Window","FrameLatency",std::to_string(v.latency));});
-    {static const char* const modes[]{"Off (default)","Loading only (experimental)"};
+    {static const char* const modes[]{"Off (default)","Loading only (experimental)","Loading only, VSync kept (experimental)"};
+     static const char* const saved[]{"0","2","1"};
      const int before=v.fast_load;
-     if(dbce::panel::Choice("Fast loading",modes,2,&v.fast_load,
+     if(dbce::panel::Choice("Fast loading",modes,3,&v.fast_load,
          "Experimental loading-only mode. Skips display waits while a race loads and restores normal pacing before "
-         "the race starts. Driving frame pacing is unchanged. Applies at the next game start."))
-         keep(&v.fast_load,before,[&]{return save("Performance","FramerateFastLoad",v.fast_load==1?"2":"0");});}
+         "the race starts; the VSync-kept choice still waits for each refresh, so it avoids tearing but gains only on "
+         "displays above 60 Hz. Driving frame pacing is unchanged. Applies at the next game start."))
+         keep(&v.fast_load,before,[&]{return save("Performance","FramerateFastLoad",saved[v.fast_load]);});}
     {const bool before=v.general_presentation;
      if(dbce::panel::OffOn("Experimental presentation rate",&v.general_presentation,
          "Off by default: preserves the normal 60/120 options. An explicit VSync override below can change presentation pacing. On at the next ordinary start: uses the presentation cap below, "
@@ -791,7 +793,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.full_vehicle_detail=settings.flag("Graphics","DisableVehicleLODs",false);
     v.no_stage_cull=settings.flag("Graphics","DisableStageCulling",false);
     v.depth_precision=settings.flag("Graphics","FixZBufferPrecision",false);
-    v.fast_load=settings.text("Performance","FramerateFastLoad","0")=="2"?1:0;   // same strict startup policy
+    {const auto fast=settings.text("Performance","FramerateFastLoad","0");   // same strict startup policy
+     v.fast_load=fast=="2"?1:fast=="1"?2:0;}
     v.general_presentation=settings.flag("Performance","FramerateUnlockExperimental",false);
     v.saved_presentation_limit=settings.text("Performance","FramerateLimit","0");v.presentation_limit=11;
     v.presentation_mode=settings.text("Performance","FramerateLimitMode","0")=="1"?1:0;

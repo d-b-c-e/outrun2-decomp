@@ -22,7 +22,8 @@ int main(){
     config(retained,true,false);
     config(retained+"[Performance]\nFramerateFastLoad=0\n",true,false);
     config(retained+"[pErFoRmAnCe]\nFramerateFastLoad = 2 ; experimental\n",true,true);
-    for(const auto value:{"1","3","-1","2junk","02","true","","2147483648"})
+    config(retained+"[Performance]\nFramerateFastLoad = 1\n",true,true);
+    for(const auto value:{"3","-1","2junk","02","01","true","","2147483648"})
         config(retained+"[Performance]\nFramerateFastLoad="+value+"\n",false,false);
     std::printf("fast_load_config: %u checks passed\n",checks);
 }

@@ -47,11 +47,33 @@ void policy(){
         mode=13;stage=0;p.begin_frame();
     }
     check(!p.loading_frame()&&!p.active()&&p.present_interval(2)==2u,"scope exit releases live pointers/override");
-    for(const auto text:{"0","1","3","-1","2junk","02","true","","2147483648"}){
+    for(const auto text:{"0","3","-1","2junk","02","01","1.0","true","","2147483648"}){
         p.configure("2");
         const bool accepted=p.configure(text);
         check(accepted==(std::string_view(text)=="0")&&!p.enabled(),"unsupported values refuse to off");
     }
+}
+// Tweaks mode 1: the same loading gate, but VSync stays (latency wait, at most one vblank).
+void policy_mode1(){
+    en::FastLoad p;
+    check(p.configure("1")&&p.enabled()&&p.setting()==1u,"accept mode 1");
+    std::uint32_t mode=13,stage=0;
+    {
+        en::FastLoadBinding binding(p,mode,stage);
+        for(const auto m:{0u,13u,16u,32u})for(const auto s:{0u,64u,65u}){
+            mode=m;stage=s;p.begin_frame();
+            const bool expected=m==13u&&s<65u;
+            check(p.active()==expected,"mode 1: exact START/stage gate");
+            check(p.present_interval(0)==0u,"mode 1: VSync off stays immediate");
+            check(p.present_interval(1)==1u,"mode 1: interval 1 kept");
+            check(p.present_interval(3)==(expected?1u:3u),"mode 1: loading presents at every refresh");
+            check(p.wait_for_latency(),"mode 1 keeps the latency wait");
+            check(p.cooperative_level(true)==(expected?2u:1u),"mode 1: 120 Hz loading forces one update");
+            check(!p.end_frame(),"mode 1: stable frame never requests a clock rebase");
+        }
+    }
+    check(!p.active()&&p.present_interval(3)==3u,"mode 1: scope exit releases the override");
+    check(p.configure("2")&&p.setting()==2u&&p.configure("0")&&!p.enabled(),"mode changes replace the setting");
 }
 struct Fixture {
     std::unique_ptr<pf::NativeRuntimeContext> context=std::make_unique<pf::NativeRuntimeContext>();
@@ -87,9 +109,10 @@ struct Fixture {
         if(pc==0x44fba0u)++f.file_services;
         return 0;
     }
-    void run(unsigned rate,std::uint32_t next_mode){
+    void run(unsigned rate,std::uint32_t next_mode,const char* setting){
         exit_mode=next_mode;auto& c=*context;
-        en::set_display_rate(rate);en::fast_load().configure("2");
+        const bool vsync_kept=std::string_view(setting)=="1";
+        en::set_display_rate(rate);en::fast_load().configure(setting);
         c.mode_state.current=13;c.start_mode.stage=0;
         pf::NativeRuntimePlatform platform{};platform.user=this;
         platform.ticks=[](void* u)->std::uint64_t{return static_cast<Fixture*>(u)->now;};
@@ -112,8 +135,8 @@ struct Fixture {
         };
         check(pf::run_native_frame_loop(c,services)==0u,"native loop exits normally");
         check(updates[0]==1u&&updates[1]==1u,"one update per loading frame at either display rate");
-        check(intervals==std::array<unsigned,4>{{0,2,2,2}},"normal Present restored in stage-65/abort frame");
-        check(waits==std::array<bool,4>{{false,false,true,true}},"normal pre-input waits restored on next frame");
+        check(intervals==std::array<unsigned,4>{{vsync_kept?1u:0u,2,2,2}},"normal Present restored in stage-65/abort frame");
+        check(waits==std::array<bool,4>{{vsync_kept,vsync_kept,true,true}},"normal pre-input waits restored on next frame");
         check(exit_remainder==0,"no loading accumulator debt on exit");
         check(file_services==4u,"original file-service call remains once per frame");
         check(en::display_rate()==rate,"configured display rate never changed");
@@ -129,7 +152,8 @@ struct Fixture {
 };
 // Compare complete production-loop service order/timing against the option
 // disabled in modes where gameplay/menu pacing must remain unchanged.
-std::vector<std::int64_t> ordinary(unsigned rate,bool enabled,std::uint32_t mode,std::uint32_t stage){
+std::vector<std::int64_t> ordinary(unsigned rate,const char* setting,std::uint32_t mode,std::uint32_t stage){
+    const bool enabled=std::string_view(setting)!="0";
     struct Trace {
         std::unique_ptr<pf::NativeRuntimeContext> context=std::make_unique<pf::NativeRuntimeContext>();
         std::vector<std::int64_t> values;
@@ -137,7 +161,7 @@ std::vector<std::int64_t> ordinary(unsigned rate,bool enabled,std::uint32_t mode
         unsigned frames{};
     } trace;
     trace.context->mode_state.current=mode;trace.context->start_mode.stage=stage;
-    en::set_display_rate(rate);en::fast_load().configure(enabled?"2":"0");
+    en::set_display_rate(rate);en::fast_load().configure(setting);
     pf::NativeRuntimePlatform platform{};platform.user=&trace;
     platform.ticks=[](void* u)->std::uint64_t{return static_cast<Trace*>(u)->now;};
     platform.frequency=[](void*)->std::uint64_t{return 60000u;};
@@ -171,14 +195,17 @@ std::vector<std::int64_t> ordinary(unsigned rate,bool enabled,std::uint32_t mode
 }
 int main(){
     policy();
-    for(const auto rate:{60u,120u})for(const auto mode:{13u,16u,32u}){
-        Fixture fixture;fixture.run(rate,mode);
+    policy_mode1();
+    for(const auto setting:{"2","1"})for(const auto rate:{60u,120u})for(const auto mode:{13u,16u,32u}){
+        Fixture fixture;fixture.run(rate,mode,setting);
     }
     for(const auto rate:{60u,120u})for(const auto mode:{13u,16u,29u,32u}){
         const auto stage=mode==13u?65u:0u;
-        const auto disabled=ordinary(rate,false,mode,stage);
-        check(ordinary(rate,true,mode,stage)==disabled,"stage 65/gameplay/menu service order and timing match disabled option");
+        const auto disabled=ordinary(rate,"0",mode,stage);
+        check(ordinary(rate,"2",mode,stage)==disabled,"stage 65/gameplay/menu service order and timing match disabled option");
+        check(ordinary(rate,"1",mode,stage)==disabled,"mode 1: stage 65/gameplay/menu service order and timing match disabled option");
     }
-    ordinary(120,true,13,0);
+    ordinary(120,"2",13,0);
+    ordinary(120,"1",13,0);
     std::printf("fast_load: %u checks passed\n",checks);
 }

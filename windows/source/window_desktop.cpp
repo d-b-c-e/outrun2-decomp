@@ -439,9 +439,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const auto value=settings.text("Performance","FramerateFastLoad","0");
         auto& fast_load=outrun::enhancements::fast_load();
         if(!fast_load.configure(value))
-            std::printf("settings: FramerateFastLoad = %.32s refused (only 0 or 2 supported); off\n",value.c_str());
+            std::printf("settings: FramerateFastLoad = %.32s refused (only 0, 1 or 2 supported); off\n",value.c_str());
         if(fast_load.enabled())
-            std::printf("settings: experimental FramerateFastLoad 2 (loading frames only; normal pacing resumes at START stage 65; runtime unqualified)\n");}
+            std::printf("settings: experimental FramerateFastLoad %u (loading frames only, %s; normal pacing resumes at START stage 65; runtime unqualified)\n",
+                fast_load.setting(),fast_load.setting()==1u?"VSync kept":"VSync off");}
     // [Graphics] TransparencySupersampling, the Tweaks key: alpha-to-coverage for alpha-tested edges under MSAA. Off when
     // absent.
     {   const bool on=settings.flag("Graphics","TransparencySupersampling",false);
