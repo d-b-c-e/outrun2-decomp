@@ -298,7 +298,7 @@ int main(int argc,char** argv){
         for(const auto& bad:{truncated,unsupported,partial}){Device d;CHECK(stock(bad,"cs_TEST_pmt",d)!=0);CHECK(d.texture_bytes[0]==bad);}
         {Device d;CHECK(stock(f,"../escape",d)!=0);}
         CHECK(pmt_texture_extraction_stats().unsupported==4&&!fs::exists(dump)&&!fs::exists(dir/"escape"));
-        texture_replacement_configure(false,{});fs::remove_all(dir);
+        pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     // The START loading picture (ui_texture_replacement_rgba): the sprite banks' lookup for a stock DDS file, then the
     // file's top level as R,G,B,A from the device reader, or nothing (the caller keeps the stock texture).
