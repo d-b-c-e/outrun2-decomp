@@ -17,6 +17,31 @@ A file is offered to the device only if the device's DDS reader takes it (DXT1/3
 kind, every level inside the file); A8B8G8R8 files are converted to A8R8G8B8 first, as Tweaks' loader does. Anything
 else keeps the stock texture and is counted.
 
+## Scene extraction (October 16 source candidate)
+
+`[Graphics] SceneTextureExtract = true` opts into saving original scene PMT DDS files at the next ordinary start.
+It defaults to false, works without either replacement flag or a `load` folder, and is disabled in latched tests,
+playback and recording. The existing validated `TextureBaseFolder` applies (default `textures`): output goes to
+`<game folder>/<TextureBaseFolder>/dump/<PMT bank stem>/<index>_<XXH32>_<width>x<height>.dds`.
+Names share the replacement lookup's XXH32 and FXT remaps. UITextureExtract remains unimplemented.
+
+Extraction runs only after successful stock device creation. A successfully loaded replacement suppresses the dump;
+a missing, invalid or refused replacement keeps the existing stock fallback and may dump that original file.
+Supported inputs are validated DXT1, DXT3, DXT5 and 32-bit RGB DDS with A8R8G8B8-compatible color masks, up to 128 MiB.
+Both 2D and complete six-face cubes are supported, with every stored mip level present. The entire original DDS is
+copied byte-for-byte; no generated mip levels, GPU readback, capture or re-encoding are involved.
+
+Each valid output name is attempted once per configured session. Exclusive file creation preserves existing files,
+including when another process creates the destination first. Directory/write failures and unsupported files are
+counted without changing texture creation or rendering; an incomplete newly created file is removed. Shutdown
+prints written/existing/failed/unsupported counts. DDS assets are already ignored by the repository. No owner pack,
+configuration or installation is changed by enabling this source option in a private candidate.
+
+The existing `pc_pmt_loader` fixture contains synthetic checks for all eight format/cube combinations, byte-identical
+stored files and source buffers, device-reader acceptance of stored mip levels, unchanged stock requests, off and
+dedup behavior, existing files, replacement precedence/fallback, resource refusal, blocked output and invalid input.
+Build and fixture qualification are pending; ordinary-game extraction and rendered behavior remain unobserved.
+
 ## Pad prompt folders (source candidate, unbuilt)
 
 Tweaks reference: local dbce-mods-outrun-2006 commit

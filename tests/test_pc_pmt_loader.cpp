@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <vector>
 using namespace outrun::platform;
 using outrun::driving::Bytes;
@@ -229,6 +230,75 @@ int main(int argc,char** argv){
             PcPmtResources r{};std::vector<std::uint8_t> v;synthetic_pmt(r,v);r.pack_name="cs_VAR_R_pmt";Device d;load_synthetic(r,d);
             CHECK((d.texture_bytes[0]==a||d.texture_bytes[0]==b)&&st.other==2&&st.ambiguous==0);}   // the chosen path, not compared again
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
+    }
+    // Scene extraction preserves original files, independently of replacement and device-generated mip levels.
+    {
+        namespace fs=std::filesystem;
+        const auto dir=fs::temp_directory_path()/"or2_scene_extraction_test",load=dir/"load",dump=dir/"dump";
+        fs::remove_all(dir);
+        const auto dds=[](unsigned format,bool cube){
+            const unsigned face_bytes=format==0?16:format==3?80:32;
+            std::vector<std::uint8_t> f(128+face_bytes*(cube?6:1));
+            auto put=[&](std::size_t o,std::uint32_t v){std::memcpy(f.data()+o,&v,4);};
+            std::memcpy(f.data(),"DDS ",4);put(4,124);put(12,4);put(16,4);put(28,2);put(76,32);
+            if(format<3){put(80,4);put(84,format==0?0x31545844u:format==1?0x33545844u:0x35545844u);}
+            else{put(80,0x41);put(88,32);put(92,0xff0000);put(96,0xff00);put(100,0xff);put(104,0xff000000);}
+            put(112,cube?0xfe00:0);for(std::size_t k=128;k<f.size();++k)f[k]=std::uint8_t(k*13u+format);
+            return f;};
+        const auto name=[](const std::vector<std::uint8_t>& f){char n[64];
+            std::snprintf(n,sizeof n,"0_%X_4x4.dds",pmt_xxh32(f.data(),f.size()));return std::string(n);};
+        const auto write=[](const fs::path& p,const std::vector<std::uint8_t>& f){fs::create_directories(p.parent_path());
+            std::ofstream o(p,std::ios::binary);o.write(reinterpret_cast<const char*>(f.data()),std::streamsize(f.size()));};
+        const auto read=[](const fs::path& p){std::ifstream in(p,std::ios::binary);
+            return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>());};
+        const auto stock=[&](const std::vector<std::uint8_t>& f,const char* pack,Device& d){
+            PcPmtResources r{};std::vector<std::uint8_t> v;synthetic_pmt(r,v);v.resize(0x20+f.size());
+            std::copy(f.begin(),f.end(),v.begin()+0x20);r.video=v.data();r.video_size=v.size();r.pack_name=pack;
+            Bytes(r.system.data(),r.system.size()).put32(0x68+0x10,std::uint32_t(f.size()-128));
+            const auto original=v;load_synthetic(r,d);CHECK(v==original);return Bytes(r.system.data(),r.system.size()).u32(0x58);};
+        const auto f=dds(0,false);Device off;
+        texture_replacement_configure(false,false,load.string());CHECK(stock(f,"cs_TEST_pmt",off)!=0);
+        CHECK(!fs::exists(dump)&&off.texture_bytes[0]==f&&pmt_texture_extraction_stats().written==0);
+        // No load folder is needed, and extraction does not index or consult replacement files.
+        texture_replacement_configure(false,false,load.string(),false,true);
+        for(unsigned format=0;format<4;++format)for(bool cube:{false,true}){
+            const auto original=dds(format,cube);Device d;CHECK(stock(original,"cs_TEST_pmt",d)!=0);
+            CHECK(d.calls==off.calls&&d.texture_bytes.size()==1&&d.texture_bytes[0]==original);
+            const auto& q=d.textures[0];CHECK(q.cube==cube&&q.mip_levels==(cube?0xffffffffu:4u)&&q.mip_filter==(cube?1u:3u));
+            const auto dumped=read(dump/"cs_TEST_pmt"/name(original));CHECK(dumped==original);
+            PcTextureFileRequest request=q;request.data=dumped.data();request.size=std::uint32_t(dumped.size());request.mip_levels=2;
+            PcDdsTexture decoded;std::string error;CHECK(pc_d3dx_texture_from_file(request,decoded,error));
+            CHECK(decoded.width==4&&decoded.height==4&&decoded.levels==2&&decoded.cube==cube&&decoded.faces.size()==(cube?6u:1u));
+            CHECK(decoded.faces.back()[1].width==2&&decoded.faces.back()[1].height==2);
+        }
+        CHECK(pmt_texture_extraction_stats().written==8&&pmt_texture_replacement_stats().looked==0&&!fs::exists(load));
+        {Device d;stock(f,"cs_TEST_pmt",d);CHECK(pmt_texture_extraction_stats().written==8&&pmt_texture_extraction_stats().existing==0);}
+        // Existing owner files survive even after a fresh configuration resets the per-session dedup set.
+        const std::vector<std::uint8_t> sentinel{1,3,5,7};write(dump/"cs_TEST_pmt"/name(f),sentinel);
+        texture_replacement_configure(false,false,load.string(),false,true);
+        {Device d;CHECK(stock(f,"cs_TEST_pmt",d)!=0);CHECK(read(dump/"cs_TEST_pmt"/name(f))==sentinel);
+         CHECK(pmt_texture_extraction_stats().existing==1&&pmt_texture_extraction_stats().written==0);}
+        // A successful replacement wins and suppresses extraction. A bad first file retains stock and dumps it.
+        fs::remove_all(dump);const auto replacement=dds(2,false);write(load/"cs_TEST_pmt"/name(f),replacement);
+        texture_replacement_configure(true,false,load.string(),false,true);
+        {Device d;CHECK(stock(f,"cs_TEST_pmt",d)!=0);CHECK(d.texture_bytes[0]==replacement&&!fs::exists(dump));
+         CHECK(pmt_texture_replacement_stats().replaced==1&&pmt_texture_extraction_stats().written==0);}
+        write(load/"cs_TEST_pmt"/name(f),sentinel);texture_replacement_configure(true,false,load.string(),false,true);
+        {Device d;CHECK(stock(f,"cs_TEST_pmt",d)!=0);CHECK(d.texture_bytes.size()==1&&d.texture_bytes[0]==f);
+         CHECK(read(dump/"cs_TEST_pmt"/name(f))==f&&pmt_texture_replacement_stats().failed==1);}
+        // Resource refusal is unchanged and never produces a dump.
+        fs::remove_all(dump);texture_replacement_configure(false,false,load.string(),false,true);
+        {Device d;d.refuse_size=std::uint32_t(f.size());CHECK(stock(f,"cs_TEST_pmt",d)==0);CHECK(!fs::exists(dump));}
+        // A regular file blocks the dump directory deterministically; creating the stock texture still succeeds.
+        write(dump,sentinel);texture_replacement_configure(false,false,load.string(),false,true);
+        {Device d;CHECK(stock(f,"cs_TEST_pmt",d)!=0);CHECK(d.texture_bytes[0]==f&&read(dump)==sentinel);
+         CHECK(pmt_texture_extraction_stats().failed==1&&!pmt_texture_extraction_stats().error.empty());}
+        fs::remove(dump);texture_replacement_configure(false,false,load.string(),false,true);
+        auto truncated=f;truncated.resize(128);auto unsupported=f;unsupported[84]='2';auto partial=dds(0,true);partial[113]=2;
+        for(const auto& bad:{truncated,unsupported,partial}){Device d;CHECK(stock(bad,"cs_TEST_pmt",d)!=0);CHECK(d.texture_bytes[0]==bad);}
+        {Device d;CHECK(stock(f,"../escape",d)!=0);}
+        CHECK(pmt_texture_extraction_stats().unsupported==4&&!fs::exists(dump)&&!fs::exists(dir/"escape"));
+        texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     // The START loading picture (ui_texture_replacement_rgba): the sprite banks' lookup for a stock DDS file, then the
     // file's top level as R,G,B,A from the device reader, or nothing (the caller keeps the stock texture).
