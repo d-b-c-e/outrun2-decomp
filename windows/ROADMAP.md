@@ -84,9 +84,11 @@ go upstream as small pull requests (first: `tweaks-exe`).
      writes `pc_input_fine_steer_202` instead. Read at start; a latched process keeps it off; runtime.log names the
      choice either way and a recording's startup INI carries it to its playback. F6 Controls Advanced saves it for
      the next start. `test_fine_steering` (21 checks: every 16-bit steering word, the PC channels and filter
-     byte-identical, the digital path untouched) passes as a standalone MSVC /W4 /WX build, and clang-cl syntax checks of
-     the changed desktop sources are clean; the CMake desktop build, a muted run and the physical feel at the rig are
-     open. Wheelkit has no row yet.
+     byte-identical, the digital path untouched) passes. Grant OUTRUN-FINE-STEERING-BUILD-01 (kobe 233347): the cached
+     ClangCL Release build of `c4b4cc3` and CTest fine_steering, pedal_volume, consumed_replay and ffb_producer2
+     passed, 4/4 (exe `5DF1B607`; hub artifacts/outrun-fine-steering-20261017/build-01). A muted run and the physical
+     feel at the rig are open; the owner-attended recorded session is the selected runtime route. Wheelkit has no row
+     yet.
      - Where the steps come from: race_input.cpp:91 stores cvttss2si(steer*127) after the dead zone and the filter.
        OperationInput 49fad0 (pc_common_control.cpp:2189) then writes the car's +0x202 as volume0 << 8.
      - The physics readers of +0x202 are continuous in that i16, with 0x7f00 as full lock: pc_steering.cpp:57 and
