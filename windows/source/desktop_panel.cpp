@@ -150,6 +150,7 @@ struct Values {
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool cd_switcher{},cd_shuffle{},cd_title{};   // existing [CDSwitcher] startup flags, all default off
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
+    bool protect_login{}; // opt-in, next ordinary start only
     bool full_pedal_fix{true},pegasus_sound_fix{true};   // existing default-on Bugfixes, next start only
     bool highway_sets{};   // [Misc] RandomHighwayAnimSets, existing default-off startup policy
     int holly_course2{3};   // [Misc] EnableHollyCourse2, existing next-start availability policy
@@ -287,6 +288,11 @@ void page_controls(bool advanced){
             "Shows the current track title briefly after a successful manual change. Requires CD track switching. "
             "Applies at the next game start.","CDSwitcher");
         dbce::panel::Heading("Menus and license");
+        graphics_flag("Protect saved online login",&v.protect_login,"ProtectLoginData",
+            "Off by default. At the next ordinary start, encrypts the login block into SaveGame/OnlineLoginData.dat "
+            "for this Windows user and writes zeroes in that block of new common.dat saves. Loading never migrates files. "
+            "A protection failure refuses the common save; old copies are not scrubbed. Keep the encrypted file with your saves. "
+            "Turning this off may require entering the login again. Online transport is still incomplete.","Misc");
         graphics_flag("Start with level selection",&v.level_select,"EnableLevelSelect",
             "Off by default. At the next game start, opens the original 66-course level menu instead of the main menu. "
             "Hold Shift, or use the game's X/left-stick action, for alternate courses where supported. "
@@ -820,6 +826,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.license_character=settings.flag("Misc","AllowCharacterSelection",false);
     v.menu_miles=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
+    v.protect_login=settings.flag("Misc","ProtectLoginData",false);
     v.hidef_characters=settings.flag("Graphics","UseHiDefCharacters",true);
     v.jp_clarissa=settings.flag("Misc","RestoreJPClarissa",false);
     v.full_pedal_fix=settings.flag("Bugfixes","FixFullPedalChecks",true);

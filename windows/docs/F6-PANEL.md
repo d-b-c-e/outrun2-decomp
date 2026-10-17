@@ -1,5 +1,12 @@
 # F6 panel for the desktop build
 
+`[Misc] ProtectLoginData` adds an opt-in next-start row under Controls / Advanced /
+Menus and license. It uses the actual shared common-save/load consumers and a
+Windows user-scoped encrypted sidecar; native default is Off. It does not enable
+online transport. See [ONLINE-LOGIN-PROTECTION.md](ONLINE-LOGIN-PROTECTION.md) for
+failure handling and the exact server-override dependency. Its rendered saving
+and DPAPI operation remain unqualified.
+
 The native toolkit panel is integrated with OutRun's own D3D11 present path. Help, Controls, FFB, Cameras, and Telemetry were rendered in muted disposable-copy runs at the earlier `6777eb3` checkpoint. The selected-model gain controls below are a later source change. Neither checkpoint accepts physical force, normal settings interaction, projected triples, or every telemetry field.
 
 ## Implemented behavior

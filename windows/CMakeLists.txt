@@ -8,13 +8,13 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
-    source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
+    source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
     source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
     vendor/native/panel vendor/native/third_party/imgui)
-target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt ws2_32)
+target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt ws2_32 crypt32)
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 
@@ -51,6 +51,16 @@ target_include_directories(test_gamepad_vibration PRIVATE ${PROJECT_SOURCE_DIR}/
 target_compile_features(test_gamepad_vibration PRIVATE cxx_std_17)
 target_compile_options(test_gamepad_vibration PRIVATE /W4 /WX)
 add_test(NAME gamepad_vibration COMMAND test_gamepad_vibration)
+
+# Real shared profile I/O on private synthetic fixtures; fake transforms only.
+add_executable(test_desktop_login_protection ${PROJECT_SOURCE_DIR}/tests/test_login_protection.cpp)
+target_link_libraries(test_desktop_login_protection PRIVATE outrun_xbox_core)
+target_compile_options(test_desktop_login_protection PRIVATE /W4 /WX)
+add_test(NAME desktop_login_protection COMMAND test_desktop_login_protection)
+add_executable(test_desktop_profile_writes ${PROJECT_SOURCE_DIR}/tests/test_frontend_profiles.cpp)
+target_link_libraries(test_desktop_profile_writes PRIVATE outrun_xbox_core)
+target_compile_options(test_desktop_profile_writes PRIVATE /W4 /WX)
+add_test(NAME desktop_profile_writes COMMAND test_desktop_profile_writes)
 
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)

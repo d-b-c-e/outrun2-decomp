@@ -2,9 +2,21 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 namespace outrun::platform {
 constexpr std::size_t PcLicenseBytes=0x40cu,PcCommonSaveBytes=0x10be4u;
+// PC login block 7C205C, inside common 7B17F8: eight names and passwords.
+constexpr std::size_t PcLoginOffset=0x7c205cu-0x7b17f8u,PcLoginBytes=0xc0u;
+constexpr std::size_t PcLoginCipherLimit=65536u;
+struct FrontendLoginProtection {
+    bool enabled{}; // native default unchanged; desktop ordinary-play opt-in
+    using Transform=std::function<bool(const std::uint8_t*,std::size_t,std::vector<std::uint8_t>&)>;
+    Transform protect,unprotect;
+};
+// Installed before the frontend starts. Empty disables sidecar access.
+void frontend_profiles_set_login_protection(FrontendLoginProtection);
 using PcLicense = std::array<std::uint8_t,PcLicenseBytes>;
 struct FrontendProfiles {
     std::array<std::array<std::uint8_t,PcLicenseBytes>,4> licenses{};
@@ -13,6 +25,7 @@ struct FrontendProfiles {
     std::array<bool,4> loaded{};
     std::uint32_t loaded_count{},invalid_files{},selected{~0u};
     bool queried{},common_loaded{},active_loaded{};
+    int login_error{}; // unreadable protected data refuses sidecar replacement
 };
 // PC 406E50 layout: LE payload length followed by the unmodified payload.
 // Read-only: never creates/overwrites a user's PC saves.

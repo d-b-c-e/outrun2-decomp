@@ -10,6 +10,7 @@
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
 #include "gamepad_vibration_live.hpp"
+#include "login_protection.hpp"
 #include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
 #include "hud_toggle.hpp"
@@ -647,6 +648,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // A playback process is as a latched one here: no telemetry, the software force stream into its home, no device
     // output, no saves; and its panel never opens (the badge only).
     const bool test_like=plan.latched||playback;
+    outrun::desktop::login_protection_configure(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
     // Preserve the native records: the level menu's Shift modifier is separate
     // final input, captured in ordinary recordings and supplied by consumed replay.
     outrun::desktop::level_select_input_configure(outrun::platform::g_pc_enable_level_select,test_like);

@@ -5,19 +5,25 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <utility>
 namespace outrun::platform {
 namespace {
+FrontendLoginProtection login_protection;
+static_assert(PcLoginOffset+PcLoginBytes<=PcCommonSaveBytes,"PC login block bounds");
+void clear_secret(std::vector<std::uint8_t>& data){
+    volatile std::uint8_t* p=data.data();for(std::size_t i=0;i<data.size();++i)p[i]=0;
+}
 std::uint32_t u32(const std::uint8_t* p){return std::uint32_t(p[0])|(std::uint32_t(p[1])<<8u)|(std::uint32_t(p[2])<<16u)|(std::uint32_t(p[3])<<24u);}
 void put32(std::uint8_t* p,std::uint32_t v){for(unsigned i=0;i<4;++i)p[i]=std::uint8_t(v>>(8*i));}
-template<std::size_t N> int write_checked(const std::string& path,const std::array<std::uint8_t,N>& data){
+int write_bytes_checked(const std::string& path,const std::uint8_t* data,std::size_t size,bool envelope){
     const auto temporary=path+".new",backup=path+".bak";
     // Do not clobber an unfinished save or its recovery copy.
     for(const auto& name:{temporary,backup})if(auto* old=std::fopen(name.c_str(),"rb")){
         std::fclose(old);return EEXIST;
     }
     auto* file=std::fopen(temporary.c_str(),"wb");if(!file)return errno?errno:EIO;
-    std::uint8_t header[4];put32(header,N);
-    bool ok=std::fwrite(header,1,4,file)==4&&std::fwrite(data.data(),1,N,file)==N;
+    std::uint8_t header[4];put32(header,static_cast<std::uint32_t>(size));
+    bool ok=(!envelope||std::fwrite(header,1,4,file)==4)&&std::fwrite(data,1,size,file)==size;
     if(std::fflush(file)!=0)ok=false;
     if(std::fclose(file)!=0)ok=false;
     if(!ok){std::remove(temporary.c_str());return EIO;}
@@ -32,7 +38,38 @@ template<std::size_t N> int write_checked(const std::string& path,const std::arr
     if(had_original&&std::remove(backup.c_str())!=0)return errno?errno:EIO;
     return 0;
 }
+template<std::size_t N> int write_checked(const std::string& path,const std::array<std::uint8_t,N>& data){
+    return write_bytes_checked(path,data.data(),N,true);
+}
 enum class Read {missing,valid,invalid};
+Read read_cipher(const std::string& path,std::vector<std::uint8_t>& out){
+    auto* f=std::fopen(path.c_str(),"rb");if(!f)return errno==ENOENT?Read::missing:Read::invalid;
+    const bool seek=std::fseek(f,0,SEEK_END)==0;const long n=seek?std::ftell(f):-1;
+    bool ok=n>0&&n<=static_cast<long>(PcLoginCipherLimit)&&std::fseek(f,0,SEEK_SET)==0;
+    if(ok){
+        try{out.resize(static_cast<std::size_t>(n));}catch(...){std::fclose(f);throw;}
+        ok=std::fread(out.data(),1,out.size(),f)==out.size();
+    }
+    if(std::fclose(f)!=0)ok=false;
+    return ok?Read::valid:Read::invalid;
+}
+void load_login(FrontendProfiles& p,const std::string& dir){
+    p.login_error=0;if(!login_protection.enabled)return;
+    std::vector<std::uint8_t> cipher,plain;bool ok=false;
+    try{
+        const auto result=read_cipher(dir+"/OnlineLoginData.dat",cipher);
+        if(result==Read::missing)return; // loading never migrates legacy plaintext
+        ok=result==Read::valid&&login_protection.unprotect&&
+            login_protection.unprotect(cipher.data(),cipher.size(),plain)&&plain.size()==PcLoginBytes;
+    }catch(...){ok=false;}
+    if(ok)std::copy(plain.begin(),plain.end(),p.common.begin()+PcLoginOffset);
+    else{
+        std::fill_n(p.common.begin()+PcLoginOffset,PcLoginBytes,0);
+        p.login_error=EACCES;++p.invalid_files;
+        std::fprintf(stderr,"profiles: protected login data unavailable; login cleared in memory, protected saves refused\n");
+    }
+    clear_secret(plain);
+}
 template<std::size_t N> Read read(const std::string& path,std::array<std::uint8_t,N>& out){
     auto* f=std::fopen(path.c_str(),"rb");if(!f)return errno==ENOENT?Read::missing:Read::invalid;
     std::uint8_t header[4]{};std::array<std::uint8_t,N> candidate{};
@@ -40,6 +77,7 @@ template<std::size_t N> Read read(const std::string& path,std::array<std::uint8_
     std::fclose(f);if(!valid)return Read::invalid;out=candidate;return Read::valid;
 }
 }
+void frontend_profiles_set_login_protection(FrontendLoginProtection policy){login_protection=std::move(policy);}
 void frontend_profiles_load(FrontendProfiles& p,const std::string& dir){
     p={};frontend_profiles_reload_416380(p,dir);
 }
@@ -56,6 +94,7 @@ void frontend_profiles_reload_416380(FrontendProfiles& p,const std::string& dir)
     const auto common=read(dir+"/common.dat",p.common);
     p.common_loaded=common==Read::valid;p.invalid_files+=common==Read::invalid;
     if(p.common_loaded)p.selected=u32(p.common.data());
+    load_login(p,dir);
     for(unsigned i=0;i<4u;++i){
         const auto result=read(dir+"/License"+std::to_string(i+1u)+".dat",p.licenses[i]);
         p.loaded[i]=result==Read::valid;p.loaded_count+=p.loaded[i];p.invalid_files+=result==Read::invalid;
@@ -202,7 +241,19 @@ bool frontend_license_completion_447400(const PcLicense& p,const LicenseProgress
 }
 FrontendProfileSaveResult frontend_profiles_save_common_4164d0(FrontendProfiles& p,const std::string& dir){
     put32(p.common.data(),p.selected);FrontendProfileSaveResult result;
-    result.error=result.common_error=write_checked(dir+"/common.dat",p.common);
+    if(login_protection.enabled){
+        int error=p.login_error;std::vector<std::uint8_t> cipher;
+        if(!error)try{
+            if(!login_protection.protect||!login_protection.protect(p.common.data()+PcLoginOffset,PcLoginBytes,cipher)||
+               cipher.empty()||cipher.size()>PcLoginCipherLimit)error=EACCES;
+            else error=write_bytes_checked(dir+"/OnlineLoginData.dat",cipher.data(),cipher.size(),false);
+        }catch(...){error=EACCES;}
+        if(!error){
+            auto sanitized=p.common;std::fill_n(sanitized.begin()+PcLoginOffset,PcLoginBytes,0);
+            error=write_checked(dir+"/common.dat",sanitized);
+        }
+        result.error=result.common_error=error; // never fall back to plaintext
+    }else result.error=result.common_error=write_checked(dir+"/common.dat",p.common);
     result.common_written=result.error==0;return result;
 }
 FrontendProfileSaveResult frontend_profiles_save_416420(FrontendProfiles& p,const std::string& dir,bool enabled){

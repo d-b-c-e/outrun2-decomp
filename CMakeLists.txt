@@ -353,6 +353,9 @@ target_link_libraries(test_frontend_license_editor PRIVATE outrun_native_runtime
 add_test(NAME frontend_license_editor COMMAND test_frontend_license_editor)
 target_link_libraries(test_frontend_profiles PRIVATE outrun_native_runtime)
 add_test(NAME frontend_profiles COMMAND test_frontend_profiles)
+add_executable(test_login_protection tests/test_login_protection.cpp)
+target_link_libraries(test_login_protection PRIVATE outrun_native_runtime)
+add_test(NAME login_protection COMMAND test_login_protection)
 
 if(NOT MSVC)
   add_executable(test_switch_audio tests/test_switch_audio.cpp switch/source/switch_audio.cpp)
