@@ -35,7 +35,8 @@ void frame(const platform::NativeRuntimeContext* rt){
     const std::uint32_t mode=rt?rt->mode_state.current:0u;
     const bool gameplay=rt&&telemetry_in_gameplay(mode);
     TelemetryCar car;
-    if(rt){const auto& b=rt->event_function36.car_select.car_799d18;car=telemetry_car(b.data(),b.size());}
+    if(rt){const auto& cs=rt->event_function36.car_select;
+           car=telemetry_car(cs.car_799d18.data(),cs.car_799d18.size(),cs.parameters.data(),cs.parameters.size());}
     if(t.shm)telemetry_shared(car,mode,gameplay,++t.packets,*t.shm);
     std::uint8_t buf[dbce::forza::FORZA_HORIZON_324];
     const auto ms=std::uint32_t(GetTickCount());
@@ -46,7 +47,7 @@ void frame(const platform::NativeRuntimeContext* rt){
         const auto& a=rt->race.car_world.analog_7d6810.current;
         const std::int32_t steer=race?a[0]:0;
         const std::uint8_t accel=race?byte(a[1]):0,brake=race?byte(a[2]):0;
-        const int n=telemetry_packet(car,true,steer,accel,brake,ms,t.s.layout,buf,int(sizeof buf));
+        const int n=telemetry_packet(car,true,steer,accel,brake,ms,t.s.layout,buf,int(sizeof buf),t.s.game_rpm);
         if(n)send(buf,n);
         else{++t.skipped;if(!t.hud_bad_logged){t.hud_bad_logged=true;std::printf("telemetry: invalid HUD speed; packet skipped, not reported as zero\n");std::fflush(stdout);}}
     }else if((t.ticks++%6u)==0u)send(buf,telemetry_parked_packet(ms,t.s.layout,buf,int(sizeof buf)));   // about 10 Hz
@@ -82,6 +83,8 @@ void telemetry_configure(const Ini& settings,bool latched){
     t.on=t.sock!=INVALID_SOCKET||t.shm;
     std::printf("telemetry: Forza %s to 127.0.0.1:%u%s%s%s\n",t.s.layout==dbce::forza::FORZA_FM7_DASH_311?"FM7 Dash (311 bytes)":"Horizon (324 bytes)",
         unsigned(t.s.port),t.shm?"; shared memory ":"",t.shm?t.s.shared_name.c_str():"",t.shm?" (76 bytes, version 1)":"");
+    std::printf("telemetry: engine RPM %s\n",t.s.game_rpm?"from the game (HUD tachometer, car idle/redline; synthesis while the car "
+        "parameters are invalid)":"synthesised from speed and gear (the mod's)");
     std::fflush(stdout);
 }
 

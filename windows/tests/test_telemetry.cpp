@@ -93,6 +93,42 @@ void test_car_and_modes(){
           "v1 raw-offset ABI stays exact although its steering/lateral/impact labels are misleading");
 }
 
+// [Telemetry] EngineRpm = Game: car +0x20C (the HUD tachometer's RPM) with the parameters' idle +0x15F8 and redline
+// +0x1644 (rad/s x 60 / 2 pi); the synthesis otherwise, byte for byte.
+void test_game_rpm(){
+    constexpr float PerRadian=9.54929638f;
+    std::vector<std::uint8_t> car(0x10f0,0),params(0x1700,0);
+    wr<float>(car,0x1f8,150.0f);wr<float>(car,0x1c4,0.6f);wr<std::uint32_t>(car,0x208,3u);
+    wr<std::int32_t>(car,0x48,7200);wr<std::int32_t>(car,0x20c,6800);
+    wr<float>(params,0x15f8,100.0f);wr<float>(params,0x1644,900.0f);wr<float>(params,0x1690,1300.0f);
+    auto c=telemetry_car(car.data(),car.size(),params.data(),params.size());
+    check(c.engine_rpm_48==7200&&c.hud_rpm_20c==6800&&c.idle_15f8==100.0f&&c.redline_1644==900.0f,"engine RPM +0x48 / +0x20C and limits +0x15F8 / +0x1644 (not the clamp +0x1690)");
+    const auto bare=telemetry_car(car.data(),car.size(),params.data(),0x1644);
+    check(bare.hud_rpm_20c==6800&&bare.idle_15f8==0.0f&&bare.redline_1644==0.0f,"short parameters: no engine limits");
+    check(telemetry_car(car.data(),car.size()).redline_1644==0.0f,"no parameters: no engine limits");
+    std::uint8_t a[400],b[400];
+    telemetry_packet(c,true,0,0,0,9,fz::FORZA_HORIZON_324,a,sizeof a);
+    telemetry_packet(c,true,0,0,0,9,fz::FORZA_HORIZON_324,b,sizeof b,false);
+    check(std::memcmp(a,b,324)==0&&rd<float>(a,8)==TelemetryMaxRpm,"Synthetic (the default) is the mod's packet, byte for byte");
+    telemetry_packet(c,true,0,0,0,9,fz::FORZA_HORIZON_324,b,sizeof b,true);
+    check(rd<float>(b,8)==900.0f*PerRadian&&rd<float>(b,12)==100.0f*PerRadian&&rd<float>(b,16)==6800.0f,
+          "Game: redline@8, idle@12 from the parameters, current@16 the HUD tachometer's +0x20C");
+    check(std::memcmp(a+20,b+20,324-20)==0,"Game changes only the three engine words");
+    telemetry_packet(c,true,0,0,0,9,fz::FORZA_FM7_DASH_311,b,sizeof b,true);
+    check(rd<float>(b,16)==6800.0f,"Game RPM in the FM7 Dash layout too");
+    float cur{},idle{},red{};
+    c.hud_rpm_20c=9000;check(telemetry_game_rpm(c,cur,idle,red)&&cur==red,"above the redline: clamped to it");
+    c.hud_rpm_20c=-50;check(telemetry_game_rpm(c,cur,idle,red)&&cur==0.0f,"negative: zero");
+    for(const auto& bad:{std::make_pair(0.0f,900.0f),std::make_pair(100.0f,0.0f),std::make_pair(900.0f,100.0f),
+                         std::make_pair(100.0f,2500.0f),std::make_pair(NAN,900.0f),std::make_pair(100.0f,INFINITY)}){
+        auto x=c;x.idle_15f8=bad.first;x.redline_1644=bad.second;
+        check(!telemetry_game_rpm(x,cur,idle,red),"invalid limits refused");
+        telemetry_packet(x,true,0,0,0,9,fz::FORZA_HORIZON_324,a,sizeof a,true);
+        telemetry_packet(x,true,0,0,0,9,fz::FORZA_HORIZON_324,b,sizeof b,false);
+        check(std::memcmp(a,b,324)==0,"invalid limits: Game falls back to the synthesis");
+    }
+}
+
 void test_settings(){
     char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
     const std::string path=std::string(dir)+"or2_desktop_telemetry_test.ini";
@@ -112,11 +148,18 @@ void test_settings(){
     check(!telemetry_settings(load(""),"0",nullptr).enabled,"OR2_TELEMETRY=0 turns it off");
     check(telemetry_settings(load(""),"1",nullptr).enabled,"OR2_TELEMETRY=1 leaves it on");
     check(telemetry_settings(load(""),nullptr,"18001").port==18001,"OR2_TELEMETRY_PORT overrides the port");
+    check(!telemetry_settings(load(""),nullptr,nullptr).game_rpm,"EngineRpm: Synthetic by default");
+    check(telemetry_settings(load("[Telemetry]\r\nEngineRpm = Game\r\n"),nullptr,nullptr).game_rpm,"EngineRpm = Game");
+    check(telemetry_settings(load("[Telemetry]\r\nEngineRpm = hud\r\n"),nullptr,nullptr).game_rpm,"EngineRpm = HUD, any case");
+    t=telemetry_settings(load("[Telemetry]\r\nEngineRpm = Synthetic\r\n"),nullptr,nullptr);
+    check(!t.game_rpm&&t.notes.empty(),"EngineRpm = Synthetic");
+    t=telemetry_settings(load("[Telemetry]\r\nEngineRpm = real\r\n"),nullptr,nullptr);
+    check(!t.game_rpm&&!t.notes.empty(),"an unknown EngineRpm: Synthetic, noted");
     std::remove(path.c_str());
 }
 
 int main(){
-    try{test_packets();test_edges();test_car_and_modes();test_settings();}
+    try{test_packets();test_edges();test_car_and_modes();test_game_rpm();test_settings();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop telemetry: "<<checks<<" checks passed\n";
     return 0;

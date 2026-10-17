@@ -140,6 +140,7 @@ struct Values {
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
+    int engine_rpm{};   // [Telemetry] EngineRpm: 0 Synthetic (default), 1 Game
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
@@ -613,6 +614,12 @@ void page_telemetry(bool advanced){
         const int before=v.layout;
         if(dbce::panel::Choice("Packet layout",layouts,2,&v.layout))
             keep(&v.layout,before,[&]{return save("Telemetry","Layout",v.layout?"FM7":"Horizon");});
+        static const char* const rpms[]{"Estimated from speed (default)","Game tachometer"};
+        const int prior=v.engine_rpm;
+        if(dbce::panel::Choice("Engine RPM",rpms,2,&v.engine_rpm,
+            "Estimated: the OutRun 2006 mod's speed and gear estimate. Game tachometer: the RPM the race HUD's tachometer "
+            "shows, with this car's idle and rev limit, for wheel shift lights and dashboards. Experimental."))
+            keep(&v.engine_rpm,prior,[&]{return save("Telemetry","EngineRpm",v.engine_rpm?"Game":"Synthetic");});
     }
     dbce::panel::Text("Changes apply at the next game start.");
 }
@@ -850,7 +857,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
     p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
-    {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;}
+    {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;
+     v.engine_rpm=t.game_rpm?1:0;}
     if(p.player_model==ffb::player::Model::Legacy){
         std::string notes,source;const auto s=ffb_settings(settings,notes,source);
         v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
