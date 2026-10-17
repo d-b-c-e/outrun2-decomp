@@ -120,3 +120,14 @@ Telemetry is described above. For the F6 panel, the triple screens and force fee
 and 4). Force feedback is built and tested offline. No owner package ships WheelFfb.dll yet, so no installed build
 sends force. Standards adoption: [TOOLKIT-ADOPTION.md](TOOLKIT-ADOPTION.md); product
 record for Wheelkit: [product.json](product.json).
+
+## Research references
+
+Decomp, recomp and reimplementation directories, saved at the owner's request (2026-10-17):
+- [Unbaked agent collection](https://unbaked.games/collections/agents/), part of a broader index. For programmatic
+  discovery use https://unbaked.games/api/games.json and https://unbaked.games/llms.txt. Its
+  `outrun-2006-coast-2-coast` entry (matching decomp) points at this repository's upstream, `r4dius/outrun2-decomp`.
+- [recomp.fyi](https://recomp.fyi/), a similar directory. On 2026-10-17 it had no OutRun 2006 entry.
+
+Both are discovery leads: check any project claim at its upstream repository. The portfolio's OutRun profile
+(`E:\Source\dbce-project-mgmt\profiles\07-outrun-2006-coast-2-coast.md`, hub `4084d7f4`) records the same links.
