@@ -1,4 +1,5 @@
 #include "enhancements/frame_rate.hpp"
+#include "enhancements/general_presentation.hpp"
 #include "enhancements/fast_load.hpp"
 #include "runtime/game_host.hpp"
 #include "platform/cd_switcher.hpp"
@@ -499,6 +500,17 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     // Opt-in fast loading reuses that cooperative single-update path only
     // for frames that began in START before stage 65.
     if(pc==0x455c20u)return enhancements::fast_load().cooperative_level(enhancements::display_frames());
+    // 417C7B calls this after 453BB0 inside every actual simulation tick.
+    // Experimental presentation may draw zero-tick frames or run several ticks
+    // before drawing: service the sound driver here, independently of a presenter.
+    // The legacy 60/120 path retains its existing per-render cadence below.
+    if(pc==0x42f330u){
+        if(enhancements::general_presentation_enabled()&&s.runtime){
+            std::lock_guard<std::recursive_mutex> audio_lock(audio_mutex());
+            s.runtime->pc_sound.tick_42f330();
+        }
+        return 0u;
+    }
     if(pc!=0x449050u||!s.presenter)return 0u;
     auto& p=*s.presenter;
     auto& mixer=audio_thread();
@@ -518,7 +530,7 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
     }
     if(s.frontend_gate_open&&s.runtime)frontend_frame(s);
     {std::lock_guard<std::recursive_mutex> audio_lock(audio_mutex());
-     ++s.game_frames;if(s.runtime)s.runtime->pc_sound.tick_42f330();
+     ++s.game_frames;if(s.runtime&&!enhancements::general_presentation_enabled())s.runtime->pc_sound.tick_42f330();
      if(!mixer.run&&!s.render_failed&&!pump_audio(s))s.render_failed=true;}
     trace_mark("pc_scene");
     // Widescreen: the PC screen the camera sees becomes 16:9 (its FOV 483C10
