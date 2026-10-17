@@ -79,13 +79,14 @@ void read_pad(outrun::ps5::PadSample& sample){
     // Presentation only. No pad, refused choice or unreadable/unsupported ID
     // stays generic. Never infer a family from the shared DualSense layout.
     outrun::platform::texture_replacement_set_pad_family(outrun::platform::UiPromptFamily::PC);
+    try{
     const auto pads=wgi::Gamepad::Gamepads();
     if(pads.Size()==0){select_vibration_pad(nullptr);return;}
     const int pick=choose_pad(pads);
     if(pick<0){select_vibration_pad(nullptr);return;}
     const auto selected=pads.GetAt(std::uint32_t(pick));
     wgi::GamepadReading r{};
-    try{r=selected.GetCurrentReading();}catch(...){select_vibration_pad(nullptr);throw;}
+    r=selected.GetCurrentReading();
     select_vibration_pad(selected);
     // Only enabled UI replacements need presentation identity. Unknown IDs
     // retry through WGI every 2 s; keep that work out of the default-off path.
@@ -104,6 +105,7 @@ void read_pad(outrun::ps5::PadSample& sample){
         {B::LeftThumbstick,StickL},{B::RightThumbstick,StickR}};
     for(auto m:mapping)if((r.Buttons&m.raw)==m.raw)sample.buttons|=m.logical;
     if(sample.l2>127)sample.buttons|=L2;if(sample.r2>127)sample.buttons|=R2;
+    }catch(...){select_vibration_pad(nullptr);throw;}
 }
 // Two spellings of one folder: separators, case and trailing separators ignored (Windows paths).
 bool same_folder(std::string a,std::string b){
