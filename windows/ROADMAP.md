@@ -314,7 +314,7 @@ or rendered-result claim. See docs/UI-SCALING.md.
 | --- | --- | --- | --- |
 | Performance | FramerateLimit, FramerateLimitMode, VSync | 🟡 | upstream: 60 / 120 fps row, presents at the monitor rate |
 | | FramerateFastLoad | 🟡 | Default-off loading-only mode 2: existing frame-latency wait/Present bypass in START before stage 65, one loading update per frame at 60/120 Hz, live restoration and existing-clock rebase on exit. Host policy/config checks passed (361/44), retained with unchanged sources. F6/Wheelkit exposure passed its incremental native build, four affected settings/catalog checks and 73-row generation/parsing on October 16. Runtime transition and load-time improvement remain unqualified. Modes 1/3 unsupported. [Source contract](docs/FAST-LOAD.md). |
-| | FramerateUnlockExperimental | ⬜ | |
+| | FramerateUnlockExperimental | ⬜ | October 16 source boundary: Tweaks permits zero simulation updates per render with arbitrary/uncapped FramerateLimit. Native already has 60 Hz simulation and display-only interpolation, but only 60/120 public rates and integer-vblank Present pacing; no general unlock key is consumed. Audio control/fade servicing is still once per rendered frame, every fourth call, so general unlock would change its cadence. Product/config/F6/Wheelkit remain unchanged; see the source boundary below. |
 | | SingleCoreAffinity | ➖ | a workaround for the original |
 | Controls | SteeringDeadZone | ✅ | |
 | | UseNewInput, ControllerHotPlug | 🟡 | gamepads via Windows.Gaming.Input (hot-plug); ordinary DirectInput rescans every two seconds and reopens the saved instance GUID, built but not checked at the rig |
@@ -376,3 +376,36 @@ or rendered-result claim. See docs/UI-SCALING.md.
 | | FixC2CRankings | ➖ | always on here: the decomp has no launcher, so every site the PC gates on its launcher check (OpenEventA of the protection's event, which the Steam build never creates; Tweaks creates it) takes the present path: the nine record inserts and the ghost save write 4168D0 do not reproduce the check, and the translated ghost module's 465EC0 / 4168D0 calls answer as present (race_ghosts_runtime.cpp). 40E888 (the Direct3D error box title) is not run. tests/launcher_gate_audit.py keeps every gated site accounted for |
 | | FixRightSideBunkiAnimations | 🟡 | on by default as in Tweaks: the right-side branch model's 44F6DC store of the culling flag at +0x90 is skipped (`race_area.cpp`); off preserves the PC store, and the left-side path is unchanged. The `bunki_animation` fixture exercises all four combinations through the production area object loop. Not yet seen in game |
 | | FixParticleRendering | 🟡 | in source since b8c9f8b, on by default as in Tweaks (pc_screen.hpp): draw_418cf0's screen mapping used the full width/height where the Xbox code had half (grass off screen; race_particles_draw.cpp halves sx, sy and the size at 419009 as Tweaks does), and the Metropolis fireworks (44DE10 object 0x630001 had no node list; race_area.cpp draws 0x1A000A with a fixed list as Tweaks does). Not yet seen at the rig |
+
+### General framerate unlock source boundary (October 16)
+
+Read against compiled cumulative `03d124f` plus docs `e6accd7`; no product edit,
+test/build/lease, game, provider retry or install was needed for this readback.
+The existing 60/120 policy and all retained candidate evidence stay unchanged.
+
+- Local Tweaks `hooks_framerate.cpp` allows `CalcNumUpdatesToRun(60)` to return
+  zero when the key is true, advances animation counters by updates and polls
+  input/sound inside the update loop. Its `FramerateLimit` also accepts arbitrary
+  values or zero for external limiting. Merely enabling the native 120 option
+  would not provide this general contract.
+- Native `src/driving/pc_common_control.cpp:5952` already allows zero-update
+  display frames and keeps input/mode/event calls inside the 60 Hz tick loop.
+  `src/enhancements/frame_rate.cpp` replays display builders with interpolation.
+  The missing general-rate seam is outside that fixed-step policy:
+  `src/enhancements/gpu_backend.cpp:39` accepts only 60/120,
+  `xbox/source/main.cpp:332` offers those rates, and
+  `xbox/source/d3d11_display.cpp:236` rounds to a positive integer vblank interval.
+  At 180 Hz its formula maps a requested 120 to interval 2 (90 presents/second
+  under ideal vblank pacing); this is source arithmetic, not observed scanout.
+- End-to-end timing neutrality is also unestablished: the host render callback
+  `src/runtime/game_host.cpp:521` calls `PcSound::tick_42f330()` on each display,
+  while `src/platform/pc_sound.cpp:327` services its control/fade work every
+  fourth call. Higher rendering therefore changes that service cadence. Fade
+  calculations also use elapsed milliseconds and the mixer has its own sample
+  clock; this finding establishes neither PCM speed nor the reported stutter's
+  cause. Sound-service ownership must be resolved before offering general unlock.
+
+General/unlimited presentation and its audio/input behavior require a focused
+integration decision and later qualification with the existing timing/audio
+evidence in an otherwise useful coordinated runtime slot. No new limiter,
+clock, profiler, framework or misleading F6/Wheelkit unlock control was added.
