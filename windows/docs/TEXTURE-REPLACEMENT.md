@@ -17,7 +17,7 @@ A file is offered to the device only if the device's DDS reader takes it (DXT1/3
 kind, every level inside the file); A8B8G8R8 files are converted to A8R8G8B8 first, as Tweaks' loader does. Anything
 else keeps the stock texture and is counted.
 
-## Scene extraction (October 16 source candidate)
+## Scene extraction (October 16 private candidate)
 
 `[Graphics] SceneTextureExtract = true` opts into saving original scene PMT DDS files at the next ordinary start.
 It defaults to false, works without either replacement flag or a `load` folder, and is disabled in latched tests,
@@ -40,7 +40,16 @@ configuration or installation is changed by enabling this source option in a pri
 The existing `pc_pmt_loader` fixture contains synthetic checks for all eight format/cube combinations, byte-identical
 stored files and source buffers, device-reader acceptance of stored mip levels, unchanged stock requests, off and
 dedup behavior, existing files, replacement precedence/fallback, resource refusal, blocked output and invalid input.
-Build and fixture qualification are pending; ordinary-game extraction and rendered behavior remain unobserved.
+ClangCL Release OutRunDesktop linked at `9df8513`. The first batch's overall failure was the new fixture cleanup
+calling the three-argument function with two arguments; test-only correction `e965695` uses the existing wrapper.
+The affected fixture target then built and `pc_pmt_loader` passed once (315 checks, 1/1, zero skipped); the desktop
+was retained without rebuilding. Original hub evidence is in `artifacts/outrun-scene-extraction-20261016/build-01`
+(including the failed fixture compile) and `build-02` (passing continuation, JUnit and original LastTest.log).
+The desktop is 23,880,192 bytes, SHA-256 `018dd406a23013143c1d119816ef2550166c77517e872967903a0751c3f7e95e`.
+Both batches released the exact lease with owned children quiescent and process environment restored; the passing
+continuation released at `2026-10-17T00:35:05.3224112Z`. Shader tables were read from the verified original EXE into
+memory only, and synthetic outputs used isolated TEMP. No game, provider or install ran. Ordinary-game extraction
+and rendered behavior remain unobserved. Canonical native checkout `235bbb3` and owner assets remain untouched.
 
 ## Pad prompt folders (source candidate, unbuilt)
 
