@@ -76,7 +76,9 @@ go upstream as small pull requests (first: `tweaks-exe`).
      shared-memory v1 raw-offset ABI stays byte-compatible, with its misleading steering/lateral/impact labels
      documented. RPM is synthetic by default. Opt-in `[Telemetry] EngineRpm = Game` (2026-10-17, zola) sends the HUD
      tachometer's RPM (car +0x20C) with the car's idle and rev limit from its parameters (1500 / 8500 RPM in every
-     retail column). `test_telemetry` passes 89 checks standalone; no live comparison yet. Surface classification and physical receiver interpretation remain
+     retail column). Grant OUTRUN-RPM-BUILD (kobe 234342): the cached ClangCL Release build of `9849369` and CTest
+     telemetry (89 checks), fine_steering and pedal_volume passed, 3/3 (exe `921710FD`; hub
+     artifacts/outrun-telemetry-rpm-20261017/build-01). No live HUD or receiver comparison yet. Surface classification and physical receiver interpretation remain
      unqualified.
      See `docs/TELEMETRY-FIELDS.md`. Reception alone remains short of field acceptance.
 6. ⬜ **Tweaks parity** (table below) and the original game's limits the
