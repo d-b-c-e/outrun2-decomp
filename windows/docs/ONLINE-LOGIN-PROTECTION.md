@@ -75,3 +75,15 @@ the existing profile/writer regression coverage. These fixtures never link the
 DPAPI adapter or access a game, network, account or owner save. Desktop build,
 test results and the executable identity belong to the hub artifact record;
 DPAPI operation, rendered F6 saving and online behavior remain runtime gates.
+
+
+Qualified source-only build: product commit `5bb80ce1a9b40494ca38204053df91cba4551d0e`.
+Hub `artifacts/outrun-login-protection-20261017/build-01` retains the original
+build output, JUnit, LastTest.log and cleanup result. Desktop Release and both
+affected CTests passed: `desktop_login_protection` 79 checks and
+`desktop_profile_writes` 51 checks (130 total, 2/2 tests, zero skipped).
+Executable: 24,023,040 bytes, SHA-256
+`0DD7BBD4DDDDE9C0C3FD15E9460D438D2828525B77EDBAF0EF3BA5C50F49CAD0`.
+Actual safe release: `2026-10-17T04:07:52.2522165Z`; direct Hera handoff
+preceded documentation. No DPAPI operation or account/network/device access
+occurred. Previous vibration/presentation evidence remains retained.
