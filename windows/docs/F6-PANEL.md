@@ -24,8 +24,12 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   choices use active Windows monitor identities, with readable labels; unavailable
   saved choices are retained and default placement applies. Separate monitors
   uses an explicit selection as the existing racing-row rule's local center.
-  No desktop layout changes. See docs/GAMEPLAY-DISPLAY.md; affected build and
-  synthetic qualification are pending, with no game/runtime acceptance.
+  No desktop layout changes. The affected ClangCL x64 Release desktop and new
+  synthetic startup_monitor fixture build at bf37a264; CTest passes1/1 with32
+  checks and zero skipped. See docs/GAMEPLAY-DISPLAY.md and original hub evidence
+  artifacts/outrun-startup-monitor-20261017/build-01. No live monitor query,
+  window, provider, UI, game or owner install ran; rendered/runtime acceptance
+  remains open.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for
   the next ordinary start. Tests, playback and recording suppress extraction. Help describes original DDS output

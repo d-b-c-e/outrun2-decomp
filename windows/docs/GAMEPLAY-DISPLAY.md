@@ -46,13 +46,20 @@ not arbitrary corner placement. Wheelkit currently lacks a dynamic trusted
 monitor picker; native F6 is the available source route. A fixed Display1/2 row
 would not preserve this identity contract and is excluded.
 
-Qualification is pending one affected ClangCL desktop build and synthetic
-startup_monitor fixture. The fixture covers reordered identities, case matching,
+The affected ClangCL x64 Release desktop and new startup_monitor fixture build
+at `bf37a264`; the single CTest passes all32 checks with zero skipped. Original
+logs/result/JUnit and executable are in hub
+`artifacts/outrun-startup-monitor-20261017/build-01`. The executable is23,963,648
+bytes, SHA-256 `3E901074DAB24022E92EBC19EF21B113ABF04287BB7A3E50159B573EB474E37A`.
+Owned children were quiescent, queries safe, environment restored and exact
+lease released at2026-10-17T01:55:59.0523458Z, with literal lease absence. Direct
+handoff to Gore preceded these docs. No live monitor query, window, game,
+provider, UI or owner install occurred. The fixture covers reordered identities, case matching,
 default/test policy, missing/duplicate/cloned/unusable identity refusal, negative
 coordinates, alternate racing-row anchor and bounded bordered geometry. It
 does not call a monitor/device/window API or qualify rendered F6 saving, actual
 window placement, DPI transitions or runtime display behavior. Prior level-select
-861, cache351, extraction782 and CD/course results remain retained.
+861, cache351, extraction782 and CD/course results remain retained without repeats.
 
 Windows API references: [target device path](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_target_device_name),
 [source GDI name](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_device_name),
