@@ -29,6 +29,9 @@ and the saves in it.
 
 - A borderless window over the primary monitor; `--windowed` (or
   `[Window] WindowedBorderless = false`) opens a 1280x720 window instead.
+- The borderless client area hides the mouse cursor by default. Set
+  `[Window] WindowedHideMouseCursor = false` for the normal Windows cursor at
+  the next start. This does not change display placement or game input.
 - Gamepads work as on the Xbox (A / Menu confirm, LB+RB+Menu exits).
 
 ## Wheel settings

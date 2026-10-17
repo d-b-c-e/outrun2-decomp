@@ -51,7 +51,7 @@
 #include <vector>
 namespace outrun::xbox_runtime {
 namespace {
-bool closed=false,borderless=true;
+bool closed=false,borderless=true,hide_mouse_cursor=true;
 outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
 // [Triple] Views = Angled asked for (set_triple_projection), or the development switch OR2_TRIPLE_VIEWS=1 (cleared in
 // test processes like every OR2_ switch). Both the lods.ini read and the window use this one request.
@@ -92,7 +92,7 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     // A device arrived or left (DBT_DEVNODES_CHANGED reaches every top-level window): the native wheel path rescans at
     // its next input sample instead of on a 2 s timer (wheel_rescan.hpp).
     if(message==WM_DEVICECHANGE)outrun::desktop::wheel_input_devices_changed();
-    if(message==WM_SETCURSOR&&borderless&&LOWORD(l)==HTCLIENT){SetCursor(nullptr);return TRUE;}
+    if(message==WM_SETCURSOR&&borderless&&hide_mouse_cursor&&LOWORD(l)==HTCLIENT){SetCursor(nullptr);return TRUE;}
     return DefWindowProcW(hwnd,message,w,l);
 }
 std::string utf8(const std::wstring& w){
@@ -211,6 +211,7 @@ unsigned select_refresh_rate(unsigned){
     return EnumDisplaySettingsW(info.szDevice,ENUM_CURRENT_SETTINGS,&mode)&&mode.dmDisplayFrequency>1?unsigned(mode.dmDisplayFrequency):60u;
 }
 void set_borderless(bool on){borderless=on;}
+void set_hide_mouse_cursor(bool on){hide_mouse_cursor=on;}
 void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
 void set_triple_projection(bool angled,bool latched){triple_angled_requested=angled;triple_latched=latched;}
 }
@@ -322,6 +323,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
+    outrun::xbox_runtime::set_hide_mouse_cursor(settings.flag("Window","WindowedHideMouseCursor",true));
     // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
     // start (the window opens once). Anything else is logged and Off applies. A latched (test) process keeps Off: a
     // display preference must not reach the harness, as with FrameLatency. windows/docs/TRIPLE-SCREENS.md.
