@@ -63,9 +63,18 @@ it cannot resume positive output silently. An unused/default-Off target receives
 no output API call at all. Stop delivery is best effort if a driver rejects it;
 there is no new watchdog or physical stop acceptance claim.
 
-Pending affected qualification: cached Release desktop and one fake-output fixture,
-covering settings, native envelope cases, output mapping, gate closures, retargeting,
-disconnect and driver failures. It performs no controller enumeration, input read,
-physical output or game launch. Prior passing presentation/audio suites remain
-retained. Rendered F6 saving, hardware routing, body/trigger feel and physical
-stop behavior remain unqualified.
+Affected qualification passes at `18582ba4`: cached ClangCL Release desktop and
+the new target compile; only `gamepad_vibration` runs, passing 706 checks (1/1
+CTest, zero skipped). It covers settings, native envelope cases, output mapping,
+gate closures, retargeting, disconnect and driver failures. It performs no
+controller enumeration, input read, physical output or game launch. Prior passing
+presentation/audio suites remain retained. Rendered F6 saving, hardware routing,
+body/trigger feel and physical stop behavior remain unqualified.
+
+Original evidence is hub artifacts/outrun-gamepad-vibration-20261017/build-01.
+The desktop is 24,015,360 bytes, SHA-256
+`427A35E26F7D9FE6D49C27D29D2A00DA501AB1B756F4F15917BD9E8F870A6E05`.
+Compiler parallelism was 1; no allocation failure occurred. Owned children closed,
+process query was safe, environment restored and exact lease released/literally
+absent at 2026-10-17T03:40:11.1581544Z. Hazu received the direct actual safe handoff
+before documentation. Canonical source and the owner installation are unchanged.

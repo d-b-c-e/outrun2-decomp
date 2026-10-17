@@ -77,9 +77,11 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   Controls keys for the next ordinary start, with failed-save rollback. Output
   follows the selected native gamepad; arbitrary controller indices are unsupported.
   Current runtime eligibility is reported separately. Trigger commands may be
-  approximated by the device driver. Wheel FFB is unchanged. Affected desktop and
-  fake-output fixture qualification is pending; rendered saving and physical output
-  remain unqualified. See [GAMEPAD-VIBRATION.md](GAMEPAD-VIBRATION.md).
+  approximated by the device driver. Wheel FFB is unchanged. At `18582ba4`, affected
+  Release desktop compilation and the one new fake-output fixture pass 706 checks
+  (1/1 CTest, zero skipped). Hub artifacts/outrun-gamepad-vibration-20261017/build-01
+  retains evidence. Rendered saving and physical output remain unqualified.
+  See [GAMEPAD-VIBRATION.md](GAMEPAD-VIBRATION.md).
 
 - October 16 paired CD controls: native `artifacts/outrun-cd-f6-settings-20261016/build-01` and Wheelkit `artifacts/outrun-cd-settings-wheelkit-20261016/build-01` in the hub retain the original logs/results and affected TRX. Native executable: 23,870,976 bytes, SHA-256 `b14814f535bcba1bbb346d34048d40feeadfe7e63383515d881a14404b254d57`. Both batches released their exact leases with children quiescent and process environment restored. No game, owner install or provider retry; matching saved rows and source/build evidence do not establish rendered controls or F6 save acceptance.
 - Hub `artifacts/outrun-f6-help-20261012/README.md`: title/race Help, frame stats, open/closed frames and unchanged INI in a muted disposable copy. The race readout showed average, 1% low and worst frame; it is a readout, not a frame-pacing acceptance result.
