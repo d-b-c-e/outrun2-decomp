@@ -32,12 +32,15 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   remains open.
 - Cameras Advanced also offers next-start **Experimental presentation rate**
   (default Off) and **Presentation cap**. The implemented ordinary consumer uses
-  Performance.FramerateUnlockExperimental and FramerateLimit0 or60..1000;
-  fixed60Hz simulation and sound control are separate from presentation. Off
-  preserves normal60/120 behavior and its saved Options choice. Tests, recording
+  Performance.FramerateUnlockExperimental and FramerateLimit 0 or 60..1000;
+  fixed 60 Hz simulation and sound control are separate from presentation. Off
+  preserves normal 60/120 behavior and its saved Options choice. Tests, recording
   and playback ignore it. See docs/GENERAL-PRESENTATION.md for CPU pacing and
-  compositor limits. Focused compilation/fixtures and runtime acceptance remain
-  pending; no rendered-control or audio/physical claim is made here.
+  compositor limits. Release desktop compilation passes; the two unique focused
+  fixtures pass 5,553 checks (general presentation 5,309 and sound 244), retaining
+  the original fault and fixture-only lifetime correction. Hub
+  artifacts/outrun-general-presentation-20261017/build-01 and build-02 hold evidence.
+  Rendered controls/save, actual pacing and audio/physical acceptance remain open.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for
   the next ordinary start. Tests, playback and recording suppress extraction. Help describes original DDS output
