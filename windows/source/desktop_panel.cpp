@@ -137,6 +137,7 @@ struct Values {
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
+    bool cd_switcher{},cd_shuffle{},cd_title{};   // existing [CDSwitcher] startup flags, all default off
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
     bool full_pedal_fix{true},pegasus_sound_fix{true};   // existing default-on Bugfixes, next start only
     bool highway_sets{};   // [Misc] RandomHighwayAnimSets, existing default-off startup policy
@@ -240,6 +241,15 @@ void page_controls(bool advanced){
              keep(&v.allow_flac,before,[&]{return save("Audio","AllowFLAC",v.allow_flac?"true":"false");});}
         if(v.allow_wav!=v.allow_wav_start||v.allow_flac!=v.allow_flac_start)
             dbce::panel::Text("The music replacement choices apply at the next game start.");
+        dbce::panel::Heading("CD track switching");
+        graphics_flag("In-race CD switcher",&v.cd_switcher,"SwitcherEnable",
+            "Uses your configured CD track list during a race. Add tracks in [CDTracks] in the settings file first. "
+            "Available in ordinary play; disabled during recording, playback and tests. Applies at the next game start.","CDSwitcher");
+        graphics_flag("Shuffle CD tracks at startup",&v.cd_shuffle,"SwitcherShuffleTracks",
+            "Shuffles your CD track list once at startup. Requires CD track switching. Applies at the next game start.","CDSwitcher");
+        graphics_flag("Show CD track title",&v.cd_title,"SwitcherDisplayTitle",
+            "Shows the current track title briefly after a successful manual change. Requires CD track switching. "
+            "Applies at the next game start.","CDSwitcher");
         dbce::panel::Heading("Menus and license");
         {const bool before=v.license_character;
          if(dbce::panel::OffOn("License character selection",&v.license_character,
@@ -679,6 +689,9 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
     v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);
+    v.cd_switcher=settings.flag("CDSwitcher","SwitcherEnable",false);
+    v.cd_shuffle=settings.flag("CDSwitcher","SwitcherShuffleTracks",false);
+    v.cd_title=settings.flag("CDSwitcher","SwitcherDisplayTitle",false);
     v.license_character=settings.flag("Misc","AllowCharacterSelection",false);
     v.menu_miles=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
