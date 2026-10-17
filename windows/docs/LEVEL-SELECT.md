@@ -1,6 +1,7 @@
 # Optional level selection
 
-Source-only, unbuilt and unrun. This does not change an installed game.
+Native source with an ordinary F6 next-start control; focused qualification of this successor is pending.
+This does not change an installed game.
 
 ```ini
 [Misc]
@@ -12,6 +13,14 @@ first frontend opens the existing PC level menu (key 27) instead of key 0,
 matching Tweaks' patch at 445756. The return-from-race history path is separate
 and stays unchanged. The original translated factory, widgets and renderer
 remain in use; this adds no synthetic menu or course list.
+
+F6 Controls Advanced offers **Start with level selection** through the existing
+one-key writer and failed-save rollback. It reads/writes the same Misc key;
+the current menu/input route stays unchanged until the next game start. Help
+describes the 66-course menu, eligible held Shift/native X/left-stick alternates,
+the panel's Shift block, and preserved return history/license progress. A latched
+process still refuses saves, and the playback panel remains unavailable. No new
+input action, menu, protocol channel or runtime publisher is introduced here.
 
 The screen's 4E7800 control has a small native implementation while enabled:
 
@@ -59,7 +68,7 @@ synthetic backend/panel owners: both Shift keys, blocked/focus-cleared state,
 disabled/test/playback policy, no duplicate wrappers and original input fields.
 `outrun_capture2` covers optional-channel compatibility and strict values;
 `consumed_replay` covers recorded modifiers and neutral end-of-tape input. These
-source additions have not been compiled or executed. The cumulative native,
+source additions still need their focused fixture qualification. The cumulative native,
 desktop, capture and replay targets must be compiled together against the changed
 input header; do not link old prebuilt input/context objects into this successor.
 Use focused affected checks in a named build slot, not a replay of unrelated

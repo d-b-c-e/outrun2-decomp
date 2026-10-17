@@ -134,6 +134,7 @@ struct Values {
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
+    bool level_select{};   // [Misc] EnableLevelSelect, ordinary next-start menu choice
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
@@ -251,6 +252,11 @@ void page_controls(bool advanced){
             "Shows the current track title briefly after a successful manual change. Requires CD track switching. "
             "Applies at the next game start.","CDSwitcher");
         dbce::panel::Heading("Menus and license");
+        graphics_flag("Start with level selection",&v.level_select,"EnableLevelSelect",
+            "Off by default. At the next game start, opens the original 66-course level menu instead of the main menu. "
+            "Hold Shift, or use the game's X/left-stick action, for alternate courses where supported. "
+            "Shift must be held in the game's window; opening this panel blocks it. "
+            "Does not change the return-from-race menu history or license progress.","Misc");
         {const bool before=v.license_character;
          if(dbce::panel::OffOn("License character selection",&v.license_character,
              "Off by default. Allows the character entry in the license editor. Applies at the next game start."))
@@ -700,6 +706,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.texture_cache=settings.flag("Graphics","EnableTextureCache",false);
     v.texture_folder=settings.text("Graphics","TextureBaseFolder","textures");
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
+    v.level_select=settings.flag("Misc","EnableLevelSelect",false);
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
