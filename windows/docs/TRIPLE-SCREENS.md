@@ -229,6 +229,16 @@ Known limits, judged at the rig, before any default (nene 30684):
 - the side panels miss the screen-space (rhw) particles, which land on the centre only;
 - objects behind the eye plane stay culled: `g_pc_view_half_width` passes everything in front, not the union of the
   three frusta (needed beyond 180 degrees);
+  - **traffic cars, fixed (2026-10-17, `meze/outrun-triple-car-cull-20261017`):** with the matched eye the side panels
+    reach about 121 degrees, so this did matter. 4F02D0's near test (+BC, 1.0 in the chase and bumper views with
+    FixZBufferPrecision) culled a car once its centre was radius - near = 1.2 to 1.5 m behind the eye plane (radii 2.2 to
+    2.5 m, model table 650500 + 18), while its front half was still on the side panel: every overtaken car vanished
+    mid-panel. Under three views 4F02D0 now hides a car only when its sphere lies wholly behind both side panels' outer
+    edges (race_traffic `triple_outer_edges`, from the same corrections the device uses). Car bit 0x80 only gates the
+    draw/LOD list 46DF50 (LOD 0 up to 5 m behind) and the shadow 4ADAC0, so the simulation is unchanged. Planar and 16:9
+    keep the near test. Source and offline checks only (`test_triple_screens`); not yet seen in a rendered run.
+  - course objects (4F0E40) keep the near test: their visible bit (+54 bit 0) also gates collision touches and Heart
+    Attack evaluation, so widening it is a gameplay change, not a presentation one;
 - the eye distance is the matched-FOV one; a physical eye distance is a later option, under the F6 selector.
 
 The `three-projections` status needs counted passes plus a WGC check of the seams, not counts alone.

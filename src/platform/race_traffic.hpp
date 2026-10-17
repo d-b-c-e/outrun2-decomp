@@ -15,6 +15,8 @@
 // is one service call (PcRaceCall); x87-returning services return the float
 // bits in EAX.
 #include "platform/race_area.hpp"
+#include "platform/pc_screen.hpp"
+#include <array>
 #include <cstdint>
 #include <vector>
 namespace outrun::platform {
@@ -22,6 +24,16 @@ namespace outrun::platform {
 // widescreen half width, as 4F02D0 always uses. An object is culled when x + r < low or x - r > high.
 struct ObjectScreenBounds { float low{},high{}; };
 ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float half_width,bool fix);
+// Three views (pc_screen.hpp g_pc_triple_corrections): with the eye matched to the game's FOV each side panel looks out to
+// about 121 degrees from the heading (TRIPLE-SCREENS.md), past the eye plane where 4F02D0's near test (+BC) culls a car.
+// The panels' outer edges are the planes x = w of the right panel and x = -w of the left one, as planes over view space
+// (x, y, z, 1) (row vectors: clip = view x P x C[i]), normalised, the side the panels see positive. From the camera's
+// projection as 404310 builds it; not ok without corrections or when they refuse the projection.
+struct TripleOuterEdges { std::array<float,4> left{},right{}; bool ok{}; };
+TripleOuterEdges triple_outer_edges(PcTripleCorrections corrections,float fov_y,float aspect,float near_z,float far_z,
+                                    float shift_x,float shift_y);
+// True when the view-space sphere lies wholly beyond both outer edges, in the wedge behind the eye that no panel shows.
+bool triple_sphere_hidden(const TripleOuterEdges& edges,float x,float y,float z,float radius);
 // Scratch stack for the module's locals passed by address (the PC passes
 // stack addresses to its services); mapped by the caller with the state.
 constexpr std::uint32_t TrafficStackBase=0x7ffc0000u,TrafficStackSize=0x4000u;
