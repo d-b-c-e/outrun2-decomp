@@ -18,11 +18,12 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   compilation passes at `fb762e2`; the shared consumers pass three existing fixtures (782 checks, zero skipped).
   Original evidence is in hub artifacts/outrun-ui-extraction-20261016/build-01. Rendered controls and ordinary
   panel saves remain unqualified; these passes do not promote an installed candidate or physical acceptance.
-- Cameras Advanced source candidate adds **Cache replacement textures** (EnableTextureCache), Off by default and
+- Cameras Advanced adds **Cache replacement textures** (EnableTextureCache), Off by default and
   next ordinary start only, ignored in tests/playback/recording. It uses the existing writer/rollback. Help explains
   the 128 MiB raw DDS cache, scene preload, memory cost and restart required after changing packs. This is CPU file
-  caching, not GPU handle reuse. Affected desktop compilation and PMT fixture qualification are pending; no rendered
-  control/save, loading-speed or memory improvement is claimed. See TEXTURE-REPLACEMENT.md.
+  caching, not GPU handle reuse. Release desktop and affected PMT target compile at `efe14f3`; the one existing PMT
+  fixture passes 351 checks (1/1, zero skipped). Hub artifacts/outrun-texture-cache-20261017/build-01 retains original
+  evidence. No rendered control/save, loading-speed or memory improvement is claimed. See TEXTURE-REPLACEMENT.md.
 - Telemetry offers On/Off and, under Advanced, Horizon 324-byte or FM7 311-byte layout. Source defaults to On/Horizon. Changes save for the next start. The earlier stream reached SimHub and the owner's wheel screen, but the `6777eb3` field correction has not had a live receiver/HUD comparison; see [the field review](TELEMETRY-FIELDS.md).
 - A page change uses the one-key `write_key` path to `OutRunDesktop.ini`, rolls back the displayed choice if saving fails, and says it applies at the next game start. The producer gain controls use the same writer, with a reload/selection roundtrip fixture for the two independent integer keys. A latched test process saves nothing. `[Panel]` view, scale, and page are panel-owned settings. An ordinary keyboard/mouse save through the panel has not been observed in game.
 

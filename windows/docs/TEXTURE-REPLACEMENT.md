@@ -87,7 +87,7 @@ assets and synthetic files in isolated TEMP. No game, provider or owner install 
 extraction, actual GPU presentation and rendered F6 interaction remain unqualified; native and Wheelkit exposure
 and the accepted installed candidate remain separate evidence layers.
 
-## Replacement file cache (October 17 source candidate, unbuilt)
+## Replacement file cache (October 17 private candidate, qualified offline)
 
 `[Graphics] EnableTextureCache = true` enables a read-only in-memory cache of replacement DDS files at the next
 ordinary start. Native default is false; latched tests, playback and recording suppress it. It needs scene or UI
@@ -114,8 +114,16 @@ Shutdown prints cache read/hit/failure/eviction and resident-byte counts. First 
 existing synchronous path; this feature does not claim to remove that stall or establish a performance gain.
 
 The existing PMT fixture adds small-budget eviction, byte-copy/session reset, owned prefetch/destruction,
-uncacheable-size fallback and real scene/UI consumer cases. Qualification is pending one affected desktop build
-and that existing fixture; earlier extraction and rendering evidence stays scoped to its original candidates.
+uncacheable-size fallback and real scene/UI consumer cases. ClangCL Release desktop and the affected target built
+at `efe14f3`; the single named `pc_pmt_loader` CTest passed once (351 checks, 1/1, zero skipped). Earlier sprite/START
+and rendering evidence is retained at its original candidate; no unrelated suite was repeated. Original hub result,
+build/test logs, JUnit, LastTest.log and binary are in `artifacts/outrun-texture-cache-20261017/build-01`.
+Desktop: 23,941,120 bytes, SHA-256 `e56ecb8e0e9fa295ada0253203d6289f24103d105ff641d6ac916b91c8e5c51f`.
+The exact lease released at `2026-10-17T01:15:32.0314463Z`, with owned children quiescent and process environment
+restored, and was handed to Hera/Lola before documentation. Test files used isolated TEMP and original EXE shader
+tables were read into memory only. No game, UI, provider, owner asset/configuration/install or canonical native
+checkout changed. Runtime loading speed, first-load UI stalls, rendered F6 control/save and physical acceptance
+remain unqualified. Wheelkit exposure and release integration are separate follow-ups.
 
 ## Pad prompt folders (qualified offline, runtime pending)
 
