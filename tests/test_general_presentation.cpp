@@ -52,12 +52,12 @@ static void policy(){
     check(contents().find("framerate=60")!=std::string::npos,"ordinary backend retains its original rate writer");
     check(std::filesystem::remove(file),"remove only the owned synthetic fixture");
 }
-static void timeline(unsigned rendered_rate,unsigned cap,std::uint32_t mode){
+static void timeline(pf::NativeRuntimeContext& context,unsigned rendered_rate,unsigned cap,std::uint32_t mode){
     struct Fixture {
-        std::unique_ptr<pf::NativeRuntimeContext> c=std::make_unique<pf::NativeRuntimeContext>();
+        pf::NativeRuntimeContext* c{};
         std::uint64_t now=60000000,frequency{};
         unsigned frames{},frame_limit{},input{},sound{},control{},draw{},zero{},multiple{};
-    } f;
+    } f;f.c=&context;
     f.frequency=std::uint64_t(rendered_rate)*60000u;f.frame_limit=rendered_rate+1u;f.c->mode_state.current=mode;
     en::general_presentation().configure(true,std::to_string(cap));en::set_display_rate(cap);
     pf::NativeRuntimePlatform platform{};platform.user=&f;
@@ -93,8 +93,12 @@ static void timeline(unsigned rendered_rate,unsigned cap,std::uint32_t mode){
 }
 int main(){
     policy();
+    // The real loop's process-wide network module retains views into its first
+    // context. Keep one context alive for all timelines, as the host does;
+    // destroying it between cases leaves those real service views dangling.
+    auto context=std::make_unique<pf::NativeRuntimeContext>();
     for(const auto rate:{30u,60u,90u,120u,144u,165u,180u,240u,360u,1000u})
-        for(const auto mode:{16u,32u})timeline(rate,rate<60u?144u:rate,mode);
-    timeline(360,0,16);
+        for(const auto mode:{16u,32u})timeline(*context,rate,rate<60u?144u:rate,mode);
+    timeline(*context,360,0,16);
     std::printf("General presentation: %u checks PASS (synthetic clocks/services only)\n",checks);
 }
