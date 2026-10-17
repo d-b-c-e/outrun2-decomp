@@ -563,13 +563,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false),ui=settings.flag("Graphics","UITextureReplacement",false);
         const bool any=settings.flag("Graphics","TextureMatchAnyFolder",false);
         const bool extract_requested=settings.flag("Graphics","SceneTextureExtract",false);
-        const bool extract=extract_requested&&!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;
-        if(extract_requested&&!extract)std::printf("settings: SceneTextureExtract off in test, playback or recording process\n");
+        const bool ui_extract_requested=settings.flag("Graphics","UITextureExtract",false);
+        const bool extraction_allowed=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;
+        const bool extract=extract_requested&&extraction_allowed,ui_extract=ui_extract_requested&&extraction_allowed;
+        if((extract_requested||ui_extract_requested)&&!extraction_allowed)std::printf("settings: texture extraction off in test, playback or recording process\n");
         std::string base=settings.text("Graphics","TextureBaseFolder","textures");
         if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
-            if(on||ui||extract)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
+            if(on||ui||extract||ui_extract)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
             base="textures";}
-        outrun::platform::texture_replacement_configure(on,ui,folder+"/"+base+"/load",any,extract);
+        outrun::platform::texture_replacement_configure(on,ui,folder+"/"+base+"/load",any,extract,ui_extract);
         if(any&&(on||ui))std::printf("settings: [Graphics] TextureMatchAnyFolder: same-name files from other pack folders when unambiguous\n");}
     // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
     // the shim is wired (slice 3); the shim's own test path replaces it.
@@ -650,10 +652,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }
         if(uncovered)std::printf("%s: %u banks without a pack folder: %s%s\n",kind,uncovered,others.c_str(),others.size()>=400?", ...":"");
     }
-    {const auto& t=outrun::platform::pmt_texture_extraction_stats();
-     if(t.written||t.existing||t.failed||t.unsupported)
-         std::printf("scene texture extraction: %u written, %u existing files kept, %u failed, %u unsupported%s%s\n",
-             t.written,t.existing,t.failed,t.unsupported,t.error.empty()?"":"; ",t.error.c_str());}
+    for(bool ui:{false,true}){
+        const auto& t=ui?outrun::platform::ui_texture_extraction_stats():outrun::platform::pmt_texture_extraction_stats();
+        if(t.written||t.existing||t.failed||t.unsupported)
+            std::printf("%s texture extraction: %u written, %u existing files kept, %u failed, %u unsupported%s%s\n",
+                ui?"UI":"scene",t.written,t.existing,t.failed,t.unsupported,t.error.empty()?"":"; ",t.error.c_str());
+    }
     if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
         // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).
         const auto r=smoke.longest_record;const bool player=r<0x9345b8u;

@@ -40,12 +40,17 @@ void pmt_texture_replacement_configure(bool enabled,const std::string& load_fold
 // the stock texture. Lets a stage variant (cs_CS_PALM_pmt) use files made for another (cs_CS_PALM_T_pmt). The name
 // index is built at configure time, and the file chosen for a name (its path, not its bytes) is cached for the session:
 // a lookup cache, with no hot reload and no guarantee if pack files change while the game runs.
-// SceneTextureExtract: original validated DDS bytes under the sibling dump folder,
-// only after successful stock creation; replacements and existing dumps are kept.
+// SceneTextureExtract / UITextureExtract: original validated DDS bytes under the sibling dump folder,
+// only after successful stock creation (or committed CPU preview pack); replacements and existing dumps are kept.
 // Extraction is independently default-off; configure resets its per-session attempts/statistics.
-void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder=false,bool scene_extract=false);
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder=false,bool scene_extract=false,bool ui_extract=false);
 struct PmtTextureExtractionStats { std::uint32_t written{},existing{},failed{},unsupported{};std::string error; };
 const PmtTextureExtractionStats& pmt_texture_extraction_stats();
+const PmtTextureExtractionStats& ui_texture_extraction_stats();
+bool ui_texture_extraction_enabled();
+// Stock DDS committed to a successfully assembled CPU preview pack, not proof of GPU upload/rendering.
+// The preview caller omits entries replaced by HD files. Shares validation/names/exclusive writes with scene/XST.
+void ui_texture_extract_stock(const std::string& pack,std::uint32_t index,const std::uint8_t* stock,std::size_t size);
 // other: replaced from another bank's folder (part of replaced); ambiguous: same-name files that differ (kept stock).
 struct PmtTextureReplacementStats { std::uint32_t files{},looked{},replaced{},failed{},other{},ambiguous{}; };
 const PmtTextureReplacementStats& pmt_texture_replacement_stats();

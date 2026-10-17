@@ -1020,7 +1020,7 @@ bool pc_sprite_bank_load_xst(PcSpriteBank& b,PcD3D9Device& device,const std::vec
     b.textures.clear();b.stock_sizes.clear();
     // UITextureReplacement: Tweaks names a pack file by the count of textures the XST created before it (its
     // CurrentTextureIdx, which entries without a texture do not advance), then by hash and stock size alone.
-    const bool ui=!pack.empty()&&ui_texture_replacement_enabled();
+    const bool ui=!pack.empty()&&(ui_texture_replacement_enabled()||ui_texture_extraction_enabled());
     std::uint32_t created=0;
     for(std::uint32_t k=0;k<count;++k){
         const auto* e=b.header.data()+table+std::size_t(k)*0x14u;

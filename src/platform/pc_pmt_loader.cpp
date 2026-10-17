@@ -33,9 +33,9 @@ std::uint32_t pmt_xxh32(const std::uint8_t* p,std::size_t len,std::uint32_t seed
 namespace {
 struct Replacement {
     bool scene{},ui{},any_folder{};std::filesystem::path root;
-    bool scene_extract{};std::filesystem::path dump;
+    bool scene_extract{},ui_extract{};std::filesystem::path dump;
     std::set<std::string> dump_attempts;
-    PmtTextureExtractionStats extraction;
+    PmtTextureExtractionStats extraction,ui_extraction;
     UiPromptSelection prompts;
     std::map<std::string,std::filesystem::path> files;   // lower-case relative path with '/' -> file
     std::map<std::string,int> folders;                   // lower-case first components of those paths
@@ -107,19 +107,20 @@ std::string stock_texture_name(const std::uint8_t* data,std::size_t size,std::ui
 }
 // No GPU readback/encoding: keep the complete original file, not generated mip levels.
 // All failures stay observational; the already-created stock resource is untouched.
-void extract_scene_texture(const std::string& pack,std::uint32_t index,const PcTextureFileRequest& q){
-    auto& r=replacement();if(!r.scene_extract)return;
+void extract_stock_texture(bool ui,const std::string& pack,std::uint32_t index,const PcTextureFileRequest& q){
+    auto& r=replacement();if(!(ui?r.ui_extract:r.scene_extract))return;
+    auto& extraction=ui?r.ui_extraction:r.extraction;
     try{
         if(pack.empty()||pack=="."||pack==".."||pack.find_first_of("/\\:")!=std::string::npos||pack.find('\0')!=std::string::npos||
            q.size>(128u<<20)||!replacement_usable(q.data,q.size,q.cube)){
-            ++r.extraction.unsupported;return;
+            ++extraction.unsupported;return;
         }
         std::uint32_t caps2;std::memcpy(&caps2,q.data+112,4);
-        if(q.cube&&(caps2&0xfe00u)!=0xfe00u){++r.extraction.unsupported;return;}   // all six cube faces
+        if(q.cube&&(caps2&0xfe00u)!=0xfe00u){++extraction.unsupported;return;}   // all six cube faces
         const auto name=std::to_string(index)+"_"+stock_texture_name(q.data,q.size);
         if(!r.dump_attempts.insert(pack+"/"+name).second)return;
         const auto directory=r.dump/std::filesystem::u8path(pack),path=directory/std::filesystem::u8path(name);
-        auto failed=[&](const char* why){++r.extraction.failed;if(r.extraction.error.empty())r.extraction.error=why;};
+        auto failed=[&](const char* why){++extraction.failed;if(extraction.error.empty())extraction.error=why;};
         std::error_code error;std::filesystem::create_directories(directory,error);
         if(error){failed("cannot create dump directory");return;}
         // C11 exclusive create: never truncate an owner's existing dump, even across processes.
@@ -129,12 +130,12 @@ void extract_scene_texture(const std::string& pack,std::uint32_t index,const PcT
 #else
         auto* file=std::fopen(path.c_str(),"wbx");
 #endif
-        if(!file){if(errno==EEXIST)++r.extraction.existing;else failed("cannot exclusively create dump file");return;}
+        if(!file){if(errno==EEXIST)++extraction.existing;else failed("cannot exclusively create dump file");return;}
         const bool wrote=std::fwrite(q.data,1,q.size,file)==q.size;
         const bool closed=std::fclose(file)==0;
         if(!wrote||!closed){std::filesystem::remove(path,error);failed("cannot finish dump file");return;}
-        ++r.extraction.written;
-    }catch(...){++r.extraction.failed;}   // optional extraction cannot abort texture creation
+        ++extraction.written;
+    }catch(...){++extraction.failed;}   // optional extraction cannot abort texture creation
 }
 // An A8B8G8R8 (or X8B8G8R8) file as the A8R8G8B8 the device reads: R and B swapped in every texel and the masks
 // rewritten, as Tweaks' loader converts D3DFMT_A8B8G8R8. About half of the owner's UI pack is stored this way.
@@ -221,7 +222,7 @@ std::uint32_t create_from_pack(PcD3D9Device& device,bool ui,const std::string& p
         ++stats.failed;++bank.failed;
     }else spent();
     const auto handle=device.create_texture_from_file(q);
-    if(handle&&!ui)extract_scene_texture(pack,index,q);
+    if(handle)extract_stock_texture(ui,pack,index,q);
     return handle;
 }
 using driving::Bytes;
@@ -294,13 +295,18 @@ void pmt_textures_begin_42e850(PcPmtResources& r,PcPmtLoadCursor& c){
 }
 void pmt_texture_replacement_configure(bool enabled,const std::string& load_folder){texture_replacement_configure(enabled,false,load_folder);}
 void texture_replacement_set_pad_family(UiPromptFamily family){replacement().prompts.current=family;}
-void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder,bool scene_extract){
+void texture_replacement_configure(bool scene,bool ui,const std::string& load_folder,bool any_folder,bool scene_extract,bool ui_extract){
     auto& r=replacement();r=Replacement{};r.scene=scene;r.ui=ui;r.any_folder=any_folder;
-    r.scene_extract=scene_extract;
-    if(scene_extract){
-        if(load_folder.empty()){r.scene_extract=false;++r.extraction.failed;r.extraction.error="empty extraction base";}
+    r.scene_extract=scene_extract;r.ui_extract=ui_extract;
+    if(scene_extract||ui_extract){
+        if(load_folder.empty()){
+            for(auto* stats:{scene_extract?&r.extraction:nullptr,ui_extract?&r.ui_extraction:nullptr})
+                if(stats){++stats->failed;stats->error="empty extraction base";}
+            r.scene_extract=r.ui_extract=false;
+        }
         else{r.dump=std::filesystem::u8path(load_folder).parent_path()/"dump";
-            std::printf("scene texture extraction: original DDS files in the sibling dump folder of %s\n",load_folder.c_str());}
+            std::printf("texture extraction: scene %s, UI %s; original DDS files in the sibling dump folder of %s\n",
+                scene_extract?"on":"off",ui_extract?"on":"off",load_folder.c_str());}
     }
     if(!scene&&!ui)return;
     std::error_code e;r.root=std::filesystem::u8path(load_folder);
@@ -321,11 +327,19 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
 }
 const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
 const PmtTextureExtractionStats& pmt_texture_extraction_stats(){return replacement().extraction;}
+const PmtTextureExtractionStats& ui_texture_extraction_stats(){return replacement().ui_extraction;}
+bool ui_texture_extraction_enabled(){return replacement().ui_extract;}
+void ui_texture_extract_stock(const std::string& pack,std::uint32_t index,const std::uint8_t* stock,std::size_t size){
+    if(!replacement().ui_extract)return;
+    if(size>(128u<<20)){++replacement().ui_extraction.unsupported;return;}
+    PcTextureFileRequest q{};q.data=stock;q.size=std::uint32_t(size);
+    extract_stock_texture(true,pack,index,q);
+}
 const std::map<std::string,PmtTextureReplacementBank>& pmt_texture_replacement_banks(){return replacement().banks;}
 bool ui_texture_replacement_enabled(){return replacement().ui;}
 std::uint32_t ui_texture_replacement_create(PcD3D9Device& device,const std::string& pack,std::uint32_t index,const PcTextureFileRequest& q,
     bool& replaced){
-    if(!replacement().ui||pack.empty()){replaced=false;return device.create_texture_from_file(q);}
+    if(!(replacement().ui||replacement().ui_extract)||pack.empty()){replaced=false;return device.create_texture_from_file(q);}
     return create_from_pack(device,true,pack,index,q,replaced);
 }
 bool ui_texture_replacement_rgba(const std::string& pack,std::uint32_t index,const std::uint8_t* stock,std::size_t size,

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -103,6 +104,29 @@ int main(int argc,char**argv){try{
   for(std::size_t i=0;i<hd.draws.size();++i){const auto& h=hd.draws[i];const auto& s=load2.draws[i];req(h.source_texture==s.source_texture&&h.crop==s.crop&&h.corners==s.corners&&h.layer_order==s.layer_order&&h.frame_index==s.frame_index,"draw geometry, crops and order unchanged");}
   GameUiPack view;{const bool ok=make_frontend_animation_view(hd,view,&e);req(ok,e.c_str());}req(view.textures[0].width==sw&&view.textures[0].height==sh,"animated crops bounded by the stock size");
   texture_replacement_configure(false,false,{});
-  req(build_retail_start_loading(store,again,&e)&&again==pack,"UI replacement off again: stock bytes");}
+  req(build_retail_start_loading(store,again,&e)&&again==pack,"UI replacement off again: stock bytes");
+  // Extraction copies only original DDS spans committed to this CPU pack, independently of replacements.
+  const auto dump=load.parent_path()/"dump",bank=dump/"spr_SPRANI_LOADING_CVT_Exst";
+  const auto raw=[&](unsigned i){const auto end=i+1<dds.size()?dds[i+1]:xst.size();
+   return std::vector<std::uint8_t>(xst.begin()+dds[i],xst.begin()+end);};
+  const auto filename=[&](unsigned i){const auto original=raw(i);char n[64];
+   std::snprintf(n,sizeof n,"%u_%X_%ux%u.dds",i,pmt_xxh32(original.data(),original.size()),rd(dds[i]+16),rd(dds[i]+12));return bank/n;};
+  const auto read=[](const fs::path& p){std::ifstream in(p,std::ios::binary);
+   return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>());};
+  req(!fs::exists(dump),"extraction default off writes nothing");
+  texture_replacement_configure(false,false,load.string(),false,false,true);
+  req(build_retail_start_loading(store,again,&e)&&again==pack,"UI extraction keeps CPU pack byte-identical");
+  req(ui_texture_extraction_stats().written==5&&ui_texture_replacement_stats().looked==0,"five stock DDS extracted without replacement lookup");
+  for(unsigned i=0;i<5;++i)req(read(filename(i))==raw(i),"dump equals original DDS, including header and stored mips");
+  req(build_retail_start_loading(store,again,&e)&&again==pack&&ui_texture_extraction_stats().written==5,"CPU rebuild deduplicates dumps");
+  fs::remove_all(dump);texture_replacement_configure(false,true,load.string(),false,false,true);
+  req(build_retail_start_loading(store,again,&e),e.c_str());
+  req(ui_texture_replacement_stats().replaced==1&&ui_texture_extraction_stats().written==4&&!fs::exists(filename(0)),"successful START replacement suppresses its dump");
+  for(unsigned i=1;i<5;++i)req(read(filename(i))==raw(i),"unreplaced START entries retain original dumps");
+  fs::remove_all(dump);const std::vector<std::uint8_t> sentinel{2,3,5};put(dump,sentinel);
+  texture_replacement_configure(false,false,load.string(),false,false,true);
+  req(build_retail_start_loading(store,again,&e)&&again==pack,"blocked dump does not fail or change stock pack");
+  req(ui_texture_extraction_stats().failed==5&&read(dump)==sentinel,"blocked dump preserves existing file and reports failures");
+  texture_replacement_configure(false,false,{});}
  fs::remove_all(root);std::printf("retail_gpu_cache_r153: %u checks passed; the START loading picture is built in memory from the game files\n",checks);return 0;
  }catch(const std::exception&x){std::fprintf(stderr,"FAILED: %s\n",x.what());return 1;}}

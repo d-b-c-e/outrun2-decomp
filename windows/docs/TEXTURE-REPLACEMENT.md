@@ -23,7 +23,7 @@ else keeps the stock texture and is counted.
 It defaults to false, works without either replacement flag or a `load` folder, and is disabled in latched tests,
 playback and recording. The existing validated `TextureBaseFolder` applies (default `textures`): output goes to
 `<game folder>/<TextureBaseFolder>/dump/<PMT bank stem>/<index>_<XXH32>_<width>x<height>.dds`.
-Names share the replacement lookup's XXH32 and FXT remaps. UITextureExtract remains unimplemented.
+Names share the replacement lookup's XXH32 and FXT remaps. UI extraction is described below.
 
 Extraction runs only after successful stock device creation. A successfully loaded replacement suppresses the dump;
 a missing, invalid or refused replacement keeps the existing stock fallback and may dump that original file.
@@ -50,6 +50,34 @@ Both batches released the exact lease with owned children quiescent and process 
 continuation released at `2026-10-17T00:35:05.3224112Z`. Shader tables were read from the verified original EXE into
 memory only, and synthetic outputs used isolated TEMP. No game, provider or install ran. Ordinary-game extraction
 and rendered behavior remain unobserved. Canonical native checkout `235bbb3` and owner assets remain untouched.
+
+## UI extraction (October 16 source successor, unbuilt)
+
+`[Graphics] UITextureExtract = true` independently enables original UI DDS output, default false and next ordinary
+start only. It shares scene extraction's path validation, format/size/mip validation, XXH32/FXT naming, dedup set and
+exclusive writer. Tests, playback and recording disable both flags before configuration. Output is under the same
+`TextureBaseFolder/dump/<XST bank stem>/` folders. Native F6 Cameras Advanced offers **Extract scene textures** and
+**Extract UI textures** through the existing one-key writer/failed-save rollback; both describe disk-write/loading
+cost, preserved existing files and replacement suppression. No generated assets, encoder or GPU readback is added.
+
+The source-backed consumers are:
+
+- XST sprite uploads (`pc_sprite_bank_load_xst`): the original DDS pointer/size goes to the existing device, and only
+  a successful stock handle triggers extraction. The index counts created textures, skipping empty XST entries,
+  exactly as replacement lookup does. Successful replacement creation suppresses extraction; fallback keeps stock.
+  Extraction leaves uploaded bytes, requests, logical stock sizes, draw geometry and UV behavior unchanged.
+- The START preview builder (`build_retail_start_loading`): the original DDS spans remain available while the CPU
+  pack is assembled. Only after successful complete pack assembly are its stock entries offered to the same writer;
+  entries present in the successful HD map are omitted. This establishes CPU pack preparation, not later device
+  creation, GPU upload or rendering. No pack version, dimensions, payloads, animation or cache semantics change.
+
+UI DDS admitted by these 2D consumers is DXT1/3/5 or A8R8G8B8-compatible 32-bit RGB with all stored mip levels.
+UI and scene statistics are separate; both are printed at shutdown. Replacement lookup stays disabled when only
+extraction is enabled. Missing, blocked or pre-existing dump destinations cannot change stock creation/pack output.
+The existing sprite and START fixtures add byte-preservation, empty-entry index, replacement/fallback, refused
+resource, stored-mip, dedup/existing-file and blocked-output cases. Planned qualification is the affected desktop
+build and these existing fixtures, plus the PMT fixture because the shared scene extractor is refactored here.
+No build/test/runtime acceptance is claimed for this UI successor yet.
 
 ## Pad prompt folders (source candidate, unbuilt)
 

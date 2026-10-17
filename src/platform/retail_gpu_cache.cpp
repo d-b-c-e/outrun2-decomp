@@ -93,9 +93,9 @@ bool build_frontend(RetailAssetStore& store,bool loading,std::vector<std::uint8_
     // the pack OR2LDP3 (rgba8 at the file's size, the stock size kept for the crops), within FrontendHdLoadingMaxBytes
     // for the whole pack; with none, the bytes are the OR2LDP2 ones as before.
     std::map<std::uint32_t,HdTexture> hd;
+    const std::string path(xst);const auto slash=path.find_last_of('/');
+    const std::string stem=path.substr(slash+1u,path.size()-slash-1u-3u);   // "spr_SPRANI_LOADING_CVT_Exst"
     if(loading&&ui_texture_replacement_enabled()){
-        const std::string path(xst);const auto slash=path.find_last_of('/');
-        const std::string stem=path.substr(slash+1u,path.size()-slash-1u-3u);   // "spr_SPRANI_LOADING_CVT_Exst"
         std::size_t stock=0;for(auto i:used)stock+=entries[i].payload.size();
         const std::size_t fixed=po+stock+(a.size()-4u);
         if(fixed<=FrontendHdLoadingMaxBytes){
@@ -113,7 +113,12 @@ bool build_frontend(RetailAssetStore& store,bool loading,std::vector<std::uint8_
     const auto animation=std::vector<std::uint8_t>(a.begin()+4,a.end());const std::size_t size=tex_end+animation.size();if(size>(hd.empty()?24u*1024u*1024u:FrontendHdLoadingMaxBytes)){fail(error,"generated frontend cache exceeds limit");return false;}bytes.assign(size,0);std::memcpy(bytes.data(),!hd.empty()?"OR2LDP3\0":loading?"OR2LDP2\0":"OR2FEP6\0",8);put32(bytes,8,!hd.empty()?3u:loading?2u:6u);put32(bytes,12,224u);put32(bytes,16,static_cast<std::uint32_t>(used.size()));put32(bytes,20,32u);put32(bytes,24,static_cast<std::uint32_t>(scenes.size()));put32(bytes,28,24u);put32(bytes,32,static_cast<std::uint32_t>(draws));put32(bytes,36,64u);put32(bytes,40,static_cast<std::uint32_t>(tro));put32(bytes,44,static_cast<std::uint32_t>(sro));put32(bytes,48,static_cast<std::uint32_t>(dro));put32(bytes,52,static_cast<std::uint32_t>(po));put32(bytes,56,static_cast<std::uint32_t>(size));put32(bytes,60,source_tex);put32(bytes,64,source_scenes);put32(bytes,68,static_cast<std::uint32_t>(xc.size()));put32(bytes,72,static_cast<std::uint32_t>(x.size()));put32(bytes,76,static_cast<std::uint32_t>(ac.size()));put32(bytes,80,static_cast<std::uint32_t>(a.size()));put32(bytes,84,static_cast<std::uint32_t>(tex_end));put32(bytes,88,static_cast<std::uint32_t>(animation.size()));put32(bytes,92,crc(animation));
     std::size_t running=po;for(std::size_t n=0;n<used.size();++n){const auto& e=entries[used[n]];const auto o=tro+n*32u;const auto it=hd.find(used[n]);const auto& p=payload(used[n]);put32(bytes,o,e.source);put32(bytes,o+4,it!=hd.end()?it->second.width:e.width);put32(bytes,o+8,it!=hd.end()?it->second.height:e.height);put32(bytes,o+12,it!=hd.end()?std::uint32_t(MeshPreviewTextureFormat::rgba8):e.format);put32(bytes,o+16,static_cast<std::uint32_t>(running));put32(bytes,o+20,static_cast<std::uint32_t>(p.size()));put32(bytes,o+24,crc(p));if(it!=hd.end())put32(bytes,o+28,(e.width<<16u)|e.height);running+=p.size();}
     std::size_t first=0,di=0;for(std::size_t si=0;si<scenes.size();++si){const auto& s=scenes[si];const auto o=sro+si*24u;put32(bytes,o,s.token);put32(bytes,o+4,s.width);put32(bytes,o+8,s.height);put32(bytes,o+12,static_cast<std::uint32_t>(first));put32(bytes,o+16,static_cast<std::uint32_t>(s.draws.size()));for(std::size_t li=0;li<s.draws.size();++li,++di){const auto&d=s.draws[li];const auto q=dro+di*64u;put32(bytes,q,d.source);for(unsigned c=0;c<4;++c)put32(bytes,q+4+c*4,d.crop[c]);for(unsigned c=0;c<8;++c)putf(bytes,q+20+c*4,d.corners[c]);put32(bytes,q+52,static_cast<std::uint32_t>(li));}first+=s.draws.size();}
-    running=po;for(auto i:used){const auto&p=payload(i);std::memcpy(bytes.data()+running,p.data(),p.size());running+=p.size();}std::memcpy(bytes.data()+tex_end,animation.data(),animation.size());return true;
+    running=po;for(auto i:used){const auto&p=payload(i);std::memcpy(bytes.data()+running,p.data(),p.size());running+=p.size();}std::memcpy(bytes.data()+tex_end,animation.data(),animation.size());
+    // Original DDS is still present here. Only successfully assembled stock entries are dumped; no GPU claim.
+    if(loading&&ui_texture_extraction_enabled())for(auto i:used)if(!hd.count(i)){
+        const auto& e=entries[i];ui_texture_extract_stock(stem,e.source,x.data()+e.dds_begin,e.dds_end-e.dds_begin);
+    }
+    return true;
 }
 
 }

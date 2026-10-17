@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <vector>
 using namespace outrun;
@@ -87,6 +88,7 @@ struct Device final:PcD3D9Device{
     struct Tex { std::uint32_t w,h; std::vector<std::uint8_t> bytes; };
     std::vector<Tex> textures;
     bool keep_bytes{true};
+    std::uint32_t refuse_size{};
     std::array<std::uint32_t,0x400> render{};std::array<std::array<std::uint32_t,32>,16> stage{},sampler{};
     std::vector<std::array<float,16>> transforms;std::vector<std::array<std::int32_t,4>> rects;
     std::vector<std::vector<std::uint8_t>> strips;
@@ -100,7 +102,7 @@ struct Device final:PcD3D9Device{
     Device(){sprite_obj.d=this;}
     std::uint32_t create_texture_from_file(const PcTextureFileRequest& q)override{
         textures.push_back({get32(q.data+16),get32(q.data+12),keep_bytes?std::vector<std::uint8_t>(q.data,q.data+q.size):std::vector<std::uint8_t>{}});
-        return std::uint32_t(textures.size());}
+        return q.size==refuse_size?0u:std::uint32_t(textures.size());}
     bool texture_level_size(std::uint32_t t,std::uint32_t,std::uint32_t& w,std::uint32_t& h)override{
         if(!t||t>textures.size())return false;w=textures[t-1].w;h=textures[t-1].h;return true;}
     PcD3DXSprite* sprite()override{return &sprite_obj;}
@@ -374,6 +376,48 @@ int main(int argc,char** argv){
         fs::remove_all(dir);store(paths[0],std::vector<std::uint8_t>(16));store(plain,choices[0]);
         texture_replacement_configure(false,true,dir.string());texture_replacement_set_pad_family(F::PlayStation);
         CHECK(load(source)==source&&ui_texture_replacement_stats().failed==1);
+    }
+    // UI extraction uses the same original DDS naming/writer without changing upload or draw geometry.
+    {
+        const auto root=fs::temp_directory_path()/"or2_ui_texture_extraction_test",load=root/"load",dump=root/"dump";
+        fs::remove_all(root);
+        const auto read=[](const fs::path& p){std::ifstream in(p,std::ios::binary);
+            return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>());};
+        const auto store=[](const fs::path& p,const std::vector<std::uint8_t>& f){fs::create_directories(p.parent_path());
+            std::ofstream out(p,std::ios::binary);out.write(reinterpret_cast<const char*>(f.data()),std::streamsize(f.size()));};
+        texture_replacement_configure(false,false,load.string());Drawn off;draw_bank(off,xst);
+        CHECK(!fs::exists(dump)&&ui_texture_extraction_stats().written==0);
+        texture_replacement_configure(false,false,load.string(),false,true);Drawn scene_only;draw_bank(scene_only,xst);
+        CHECK(!fs::exists(dump)&&pmt_texture_extraction_stats().written==0);   // independent flags
+        texture_replacement_configure(false,false,load.string(),false,false,true);Drawn extracted;draw_bank(extracted,xst);
+        CHECK(ui_texture_extraction_stats().written==3&&ui_texture_replacement_stats().looked==0&&!fs::exists(load));
+        CHECK(extracted.dev.rects==off.dev.rects&&extracted.dev.strips==off.dev.strips&&extracted.dev.transforms==off.dev.transforms);
+        CHECK(extracted.s.banks[Bank].textures==off.s.banks[Bank].textures&&extracted.s.banks[Bank].stock_sizes==off.s.banks[Bank].stock_sizes);
+        CHECK(read(dump/"spr_test_xst"/name(a,"0_"))==a&&read(dump/"spr_test_xst"/name(b,"1_"))==b&&read(dump/"spr_test_xst"/name(c,"2_"))==c);
+        for(unsigned i=0;i<3;++i)CHECK(extracted.dev.textures[i].bytes==off.dev.textures[i].bytes);
+        {Drawn again;draw_bank(again,xst);CHECK(ui_texture_extraction_stats().written==3&&ui_texture_extraction_stats().existing==0);}
+        const std::vector<std::uint8_t> sentinel{1,4,9};store(dump/"spr_test_xst"/name(a,"0_"),sentinel);
+        texture_replacement_configure(false,false,load.string(),false,false,true);
+        {Drawn again;draw_bank(again,xst);CHECK(read(dump/"spr_test_xst"/name(a,"0_"))==sentinel&&ui_texture_extraction_stats().existing==3);}
+        // Successful HD creation suppresses only that entry; invalid replacement retains and extracts stock.
+        fs::remove_all(dump);store(load/"spr_test_xst"/name(a,"0_"),ra);
+        texture_replacement_configure(false,true,load.string(),false,false,true);
+        {Drawn hd;draw_bank(hd,xst);CHECK(hd.dev.textures[0].w==16&&!fs::exists(dump/"spr_test_xst"/name(a,"0_")));
+         CHECK(ui_texture_extraction_stats().written==2&&ui_texture_replacement_stats().replaced==1);}
+        fs::remove_all(dump);store(load/"spr_test_xst"/name(a,"0_"),sentinel);
+        texture_replacement_configure(false,true,load.string(),false,false,true);
+        {Drawn fallback;draw_bank(fallback,xst);CHECK(fallback.dev.textures[0].bytes==a&&read(dump/"spr_test_xst"/name(a,"0_"))==a);}
+        // A refused stock resource is never dumped. Other entries still upload and extract normally.
+        fs::remove_all(dump);texture_replacement_configure(false,false,load.string(),false,false,true);
+        {auto different=b;different.resize(b.size()+32,0x5a);put32(different,28,2);   // retain two stored levels
+         const auto source=make_xst({{},a,different},{}),original=source;PcSpriteBank bank;Device device;device.refuse_size=std::uint32_t(a.size());std::string error;
+         CHECK(pc_sprite_bank_load_xst(bank,device,source,error,"spr_test_xst")&&source==original);
+         CHECK(bank.textures[1]==0&&bank.textures[2]!=0&&!fs::exists(dump/"spr_test_xst"/name(a,"0_")));
+         CHECK(read(dump/"spr_test_xst"/name(different,"1_"))==different&&ui_texture_extraction_stats().written==1);}
+        fs::remove_all(dump);store(dump,sentinel);texture_replacement_configure(false,false,load.string(),false,false,true);
+        {Drawn blocked;draw_bank(blocked,xst);CHECK(blocked.dev.textures[0].bytes==a&&blocked.dev.strips==off.dev.strips);
+         CHECK(ui_texture_extraction_stats().failed==3&&read(dump)==sentinel);}
+        texture_replacement_configure(false,false,{});fs::remove_all(root);
     }
     texture_replacement_configure(false,false,{});fs::remove_all(dir);
     std::printf("pc sprite replacement: %u checks\n",checks);

@@ -120,7 +120,7 @@ struct Values {
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
-    bool scene_textures{},ui_textures{};   // existing default-off Graphics startup flags
+    bool scene_textures{},ui_textures{},scene_extract{},ui_extract{};   // default-off Graphics startup flags
     std::string texture_folder{"textures"};   // saved base folder, shown only; the native loader validates it
     std::string shadow_opacity{"1"};   // raw setting: arbitrary custom values stay intact until an explicit preset edit
     bool screen_edge_cull{true},screen_edge_cull_start{true};   // [Graphics] ScreenEdgeCullFix
@@ -484,6 +484,14 @@ void page_cameras(bool advanced){
         "Off by default. Uses an existing Tweaks pack for menus, HUD and button prompts from the saved "
         "TextureBaseFolder/load folder (textures/load by default). Prompt artwork depends on the pack. "
         "Packs can increase loading time and memory use. Applies at the next game start.");
+    graphics_flag("Extract scene textures",&v.scene_extract,"SceneTextureExtract",
+        "Off by default. Saves original scene DDS files to TextureBaseFolder/dump (textures/dump by default). "
+        "Existing files are kept; loaded replacements are not dumped. Adds disk writes and may slow loading. "
+        "Applies at the next ordinary game start; ignored in tests, playback and recording.");
+    graphics_flag("Extract UI textures",&v.ui_extract,"UITextureExtract",
+        "Off by default. Saves original UI DDS files from sprite uploads and START pack preparation to "
+        "TextureBaseFolder/dump (textures/dump by default). Existing files are kept; loaded replacements are not dumped. "
+        "Adds disk writes and may slow loading. Applies at the next ordinary game start; ignored in tests, playback and recording.");
     dbce::panel::Status("Saved texture base folder",v.texture_folder.c_str());
     dbce::panel::Text("Packs are read from <game folder>/<base folder>/load; the default is textures/load. "
         "Invalid or external base paths use textures. Folder settings apply at the next start.");
@@ -683,6 +691,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.shadow_opacity=settings.text("Graphics","CarBaseShadowOpacity","1");
     v.scene_textures=settings.flag("Graphics","SceneTextureReplacement",false);
     v.ui_textures=settings.flag("Graphics","UITextureReplacement",false);
+    v.scene_extract=settings.flag("Graphics","SceneTextureExtract",false);
+    v.ui_extract=settings.flag("Graphics","UITextureExtract",false);
     v.texture_folder=settings.text("Graphics","TextureBaseFolder","textures");
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
