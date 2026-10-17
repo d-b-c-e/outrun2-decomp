@@ -10,6 +10,7 @@
 #include "telemetry_forza.hpp"
 #include "shim_input.hpp"
 #include "triple_screens.hpp"
+#include "startup_monitor.hpp"
 #include "wheel_input.hpp"
 #include "display_fit.hpp"
 #include "renderer.hpp"
@@ -116,6 +117,8 @@ Letterbox lb;
 // The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
+    int monitor_choice{};
+    std::vector<std::string> monitor_labels,monitor_paths;
     int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, next start only
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
     int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
@@ -400,6 +403,17 @@ void page_cameras(bool advanced){
     }
     if(v.triple!=int(st.mode)||v.projection!=v.projection_start)dbce::panel::Text("The choice applies at the next game start.");
     if(!advanced)return;
+    {
+        std::vector<const char*> labels;
+        for(const auto& label:v.monitor_labels)labels.push_back(label.c_str());
+        const int before=v.monitor_choice;
+        if(dbce::panel::Choice("Gameplay display",labels.data(),int(labels.size()),&v.monitor_choice,
+            "Applies at the next game start. Default keeps primary-monitor placement (Windows chooses a bordered window's position). "
+            "A selected display fills its screen, or centers a bordered window in its work area. Separate monitors uses it as the "
+            "center of the existing racing-row rule. Missing or ambiguous saved displays keep the saved choice and use default placement. "
+            "Names and coordinates are labels; the saved Windows device identity can change after driver or cable changes. No desktop layout changes."))
+            keep(&v.monitor_choice,before,[&]{return save("Window","MonitorDevicePath",v.monitor_paths[std::size_t(v.monitor_choice)]);});
+    }
     // As Wheelkit's Display page words it (sana 90841): 0 is the plain presentation mode, not the least-lag choice.
     static const char* const latency[]{"0 (plain)","1","2 (default)","3"};
     const int before=v.latency;
@@ -667,6 +681,18 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.name="OutRun 2006 desktop (decomp)";
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
+    v.monitor_labels={"Default placement"};v.monitor_paths={""};
+    const auto saved_monitor=settings.text("Window","MonitorDevicePath");
+    for(const auto& monitor:startup_monitor_state().monitors)if(monitor.paths.size()==1u){
+        const auto match=select_startup_monitor(startup_monitor_state().monitors,monitor.paths.front());
+        if(!match.index)continue;
+        v.monitor_labels.push_back(monitor.label);v.monitor_paths.push_back(monitor.paths.front());
+        if(monitor_path_equal(saved_monitor,monitor.paths.front()))v.monitor_choice=int(v.monitor_paths.size()-1u);
+    }
+    if(!saved_monitor.empty()&&v.monitor_choice==0){
+        v.monitor_labels.push_back("Saved display (unavailable or ambiguous)");v.monitor_paths.push_back(saved_monitor);
+        v.monitor_choice=int(v.monitor_paths.size()-1u);
+    }
     v.selected_steering=p.applied_strengths.steering_percent;
     v.selected_shift=p.applied_strengths.shift_percent;
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));

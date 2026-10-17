@@ -18,6 +18,14 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   recording/replay acceptance remain unqualified. No game, provider, UI or owner install ran in this batch.
 - FFB shows status, the legacy Strength/Tweaks-derived advanced effect settings and invert for the default legacy model, and the next-start `[FFB] Output` choice when the add-on is present or already selected. With `outrun-producer@2` selected, it instead shows this session's applied steering/shift percentages and two independent 0–100% controls saved as integer `[FFBProducer2]` keys for the next start. These controls do not retune this session or migrate legacy keys. The output choice never starts/stops output in the current session. Stop FFB/F8 stops the current output and tries to save `Output = none` for the next start; a failed save is reported. The force path is default-off and has no owner-attended physical qualification.
 - Cameras offers Off / Surround / Separate monitors, with the current-view status, and the separate experimental projection choice when triples are selected. The planar span is the Tweaks-parity behavior. The projected-view path remains default-off and is not qualified as three independently rendered, angle-correct views. Advanced choices include frame latency, letterboxing, and resolution from the display; changes save for the next start.
+- Cameras Advanced source successor adds **Gameplay display**, saving one opaque
+  Window.MonitorDevicePath for the next start through the existing writer and
+  failed-save rollback. Default placement preserves current behavior. Explicit
+  choices use active Windows monitor identities, with readable labels; unavailable
+  saved choices are retained and default placement applies. Separate monitors
+  uses an explicit selection as the existing racing-row rule's local center.
+  No desktop layout changes. See docs/GAMEPLAY-DISPLAY.md; affected build and
+  synthetic qualification are pending, with no game/runtime acceptance.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for
   the next ordinary start. Tests, playback and recording suppress extraction. Help describes original DDS output

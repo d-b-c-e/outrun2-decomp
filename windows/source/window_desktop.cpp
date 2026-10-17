@@ -32,6 +32,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "startup_monitor.hpp"
 #include "triple_rig.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -108,29 +109,41 @@ NativeWindow& native_window(){
     c.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));
     RegisterClassW(&c);
     namespace td=outrun::desktop;
+    const auto& monitor_state=td::startup_monitor_state();
+    const auto* selected_monitor=monitor_state.selected();
     std::string span_note;
     if(borderless){
         MONITORINFO m{};m.cbSize=sizeof m;
         GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m);
         RECT r=m.rcMonitor;
+        std::string monitor_note="the primary monitor";
+        if(selected_monitor){
+            const auto& chosen=selected_monitor->bounds;r={chosen.left,chosen.top,chosen.right,chosen.bottom};
+            monitor_note="the selected gameplay display";
+        }
         // Separate monitors (STD-015): the primary-centered racing row in physical pixels (the process is per-monitor
         // DPI aware; the left monitor's x is negative). A dashboard outside the row is ignored. No mode/layout changes.
         bool separate_span=false;   // Separate monitors found its three-monitor span
         if(triple==td::TripleScreens::separate){
             MonitorScan scan{};
-            const bool enumerated=EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&scan))!=FALSE;
+            const bool enumerated=selected_monitor||EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&scan))!=FALSE;
             td::ScreenRect span{};std::string reason;
-            if(enumerated&&!scan.failed&&td::triple_span_from_monitors(scan.rects,span,&reason)){
-                r={span.left,span.top,span.right,span.bottom};span_note="over three monitors";separate_span=true;
+            const bool found=selected_monitor?
+                td::startup_monitor_span(monitor_state.monitors,*monitor_state.selection.index,span,&reason):
+                enumerated&&!scan.failed&&td::triple_span_from_monitors(scan.rects,span,&reason);
+            if(found){
+                r={span.left,span.top,span.right,span.bottom};
+                span_note=selected_monitor?"over three monitors centered on the selected gameplay display":"over three monitors";separate_span=true;
             }else{
                 if(!enumerated||scan.failed)reason="Windows did not report all monitors";
-                span_note="refused: "+reason+" ("+std::to_string(scan.rects.size())+" found); the primary monitor";
+                span_note="refused: "+reason+" ("+std::to_string(selected_monitor?monitor_state.monitors.size():scan.rects.size())+
+                    " found); "+monitor_note;
             }
         }
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
-        if(span_note.empty())span_note="the primary monitor";
+        if(span_note.empty())span_note=monitor_note;
         // The planar span (step 2): wider than 16:9 and not Off gives one wide frustum over the whole window.
         outrun::platform::g_pc_wide_aspect=td::planar_aspect(triple,w.width,w.height);
         triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
@@ -182,10 +195,20 @@ NativeWindow& native_window(){
         if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
                                                       "no --windowed); one 16:9 view\n",td::triple_screens_name(triple));
         RECT r{0,0,1280,720};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);
-        w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,
-                             r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
+        int x=CW_USEDEFAULT,y=CW_USEDEFAULT;
         w.width=1280;w.height=720;
-        triple_status={triple,{},"a 1280x720 window (not borderless)",0.f};
+        if(selected_monitor){
+            const long frame_width=r.right-r.left-1280,frame_height=r.bottom-r.top-720;
+            const auto& work=selected_monitor->work;
+            if(work.right-work.left>frame_width&&work.bottom-work.top>frame_height){
+                const auto placed=td::center_startup_window(work,r.right-r.left,r.bottom-r.top);
+                x=int(placed.left);y=int(placed.top);r={0,0,placed.right-placed.left,placed.bottom-placed.top};
+                w.width=unsigned(r.right-frame_width);w.height=unsigned(r.bottom-frame_height);
+            }
+        }
+        w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,x,y,
+                             r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
+        triple_status={triple,{},selected_monitor?"a bordered window on the selected gameplay display":"a 1280x720 window (not borderless)",0.f};
         if(triple_angled_requested){triple_status.requested=outrun::desktop::TripleProjection::angled;
             triple_status.projection_note=outrun::desktop::triple_projection_refusal(triple_latched,false,triple,false,0.f);
             std::printf("triple screens: Angled views not applied: %s\n",triple_status.projection_note.c_str());}
@@ -324,6 +347,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
     outrun::xbox_runtime::set_hide_mouse_cursor(settings.flag("Window","WindowedHideMouseCursor",true));
+    // Presentation only, including playback's existing owner-[Window] merge. Test processes never enumerate displays.
+    outrun::desktop::configure_startup_monitor(settings.text("Window","MonitorDevicePath"),!plan.latched);
     // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
     // start (the window opens once). Anything else is logged and Off applies. A latched (test) process keeps Off: a
     // display preference must not reach the harness, as with FrameLatency. windows/docs/TRIPLE-SCREENS.md.
@@ -362,13 +387,15 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::xbox_runtime::set_frame_latency(frames);}
     // [Window] AutoDetectResolution, the Tweaks key (on unless set false, as there): while options.ini holds no resolution,
     // the render resolution takes the display's height instead of the fixed 1920x1440 default (xbox/source/main.cpp). The
-    // height is the primary monitor's (a Surround display or a three-monitor span has the same), or 720 for --windowed. A
+    // height is the selected monitor's, or the primary's by default (a span has the same height), or the bordered client. A
     // latched (test) process keeps the fixed default, as a display preference must not reach the harness. No display mode
     // is changed.
     {   const bool on=settings.flag("Window","AutoDetectResolution",true);
         unsigned height=0u;
         if(on&&!plan.latched){
-            if(!borderless)height=720u;
+            const auto* monitor=outrun::desktop::startup_monitor_state().selected();
+            if(monitor)height=outrun::desktop::selected_monitor_render_height(borderless);
+            else if(!borderless)height=720u;
             else{MONITORINFO m{};m.cbSize=sizeof m;
                  if(GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m))height=unsigned(m.rcMonitor.bottom-m.rcMonitor.top);}
         }
