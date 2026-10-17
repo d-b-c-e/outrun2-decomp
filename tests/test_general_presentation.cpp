@@ -52,14 +52,14 @@ static void policy(){
     check(contents().find("framerate=60")!=std::string::npos,"ordinary backend retains its original rate writer");
     check(std::filesystem::remove(file),"remove only the owned synthetic fixture");
 }
-static void timeline(pf::NativeRuntimeContext& context,unsigned rendered_rate,unsigned cap,std::uint32_t mode){
+static void timeline(pf::NativeRuntimeContext& context,unsigned rendered_rate,unsigned cap,std::uint32_t mode,bool general=true){
     struct Fixture {
         pf::NativeRuntimeContext* c{};
         std::uint64_t now=60000000,frequency{};
         unsigned frames{},frame_limit{},input{},sound{},control{},draw{},zero{},multiple{};
     } f;f.c=&context;
     f.frequency=std::uint64_t(rendered_rate)*60000u;f.frame_limit=rendered_rate+1u;f.c->mode_state.current=mode;
-    en::general_presentation().configure(true,std::to_string(cap));en::set_display_rate(cap);
+    en::general_presentation().configure(general,std::to_string(cap));en::set_display_rate(cap);
     pf::NativeRuntimePlatform platform{};platform.user=&f;
     platform.ticks=[](void* u)->std::uint64_t{return static_cast<Fixture*>(u)->now;};
     platform.frequency=[](void* u)->std::uint64_t{return static_cast<Fixture*>(u)->frequency;};
@@ -113,6 +113,17 @@ static void pacing_controls(){
         check(!p.configure("1",invalid)&&p.mode==1u&&p.vsync==-1,"invalid sync retains mode but uses legacy interval");
     }
     check(p.configure("bad","bad",false)&&p.mode==0u&&p.vsync==-1,"test/record/playback ignore both controls");
+    en::general_presentation().configure(false,"0");en::set_display_rate(60u);
+    for(const auto sync:{"0","1","2"}){
+        en::presentation_controls().configure("0",sync);
+        check(en::presentation_tick_timing_enabled()&&en::display_frames(),"ordinary sync override selects existing fixed tick path");
+    }
+    en::presentation_controls().configure("1","2",false);
+    check(!en::presentation_tick_timing_enabled()&&!en::display_frames(),"test/record/playback retain default timing path");
+    {auto context=std::make_unique<pf::NativeRuntimeContext>();
+     en::presentation_controls().configure("0","2");
+     timeline(*context,30u,60u,32u,false); // half-refresh menu: actual original loop still runs 60 updates
+     en::presentation_controls().configure("0","");}
     for(const unsigned mode:{0u,1u}){
         en::PresentationDeadline deadline;std::uint64_t now=1000000000ull;
         unsigned sleeps=0,yields=0,spins=0;

@@ -68,7 +68,7 @@ struct Fixture {
     }
 };
 
-static void cadence(bool experimental,std::uint32_t legacy_rate,const char* limit){
+static void cadence(bool experimental,std::uint32_t legacy_rate,const char* limit,bool sync_override=false){
     en::set_display_rate(legacy_rate);
     CHECK(en::general_presentation().configure(experimental,limit));
     Fixture f;
@@ -80,10 +80,10 @@ static void cadence(bool experimental,std::uint32_t legacy_rate,const char* limi
             f.call(0x42f330u);++ticks;
             // PcSound performs its ICS/fade update every fourth service call.
             // Check before rendering too, to distinguish a deferred/collapsed tick.
-            CHECK(f.runtime->pc_sound.stats.ticks==(experimental?ticks:renders)/4u);
+            CHECK(f.runtime->pc_sound.stats.ticks==((experimental||sync_override)?ticks:renders)/4u);
         }
         f.call(0x449050u);++renders;
-        CHECK(f.runtime->pc_sound.stats.ticks==(experimental?ticks:renders)/4u);
+        CHECK(f.runtime->pc_sound.stats.ticks==((experimental||sync_override)?ticks:renders)/4u);
         CHECK(f.host.game_frames==renders);
         CHECK(f.audio.submissions==renders); // PCM pumping remains per render
         CHECK(f.presenter.draws==renders);
@@ -91,7 +91,17 @@ static void cadence(bool experimental,std::uint32_t legacy_rate,const char* limi
     }
 }
 
-int main(){
+int main(int argc,char** argv){
+    if(argc==2&&std::string_view(argv[1])=="--vsync-controls"){
+        for(const auto sync:{"0","1","2"}){
+            CHECK(en::presentation_controls().configure("0",sync));
+            cadence(false,60u,"0",true);
+        }
+        CHECK(en::presentation_controls().configure("1","2",false));
+        cadence(false,60u,"0"); // exclusions restore the original compatibility path
+        CHECK(en::general_presentation().configure(false,"0"));en::set_display_rate(60u);
+        std::printf("Presentation controls sound: %u checks PASS (synthetic host; no device/assets)\n",checks);return 0;
+    }
     CHECK(!rt::audio_thread().run);
     CHECK(!rt::audio_thread().failed);
     cadence(false,60u,"0");

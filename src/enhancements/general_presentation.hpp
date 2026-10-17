@@ -41,6 +41,9 @@ struct PresentationControls {
     }
 };
 inline PresentationControls& presentation_controls(){static PresentationControls controls;return controls;}
+// A sync override can change menu/render cadence even without general unlock.
+// Reuse the already-qualified zero/multitick and sound owner for that consumer.
+inline bool presentation_tick_timing_enabled(){return general_presentation_enabled()||presentation_controls().vsync>=0;}
 // Nanosecond deadlines; no new OS timer or simulation-clock mutation.
 // Late frames rebase, avoiding a burst of presentations trying to catch up.
 class PresentationDeadline {

@@ -29,7 +29,7 @@ void set_display_rate(std::uint32_t rate){
     if(rate<=60u&&!(general_presentation_enabled()&&rate==0u)){display_before_tick();s.replays.clear();rate=60u;}
     s.rate=rate;
 }
-bool display_frames(){return general_presentation_enabled()||state().rate>60u;}
+bool display_frames(){return presentation_tick_timing_enabled()||state().rate>60u;}
 float display_blend(){return state().blend;}
 
 void display_before_tick(){

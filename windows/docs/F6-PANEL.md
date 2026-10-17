@@ -45,9 +45,10 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
   accurate processor-pause waiting) and independent **VSync** (existing pacing,
   Off, On, Half refresh). Existing pacing is the absent/empty default; explicit
   values request Present intervals 0/1/2. Without general unlock, an override keeps
-  the ordinary selected CPU rate. Both use the existing writer/rollback and are
+  the ordinary selected CPU rate and selects the existing fixed-tick simulation
+  and sound path. Both use the existing writer/rollback and are
   ignored in tests, recording and playback. Accurate mode has higher CPU cost.
-  Affected desktop and the new policy-only CTest are pending for this successor;
+  Affected desktop and two new policy/host CTests are pending for this successor;
   its UI/pacing/scanout are unqualified. See GENERAL-PRESENTATION.md.
 - Cameras Advanced adds **Extract scene textures** and **Extract UI textures**, independently Off
   by default. Both save their existing Graphics keys with the normal one-key writer and failed-save rollback for

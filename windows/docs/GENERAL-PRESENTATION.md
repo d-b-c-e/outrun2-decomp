@@ -105,7 +105,10 @@ The extra empty/absent default preserves this port's ordinary 60/120 integer-vbl
 pacing, or interval 0 when general presentation is enabled. F6's **Existing pacing**
 choice saves an empty value through the existing writer. With general presentation
 off, an explicit VSync override keeps a CPU cap at the ordinary selected 60/120 rate;
-it does not unlock simulation. With general presentation on, its existing cap applies,
+it does not remove that rate cap. An explicit override selects the already-qualified
+zero/multiple 60 Hz update path and fixed-tick sound owner even when general unlock
+is off, keeping a half-refresh menu at 60 simulation updates per second.
+With general presentation on, its existing cap applies,
 including 0 for no CPU cap. The existing frame-latency wait and compositor remain.
 This does not enable tearing, change monitor refresh or establish VRR/scanout behavior.
 
@@ -113,11 +116,17 @@ Strict parsing accepts only mode 0/1 and VSync empty/0/1/2. An invalid key logs 
 uses its own default, preserving the other valid key. Tests, recording and playback
 ignore both controls, as they ignore general presentation. Loading-only fast load
 still skips/reset the CPU pacer and temporarily requests interval 0 through its
-existing gate. Fixed-tick simulation and sound ownership are unchanged.
+existing gate. The simulation and sound algorithms are unchanged; the existing
+fixed-tick owner is selected for this new presentation consumer too.
 
 Pending qualification: affected cached Release desktop build and only the new
-`presentation_controls` CTest in the existing target. It uses synthetic clocks,
+`presentation_controls` and `presentation_controls_sound` CTests in existing targets.
+The first uses synthetic clocks,
 sleep and pause callbacks to exercise the actual wait loop, mode/sync policy,
 invalid/default values, exclusions, uncapped behavior and late-frame/reset behavior.
+It also runs the actual native menu loop at a synthetic 30 rendered frames per
+second with general unlock off and VSync overridden, requiring 60 updates.
+The second checks the actual host sound callback for each VSync override and the
+excluded/default compatibility path; it starts no output device or worker.
 The qualified desktop, general-presentation 5,309 and sound 244 checks at `0551df8`
 remain retained. Rendered F6 save, physical CPU/pacing and output behavior remain open.

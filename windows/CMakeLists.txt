@@ -45,6 +45,7 @@ add_executable(test_presentation_sound ${PROJECT_SOURCE_DIR}/tests/test_presenta
 target_link_libraries(test_presentation_sound PRIVATE outrun_xbox_core)
 target_compile_options(test_presentation_sound PRIVATE /W4 /WX)
 add_test(NAME presentation_sound COMMAND test_presentation_sound)
+add_test(NAME presentation_controls_sound COMMAND test_presentation_sound --vsync-controls)
 
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)
