@@ -1,5 +1,6 @@
 #include "platform_api.hpp"
 #include "native_window.hpp"
+#include "enhancements/gamepad_vibration.hpp"
 #include "platform/retail_asset_store.hpp"
 #include "platform/pc_pmt_loader.hpp"
 #include <winrt/Windows.Foundation.Collections.h>
@@ -19,6 +20,16 @@ namespace {
 namespace wgi=winrt::Windows::Gaming::Input;
 bool running=true;
 std::string retail_root;
+wgi::Gamepad vibration_pad{nullptr};
+outrun::enhancements::PadVibrationSession vibration_session;
+std::uint64_t vibration_generation=0;
+void select_vibration_pad(const wgi::Gamepad& pad){
+    if(pad==vibration_pad)return;
+    outrun::enhancements::PadVibrationSession::Writer writer;
+    if(pad)writer=[pad](const outrun::enhancements::PadMotors& m){
+        try{pad.Vibration(wgi::GamepadVibration{m.left,m.right,m.left_trigger,m.right_trigger});return true;}catch(...){return false;}};
+    if(vibration_session.select(std::move(writer))){vibration_pad=pad;++vibration_generation;}
+}
 // -1..1 (y up) to the DualSense byte (0..255, 128 centre, y down).
 std::uint8_t axis(double v,bool invert){v=std::clamp(invert?-v:v,-1.0,1.0);return std::uint8_t(std::clamp<long>(std::lround(128.0+v*(v<0?128.0:127.0)),0,255));}
 // A pad's USB identity (RawGameController); known false when it cannot be read.
@@ -69,11 +80,13 @@ void read_pad(outrun::ps5::PadSample& sample){
     // stays generic. Never infer a family from the shared DualSense layout.
     outrun::platform::texture_replacement_set_pad_family(outrun::platform::UiPromptFamily::PC);
     const auto pads=wgi::Gamepad::Gamepads();
-    if(pads.Size()==0)return;
+    if(pads.Size()==0){select_vibration_pad(nullptr);return;}
     const int pick=choose_pad(pads);
-    if(pick<0)return;
+    if(pick<0){select_vibration_pad(nullptr);return;}
     const auto selected=pads.GetAt(std::uint32_t(pick));
-    const auto r=selected.GetCurrentReading();
+    wgi::GamepadReading r{};
+    try{r=selected.GetCurrentReading();}catch(...){select_vibration_pad(nullptr);throw;}
+    select_vibration_pad(selected);
     // Only enabled UI replacements need presentation identity. Unknown IDs
     // retry through WGI every 2 s; keep that work out of the default-off path.
     if(outrun::platform::ui_texture_replacement_enabled()){
@@ -102,8 +115,14 @@ bool writable(const std::string& folder){
     std::FILE* f=std::fopen(probe.c_str(),"wb");if(!f)return false;std::fclose(f);std::remove(probe.c_str());return true;
 }
 }
+namespace outrun::xbox_runtime {
+bool gamepad_vibration_available(){return bool(vibration_pad)&&!vibration_session.failed();}
+std::uint64_t gamepad_vibration_generation(){return vibration_generation;}
+bool gamepad_vibration_write(const enhancements::PadMotors& m){return vibration_session.submit(m);}
+bool gamepad_vibration_stop(){return vibration_session.stop();}
+}
 bool application_initialize(std::string&){running=true;return true;}
-void application_shutdown(){running=false;}
+void application_shutdown(){outrun::xbox_runtime::gamepad_vibration_stop();running=false;}
 bool application_running(){return running;}
 void platform_sleep_ns(s64 ns){if(ns>0)std::this_thread::sleep_for(std::chrono::nanoseconds(ns));else std::this_thread::yield();}
 // The game folder is the home: the original data is read there and the

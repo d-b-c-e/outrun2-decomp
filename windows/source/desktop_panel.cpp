@@ -1,6 +1,8 @@
 // The F6 panel (desktop_panel.hpp): the toolkit panel's frame sequence on our own D3D11 device, as the toolkit's
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
 #include "desktop_panel.hpp"
+#include "enhancements/gamepad_vibration.hpp"
+#include "gamepad_vibration_live.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
 #include "hud_toggle.hpp"
@@ -117,6 +119,7 @@ Letterbox lb;
 // The values the pages show, read once from the settings at start; each change saves its one key at once (write_key)
 // and applies at the next game start (the owner's choice is never half-applied to a running game).
 struct Values {
+    int vibration{},vibration_strength{7},impulse{},impulse_left{25},impulse_right{25};
     int monitor_choice{};
     std::vector<std::string> monitor_labels,monitor_paths;
     int fast_load{};   // existing Performance.FramerateFastLoad: choice index 0 -> 0, 1 -> 2, next start only
@@ -195,6 +198,31 @@ void page_controls(bool advanced){
     dbce::panel::Status("Input",shim.empty()?"Native (the build's own wheel input)":"Shim (the shared input shim, [Input] Backend = Shim)");
     dbce::panel::Status("Controls",(shim.empty()?wheel_input_status_text():shim).c_str());
     dbce::panel::Text("Bindings are set in Wheelkit ([Controls] of the settings file).");
+    dbce::panel::Status("Gamepad output",gamepad_vibration_status_text());
+    {static const char* const modes[]{"Off (default)","Normal","Swap left/right","Merge motors"};
+     const int before=v.vibration;
+     if(dbce::panel::Choice("Gamepad vibration",modes,4,&v.vibration,
+         "Opt-in at the next ordinary start, only on the gamepad already selected by the native input reader. "
+         "Stops outside active gameplay, on pause, F6, focus loss, disconnect and exit; ignored in tests, recording, playback and DBCE_FFB_MUTE. "
+         "Uses an Xbox-derived native-car calculation; physical feel is unqualified. This does not configure wheel FFB."))
+         keep(&v.vibration,before,[&]{return save("Controls","VibrationMode",std::to_string(v.vibration));});}
+    if(v.vibration&&advanced){
+        const int before=v.vibration_strength;
+        if(dbce::panel::Slider("Vibration strength",&v.vibration_strength,0,10,7,"%d / 10","Next ordinary start; zero silences body and trigger motors."))
+            keep(&v.vibration_strength,before,[&]{return save("Controls","VibrationStrength",std::to_string(v.vibration_strength));});
+        static const char* const modes[]{"Off (default)","Normal","Swap left/right","Merge motors"};
+        const int prior=v.impulse;
+        if(dbce::panel::Choice("Trigger vibration",modes,4,&v.impulse,
+            "Next ordinary start. Sends independent left/right trigger commands through the existing WGI gamepad API; "
+            "a driver may approximate or merge them on devices without independent motors. Physical trigger support is unqualified."))
+            keep(&v.impulse,prior,[&]{return save("Controls","ImpulseVibrationMode",std::to_string(v.impulse));});
+        if(v.impulse){
+            for(const bool left:{true,false}){int* value=left?&v.impulse_left:&v.impulse_right;const int old=*value;
+                if(dbce::panel::Percent(left?"Left trigger gain":"Right trigger gain",value,0,100,25,"Next ordinary start; scales the mapped body channel."))
+                    keep(value,old,[&]{return save("Controls",left?"ImpulseVibrationLeftMultiplier":"ImpulseVibrationRightMultiplier",fraction(*value));});}
+        }
+        dbce::panel::Text("Output follows the selected native gamepad. VibrationControllerId must be 0; arbitrary index routing is unavailable.");
+    }
     {const int before=v.sensitivity;
      if(dbce::panel::Slider("Steering sensitivity",&v.sensitivity,10,300,100,"%d%%"))
          keep(&v.sensitivity,before,[&]{return save("Wheel","SteeringSensitivity",fraction(v.sensitivity));});}
@@ -778,6 +806,11 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.level_select=settings.flag("Misc","EnableLevelSelect",false);
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
+    {const auto rumble=enhancements::pad_vibration_settings(settings.text("Controls","VibrationMode","0"),settings.text("Controls","VibrationStrength","7"),
+        settings.text("Controls","ImpulseVibrationMode","0"),settings.text("Controls","ImpulseVibrationLeftMultiplier","0.25"),
+        settings.text("Controls","ImpulseVibrationRightMultiplier","0.25"),settings.text("Controls","VibrationControllerId","0"),true,false);
+     v.vibration=int(rumble.mode);v.vibration_strength=int(rumble.strength);v.impulse=int(rumble.impulse);
+     v.impulse_left=int(std::lround(rumble.left_gain*100));v.impulse_right=int(std::lround(rumble.right_gain*100));}
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
     v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; struct NativeCarProducerObserver; }
+namespace outrun::enhancements {struct PadMotors;}
 namespace outrun::xbox_runtime {
 // Desktop builds (windows/) adjust the game input after the gamepad mapping:
 // wheel, pedals and further devices. `runtime` is null until the game runs.
@@ -25,6 +26,11 @@ PresentOverlay& present_overlay();
 struct GamepadIdentity { bool known; std::uint16_t vid,pid; };
 using GamepadChoice=int(*)(const GamepadIdentity* pads,unsigned count);
 GamepadChoice& gamepad_choice();
+// Output to the exact pad already selected/read by platform_api, no new reader.
+bool gamepad_vibration_available();
+std::uint64_t gamepad_vibration_generation();
+bool gamepad_vibration_write(const enhancements::PadMotors&);
+bool gamepad_vibration_stop();
 // A latched (test) desktop process: home() is this run folder and the game folder is only read (data, the EXE image
 // cache). Empty in every other process. Set by the desktop entry point before or2_xbox_main.
 std::string& latched_home();

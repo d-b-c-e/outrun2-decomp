@@ -7,7 +7,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
-    source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp
+    source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp
     source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
@@ -46,6 +46,11 @@ target_link_libraries(test_presentation_sound PRIVATE outrun_xbox_core)
 target_compile_options(test_presentation_sound PRIVATE /W4 /WX)
 add_test(NAME presentation_sound COMMAND test_presentation_sound)
 add_test(NAME presentation_controls_sound COMMAND test_presentation_sound --vsync-controls)
+add_executable(test_gamepad_vibration ${PROJECT_SOURCE_DIR}/tests/test_gamepad_vibration.cpp)
+target_include_directories(test_gamepad_vibration PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_gamepad_vibration PRIVATE cxx_std_17)
+target_compile_options(test_gamepad_vibration PRIVATE /W4 /WX)
+add_test(NAME gamepad_vibration COMMAND test_gamepad_vibration)
 
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)

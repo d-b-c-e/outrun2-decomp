@@ -9,6 +9,7 @@
 #include "enhancements/general_presentation.hpp"
 #include "telemetry_forza.hpp"
 #include "ffb_live.hpp"
+#include "gamepad_vibration_live.hpp"
 #include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
 #include "hud_toggle.hpp"
@@ -83,14 +84,14 @@ BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM state){
     return TRUE;
 }
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
-    if(message==WM_CLOSE){closed=true;return 0;}
+    if(message==WM_CLOSE){outrun::desktop::gamepad_vibration_stop();closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
     // window loses the focus. Alt+F4 and the other system keys still reach DefWindowProc.
     if(message==WM_KEYDOWN||message==WM_SYSKEYDOWN||message==WM_KEYUP||message==WM_SYSKEYUP){
         const unsigned scan=(unsigned(l)>>16)&0xffu;
         if(scan)outrun::desktop::desktop_keys()[scan|((unsigned(l)>>24)&1u?0x80u:0u)]=message==WM_KEYDOWN||message==WM_SYSKEYDOWN?0x80u:0u;
     }
-    if(message==WM_KILLFOCUS)outrun::desktop::desktop_keys_clear();
+    if(message==WM_KILLFOCUS){outrun::desktop::desktop_keys_clear();outrun::desktop::gamepad_vibration_stop();}
     // A device arrived or left (DBT_DEVNODES_CHANGED reaches every top-level window): the native wheel path rescans at
     // its next input sample instead of on a 2 s timer (wheel_rescan.hpp).
     if(message==WM_DEVICECHANGE)outrun::desktop::wheel_input_devices_changed();
@@ -657,6 +658,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // OR2_FFB_TRACE in ordinary play); no device output at all.
     outrun::desktop::ffb_configure(settings,test_like,private_home);
     outrun::desktop::ffb_wrap_input_filter();
+    outrun::desktop::gamepad_vibration_configure(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
+    outrun::desktop::gamepad_vibration_wrap_input_filter();
     // Optional producer@2 trace: ordinary, non-recording diagnostic only.
     // Test and playback processes already cleared all OR2_ switches above.
     if(const wchar_t* trace=_wgetenv(L"OR2_FFB_PRODUCER2_SHADOW_TRACE")){
@@ -672,7 +675,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
+    struct PadOutputCleanup {~PadOutputCleanup(){outrun::desktop::gamepad_vibration_shutdown();}} pad_output_cleanup;
     const int result=or2_xbox_main(int(args.size()),argv.data());
+    outrun::desktop::gamepad_vibration_shutdown();
     outrun::desktop::desktop_panel_shutdown();
     outrun::desktop::ffb_shadow_shutdown();
     outrun::desktop::telemetry_shutdown();
