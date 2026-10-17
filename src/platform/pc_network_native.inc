@@ -66,6 +66,9 @@ bool network_native(NativeRuntimeContext& c,State& s,std::uint32_t pc,std::uint3
     N net(c,s);
     auto a=[&](std::size_t k){return k<n?args[k]:0u;};
     switch(pc){
+    case 0x5349b0u:
+        if(s.socket_bridge.server_override().empty())return false;
+        eax=s.socket_bridge.resolve_server(s.memory,s.socket_bridge.server_override(),a(1),a(2));return true;
     case 0x4e7800u:
         if(!g_pc_enable_level_select)return false; // preserve the translated stock screen when off
         {

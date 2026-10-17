@@ -25,7 +25,15 @@ struct PcNetworkPlatform {
     // Next datagram into data (at most size bytes); bytes, 0 when none is waiting, -1 on error.
     std::function<int(int socket,std::uint8_t* data,std::uint32_t size,std::uint32_t& address,std::uint16_t& port)> receive_from;
     std::function<std::vector<PcNetworkInterface>()> interfaces;
+    // Optional IPv4 resolver; addresses are network byte order. No callback means no DNS.
+    std::function<std::vector<std::uint32_t>(const std::string&)> resolve;
+    // Optional exact Winsock error. For receive_from==0, error 0 is a valid
+    // empty datagram; absent/10035 means no pending data (legacy contract).
+    std::function<std::uint32_t()> last_error;
 };
+// Empty by default. Invalid names refuse and clear the previous override.
+bool native_network_set_server_override(const std::string&);
+const std::string& native_network_server_override();
 void native_network_set_platform(PcNetworkPlatform);
 // The frame's 454670.
 bool native_network_tick_454670(NativeRuntimeContext&);

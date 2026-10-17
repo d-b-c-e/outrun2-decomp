@@ -2,6 +2,7 @@
 // BSD sockets; interface discovery and the host test LAN where getifaddrs and
 // Unix sockets exist (Linux, macOS).
 #include "system/network_bsd.hpp"
+#include "system/network_windows.hpp"
 #if __has_include(<sys/socket.h>)
 #define OR2_NET_BSD 1
 #endif
@@ -135,6 +136,11 @@ PcNetworkPlatform pc_network_bsd_platform(){
     return p;
 }
 #else
-PcNetworkPlatform pc_network_bsd_platform(){return {};}
+PcNetworkPlatform pc_network_bsd_platform(){
+#if defined(_WIN32)
+    if(!native_network_server_override().empty())return pc_network_windows_platform();
+#endif
+    return {};
+}
 #endif
 }

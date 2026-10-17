@@ -61,6 +61,10 @@ add_executable(test_desktop_profile_writes ${PROJECT_SOURCE_DIR}/tests/test_fron
 target_link_libraries(test_desktop_profile_writes PRIVATE outrun_xbox_core)
 target_compile_options(test_desktop_profile_writes PRIVATE /W4 /WX)
 add_test(NAME desktop_profile_writes COMMAND test_desktop_profile_writes)
+add_executable(test_desktop_network_sockets ${PROJECT_SOURCE_DIR}/tests/test_network_sockets.cpp)
+target_link_libraries(test_desktop_network_sockets PRIVATE outrun_xbox_core)
+target_compile_options(test_desktop_network_sockets PRIVATE /W4 /WX)
+add_test(NAME desktop_network_sockets COMMAND test_desktop_network_sockets)
 
 add_executable(test_desktop_controls tests/test_desktop_controls.cpp source/controls_store.cpp source/desktop_settings.cpp source/test_injection.cpp)
 target_include_directories(test_desktop_controls PRIVATE source vendor/controls)

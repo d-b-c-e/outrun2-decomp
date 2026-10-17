@@ -47,6 +47,11 @@ contracts for user/roaming-profile behavior and buffer ownership.
 
 ## Server override: actual missing dependencies
 
+This section records the earlier login-only build `5bb80ce`. Its native
+successor adds the exercised DNS/IPv4/Windows UDP consumer described in
+[NETWORK-TRANSPORT.md](NETWORK-TRANSPORT.md); connected transport and online
+acceptance remain separate gaps.
+
 `DemonwareServerOverride` is not exposed or consumed in this candidate. Tweaks
 reference `51acc201`, `src/hooks_misc.cpp`, redirects `bdPlatformSocket`
 resolution at `5349B0` to its configured hostname (default `clarissa.port0.org`)

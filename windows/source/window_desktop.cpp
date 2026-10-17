@@ -25,6 +25,7 @@
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_network.hpp"
 #include "platform/race_draw_distance.hpp"
 #include "platform/race_particles.hpp"
 #include "platform/race_input.hpp"
@@ -648,6 +649,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // A playback process is as a latched one here: no telemetry, the software force stream into its home, no device
     // output, no saves; and its panel never opens (the badge only).
     const bool test_like=plan.latched||playback;
+    const bool ordinary_network=!test_like&&intake.kind!=session::Intake::Kind::Record;
+    const auto server=ordinary_network?settings.text("Misc","DemonwareServerOverride"):std::string();
+    if(!outrun::platform::native_network_set_server_override(server))
+        std::printf("network: invalid server override refused; Windows transport remains off\n");
+    else if(!server.empty())std::printf("network: opt-in IPv4 DNS/UDP server override configured; online play unqualified\n");
     outrun::desktop::login_protection_configure(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
     // Preserve the native records: the level menu's Shift modifier is separate
     // final input, captured in ordinary recordings and supplied by consumed replay.
