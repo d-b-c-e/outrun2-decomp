@@ -51,7 +51,7 @@ continuation released at `2026-10-17T00:35:05.3224112Z`. Shader tables were read
 memory only, and synthetic outputs used isolated TEMP. No game, provider or install ran. Ordinary-game extraction
 and rendered behavior remain unobserved. Canonical native checkout `235bbb3` and owner assets remain untouched.
 
-## UI extraction (October 16 source successor, unbuilt)
+## UI extraction (October 16 private candidate, qualified offline)
 
 `[Graphics] UITextureExtract = true` independently enables original UI DDS output, default false and next ordinary
 start only. It shares scene extraction's path validation, format/size/mip validation, XXH32/FXT naming, dedup set and
@@ -75,11 +75,19 @@ UI DDS admitted by these 2D consumers is DXT1/3/5 or A8R8G8B8-compatible 32-bit 
 UI and scene statistics are separate; both are printed at shutdown. Replacement lookup stays disabled when only
 extraction is enabled. Missing, blocked or pre-existing dump destinations cannot change stock creation/pack output.
 The existing sprite and START fixtures add byte-preservation, empty-entry index, replacement/fallback, refused
-resource, stored-mip, dedup/existing-file and blocked-output cases. Planned qualification is the affected desktop
-build and these existing fixtures, plus the PMT fixture because the shared scene extractor is refactored here.
-No build/test/runtime acceptance is claimed for this UI successor yet.
+resource, stored-mip, dedup/existing-file and blocked-output cases. ClangCL Release desktop and affected targets
+built at `fb762e2`; all three named existing fixtures passed once with zero skipped: `pc_pmt_loader` 315 checks
+(shared scene helper regression), `pc_sprite_replacement` 208, and `retail_gpu_cache_r153` 259 (782 checks total).
+Original result, build/test logs, JUnit, LastTest.log and binary are in hub
+`artifacts/outrun-ui-extraction-20261016/build-01`. The desktop is 23,884,800 bytes, SHA-256
+`da2c7773a06d712a9e2e736a5139e2103444f287046411e2be83430e3ecfb450`.
+The exact lease was released at `2026-10-17T00:53:01.0333036Z` with owned children quiescent and process environment
+restored, and handed directly to the next worker before documentation. Inputs used read-only original shader/START
+assets and synthetic files in isolated TEMP. No game, provider or owner install ran in this batch. Ordinary-game
+extraction, actual GPU presentation and rendered F6 interaction remain unqualified; native and Wheelkit exposure
+and the accepted installed candidate remain separate evidence layers.
 
-## Pad prompt folders (source candidate, unbuilt)
+## Pad prompt folders (qualified offline, runtime pending)
 
 Tweaks reference: local dbce-mods-outrun-2006 commit
 `51acc201d70ebb1ec1151f7fa2ebaa627be915df`, hooks_textures.cpp:623-669,
@@ -144,9 +152,10 @@ families/unknown products, six hashes, non-prompt/scene non-latch, first non-PC
 latch/disconnect/configure reset, all ten path positions, missing/other-family
 folders, invalid file, off/stock bytes, and pre-whitelist FXT remapping. Synthetic
 DDS hash-tail inversion supplies exact prompt hashes without retail assets.
-No test, compilation or runtime was executed for this source slice. Lola's
-frozen c5d3a9f checkout, CMake/startup/Shift/highway work and active batch remain
-unchanged. Woden's queued ordinary run takes priority over qualification here.
+The original slice was source-only. Cumulative `fb762e2` now builds the desktop
+and passes the existing sprite fixture (208 checks, including the synthetic
+prompt-folder cases above and UI extraction additions). This does not establish
+actual physical WGI selection, rendered prompt artwork or runtime acceptance.
 
 ## Logical size (UI)
 
