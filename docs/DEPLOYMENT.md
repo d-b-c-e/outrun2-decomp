@@ -61,7 +61,7 @@ presentation; the deployment sets the following.
 
 | Feature | Required setting | Assets | State today |
 | --- | --- | --- | --- |
-| HD interface | `[Graphics] UITextureReplacement = true`; `TextureBaseFolder` pointing at the pack | The owner's existing pack at `Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Tweaks)/textures/load`: 32 UI banks, 257 DDS (about 2.5 GB), including the frontend, HUD and loading banks. Provenance: hub `artifacts/outrun-ui-textures-20261012/pack-copy-manifest.csv`, and `artifacts/outrun-course-loading-runtime-20261016` for START | Off by default; no decomp folder has `textures/` |
+| HD interface | `[Graphics] UITextureReplacement = true`. `TextureBaseFolder` must name a folder inside the install: the reader refuses `..`, drive letters and leading slashes (`window_desktop.cpp:640-646`) | The owner's existing pack at `Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Tweaks)/textures/load`: 32 UI banks, 257 DDS (about 2.5 GB), including the frontend, HUD and loading banks. Provenance: hub `artifacts/outrun-ui-textures-20261012/pack-copy-manifest.csv`, and `artifacts/outrun-course-loading-runtime-20261016` for START | Off by default; no decomp folder has `textures/` |
 | HD scene textures | `[Graphics] SceneTextureReplacement = true` (Tweaks enables both) | The same pack's scene banks | Off; memory cost to be measured in the smoke |
 | Widescreen | `options.ini` `widescreen=1`, `resolution=2560x1440` | none | Source default 4:3. The owner's `E:/Games/OutRunDecompSmoke` already has `widescreen=1`; the LaunchBox "(Decomp)" folder does not |
 | 2D UI layout | `[Graphics] UIScalingMode`: decomp default `2` (centred 4:3). Tweaks' default `1` widens the HUD but has documented gaps ([UI-SCALING](../windows/docs/UI-SCALING.md)) | none | Keep `2` unless the owner chooses `1` |
@@ -69,9 +69,16 @@ presentation; the deployment sets the following.
 | Controls, FFB | The owner's existing `[Controls]` from Wheelkit and `[FFB]` choice, preserved | `WheelFfb.dll` only if the owner already uses the force add-on | Physical feel is owner acceptance |
 
 Rules:
-- Never copy or modify the owner's originals.
+- Never modify the owner's originals; read them only.
 - Keep packs and game files out of git and out of the private ZIP.
-- Prefer a relative `TextureBaseFolder` to the sibling Tweaks folder over copying 3 GB, if the reader accepts it. Otherwise copy only the UI banks named in the manifest.
+- Copy only the UI banks named in the existing manifests into the install's `textures/load`, from the Tweaks pack (read only). That is 32 banks, 257 DDS, plus the newer START assets their completed provenance covers. Use no link or path bypass.
+
+First deployment choices:
+- UI replacement on; scene replacement off. Scene replacement is the next toggle once the smoke shows memory headroom.
+- `widescreen=1` at 2560x1440 (already set in the target).
+- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. Fall back to `Planar` if the smoke shows an angled defect.
+- `UIScalingMode` stays `2`.
+- The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
 
 ## Deploy target, backup and rollback
 
@@ -81,6 +88,18 @@ Hule owns the receipt. Read-only facts so far:
 - The folder `Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Decomp)/` holds an Oct 10 `OutRunDesktop.exe` (20919296 B), with `options.ini` set to `reflections=1` only.
 - The newer owner route is `E:/Games/OutRunDecompSmoke`: Oct 15 exe, 23613952 B, `widescreen=1`. Its historical update script and rollback pair are in hub `artifacts/outrun-qualified-deployment-20261015/`.
 
-The target is chosen from those records, then backed up (exe, INI, `options.ini`,
-saves) before the exact validated artifact is installed. Rollback restores the
-backed-up exe and INI.
+**Decision (kobe 269317): the target is `E:/Games/OutRunDecompSmoke`.**
+- Hule's read-only receipt is hub `.local/outrun-alpha-hule-20261018/deployment-readiness.json`. The current exe is `341bc049…`, matching the installed `d86f1fc` record and its capabilities pair. 16 baseline files are pinned, including saves and companions.
+- Before install, a new backup goes to `.dbce-backups/consolidated-20261018-01`; the existing rollback receipts are kept.
+- The session-capabilities/install tuple is generated fresh from the new build with the existing generator, not by hand-editing the old updater's pinned hashes.
+- Rollback restores the backed-up exe, INI, `options.ini` and capabilities, and removes the staged `textures/load`.
+
+**Launch route.** The real launch path gets its own LaunchBox entry, added with
+the Launchbox-Racing tooling `scripts/add-outrun-decomp.py` (`a2cf580`).
+- It registers "OutRun 2006: Coast 2 Coast (Decomp)", runs `OutRunDesktop.exe` in the target via a relative `ApplicationPath`, and adds it to the Outrun Collection playlist.
+- It is a dry run by default. `--apply` refuses while LaunchBox or BigBox runs and backs up both XML files.
+- The Tweaks and Redux entries and their Stream Deck key are unchanged.
+
+**Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d` carries only
+the five OutRun commits, under a unique private version. It is installed through
+Wheelkit's own route, with its own qualification and rollback.
