@@ -4,7 +4,7 @@
 # bound by the wheel toolkit's controls contract (vendor/controls). Built with
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_monitor.cpp source/desktop_settings.cpp source/wheel_input.cpp
-    source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp shim/parse.cpp
+    source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp source/render_test.cpp source/render_test_capture.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
@@ -359,8 +359,8 @@ target_compile_features(test_triple_screens PRIVATE cxx_std_17)
 target_compile_options(test_triple_screens PRIVATE /W4 /WX)
 add_test(NAME triple_screens COMMAND test_triple_screens)
 
-add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp shim/parse.cpp)
-target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)
+add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp source/render_test.cpp shim/parse.cpp)
+target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/xbox/source)
 target_compile_features(test_fence PRIVATE cxx_std_17)
 target_compile_options(test_fence PRIVATE /W4)
 target_compile_definitions(test_fence PRIVATE _CRT_SECURE_NO_WARNINGS)

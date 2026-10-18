@@ -229,6 +229,17 @@ Known limits, judged at the rig, before any default (nene 30684):
 - the side panels miss the screen-space (rhw) particles, which land on the centre only;
 - objects behind the eye plane stay culled: `g_pc_view_half_width` passes everything in front, not the union of the
   three frusta (needed beyond 180 degrees);
+  - **traffic cars, fixed (2026-10-17, `meze/outrun-triple-car-cull-20261017`):** with the matched eye the side panels
+    reach about 121 degrees, so this did matter. 4F02D0's near test (+BC: 0.1 by default, 1.0 in the chase and bumper
+    views with the default-off FixZBufferPrecision) culled a car once its centre was radius - near behind the eye plane:
+    2.1 to 2.4 m by default, 1.2 to 1.5 m with the fix (radii 2.2 to 2.5 m, model table 650500 + 18). Its front half
+    (about 2.2 m ahead of the centre) was then still at or ahead of the eye plane, on the side panel: every overtaken car
+    vanished mid-panel. Under three views 4F02D0 now hides a car only when its sphere lies wholly behind both side panels' outer
+    edges (race_traffic `triple_outer_edges`, from the same corrections the device uses). Car bit 0x80 only gates the
+    draw/LOD list 46DF50 (LOD 0 up to 5 m behind) and the shadow 4ADAC0, so the simulation is unchanged. Planar and 16:9
+    keep the near test. Source and offline checks only (`test_triple_screens`); not yet seen in a rendered run.
+  - course objects (4F0E40) keep the near test: their visible bit (+54 bit 0) also gates collision touches and Heart
+    Attack evaluation, so widening it is a gameplay change, not a presentation one;
 - the eye distance is the matched-FOV one; a physical eye distance is a later option, under the F6 selector.
 
 The `three-projections` status needs counted passes plus a WGC check of the seams, not counts alone.
@@ -402,6 +413,32 @@ sana 37757).**
 - `test_d3d11_vertex_path` passes with OR2_EXE (the renderer unchanged).
 - At the rig only after review, muted, in the perf copy: one Angled run with `MatchGameFov = false`, a window clip,
   and the side panels' outer edges checked near 91 degrees.
+
+## Rendering tests (sana 215675, 2026-10-17)
+
+A latched (test) process keeps Screens Off and refuses Angled, so no automated run could show three views. The opt-in
+rendering test (`windows/source/render_test.hpp`) admits presentation only, through the test's own request:
+- **The request:** `render-test.txt` beside `inject.on`, strict, bound to the session's nonce. It sets `screens`, `views`,
+  and a frame burst (`frames` 0..300, `every`, `after` the race entry, `scale` 1/2/4).
+- **Absent:** the test process is unchanged. A malformed request refuses the run before the game initializes (the
+  fence's refusal note).
+- **What stays latched:** the run folder as home, the game folder read only, OR2_ switches cleared, offline, no force
+  output (`ffb_device` refuses a latched process), no gamepad vibration, and the fixture rig with the matched eye.
+  `[Window]` keeps the test defaults.
+- **Frames:** the game's own back buffer, after the overlay, written by `d3d11_display.cpp` `screenshot` into
+  `<run>\frames\frame-NNNN.ppm`. They are exclusive (no overwrite), box-downscaled, and bounded to 300 frames and 1 GiB.
+  The burst is armed by the first race input sample (mode 16/18).
+- **Driver:** `windows/tests/shim_first_loop/run.py --render screens=separate,views=angled,frames=240,every=3,after=360
+  --drive 45`. Input is the shim's application-level `inject action` (throttle held, steering right and left in turn
+  after 12 s). There is no OS input or capture. The game runs borderless (not `--windowed`) when a span is asked for.
+  The frames come back in the evidence copy (`out\run\frames`).
+- **Evidence label:** synthetic test input and the game's own frames. Not owner play, not physical input, not a timing
+  measurement (each captured frame costs a GPU read-back).
+- **Checks:**
+  - `test_fence`: the parse with 25 refusals, the fence step against a real prepared run (game tree byte-identical,
+    exclusive keep and frames folder, refusals), and the burst's due frames and downscale.
+  - `shim_first_loop_timing`: the drive's batches and budget, and the request's bytes.
+  - `write_audit`: the four new writers are classified `fence`.
 
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 

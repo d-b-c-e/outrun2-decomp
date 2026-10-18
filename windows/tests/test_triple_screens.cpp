@@ -7,6 +7,7 @@
 #include "platform/c2c_ui_spacing.hpp"
 #include "platform/race_translated.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/race_traffic.hpp"
 #include "driving/pc_camera.hpp"
 #include <array>
 #include <cmath>
@@ -427,6 +428,48 @@ int main(){
         Frustum fr{};CHECK(perspective_frustum(perspective_off_center_rh(-0.3,0.5,-0.2,0.4,0.25,3000.),fr));
         CHECK(std::fabs(fr.l+0.3)<1e-12&&std::fabs(fr.r-0.5)<1e-12&&std::fabs(fr.b+0.2)<1e-12&&std::fabs(fr.t-0.4)<1e-12&&
               std::fabs(fr.n-0.25)<1e-12&&std::fabs(fr.f-3000.)<1e-6);
+    }
+    // Traffic cars under three views (race_traffic 4F02D0, triple_outer_edges): the fixture rig's corrections at the game's
+    // race projection (96.4 degrees across, FixZBufferPrecision's chase near 1.0). The side panels end near 121 degrees
+    // from the heading; a car one lane over whose centre is 1.35 m behind the eye still shows its front on the right
+    // panel, where the game's near test (near > radius - z) would cull it. Only the wedge behind both panels is hidden.
+    {
+        namespace pf=outrun::platform;
+        const auto rig=[](const float* projection,float* out){
+            Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
+            TripleViews v{};if(!triple_views(p,fixture_rig(8.),v))return false;
+            for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+            return true;};
+        const double pi=3.14159265358979323846;
+        const float fov_y=float(2.*std::atan(1./1.589)),aspect=16.f/9.f;
+        const auto e=pf::triple_outer_edges(rig,fov_y,aspect,1.f,5000.f,0.f,0.f);
+        CHECK(e.ok);
+        CHECK(std::fabs(e.left[3])<1e-5f&&std::fabs(e.right[3])<1e-5f&&std::fabs(e.left[1])<1e-5f&&std::fabs(e.right[1])<1e-5f);
+        // The outer edge's angle from the heading: the right plane's zero along (sin a, 0, -cos a).
+        const auto edge_deg=[&](const std::array<float,4>& q,double sign){
+            double lo=90.,hi=179.;
+            for(int k=0;k<60;++k){const double a=(lo+hi)/2.*pi/180.;
+                (double(q[0])*sign*std::sin(a)-double(q[2])*std::cos(a)>0.?lo:hi)=(lo+hi)/2.;}
+            return lo;};
+        CHECK(edge_deg(e.right,1.)>120.&&edge_deg(e.right,1.)<122.);
+        CHECK(std::fabs(edge_deg(e.left,-1.)-edge_deg(e.right,1.))<1e-3);
+        const float car_r=2.3f;   // 650500 + 18: an ordinary traffic car's sphere
+        const auto near_culls=[&](float z){return 1.f>car_r-z;};   // 4F02D0's test, near 1.0, z the view depth
+        CHECK(near_culls(1.35f)&&!pf::triple_sphere_hidden(e,3.75f,-1.5f,1.35f,car_r));
+        CHECK(!pf::triple_sphere_hidden(e,-3.75f,-1.5f,1.35f,car_r));
+        const auto at=[&](double deg,double dist,float radius){const double a=deg*pi/180.;
+            return pf::triple_sphere_hidden(e,float(dist*std::sin(a)),-1.5f,float(-dist*std::cos(a)),radius);};
+        CHECK(!at(0.,50.,car_r)&&!at(110.,10.,car_r)&&!at(-110.,10.,car_r));
+        CHECK(!at(123.,10.,car_r)&&!at(-123.,10.,car_r));   // straddles the outer edge
+        CHECK(at(140.,30.,car_r)&&at(-140.,30.,car_r)&&at(180.,20.,car_r));
+        // The physical eye (MatchGameFov = false, 33.6 degrees vertical at the fixture's 660 mm): sides end near 91.
+        const float fov_phys=float(2.*std::atan(708.4/2./660./(16./9.)));
+        const auto p=pf::triple_outer_edges(rig,fov_phys,aspect,1.f,5000.f,0.f,0.f);
+        CHECK(p.ok&&edge_deg(p.right,1.)>90.&&edge_deg(p.right,1.)<92.);
+        // No corrections, a refused projection, a degenerate camera: not ok (4F02D0 keeps its near test).
+        CHECK(!pf::triple_outer_edges(nullptr,fov_y,aspect,1.f,5000.f,0.f,0.f).ok);
+        CHECK(!pf::triple_outer_edges([](const float*,float*){return false;},fov_y,aspect,1.f,5000.f,0.f,0.f).ok);
+        CHECK(!pf::triple_outer_edges(rig,0.f,aspect,1.f,5000.f,0.f,0.f).ok&&!pf::triple_outer_edges(rig,fov_y,aspect,0.f,5000.f,0.f,0.f).ok);
     }
     std::printf("triple screens: %u checks\n",checks);
     return 0;

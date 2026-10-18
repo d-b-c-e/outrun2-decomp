@@ -2,6 +2,7 @@
 #include "enhancements/fast_load.hpp"
 #include "enhancements/general_presentation.hpp"
 #include "display_fit.hpp"
+#include "frame_capture.hpp"
 #include "frame_profile.hpp"
 #include "native_window.hpp"
 #include "platform_api.hpp"
@@ -186,20 +187,42 @@ void D3D11Display::pc_frame_window(ID3D11ShaderResourceView* texture){
     const D3D11_VIEWPORT vp{float(fit.x),float(fit.y),float(fit.width),float(fit.height),0,1};g.context->RSSetViewports(1,&vp);
 }
 // Development: OR2_XBOX_SCREENSHOT_DIR=<folder> writes every 60th presented frame as frame-NNNN.ppm.
+// A rendering test (frame_capture.hpp, configured only by a latched test run) writes its bounded burst into the run's
+// own frames folder, never over a file.
 void screenshot(Graphics& g){
     static const char* dir=std::getenv("OR2_XBOX_SCREENSHOT_DIR");static unsigned frame=0;
-    if(!dir||(frame++%60u)!=0u)return;
+    auto& cap=frame_capture();
+    bool test=false;
+    if(!cap.folder.empty()&&cap.armed.load(std::memory_order_relaxed)){
+        test=cap.bytes<cap.byte_limit&&frame_capture_due(cap.since_armed,cap.written,cap.frames,cap.every,cap.after);
+        ++cap.since_armed;
+    }
+    const bool dev=dir&&(frame++%60u)==0u;
+    if(!dev&&!test)return;
     ComPtr<ID3D11Texture2D> back;if(FAILED(g.swap_chain->GetBuffer(0,IID_PPV_ARGS(&back))))return;
     D3D11_TEXTURE2D_DESC d{};back->GetDesc(&d);d.Usage=D3D11_USAGE_STAGING;d.BindFlags=0;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;d.MiscFlags=0;
     ComPtr<ID3D11Texture2D> staging;if(FAILED(g.device->CreateTexture2D(&d,nullptr,&staging)))return;
     g.context->CopyResource(staging.Get(),back.Get());
     D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(g.context->Map(staging.Get(),0,D3D11_MAP_READ,0,&m)))return;
+    if(dev){
     char name[64];std::snprintf(name,sizeof name,"/frame-%04u.ppm",frame/60u);
     if(std::FILE* f=std::fopen((std::string(dir)+name).c_str(),"wb")){
         std::fprintf(f,"P6\n%u %u\n255\n",d.Width,d.Height);
         for(unsigned y=0;y<d.Height;++y){const auto* row=static_cast<const std::uint8_t*>(m.pData)+std::size_t(y)*m.RowPitch;
             for(unsigned x=0;x<d.Width;++x)std::fwrite(row+x*4,3,1,f);}
         std::fclose(f);}
+    }
+    if(test){
+        unsigned w=0,h=0;
+        const auto rgb=frame_capture_rgb(static_cast<const std::uint8_t*>(m.pData),m.RowPitch,d.Width,d.Height,cap.scale,w,h);
+        wchar_t name[32];std::swprintf(name,32,L"\\frame-%04u.ppm",cap.written);
+        if(std::FILE* f=_wfopen((cap.folder+name).c_str(),L"wbx")){
+            std::fprintf(f,"P6\n%u %u\n255\n",w,h);
+            std::fwrite(rgb.data(),1,rgb.size(),f);
+            std::fclose(f);
+        }
+        ++cap.written;cap.bytes+=rgb.size();   // counted when the write fails too: the burst stays bounded
+    }
     g.context->Unmap(staging.Get(),0);
 }
 // FRAME RATE (enhancements/frame_rate): the output is put at 120 Hz once,

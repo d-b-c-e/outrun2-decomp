@@ -9,6 +9,7 @@
 #include "platform/vehicle_body_init.hpp"   // 516E10 rigid body (course objects)
 #include "driving/pc_crash.hpp"            // 513650 motion channels (course objects)
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,39 @@ namespace outrun::platform {
 ObjectScreenBounds object_screen_bounds_4f0e40(float k_low,float k_high,float half_width,bool fix){
     if(fix&&half_width!=320.0f)return {-half_width,half_width};
     return {k_low,k_high};
+}
+TripleOuterEdges triple_outer_edges(PcTripleCorrections corrections,float fov_y,float aspect,float near_z,float far_z,
+                                    float shift_x,float shift_y){
+    if(!corrections||!(fov_y>0.0f&&fov_y<3.1f)||!(aspect>0.0f)||!(near_z>0.0f)||!(far_z>near_z))return {};
+    // 404310: the frustum at the near plane, then D3DXMatrixPerspectiveOffCenterRH.
+    const double t=std::tan(double(fov_y)*0.5)*near_z,u=double(aspect)*t,zn=near_z,zf=far_z;
+    const double top=t+t*shift_y,bottom=-t+t*shift_y,right=u+u*shift_x,left=-u+u*shift_x;
+    float p[16]{};
+    p[0]=float(2.0*zn/(right-left));p[5]=float(2.0*zn/(top-bottom));
+    p[8]=float((left+right)/(right-left));p[9]=float((top+bottom)/(top-bottom));p[10]=float(zf/(zn-zf));p[11]=-1.0f;
+    p[14]=float(zn*zf/(zn-zf));
+    float c[48];
+    if(!corrections(p,c))return {};
+    TripleOuterEdges e;
+    // Row j of P x C[i] holds view component j's share of each clip coordinate: right x <= w, left x >= -w.
+    for(std::size_t j=0;j<4;++j){
+        double l[4]{},r[4]{};
+        for(std::size_t k=0;k<4;++k)for(std::size_t i=0;i<4;++i){
+            l[k]+=double(p[j*4+i])*c[i*4+k];r[k]+=double(p[j*4+i])*c[32+i*4+k];
+        }
+        e.left[j]=float(l[3]+l[0]);e.right[j]=float(r[3]-r[0]);
+    }
+    for(auto* q:{&e.left,&e.right}){
+        const double n=std::sqrt(double((*q)[0])*(*q)[0]+double((*q)[1])*(*q)[1]+double((*q)[2])*(*q)[2]);
+        if(!(n>0.0&&n<1e30))return {};
+        for(auto& v:*q)v=float(v/n);
+    }
+    e.ok=true;
+    return e;
+}
+bool triple_sphere_hidden(const TripleOuterEdges& e,float x,float y,float z,float radius){
+    const auto side=[&](const std::array<float,4>& q){return double(q[0])*x+double(q[1])*y+double(q[2])*z+q[3];};
+    return side(e.left)< -double(radius)&&side(e.right)< -double(radius);
 }
 namespace {
 using driving::X87;
@@ -2793,10 +2827,14 @@ struct T {
         pf(out+0xc,driving::x87_float(driving::x87_abs(X87(smul(f32(in+0xc),scale)))));
         return X87(scale);
     }
-    // 4F02D0(camera, sphere, out): the projected sphere inside the depth range and the screen bounds.
-    std::uint32_t view_4f02d0(std::uint32_t cam,std::uint32_t in,std::uint32_t out){
+    // 4F02D0(camera, sphere, out): the projected sphere inside the depth range and the screen bounds. With three views
+    // (edges) the side panels' outer edges replace the near test (triple_outer_edges); 0x80 only gates the car's draw.
+    std::uint32_t view_4f02d0(std::uint32_t cam,std::uint32_t in,std::uint32_t out,const TripleOuterEdges* edges=nullptr){
         project_449e70(f32(cam+0xb4),in,out);
-        if(gt(f32(cam+0xbc),ssub(f32(in+0xc),f32(out+8))))return 0;
+        if(edges){
+            const auto b=driving::pc_matrix_point(c.matrices,vec(in));
+            if(triple_sphere_hidden(*edges,b.x,b.y,b.z,f32(in+0xc)))return 0;
+        }else if(gt(f32(cam+0xbc),ssub(f32(in+0xc),f32(out+8))))return 0;
         if(gt(ssub(ssub(0.0f,f32(out+8)),f32(in+0xc)),f32(cam+0xc0)))return 0;
         // x bounds 5DA2D4 / 6281C8 (-320 / 320): the port's widescreen view widens them.
         const float half=g_pc_view_half_width==320.0f?K(0x6281c8u):g_pc_view_half_width;
@@ -2812,6 +2850,10 @@ struct T {
         Frame Q(*this,0x40);
         const std::uint32_t cam=u32(0x79f574u);
         push_load(cam+0x140);
+        // Three views: the side panels' outer edges from the projection 484BD0 last built (+A0 FOV, +B8 aspect, +BC / +C0
+        // near / far, +C4 / +C8 shift), so a car beside or just behind the eye stays drawn while a side panel shows it.
+        const auto edges=g_pc_triple_corrections?triple_outer_edges(g_pc_triple_corrections,f32(cam+0xa0),f32(cam+0xb8),
+            f32(cam+0xbc),f32(cam+0xc0),f32(cam+0xc4),f32(cam+0xc8)):TripleOuterEdges{};
         std::uint32_t best=0x19a;
         for(std::uint32_t id=8,rec=0x799d18u;rec<0x79a2b8u;rec+=0x3cu,++id){
             if((u8(0x79fb48u+id)&3u)!=2u)continue;
@@ -2820,7 +2862,7 @@ struct T {
             pf(w+0x300,f32(Q(0x20)));
             p32(Q(0x24),u32(w+0x14));p32(Q(0x28),u32(w+0x18));p32(Q(0x2c),u32(w+0x1c));
             p32(Q(0x30),u32(model_4866c0(i8(w+0x11))+0x18));
-            if(!view_4f02d0(cam,Q(0x24),Q(0x34))){p32(w+4,u32(w+4)&0xffffff7fu);continue;}
+            if(!view_4f02d0(cam,Q(0x24),Q(0x34),edges.ok?&edges:nullptr)){p32(w+4,u32(w+4)&0xffffff7fu);continue;}
             const std::uint32_t f=u32(w+4)|0x80u;p32(w+4,f);
             if(!(f&0x20u))continue;
             if(best==0x19au||!jb(f32(w+0x300),f32(work(best)+0x300)))best=id;
