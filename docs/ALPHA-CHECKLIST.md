@@ -57,6 +57,16 @@ runtime row stays **pending** until one serialized candidate session records it.
 Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 `c6154bb6`. It adds the opt-in `--brake-coast` (Samo `a71c073`); default routes are unchanged.
 
+### Candidate run-03, functional (2026-10-18)
+
+- **Setup:** same exe, existing license, one cold launch. Hule held the lease from 20:26:52Z to 20:28:53Z.
+- **Route PASS:** the saved license loaded, all five pedal phases completed and the game exited 0. The INI and both saves were restored exactly.
+- **Brake vs coast: INCONCLUSIVE.**
+  - Coast: 50.4 to 16.0 m/s. Brake (255 witnessed): 39.3 to 0.0 m/s, overlapping the coast over 16.0–39.3.
+  - The coast screenshot shows the car on the beach or off-road, so a surface difference or collision could account for the gap.
+- **Screenshots (default single view):** car menu, race/HUD and the scene at the end of the pedal phases. Scene and UI are 4:3, pillarboxed in the 2560x1440 window: `options.ini` had no `widescreen`, and no HD pack or replacement was configured.
+- **F6 Horn persistence: PENDING.** The supported window capture worked, but the F6 key press never reached the window (one retry, same failure). No widget edit and no second launch were made.
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an
