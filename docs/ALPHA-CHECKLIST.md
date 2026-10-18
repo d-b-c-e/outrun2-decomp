@@ -89,6 +89,20 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 - **No deployment:** nothing was applied to the owner's install or LaunchBox, and no second launch ran.
 - **Next:** use the game's own `shim_first_loop --render` back-buffer capture, which covers the full span with fixture rig geometry equal to the live profile. Hule is adding a render-only `[Graphics]` whitelist to that runner.
 
+### Render slot render-deploy-01 (2026-10-18): the game's own full-width capture
+
+- **Setup:** exe `A92CDCB6`, harness `a70e369` (merged as `81f3a15`). The private test profile carried the pinned four-key HD overlay over the staged 257 assets, with an existing license. Hule held the lease from 21:38:02Z to 21:40:39Z.
+- **Capture PASS:**
+  - 60 back-buffer frames at 3840x720 (the full 7680x1440 span at half scale). Seal and replay passed.
+  - Scripted existing-license route to the beach course; normal exit 0.
+  - The owner's 16 files were verified unchanged and the profile was restored.
+- **Frames 0, 30 and 59:** the centred HD HUD and START are sharp. Three distinct views progress from 0 to 109 km/h, folding through both seams. Widescreen and three projections are confirmed visually.
+- **Finding: black wedges on the start grid only (frame 0).** One sits under the grandstand at the outer left, the other beyond the ground past the fence at the outer right. Both are filled by frame 30.
+  - This matches the documented limit in [TRIPLE-SCREENS](../windows/docs/TRIPLE-SCREENS.md) (start-grid wedges). With `MatchGameFov = true` the side panels look up to 121° from the heading, beyond the stock camera.
+  - The 2026-10-12 coverage runs and object census (archived `claude/triple-projection-f6`) found no stage geometry there.
+  - Samo is confirming the match against that evidence.
+- **No overall visual PASS was given, so nothing was installed.** The disposition is pending: "PASS with documented limitation" if Samo confirms the match, otherwise a defect.
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an
