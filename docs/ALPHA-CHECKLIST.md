@@ -15,10 +15,10 @@ runtime row stays **pending** until one serialized candidate session records it.
 | Criterion | Offline evidence | Runtime on this candidate (run-01, below) |
 | --- | --- | --- |
 | Boot, menus, actual driving | Candidate build: 17 focused tests pass, 1 expected skip | **PASS (A)**: the game's own trace shows the license created and saved at 15.1 s and GAME entered at 33.2 s, followed by a 60 s weave drive. Telemetry: 4007 packets, top HUD speed 60.37 m/s (about 217 km/h), gear 4, throttle 255. **Pending**: heading change and brake response (not in the telemetry route) |
-| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | **Partial**: A created `OutRunDesktop.ini` and B read the same file without importing again. **Pending**: saving through F6, and a changed value applied after relaunch |
+| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | **Partial**: A created `OutRunDesktop.ini`; both later launches read the same file unchanged, with no second import. Synthetic keyboard input steered both ways (consumed steering -127..127). **Pending**: saving through F6, a changed value applied after relaunch, wheel or pad bindings |
 | Rendering, including the requested triples modes | `triple_screens` and the traffic outer-edge culling fixture (`594609f`) | **Pending**: A drove the default single view but asserted no picture. Triples were excluded from this slot and remain a separate gate (historical: planar modes seen at the rig; `Views = Angled` gave three projections on 2026-10-12) |
-| Exit and relaunch | Settings apply at the next start; shutdown is documented in [P21-SHUTDOWN](../windows/docs/P21-SHUTDOWN.md) | **PASS**: A and B each closed cleanly (exit 0, not forced) with owned processes gone, and B cold-relaunched to the title |
-| No known crash or save regression | Resource-lifetime null read fixed (`ff90127`); upstream #2 not reproduced by the `c2c_goal_sequence` fixture | **Partial**: no crash in A or B; A wrote `License1.dat` (1040 B) and `common.dat` (68584 B). **Pending**: reload of that license (B failed, see below) |
+| Exit and relaunch | Settings apply at the next start; shutdown is documented in [P21-SHUTDOWN](../windows/docs/P21-SHUTDOWN.md) | **PASS**: all three launches closed cleanly (exit 0, not forced) with owned processes gone. The cold relaunch (run-02) loaded the saved license and drove again |
+| No known crash or save regression | Resource-lifetime null read fixed (`ff90127`); upstream #2 not reproduced by the `c2c_goal_sequence` fixture | **PASS for the license save**: no crash in three launches. A wrote `License1.dat` (1040 B) and `common.dat` (68584 B); run-02 loaded them, and both files stayed byte-identical. **Pending**: a race finish with its records saved and reloaded |
 
 ### Candidate run-01 (2026-10-18)
 
@@ -29,9 +29,34 @@ runtime row stays **pending** until one serialized candidate session records it.
 - **Run B failure (first and only):** the `existing-license-loaded` wait timed out after 20 s at the title (mode 32, child 0, profiles never queried).
   - Cause: the runner. Its existing-license branch sends no title or menu input before waiting for the load; the title prefix runs only on the fresh path.
   - Not evidence of save corruption: A's save files are on disk.
-  - Next: a runner-only correction (Samo; `run_observed_license.py` and its test), then a B-only cold-relaunch slot against the same exe hash.
+  - Fixed in the runner only: Samo `10722ca`, merged as `48bd5b9`. The game exe was not rebuilt.
+- **Private package:** `outrun-desktop-private-alpha-289ade5-windows-x64.zip`, SHA-256 `ec08d51f054baa81c0fb6257f84df429dbb49b23227a136537d6d1af6d374db1`, 14 members read back. Its manifest marks it pending and private-only.
 
-The candidate is **not alpha-qualified** yet.
+### Candidate run-02, cold relaunch only (2026-10-18)
+
+- **Setup:** same exe hash, runner tree `055aa651` (from `48bd5b9`), the same disposable copy holding run A's save. Hule held the lease from 19:59:44Z to 20:00:50Z; runtime was about 46 s.
+- **Result: PASS.**
+  - The game's trace showed the title, then title advance and license loaded at 6.7 s (`PC profiles queried=1 loaded=1`).
+  - The menus followed, and GAME was entered at 24.2 s with a 15 s drive. Telemetry: 1260 packets, top speed 26.9 m/s, throttle 255.
+  - No save was written (`saves=0`), and the save, INI and exe baselines were unchanged afterwards.
+- **Diagnostics:** the same five declared names.
+
+## Disposition
+
+The 289ade5 exe is a **private alpha candidate**. It is suitable for an
+owner-attended trial from the private package. It is **not** ready for a tag or
+public release. Proven on this exe: a fresh license through menus to actual
+driving, clean exit, and a cold relaunch that reloads the saved license and
+drives again, with no crash and no save change.
+
+Gates still open before any tag, each needing its own bounded slot or the owner:
+
+1. Rendering. A picture assertion of the default single view, and the requested
+   triples modes (`Screens = Separate`, `Views = Angled`, via the existing
+   `shim_first_loop/run.py --render` route).
+2. Settings saved through F6, then applied after relaunch.
+3. Heading, brake response and the physical wheel (owner-attended).
+4. A race finish with its records saved and reloaded.
 
 A physical check of wheel feel, force output, telemetry fields and angled triples is
 a separate, owner-attended gate. A pass here does not imply it.
