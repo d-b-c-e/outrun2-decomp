@@ -13,7 +13,7 @@ controls-journal.jsonl (the strict reader) and host-shutdown.json. The capture (
 evidence copy by the reviewed P21 finalizer (--finalizer): the final host report is copied into it and this runner writes
 exit.json only for an exit it observed, with the process identity it held from the spawn.
 """
-import argparse, ctypes, ctypes.wintypes as wt, hashlib, json, math, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
+import argparse, configparser, ctypes, ctypes.wintypes as wt, hashlib, json, math, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
@@ -42,6 +42,11 @@ HORN_INI = PROFILE + "horn = button 27 %s\n[Audio]\nAllowHorn = true\n" % WHEEL
 MENU_SCRIPT = [(6.0, "confirm"), (9.0, "confirm"), (11.0, "navDown"), (11.5, "navDown"), (12.0, "navDown"), (12.8, "confirm"),
                (15.5, "confirm"), (18.0, "navRight"), (18.8, "confirm"), (21.5, "confirm"), (24.0, "confirm"), (26.0, "confirm"),
                (28.5, "confirm")]
+# Existing bank: title, single player, OutRun, course, car, transmission, music, START.
+# Same choices as the observed existing-bank route, with conservative animation gaps.
+# No editor/name/save actions or fallback presses. Runtime must still witness race entry.
+EXISTING_LICENSE_SCRIPT = [(6.0, "confirm"), (9.0, "confirm"), (12.0, "navRight"), (13.0, "confirm"),
+                           (16.0, "confirm"), (19.0, "confirm"), (22.0, "confirm"), (25.0, "confirm")]
 MENU_FALLBACK_AFTER = 12.0     # seconds after the script's last step with no race before the confirm/start presses resume
 MENU_MIN_GAP = 0.4             # seconds between any two presses: each is a 200 ms hold, so the game samples a release
 # The race's identity from the run's runtime.log exit summary (romi 24552): the stage the world loads, the retail car
@@ -165,7 +170,7 @@ def inject_expiry(start, startup_seconds, budget):
     return int(math.ceil(start + startup_seconds + budget)) + INJECT_MARGIN
 
 
-def next_menu_action(script, since_menu, sent, last_press_age, presses):
+def next_menu_action(script, since_menu, sent, last_press_age, presses, allow_fallback=True):
     """The menu press due now, or None: the next script step once its time has come (one per poll, in order), then,
     MENU_FALLBACK_AFTER seconds past the script's last press, the former start/confirm presses 1.5 s apart, 40 presses in all.
     The clock starts when the log first shows the frontend (mode 32), not at the window: render-01 (three angled views at
@@ -175,6 +180,7 @@ def next_menu_action(script, since_menu, sent, last_press_age, presses):
     if sent < len(script):
         gap = script[sent][0] - script[sent - 1][0] if sent else 0.0
         return script[sent][1] if since_menu >= script[sent][0] and last_press_age >= gap else None
+    if not allow_fallback: return None
     if (since_menu < script[-1][0] + MENU_FALLBACK_AFTER or last_press_age <= 1.5 or
             presses == len(script) and last_press_age < MENU_FALLBACK_AFTER): return None
     return "start" if (presses - len(script)) % 3 == 0 else "confirm"
@@ -193,7 +199,35 @@ def route_of(receipt, log_text):
     """How this run reached its race: by the menu script alone (no fallback press), and the identity the log names."""
     presses = receipt.get("presses") or []
     return dict(scriptedOnly=bool(presses) and all(p.get("scripted") for p in presses),
-                script=[list(step) for step in MENU_SCRIPT], identity=route_identity(log_text))
+                script=(receipt.get("plan") or {}).get("menuScript", [list(step) for step in MENU_SCRIPT]), identity=route_identity(log_text))
+
+
+def render_presentation(text):
+    """Only four UI presentation keys; never input, extraction/cache, arbitrary paths or scene assets."""
+    if len(text.encode("utf-8")) > 4096: raise ValueError("render presentation exceeds 4096 bytes")
+    cfg = configparser.ConfigParser(interpolation=None, strict=True)
+    cfg.optionxform = str
+    try: cfg.read_string(text)
+    except configparser.Error as error: raise ValueError("invalid render presentation: %s" % error) from error
+    keys = {"UITextureReplacement", "SceneTextureReplacement", "TextureBaseFolder", "UIScalingMode"}
+    if cfg.defaults() or cfg.sections() != ["Graphics"] or set(cfg["Graphics"]) != keys:
+        raise ValueError("render presentation requires exactly four whitelisted [Graphics] keys")
+    values = dict(cfg["Graphics"])
+    if (values["UITextureReplacement"] != "true" or values["SceneTextureReplacement"] != "false" or
+            values["UIScalingMode"] != "2"):
+        raise ValueError("render presentation requires UI=true, scene=false and UIScalingMode=2")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", values["TextureBaseFolder"]):
+        raise ValueError("render presentation texture folder must be one local directory name")
+    return "\n[Graphics]\n" + "".join("%s = %s\n" % (k, values[k]) for k in
+                                      ("UITextureReplacement", "SceneTextureReplacement", "TextureBaseFolder", "UIScalingMode"))
+
+
+def existing_license_problem(game):
+    save = game / "SaveGame"
+    files = set(p.name for p in save.iterdir()) if save.is_dir() else set()
+    if files != {"License1.dat", "common.dat"} or any(not (save / n).is_file() or (save / n).stat().st_size == 0 for n in files):
+        return "--existing-license requires exactly two nonempty bank files (License1.dat and common.dat)"
+    return None
 
 
 def same_route(first, second):
@@ -383,6 +417,10 @@ def main():
     a.add_argument("--render", default="",
                    help="R1 only: a rendering test, e.g. screens=separate,views=angled,frames=240,every=3,after=360,scale=2 "
                         "(render-test.txt; frames land in the run folder's frames)")
+    a.add_argument("--render-presentation", type=pathlib.Path,
+                   help="R1 --render only: four-key [Graphics] UI presentation file; appended temporarily to the exact test profile")
+    a.add_argument("--existing-license", action="store_true",
+                   help="R1 --render only: existing two-file bank; bounded script, no fresh-license actions or fallback")
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     a.add_argument("--lease-held", action="store_true", help="the caller holds the shared rig lease through this run and its "
                    "evidence (seal, replay, frame conversion) and releases it; run.py neither takes nor releases it")
@@ -390,6 +428,8 @@ def main():
                    "and holds it 1.5 s after the steer holds; the exit result log's race sound line must show the 9BC loop and the "
                    "81BC stop as played (refused or missing is a request only; the command path, not an audible check)")
     o = a.parse_args()
+    if o.prepare_from and (o.render_presentation or o.existing_license):
+        a.error("prepare the unchanged test profile first; render flags are for run/preflight only")
     if o.prepare_from: prepare(o.prepare_from, o.game, o.candidate); return
     if not o.result: a.error("--result is required for a run or a preflight")
     out = o.result.resolve()
@@ -416,6 +456,24 @@ def main():
     if consumed and o.replay_of: problems.append("--consumed-replay and --replay-of are exclusive")
     if o.horn and (consumed or o.replay_of): problems.append("--horn is an R1 step only (no --replay-of or --consumed-replay)")
     if (o.drive or o.render) and (consumed or o.replay_of or o.horn): problems.append("--drive and --render are R1 only (no replay, no --horn)")
+    presentation = ""; presentation_raw = b""
+    if o.render_presentation or o.existing_license:
+        if not o.render or consumed or o.replay_of or o.horn:
+            problems.append("--render-presentation and --existing-license require R1 --render (no replay or --horn)")
+    if o.render_presentation:
+        try:
+            if o.render_presentation.stat().st_size > 4096: raise ValueError("render presentation exceeds 4096 bytes")
+            presentation_raw = o.render_presentation.read_bytes()
+            presentation = render_presentation(presentation_raw.decode("utf-8"))
+            folder = re.search(r"^TextureBaseFolder = (.+)$", presentation, re.M).group(1)
+            if not (o.game / folder / "load").is_dir(): problems.append("render presentation pack folder absent")
+        except (OSError, UnicodeError, ValueError) as error: problems.append(str(error))
+    if o.existing_license:
+        try:
+            why = existing_license_problem(o.game)
+            if why: problems.append(why)
+        except OSError as error: problems.append("cannot inspect existing license: %s" % error)
+    menu_script = EXISTING_LICENSE_SCRIPT if o.existing_license else MENU_SCRIPT
     if o.drive and not 15 <= o.drive <= 120: problems.append("--drive is 15..120 seconds")
     try: render_request(o.render, "preflight")
     except ValueError as e: problems.append(str(e))
@@ -464,7 +522,11 @@ def main():
                 replayTool=str(o.replay_tool), replayToolSha256=sha(o.replay_tool) if o.replay_tool and o.replay_tool.exists() else None,
                 replayOf=str(o.replay_of) if o.replay_of else None, tapeSource=str(tape_source) if tape_source else None, tapeRows=tape_rows,
                 replayTimeoutSeconds=replay_timeout, raceBudgetSeconds=race_budget(replay_timeout, o.horn, o.drive) if not o.replay_of or replay_timeout is not None else None,
-                horn=o.horn, drive=o.drive, render=o.render, dbce=str(DBCE), seconds=o.seconds, problems=problems)
+                horn=o.horn, drive=o.drive, render=o.render, dbce=str(DBCE), seconds=o.seconds,
+                renderPresentation=str(o.render_presentation) if o.render_presentation else None,
+                renderPresentationSha256=hashlib.sha256(presentation_raw).hexdigest() if presentation else None,
+                effectiveProfileSha256=hashlib.sha256((PROFILE + presentation).encode("utf-8")).hexdigest() if presentation else None,
+                menuScript=[list(step) for step in menu_script], existingLicense=o.existing_license, problems=problems)
     if o.check_only or problems:
         print(json.dumps(plan, indent=1)); sys.exit(1 if problems else 0)
     out.mkdir(parents=True)
@@ -505,6 +567,13 @@ def main():
                 label="AllowHorn command path: one 'inject action horn 1 ms=1500' after the steer holds; the exit result log's race "
                       "sound line (42F0D0 played/refused/missing per command) must show the 9BC loop and the 81BC stop played; "
                       "refused or missing is a request only; not an audible check")
+        elif presentation:
+            # Same temporary-profile/restore boundary as --horn; no binding or fence change.
+            if sha(o.render_presentation) != plan["renderPresentationSha256"]:
+                raise RuntimeError("render presentation changed after preflight")
+            wrote_ini = True
+            ini.write_bytes((PROFILE + presentation).encode("utf-8"))
+            if sha(ini) != plan["effectiveProfileSha256"]: raise RuntimeError("render profile write mismatch")
         DBCE.mkdir(parents=True, exist_ok=True)
         start = time.time(); budget = race_budget(replay_timeout, o.horn, o.drive)
         if o.render:   # before inject.on, so a latched start always finds it; the game refuses the run if it does not admit it
@@ -551,12 +620,15 @@ def main():
                 if race: phase, phase_at = "steer-right", time.time(); batch(["inject action steer 0.6 ms=3000", "inject action throttle 1 ms=3000"]); continue
                 if window_at is None and windows_of(proc.pid): window_at = time.time(); receipt["windowSeconds"] = round(window_at - start, 3)
                 if menu_at is None and window_at is not None and mode == 32: menu_at = time.time(); receipt["menuSeconds"] = round(menu_at - start, 3)
-                action = next_menu_action(MENU_SCRIPT, None if menu_at is None else time.time() - menu_at, scripted,
-                                          time.time() - last_press, len(receipt["presses"]))
+                if (o.existing_license and menu_at is not None and scripted == len(menu_script) and
+                        time.time() - menu_at > menu_script[-1][0] + MENU_FALLBACK_AFTER):
+                    raise RuntimeError("existing-license script did not reach a race; no fallback presses")
+                action = next_menu_action(menu_script, None if menu_at is None else time.time() - menu_at, scripted,
+                                          time.time() - last_press, len(receipt["presses"]), allow_fallback=not o.existing_license)
                 if action:
                     batch(["inject action %s 1 ms=200" % action]); last_press = time.time()
-                    receipt["presses"].append(dict(action=action, mode=mode, at=round(last_press - window_at, 3), scripted=scripted < len(MENU_SCRIPT)))
-                    if scripted < len(MENU_SCRIPT): scripted += 1
+                    receipt["presses"].append(dict(action=action, mode=mode, at=round(last_press - window_at, 3), scripted=scripted < len(menu_script)))
+                    if scripted < len(menu_script): scripted += 1
             elif phase == "drive":
                 if time.time() - phase_at >= o.drive: phase = "end"; batch(["end"]); break
                 if int((time.time() - phase_at) / DRIVE_STEP) > drive_step:
