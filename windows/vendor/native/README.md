@@ -1,18 +1,30 @@
 # Vendored: wheel toolkit native panel and its Dear ImGui
 
 From [d-b-c-e/dbce-wheel-mod-toolkit](https://github.com/d-b-c-e/dbce-wheel-mod-toolkit) `native/` at
-`e8fca59c6d5285806d42f97785e43a7713d1276f` for `panel/dbce_panel.cpp/.h` (2026-10-16: small Help repository text links); the other files remain at `bb46a5e` / `ee12f00`, byte for byte, in the same layout (the panel
+`5cb9953158907c6bcce51b488e19186f4a7ac6f6` for `panel/dbce_panel.cpp`, `panel/dbce_panel.h` and
+`panel/dbce_panel_input.cpp` (2026-10-18); the other files remain at `bb46a5e` / `ee12f00`, byte for byte, in the same layout (the panel
 includes `../third_party/imgui/`). The toolkit code is MIT (`LICENSE` here); Dear ImGui 1.91.6 WIP is MIT
 (`third_party/imgui/LICENSE.txt`, provenance in `third_party/imgui/PROVENANCE.md`). Do not edit; re-vendor from the
 toolkit and update this table together. Only the DX11 backend is copied, and not the toolkit overlay (`dbce_overlay_*`):
 the desktop build draws the panel from its own renderer (docs/F6-PANEL.md).
 
+The refreshed files include foreground-root ownership before releasing cursor clipping (`6e69cc2`),
+Stop FFB persistence-feedback ordering (`10d6c63`), Help report actions before repository text links
+(`c89e382`), and the additive passive status-line API (`3200202` / `a00d7b0`). The status-line API is
+unused by this consumer; this refresh does not enable recording or other host behavior.
+
+The pin is the toolkit's local `master`, not a published origin commit. At this refresh, both the
+tracked and live `origin/master` were `b695fbfcde4dfae4af5f1a0cabe3715ba0cdd428`, 106 commits behind
+the local pin. This selective copy does not publish those toolkit commits. The three files match
+the pinned Git blobs exactly (LF bytes, preserved by this repository's `-text` vendor attributes);
+the table records those SHA-256 hashes. Compilation and rendered acceptance remain separate checks.
+
 | File | SHA-256 |
 | --- | --- |
 | `panel/dbce_frame_stats.hpp` | `50e5e8e37c6d2b7477a46ca12dedde31d9135be080df689e39503104027d64be` |
-| `panel/dbce_panel.cpp` | `2f308bfda8227b27ea5c76a305823f13b5ccf22e84bdbc94281bb90abcf4f971` |
-| `panel/dbce_panel.h` | `d5cf806f03429abcc5f852f94f0968d282f20013c4b4b709b873567dbc7da129` |
-| `panel/dbce_panel_input.cpp` | `0616115375a31b1bd21ca89b3b259aff2db9ff5fa00ecad1fc20ee96705ce295` |
+| `panel/dbce_panel.cpp` | `5a20488eb7fca5aa4a70678bbc2809ede4616a8617fd0bbebf86f036474a3efa` |
+| `panel/dbce_panel.h` | `c8fd4d18c275b19baa067913258bcc4ed3536178a4704c7c29c86183eafe5b32` |
+| `panel/dbce_panel_input.cpp` | `0b4e0067cfeafb3ff1ae57fd993520e8d72cee94df0b8cdc85803ae1da287ab2` |
 | `panel/dbce_panel_input.h` | `e0ea85167608ad9a1d5ef2af7837fdea9dee10fb6bce98f2542cd97b42809a39` |
 | `third_party/imgui/backends/imgui_impl_dx11.cpp` | `5d76d6a60a6aafa4f41be30e2637e82d76dce65de796ff638604b48c9cf8917b` |
 | `third_party/imgui/backends/imgui_impl_dx11.h` | `6c62cc541e332b75c3de607188dc0b5f4916f68804cd10e3aa11200ce8f8d144` |

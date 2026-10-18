@@ -72,6 +72,71 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def run_brake_coast(hwnd, proc, receipt, start, race_time, seconds, persist):
+    """Post the opt-in pedal sequence; telemetry analysis owns acceptance."""
+    receipt["phaseClock"] = {"epochSeconds": time.time(), "monotonic": time.monotonic(),
+                             "runStartMonotonic": start}
+    receipt["phases"] = []
+
+    def check(name):
+        if proc.poll() is not None:
+            raise StageError(f"brake-coast-{name}: game exited {proc.returncode}")
+        if hwnd not in base.windows_of(proc.pid):
+            raise StageError(f"brake-coast-{name}: game window disappeared")
+
+    def edge(name, up):
+        entry = {"key": name, "posted": round(time.monotonic() - start, 6), "up": up}
+        try:
+            base.post_key(hwnd, name, up)
+        except (OSError, ValueError) as error:
+            entry["error"] = str(error)
+            raise
+        finally:
+            receipt["keysSent"].append(entry)
+            persist()
+
+    def hold(name, deadline):
+        while True:
+            check(name)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: return
+            time.sleep(min(.05, remaining))
+
+    try:
+        deadline = race_time
+        for name, duration, edges in (
+                ("throttle", 12, (("up", False),)),
+                ("coast", 3, (("up", True),)),
+                ("throttle-again", 4, (("up", False),)),
+                ("brake", 3, (("up", True), ("down", False))),
+                ("neutral", 3, (("down", True),))):
+            check(name)
+            deadline += duration
+            if time.monotonic() >= deadline:
+                raise StageError(f"brake-coast-{name}: phase deadline exceeded")
+            phase = {"phase": name, "start": round(time.monotonic() - start, 6), "end": None,
+                     "scheduledEnd": round(deadline - start, 6)}
+            receipt["phases"].append(phase)
+            persist()
+            try:
+                for key_name, up in edges: edge(key_name, up)
+                # Fixed monotonic phase boundaries avoid accumulating receipt
+                # write overhead beyond the requested race hold. Actual edges
+                # and start/end times, rather than nominal durations, are saved.
+                hold(name, deadline)
+                phase["complete"] = True
+            finally:
+                phase["end"] = round(time.monotonic() - start, 6)
+                persist()
+        hold("neutral-rest", race_time + seconds)
+    finally:
+        # Attempt each release independently, even if posting the other fails.
+        for name in ("up", "down"):
+            try: edge(name, True)
+            except (OSError, ValueError) as error:
+                receipt["errors"].append(f"brake-coast-release-{name}: {error}")
+
+
 def main():
     a = argparse.ArgumentParser(description=__doc__)
     a.add_argument("--game", type=pathlib.Path, required=True)
@@ -83,6 +148,8 @@ def main():
     a.add_argument("--weave", type=float, default=0.0,
                    help="seconds to hold the accelerator after race entry, steering right and left in turn after 12 s so "
                         "traffic passes on both sides (0: the short drive)")
+    a.add_argument("--brake-coast", action="store_true",
+                   help="opt-in 25 s throttle/coast/throttle/brake/neutral sequence; no steering")
     a.add_argument("--check-only", action="store_true")
     o = a.parse_args()
     game, out = o.game.resolve(), o.result.resolve()
@@ -107,6 +174,8 @@ def main():
     if o.port == 8000 or not 1 <= o.port <= 65535: problems.append("invalid/private telemetry port")
     if not 15 <= o.seconds <= 180: problems.append("seconds outside 15..180")
     if o.weave and not 15 <= o.weave <= o.seconds: problems.append("weave outside 15..seconds")
+    if o.brake_coast and o.weave: problems.append("brake-coast cannot be combined with weave")
+    if o.brake_coast and o.seconds < 25: problems.append("brake-coast requires seconds >= 25")
     if "OutRunDesktop.exe" in subprocess.run(["tasklist", "/FI", "IMAGENAME eq OutRunDesktop.exe", "/NH"],
                                              capture_output=True, text=True).stdout:
         problems.append("OutRunDesktop already running")
@@ -227,6 +296,22 @@ def main():
             if row["editorState"] != 7: raise StageError("editor-complete: no completed editor state")
             stage("editor-complete", row)
         else:
+            # The welcome owner queries profiles only after title input
+            # (frontend_welcome.cpp: case 2 / native_runtime.cpp: 0x416380).
+            # A loaded bank goes directly to child 1; do not send the fresh
+            # route's second Enter into that menu.
+            wait_for("existing-title-ready", lambda r: r["mode"] == 32 and r["childState"] == 0, 10)
+            due, name = PREFIX[0]
+            while time.monotonic() - window_time < due:
+                if proc.poll() is not None: raise StageError("existing-title-advance: game exited")
+                time.sleep(.02)
+            key(name, .12)
+            row = wait_for("existing-title-advanced", lambda r: r["loaded"] >= 1 or r["childState"] != 0, 20)
+            if row["childState"] == 21:
+                # Key 21 is the chooser, whose +0x38 state and +0x44 cursor
+                # are not in this executable's trace: `selected` belongs to
+                # the name keyboard. Never guess an existing/new-slot action.
+                raise StageError("existing-license-chooser: chooser state/cursor unavailable in frontend trace")
             row = wait_for("existing-license-loaded", lambda r: r["loaded"] >= 1, 20)
             receipt["saveWitness"] = {str(p): {"bytes": p.stat().st_size, "sha256": baseline_save[p.name]}
                                       for p in (license_file, common_file)}
@@ -258,28 +343,31 @@ def main():
         row = wait_for("race-game", lambda r: r["mode"] == 16, 45)
         stage("race-entry", row)
         race_time = time.monotonic()
-        posted = round(time.monotonic() - start, 3)
-        base.post_key(hwnd, "up", False)
-        try:
-            if o.weave:
-                time.sleep(12)
-                side = "right"
-                while time.monotonic() - race_time < o.weave - 4 and proc.poll() is None:
-                    key(side, 1.5)
-                    side = "left" if side == "right" else "right"
+        if o.brake_coast:
+            run_brake_coast(hwnd, proc, receipt, start, race_time, o.seconds, persist)
+        else:
+            posted = round(time.monotonic() - start, 3)
+            base.post_key(hwnd, "up", False)
+            try:
+                if o.weave:
+                    time.sleep(12)
+                    side = "right"
+                    while time.monotonic() - race_time < o.weave - 4 and proc.poll() is None:
+                        key(side, 1.5)
+                        side = "left" if side == "right" else "right"
+                        time.sleep(2.5)
+                    while time.monotonic() - race_time < o.weave and proc.poll() is None: time.sleep(.05)
+                else:
+                    time.sleep(3)
+                    key("left", 1.5)
+                    time.sleep(1.5)
+                    key("right", 1.5)
                     time.sleep(2.5)
-                while time.monotonic() - race_time < o.weave and proc.poll() is None: time.sleep(.05)
-            else:
-                time.sleep(3)
-                key("left", 1.5)
-                time.sleep(1.5)
-                key("right", 1.5)
-                time.sleep(2.5)
-        finally:
-            base.post_key(hwnd, "up", True)
-            receipt["keysSent"].extend(({"key": "up", "posted": posted, "up": False},
-                                        {"key": "up", "posted": round(time.monotonic() - start, 3), "up": True}))
-            persist()
+            finally:
+                base.post_key(hwnd, "up", True)
+                receipt["keysSent"].extend(({"key": "up", "posted": posted, "up": False},
+                                            {"key": "up", "posted": round(time.monotonic() - start, 3), "up": True}))
+                persist()
         while time.monotonic() - race_time < o.seconds and proc.poll() is None: time.sleep(.05)
         if proc.poll() is not None: raise StageError("race-hold: game exited itself")
         stage("race-hold-complete", trace.poll())

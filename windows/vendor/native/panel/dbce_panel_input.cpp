@@ -141,12 +141,18 @@ void DrainInput(int bw, int bh)
     InitOnceExecuteOnce(&g_once, initOnce, nullptr, nullptr);
     ImGuiIO &io = ImGui::GetIO();
     const bool open = IsOpen();
+    // Releasing a cursor clip changes desktop state: only the panel's foreground
+    // root may do it. Hidden/inactive hosts and missing window roots leave it alone.
+    const HWND foreground = open && g_hwnd ? GetForegroundWindow() : nullptr;
+    const HWND panelRoot = foreground ? GetAncestor(g_hwnd, GA_ROOT) : nullptr;
+    const HWND foregroundRoot = foreground ? GetAncestor(foreground, GA_ROOT) : nullptr;
+    const bool ownsForeground = panelRoot && foregroundRoot && panelRoot == foregroundRoot;
     if (open && !g_wasOpen) {
         // Fresh state on open: no stale keys, the pointer where the system cursor is, the cursor free to move.
         io.ClearInputKeys();
         POINT p;
         if (GetCursorPos(&p) && g_hwnd && ScreenToClient(g_hwnd, &p)) push(EV_MOVE, p.x, p.y);
-        ClipCursor(nullptr);
+        if (ownsForeground) ClipCursor(nullptr);
     }
     if (!open && g_wasOpen) io.ClearInputKeys();
     g_wasOpen = open;
@@ -177,7 +183,7 @@ void DrainInput(int bw, int bh)
         default: break;
         }
     }
-    if (open) ClipCursor(nullptr);   // games re-clip the cursor every frame; the panel needs the whole window
+    if (open && ownsForeground) ClipCursor(nullptr);   // games re-clip the cursor every frame; the panel needs the whole window
 }
 
 }} // namespace dbce::panel

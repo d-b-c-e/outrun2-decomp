@@ -38,6 +38,7 @@
 #include "triple_screens.hpp"
 #include "render_test.hpp"
 #include "startup_monitor.hpp"
+#include "startup_diagnostics.hpp"
 #include "triple_rig.hpp"
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
@@ -335,6 +336,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
                            session::utf8(intake.request.startup/L"OutRunDesktop.ini")+" with this rig's [Window] and [Triple]");
         std::printf("settings: %s%s\n",settings.path().c_str(),intake.has_recorded_settings?"":" (the recording had no settings file: defaults)");
     }else settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);
+    std::printf("%s\n",outrun::desktop::startup_diagnostics().c_str());
     // The session request's outcome (taken above; a refused playback or an unreadable request already ended the process).
     if(!plan.latched){
         switch(intake.kind){

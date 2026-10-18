@@ -49,6 +49,13 @@ void Configure(const Config &config);
 bool IsOpen();
 void SetOpen(bool open);
 void Toggle();
+// Internal, passive status only. Text is copied (up to 255 UTF-8 bytes); null/empty clears.
+// Safe from a host worker thread. No recorder, hotkeys, persistence or output is enabled.
+// Hosts use SessionStatusPresentation wording and own terminal-state expiry. Saved must mean sealed.
+enum class StatusTone { Recording, Busy, Success, Problem, Playback };
+void SetStatusLine(const char *utf8Text, StatusTone tone);
+void ClearStatusLine();
+bool StatusLineActive();
 // F8 (dbce_panel_input): Stop FFB when the mod offers it.
 bool StopFfbAvailable();
 void StopFfbFromKey();
