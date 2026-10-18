@@ -80,7 +80,7 @@ Rules:
 First deployment choices:
 - UI replacement on; scene replacement off. Scene replacement is the next toggle once the smoke shows memory headroom.
 - `widescreen=1` at 2560x1440 (already set in the target).
-- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. The live Wheelkit rig profile is 3x2560x1440, separate, 32-inch, eye 660 mm, sides 70°, bezel 8 mm, 1500R curve, mapped through the existing geometry mapper. The decomp has no curvature warp, so no curved-rendering claim is made. Fall back to `Planar` if the smoke shows an angled defect.
+- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. The live Wheelkit rig profile is 3x2560x1440, separate, 32-inch, eye 660 mm, sides 70°, bezel 8 mm, 1500R curve, mapped through the existing geometry mapper. The decomp has no curvature warp, so no curved-rendering claim is made. `MatchGameFov` stays `true` (the default; the eye is matched to the game's FOV). The owner's recorded feedback of 2026-10-12 (`3dd434e`, archived branch `claude/triple-projection-f6`) is that a narrowed FOV is not wanted and `true` stays the default. `false` (the physical eye) is an owner choice for a later attended check. Fall back to `Planar` if the smoke shows an angled defect.
 - `UIScalingMode` stays `2`.
 - The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
 
