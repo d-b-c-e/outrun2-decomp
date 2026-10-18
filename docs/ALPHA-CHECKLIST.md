@@ -41,6 +41,22 @@ runtime row stays **pending** until one serialized candidate session records it.
   - No save was written (`saves=0`), and the save, INI and exe baselines were unchanged afterwards.
 - **Diagnostics:** the same five declared names.
 
+### Render tools preparation, render-tools-01 (2026-10-18)
+
+- **Session:** build only. Hule held the lease from 20:20:07Z to 20:22:06Z. Pins (candidate `289ade5`, toolkit `5cb9953`) matched before and after; the candidate exe was unchanged.
+- **Tools staged privately:**
+  - `control_publish.exe`: SHA-256 `66aaa6cd…9becbc`
+  - `capture_replay.exe`: SHA-256 `ba760dcd…99f02f22`
+  - `P21Finalizer.dll`: SHA-256 `4457fece…a8e3c20`
+  - Native imports are system DLLs plus the VC runtime only.
+- **Render copy:** a dedicated copy, `OutRunAlpha-hule-render-20261018-01`, with its exact PROFILE INI.
+- **Checks:** both the single-view and angled-view no-launch checks passed (`--check-only` exit 0, no problems).
+- **Cleanup:** the dotnet compiler server was closed with `dotnet build-server shutdown`. Future dotnet steps inside a lease use `UseSharedCompilation=false`.
+- No picture was taken. Rendering acceptance is still pending.
+
+Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
+`c6154bb6`. It adds the opt-in `--brake-coast` (Samo `a71c073`); default routes are unchanged.
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an
