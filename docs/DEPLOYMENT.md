@@ -84,6 +84,15 @@ First deployment choices:
 - `UIScalingMode` stays `2`.
 - The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
 
+## Known limitations shown to the owner
+
+- **Start-grid wedges (Angled triples).** While the car stands on the start grid, the outer edges of both side panels show black wedges: below the grandstand on the left, and beyond the ground on the right. They fill once the car moves.
+  - The same wedges were seen on 2026-10-12. They are documented in [TRIPLE-SCREENS](../windows/docs/TRIPLE-SCREENS.md).
+  - With `MatchGameFov = true` the side panels look up to 121° from the heading, beyond the stock camera's view.
+  - Their cause is not proven: missing content, or clipping not yet instrumented.
+  - The owner keeps `MatchGameFov = true` (2026-10-12). `Planar` views do not show them.
+- **Not yet qualified on this build:** physical wheel feel and force, saving through F6, brake response against coasting, and the real-route smoke. The record is [ALPHA-CHECKLIST](ALPHA-CHECKLIST.md).
+
 ## Deploy target, backup and rollback
 
 Hule owns the receipt. Read-only facts so far:

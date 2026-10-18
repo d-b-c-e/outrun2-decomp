@@ -99,9 +99,15 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 - **Frames 0, 30 and 59:** the centred HD HUD and START are sharp. Three distinct views progress from 0 to 109 km/h, folding through both seams. Widescreen and three projections are confirmed visually.
 - **Finding: black wedges on the start grid only (frame 0).** One sits under the grandstand at the outer left, the other beyond the ground past the fence at the outer right. Both are filled by frame 30.
   - This matches the documented limit in [TRIPLE-SCREENS](../windows/docs/TRIPLE-SCREENS.md) (start-grid wedges). With `MatchGameFov = true` the side panels look up to 121° from the heading, beyond the stock camera.
-  - The 2026-10-12 coverage runs and object census (archived `claude/triple-projection-f6`) found no stage geometry there.
-  - Samo is confirming the match against that evidence.
-- **No overall visual PASS was given, so nothing was installed.** The disposition is pending: "PASS with documented limitation" if Samo confirms the match, otherwise a defect.
+  - The 2026-10-12 coverage runs and object census (archived `claude/triple-projection-f6`) found no pixel written there under the tested overrides. Shader discard was ruled out, and every enumerated stage and environment object was submitted.
+  - The cause is **not proven**: missing content, viewport or depth clipping, unloaded banks and prop placement remain uninstrumented.
+  - Samo confirmed the same outlines and placement as the historical shots (N1, RC1, RC2). There is no new location or shape, and frames 30 and 59 fill both. That is not a pixel-identity claim.
+  - No evidence-driven code correction is justified.
+- **No overall visual PASS was given in that slot, so nothing was installed.** The stop receipt is preserved.
+- **Later disposition (kobe 270778):** the HD, widescreen and Separate/Angled visual evidence is **qualified for this alpha**, with the start-grid black wedges documented.
+  - The wedges match the history and are absent from moving frames.
+  - Their cause is unproven, so they are not classified as a non-defect.
+  - Install and real-route smoke follow in a fresh slot.
 
 ## Disposition
 
