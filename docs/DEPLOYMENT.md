@@ -111,6 +111,13 @@ on `origin/master` `a04a6fa`. The branch changes only this script and its offlin
 - `--rollback RECEIPT` restores each XML file only while it is in its backup state or its exact post-apply state, so a partial write is recoverable and later edits are kept. It removes only the media the run created.
 - The Tweaks and Redux entries and their Stream Deck key are unchanged.
 
-**Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d` carries only
-the five OutRun commits, under a unique private version. It is installed through
-Wheelkit's own route, with its own qualification and rollback.
+**Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d`, private
+`0.6.52+0c1c24f`, carries only the five OutRun commits. Its 101 OutRun rows equal
+Wheelkit main. Qualified 2026-10-18:
+- 278/278 focused tests passed, with none skipped.
+- The app published, and the 69-page and 109-page settings/layout smoke checks passed.
+- Package SHA-256 `5F3A3C6350B2F0977F5086238705CA889A6C877CCEF01C75B386906093E3FBC1`. Evidence in hub `artifacts/wheelkit-outrun-0652-vunu-20261018/run-01`.
+
+**Not installed yet.** The owner's Wheelkit is running, so the upgrade is a separate
+closed-app handoff through Wheelkit's installer route. The installed gap stays open
+until that upgrade is read back.

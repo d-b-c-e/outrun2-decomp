@@ -33,13 +33,14 @@ py -3 -B run.py ... --result <fresh dir> --replay-of <passing R1 result>        
 The test profile in the test copy binds the R12's real axes (steer 0, throttle 2, brake 5, as in
 readonly-provider-live-03). Menu actions go to otherwise unused R12 buttons (20-26), injected only.
 
-Menus: a latched process keeps its saves in the fresh run folder, so every run starts at "create new license". R1 and
+Menus: the fence copies a test copy's saves into the fresh run folder. The default script expects an empty bank
+("create new license"); it is not the route for an existing license. R1 and
 R3 play `MENU_SCRIPT`, zero's mapped path from perf runs 1-3, in seconds after the game window appears:
 - title;
 - CREATE NEW LICENSE, three navDowns to DONE;
 - SINGLE PLAYER, navRight to OUTRUN;
 - the OUTRUN2 course, the first car, automatic, the first music.
-Twelve seconds after the script ends, if the race has not started, the former start/confirm presses resume (40 in
+  Twelve seconds after the default script ends, if the race has not started, the former start/confirm presses resume (40 in
 all). Each press is recorded with its time and whether it was scripted.
 
 Receipt: the run folder (`runtime.log`, `controls-journal.jsonl` with the strict reader's verdict,
@@ -70,6 +71,42 @@ Capture and replay (Astra 16553/16754):
 - `--prepare-from` refuses an existing test folder. For a new candidate, prepare a new folder; the preflight refuses a
   test copy whose `OutRunDesktop.exe` is not the candidate. The owner's save backups are never a source.
 
-First-loop limits:
+  For HD UI capture with an existing license, use the same R1 `--render` path:
+
+  ```powershell
+  py -3 -B run.py ... --render screens=separate,views=angled,frames=60,every=4,after=120,scale=2 --drive 20 --seconds 60 --render-presentation render-presentation.ini --existing-license --check-only
+  ```
+
+  `render-presentation.ini` must contain exactly these four keys and no other section/defaults:
+
+  ```ini
+  [Graphics]
+  UITextureReplacement = true
+  SceneTextureReplacement = false
+  TextureBaseFolder = textures-consolidated-20261018-01
+  UIScalingMode = 2
+  ```
+
+  Stage the verified DDS pack under that **test game's** folder, with `load` below it. The folder name must be a
+  single local name (letters, digits, underscore or hyphen). The test game's INI must still be byte-exact `PROFILE`.
+  After admission the runner temporarily appends only those Graphics keys, verifies the input/profile hashes and
+  restores `PROFILE` on exit, using the existing `--horn` restore boundary. Neither option is admitted for replay,
+  consumed replay or horn checks, or without `--render`. No native code, input binding, latch, force or capture limit changes.
+
+  `--existing-license` requires exactly the two nonempty bank files, `License1.dat` and `common.dat`. The fence
+  hash-verifies their copies plus `options.ini` into the run home. The existing-license script uses title, single
+  player, OutRun, course, car, transmission, music and START; it never creates/names/saves a license. Unlike the
+  default script, it sends no fallback presses: no race within 12 seconds after the final step fails the run.
+  This schedule derives from the observed ordinary route; it still needs its own fenced runtime qualification.
+
+  The render request owns the fixture rig (32-inch 16:9, eye 660 mm, sides 70 degrees, gap 8 mm, MatchGameFov true).
+  Compare that with the live intended geometry before claiming equivalence. Preserve intended widescreen/resolution
+  in the test copy's `options.ini`; the fence copies that file, rather than reading options from the owner's install.
+  Full-width PPM frames are game back-buffer output. Review the views, seams and HUD after closure; indexing or a
+  replacement count alone does not prove HD appearance. A passing fixture is not installed-route or physical acceptance.
+
+  Focused offline checks: `py -3 -B test_render_presentation.py` and `py -3 -B test_run_timing.py`.
+
+  First-loop limits:
 - no observer mapping;
 - the identity's executable and schema hashes are reported as null.
