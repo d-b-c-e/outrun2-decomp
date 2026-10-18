@@ -135,11 +135,68 @@ route where a state-gated path is needed. The old five-minute idle language in
 historical runner docs is superseded by current coordinator policy; retain the
 owner notice, lease, mute and restoration guards.
 
-Current automation gaps are ordinary-home persistence across two real launches,
-brake/release vehicle response beyond input counters, and visual traffic-overtake
-acceptance in angled side panels. Existing parsers/fence/math tests do not fill
-those gaps. Do not add a second gameplay automation framework: bind observations
-from the existing routes to the exact candidate and preserve pending cases.
+The table is a qualification template, not the integration lead's live verdict.
+Consult the current checklist and receipts before repeating an accepted gate.
+Remaining observations include a real F6 value edit across a cold launch,
+brake response compared with coast, and actual default/angled pictures.
+Existing parsers/fence/math tests do not fill those gaps. Do not add a second
+gameplay automation framework: bind observations from the existing routes to
+the exact candidate and preserve pending cases.
+
+### Existing route capabilities at candidate `289ade5`
+
+This source-only audit does not authorize a launch, tool build or staging.
+
+- `windows/vendor/native/panel/dbce_panel.cpp` `PollDev` accepts only
+  `open <page> [advanced]` and `close` through `OutRunDesktop.panel-dev.txt`.
+  Pages are Controls, FFB, Cameras, Telemetry and Help. It polls every 500 ms,
+  reads at most 127 bytes, reacts to a changed modification time, and ignores
+  a command older than the process. An unrecognized page leaves the current
+  page selected; the optional view selects Advanced only for `advanced`,
+  otherwise Simple. These navigation commands do not edit/apply/save settings;
+  the dev-selected view is deliberately not saved. The channel is unavailable
+  during playback; a latched run uses its run folder when available.
+- Actual ordinary F6 widgets call `desktop_panel.cpp` `save`, which writes one
+  INI key, logs the result, restores the displayed value on failure and reports
+  that the change applies at the next game start. Latched saves are refused.
+  A small persistence case is Controls / Horn: Off writes
+  `[Audio] AllowHorn = false`; cold startup must log
+  `settings: the horn off ([Audio] AllowHorn = false)` and reopening F6 must
+  show Off. Preserve the disposable INI before the edit and restore its exact
+  bytes after closure. Directly writing the INI does not qualify the widget.
+  Keyboard navigation is enabled, and the panel input hook accepts Tab,
+  arrows, Enter and Space. Existing `run_perf.py` has no F6/Tab key names;
+  an observation-based supported desktop UI route or owner interaction is
+  needed for this part, without extending the game runner.
+- `shim_first_loop/run.py --render` supports single view with
+  `screens=off,views=planar` and a separate run with
+  `screens=separate,views=angled`. Both require the exact candidate in a
+  dedicated copy and an INI byte-equal to the runner's `PROFILE`; the ordinary
+  A/B save-test copy is not that profile. Do not overwrite it to satisfy this
+  preflight. The latched home cannot qualify ordinary F6 persistence.
+- Missing candidate-qualified tool inputs are an explicit path, build/source
+  receipt and SHA-256 for `control_publish.exe`, `capture_replay.exe`, and
+  `P21Finalizer.dll` with its runnable .NET dependencies. The two native targets
+  were not in this candidate's completed build batch and are absent from
+  `build-alpha/windows/Release`. No finalizer tuple has been supplied. The
+  finalizer source is `windows/tests/p21_recorder_integration/managed`, targets
+  .NET 8 and references the toolkit recording project and `ArtifactSeal.cs`;
+  pin that toolkit source too. Existing binaries elsewhere are not implicitly
+  this tuple. The runner records the three tool hashes in its preflight plan.
+- Before a granted render run, use a fresh `--result`, explicit `--candidate`,
+  `--game`, `--publisher-tool`, `--replay-tool`, `--finalizer`, and
+  `--check-only`. A live caller holds the shared lease through seal/replay and
+  cleanup and passes `--lease-held`. The existing fixed menu script/fallback
+  remains a route risk; ordinary A/B route success does not qualify that script.
+  A refusal or stalled route needs diagnosis before another attempt.
+- Render requests are nonce-bound and presentation-only. They preserve the
+  latched write/force fence, clear OR2 switches and use the fixture rig with
+  matched FOV. Frames are back buffers after overlays, captured only after
+  race entry, capped at 300 and 1 GiB, with scale 1/2/4. Separate screens span
+  borderless; single view uses `--windowed`. Pictures require visual review;
+  frame count and runner success cannot certify seams, traffic, physical
+  scanout or performance. The race-armed burst alone omits title/loading and
+  other pre-race default-picture observations.
 
 Report one milestone: source/EXE/ZIP hashes; selected checks with explicit skips;
 runtime outcomes and evidence; actual start/end; cleanup/release; unresolved
