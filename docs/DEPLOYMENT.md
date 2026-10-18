@@ -1,142 +1,84 @@
-# Consolidated Windows deployment: coverage and dependencies
+# Consolidated Windows build: deployment record
 
-Goal (owner, 2026-10-18): one deployed OutRunDesktop build on the fork's `main`. It
-should carry every completed Wheelkit-integration and Tweaks-parity change, be
-installed on the rig's existing route with a recoverable backup, and be smoke-tested
-there. This is not a public release or tag. Test evidence is in
-[ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
+The owner's goal (2026-10-18) was one OutRunDesktop build on the fork's `main`. It
+carries every completed Wheelkit-integration and Tweaks-parity change, installed on
+the rig with a recoverable backup. This is a private rig deployment, not a public
+release or tag. Test evidence is in [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
+
+## What is installed (2026-10-18, 21:57:30Z)
+
+| Item | Value |
+| --- | --- |
+| Install | `E:/Games/OutRunDecompSmoke` (the owner's maintained decomp install) |
+| Executable | `OutRunDesktop.exe`, SHA-256 `A92CDCB6468D27082970F7D14D8B909A4A346A14A77608AB0367F7296AE234AF`, 24023040 B. Built from `4652a18`; fork `main`'s product source (`src`, `xbox`, `windows/source`, `windows/vendor`) is identical to it |
+| Settings | `OutRunDesktop.ini` SHA-256 `C2D4AD15…`: the owner's file with `[Graphics]` and `[Triple]` sections appended. The owner's controls, saves, force and unknown keys are kept byte for byte. `session-capabilities.json` `5BB46931…` comes from install tuple `87B3BE6D…` |
+| HD interface | `[Graphics] UITextureReplacement = true`, `TextureBaseFolder = textures-consolidated-20261018-01`. That folder holds 257 UI DDS copied read-only from the owner's Tweaks pack (receipt `FDB2CAF1…`). Scene replacement is off |
+| Widescreen | `options.ini` `widescreen=1`, `resolution=2560x1440`, `antialiasing=msaa4` (the owner's existing values) |
+| Triple screens | `[Triple] Screens = Separate monitors`, `Views = Angled`, rig geometry from the live Wheelkit profile, `MatchGameFov = true`. There is no curvature warp, so the 1500R curve is not modelled |
+| 2D layout | `UIScalingMode = 2` (centred 4:3 UI) |
+| Backup | `E:/Games/OutRunDecompSmoke/.dbce-backups/consolidated-20261018-02` (26 files, journal `deployment.json`, state `installed-not-runtime-qualified`). The failed first attempt's `-01` is kept as evidence |
+| LaunchBox | Its own entry "OutRun 2006: Coast 2 Coast (Decomp)", ID `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, in the Outrun Collection playlist. The Tweaks and Redux entries and their Stream Deck key are unchanged |
+
+**Launching.** Use the new LaunchBox entry, or run
+`E:\Games\OutRunDecompSmoke\OutRunDesktop.exe` from its own folder. F6 opens the settings
+panel; LB+RB+Menu exits.
+
+**Rolling back.** Close LaunchBox and the game first.
+- **The install:** run the deployer's `-Action Rollback` (hub `.local/outrun-alpha-hule-20261018/Deploy-Consolidated.ps1`, SHA-256 `A64A9483…`) inside a serialized lease. It restores the backed-up exe, INI and capabilities through the retained updater and removes `textures-consolidated-20261018-01`. It refuses if an owner file has changed since the install.
+- **The LaunchBox entry:** run `scripts/add-outrun-decomp.py --root <LaunchBox root> --rollback Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`. This works only while the XML still matches its post-apply hashes. After LaunchBox's next normal exit rewrites the XML, delete the entry inside LaunchBox instead.
+
+## Known limitations and open gates
+
+- **Start-grid wedges (Angled triples).** While the car stands on the start grid, the outer edges of both side panels show black wedges: below the grandstand on the left, and beyond the ground on the right. They fill once the car moves.
+  - The same wedges were seen on 2026-10-12, and [TRIPLE-SCREENS](../windows/docs/TRIPLE-SCREENS.md) documents them. With `MatchGameFov = true` the side panels look up to 121° from the heading.
+  - Their cause is not proven: missing content, or clipping not yet instrumented.
+  - The owner keeps `MatchGameFov = true`. `Planar` views do not show them.
+- **Real-route smoke through LaunchBox: open.**
+  - During the install slot LaunchBox stayed on "Populating Games" for the whole bounded wait, so no game was launched through it.
+  - Its log stops after a Steam play-time sync. `RunLibraryScanOnStartup` and ROM auto-import are on; a startup scan or a hidden prompt are the candidates, neither proven.
+- **Not yet qualified on this build:** physical wheel feel and force, saving through F6 and applying it on relaunch, brake response against coasting, a race finish with its records saved and reloaded, and the Wheelkit 0.6.52 install (below).
+
+## Deployment history
+
+| Slot | Outcome |
+| --- | --- |
+| main-build-01 | Build PASS: 19 focused tests, 18 pass, 1 expected skip |
+| combined-01 | Configuration proven by log. Visual gate incomplete: the desktop capture covered only the left screen |
+| render-deploy-01 | The game's own full-width capture: HD, widescreen and three views. It stopped on the start-grid wedges; later qualified (kobe 270778) with them documented |
+| installed-smoke-01 | A journal-save sharing violation (holder unknown); rolled back, owner unchanged. The deployer was fixed to write the journal atomically |
+| installed-smoke-02 | **Installed**, readback exact; LaunchBox UI smoke pending. The real `Core\LaunchBox.exe` outlived the stub close and was recovered by a normal close, with the XML unchanged |
 
 ## Source coverage
 
-| Scope | Where it is | Notes |
-| --- | --- | --- |
-| Completed Windows feature work | `main` `a187a94` | See below |
-| Startup diagnostics line, alpha docs, packaging tool, runner fixes | Integration branch `demo/outrun-alpha-20261018` | The runner fixes are the cold-relaunch title advance and the opt-in brake/coast phases |
-| Toolkit F6 panel and controls header | **Missing.** Allocated to Samo: re-vendor from toolkit `5cb9953` | Panel fixes: cursor-clip release only by the foreground root (`6e69cc2`), FFB state on a failed save (`10d6c63`), Help ordering, a passive status API. Controls: additive overloads only. `5cb9953` is not on the toolkit's origin |
-
-What `main` `a187a94` already contains:
+What `main` contains:
 - the cumulative branch `54b2c46`, angled traffic culling `594609f` and the resource fixture `e87299a`;
-- every row of the [roadmap](../windows/ROADMAP.md) Tweaks table that is in source: texture replacement, music, CD switcher, fast load, pacing and VSync, vibration, level select, Holly, highway sets, compatibility fixes, telemetry RPM, fine steering, login protection, the opt-in network, triples (planar span plus the angled views), and the F6 pages.
+- every in-source row of the [roadmap](../windows/ROADMAP.md) Tweaks table: texture replacement, music, CD switcher, fast load, pacing and VSync, vibration, level select, Holly, highway sets, compatibility fixes, telemetry RPM, fine steering, login protection, the opt-in network, triples, and the F6 pages;
+- from this consolidation: the startup diagnostics line, the toolkit F6 panel fixes and controls overloads (re-vendored from toolkit `5cb9953`, which is not on the toolkit's origin), runner fixes, the HD render-capture harness, and `tools/alpha`.
 
 Not merged, each with its reason:
 
 | Item | Reason |
 | --- | --- |
-| Toolkit shim extensions 2–4 and the copied-input bridge | Hundreds of lines of divergence. The decomp has its own host files, its shim backend is opt-in (Native is the default), and nothing in OutRun uses the new extensions. Keep the reviewed pin `d26776a` |
+| Toolkit shim extensions 2–4 and the copied-input bridge | Large divergence. The shim backend is opt-in (Native is the default), and no OutRun consumer uses the extensions. Keep the reviewed pin `d26776a` |
 | Async shader compiles | Needs a re-port and a cold-cache A/B on the rig |
-| Hitch-probe and triple-projection diagnostics | Measurement only |
-| Slow-frame counter `1d9ca5e` | Left on its branch for the author |
-| Controls rescan `235bbb3` | Superseded |
-| Older request and loading branches | Already equivalent in `main` ([review](UPSTREAM-REVIEW.md), [inventory](BRANCH-INVENTORY.md)) |
+| Hitch-probe and triple-projection diagnostics; slow-frame counter `1d9ca5e` | Measurement only; left on their branches |
+| Controls rescan `235bbb3`; older request and loading branches | Superseded or already equivalent ([review](UPSTREAM-REVIEW.md), [inventory](BRANCH-INVENTORY.md)) |
 
-**Separate architecture, not merged.** OutRun2006Tweaks and the d-b-c-e Tweaks
-fork with force feedback (`dbce-mods-outrun-2006`) are a DLL on the original
-`OR2006C2C.EXE`. Their LaunchBox entries ("(Tweaks)" and "(Redux)") stay as they are.
+OutRun2006Tweaks and the d-b-c-e Tweaks fork with force feedback (`dbce-mods-outrun-2006`)
+are a separate architecture: a DLL on the original `OR2006C2C.EXE`. They are not merged,
+and their LaunchBox entries are unchanged.
 
-## Wheelkit (separate repository)
+## Wheelkit
 
-Every completed OutRun settings branch in `dbce-wheelkit` is integrated in its
-local `main` `1248cb2` (2026-10-17). The tip that contains them all,
-`haru/outrun-fastload-mode1-20261017` `6d36997`, is an ancestor of that main. The
-decomp's readers for every such row are in this fork's `main`.
+Every completed OutRun settings branch is in `dbce-wheelkit` local `main` `1248cb2`.
+The installed Wheelkit `0.6.49+c4a4e6d` lacks five OutRun commits:
+- the Fine steering and Engine RPM rows (`f7cb7d8`, with `184b4bd` and `10d3c6d`);
+- the loading-only VSync mode (`6d36997`);
+- borderless cursor visibility (`5dd4219`).
 
-The rig's installed Wheelkit, `0.6.49+c4a4e6d`, lacks 5 of those OutRun commits:
+The decomp reads all of these keys, so they can be set in `OutRunDesktop.ini` or F6 until then.
 
-| Commit | Change | Decomp key it writes |
-| --- | --- | --- |
-| `f7cb7d8` (+ `184b4bd` docs, `10d3c6d` catalog test) | Fine steering and Engine RPM rows | `[Misc] FineSteering`, `[Telemetry] EngineRpm` |
-| `6d36997` | The loading-only VSync-kept mode | `[Performance] FramerateFastLoad` |
-| `5dd4219` | Borderless cursor visibility | `[Window] WindowedHideMouseCursor` |
-
-Without them the owner can still set these keys in OutRunDesktop.ini or through F6.
-Picking them up means a new Wheelkit build from local `main`, and that build also
-carries 43 non-OutRun commits (trucking, Sonic, SCS and others). It therefore needs
-Wheelkit's own qualification and installer route. Wheelkit's `origin/main` is 305
-commits behind local `main` (unpushed).
-
-## Asset and configuration dependencies
-
-The source defaults are the conservative test path. They are not the deployed
-presentation; the deployment sets the following.
-
-| Feature | Required setting | Assets | State today |
-| --- | --- | --- | --- |
-| HD interface | `[Graphics] UITextureReplacement = true`. `TextureBaseFolder` must name a folder inside the install: the reader refuses `..`, drive letters and leading slashes (`window_desktop.cpp:640-646`) | The owner's existing pack at `Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Tweaks)/textures/load`: 32 UI banks, 257 DDS (about 2.5 GB), including the frontend, HUD and loading banks. Provenance: hub `artifacts/outrun-ui-textures-20261012/pack-copy-manifest.csv`, and `artifacts/outrun-course-loading-runtime-20261016` for START | Off by default; no decomp folder has `textures/` |
-| HD scene textures | `[Graphics] SceneTextureReplacement = true` (Tweaks enables both) | The same pack's scene banks | Off; memory cost to be measured in the smoke |
-| Widescreen | `options.ini` `widescreen=1`, `resolution=2560x1440` | none | Source default 4:3. The owner's `E:/Games/OutRunDecompSmoke` already has `widescreen=1`; the LaunchBox "(Decomp)" folder does not |
-| 2D UI layout | `[Graphics] UIScalingMode`: decomp default `2` (centred 4:3). Tweaks' default `1` widens the HUD but has documented gaps ([UI-SCALING](../windows/docs/UI-SCALING.md)) | none | Keep `2` unless the owner chooses `1` |
-| Triples | `[Triple] Screens = Separate monitors`, `Views = Angled`, plus the rig keys | none (needs the racing-row span) | Off by default. Angled rendering is not yet qualified on this candidate |
-| Controls, FFB | The owner's existing `[Controls]` from Wheelkit and `[FFB]` choice, preserved | `WheelFfb.dll` only if the owner already uses the force add-on | Physical feel is owner acceptance |
-
-Rules:
-- Never modify the owner's originals; read them only.
-- Keep packs and game files out of git and out of the private ZIP.
-- Copy into the install's `textures/load` from the Tweaks pack (read only), with no link or path bypass:
-  - the 209 DDS (10 banks, 1,965,124,564 B) named in the historical `pack-copy-manifest.csv`;
-  - the remaining 48 compatible UI files, enumerated by exact name and recorded in a supplemental copy/hash receipt during staging;
-  - the newer START assets that their completed provenance covers.
-  Each file's inclusion and provenance is recorded as it actually is.
-
-First deployment choices:
-- UI replacement on; scene replacement off. Scene replacement is the next toggle once the smoke shows memory headroom.
-- `widescreen=1` at 2560x1440 (already set in the target).
-- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. The live Wheelkit rig profile is 3x2560x1440, separate, 32-inch, eye 660 mm, sides 70°, bezel 8 mm, 1500R curve, mapped through the existing geometry mapper. The decomp has no curvature warp, so no curved-rendering claim is made. `MatchGameFov` stays `true` (the default; the eye is matched to the game's FOV). The owner's recorded feedback of 2026-10-12 (`3dd434e`, archived branch `claude/triple-projection-f6`) is that a narrowed FOV is not wanted and `true` stays the default. `false` (the physical eye) is an owner choice for a later attended check. Fall back to `Planar` if the smoke shows an angled defect.
-- `UIScalingMode` stays `2`.
-- The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
-
-## Status (2026-10-18)
-
-**Deployed** to `E:/Games/OutRunDecompSmoke` (install-smoke-02, applied 21:57:30Z):
-- **Installed:** exe `A92CDCB6`, INI `C2D4AD15` and capabilities `5BB46931`, read back exactly. The 257 UI assets are staged and verified.
-- **Backups:** backup `consolidated-20261018-02`; the failed attempt's `-01` is preserved.
-- **LaunchBox:** entry `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, "OutRun 2006: Coast 2 Coast (Decomp)", is registered. Its rollback receipt is `Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`.
-- **Open:** the real-route smoke. LaunchBox stayed on "Populating Games" through the bounded wait, so no game launched through it yet.
-- **Separate gates:** Wheelkit 0.6.52 install, physical feel, F6 save, and brake against coasting.
-- The full record is in [ALPHA-CHECKLIST](ALPHA-CHECKLIST.md).
-
-## Known limitations shown to the owner
-
-- **Start-grid wedges (Angled triples).** While the car stands on the start grid, the outer edges of both side panels show black wedges: below the grandstand on the left, and beyond the ground on the right. They fill once the car moves.
-  - The same wedges were seen on 2026-10-12. They are documented in [TRIPLE-SCREENS](../windows/docs/TRIPLE-SCREENS.md).
-  - With `MatchGameFov = true` the side panels look up to 121° from the heading, beyond the stock camera's view.
-  - Their cause is not proven: missing content, or clipping not yet instrumented.
-  - The owner keeps `MatchGameFov = true` (2026-10-12). `Planar` views do not show them.
-- **Not yet qualified on this build:** physical wheel feel and force, saving through F6, brake response against coasting, and the real-route smoke. The record is [ALPHA-CHECKLIST](ALPHA-CHECKLIST.md).
-
-## Deploy target, backup and rollback
-
-Hule owns the receipt. Read-only facts so far:
-
-- LaunchBox `Windows.xml` has no entry that launches `OutRunDesktop.exe`. Its two OutRun 2006 entries run `OR2006C2C.EXE` (Tweaks, Redux).
-- The folder `Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Decomp)/` holds an Oct 10 `OutRunDesktop.exe` (20919296 B), with `options.ini` set to `reflections=1` only.
-- The newer owner route is `E:/Games/OutRunDecompSmoke`: Oct 15 exe, 23613952 B, `widescreen=1`. Its historical update script and rollback pair are in hub `artifacts/outrun-qualified-deployment-20261015/`.
-
-**Decision (kobe 269317): the target is `E:/Games/OutRunDecompSmoke`.**
-- Hule's read-only receipt is hub `.local/outrun-alpha-hule-20261018/deployment-readiness.json`. The current exe is `341bc049…`, matching the installed `d86f1fc` record and its capabilities pair. 16 baseline files are pinned, including saves and companions.
-- Before install, a new backup goes to `.dbce-backups/consolidated-20261018-01`; the existing rollback receipts are kept.
-- The session-capabilities/install tuple is generated fresh from the new build with the existing generator, not by hand-editing the old updater's pinned hashes.
-- Rollback restores the backed-up exe, INI, `options.ini` and capabilities, and removes the staged `textures/load`.
-
-**Launch route.** The real launch path gets its own LaunchBox entry, added with
-the Launchbox-Racing tooling `scripts/add-outrun-decomp.py`. It is published alone on
-`d-b-c-e/LaunchboxRacingRedux` branch `demo/outrun-decomp-launch-route`, head `d1bd873`
-on `origin/master` `a04a6fa`. The branch changes only this script and its offline test
-`tests/test-add-outrun-decomp.py`. Run it against the live root with
-`--root <LaunchBox root>`; the live checkout's own files are not changed.
-- It registers "OutRun 2006: Coast 2 Coast (Decomp)", runs `OutRunDesktop.exe` in the target via a relative `ApplicationPath`, and adds it to the Outrun Collection playlist.
-- It is a dry run by default.
-- `--apply` needs `--expect-sha256` (the deployed exe). It refuses while LaunchBox or BigBox runs, and refuses a duplicate title or resolved target. The process check fails closed: the tasklist CSV is parsed strictly, and any unreadable, malformed or empty list refuses.
-- It records both XML backups and their post-apply hashes in the receipt before writing either file.
-- `--rollback RECEIPT` restores each XML file only while it is in its backup state or its exact post-apply state, so a partial write is recoverable and later edits are kept. It removes only the media the run created.
-- The Tweaks and Redux entries and their Stream Deck key are unchanged.
-
-**Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d`, private
-`0.6.52+0c1c24f`, carries only the five OutRun commits. Its 101 OutRun rows equal
-Wheelkit main. Qualified 2026-10-18:
-- 278/278 focused tests passed, with none skipped.
-- The app published, and the 69-page and 109-page settings/layout smoke checks passed.
-- Package SHA-256 `5F3A3C6350B2F0977F5086238705CA889A6C877CCEF01C75B386906093E3FBC1`. Evidence in hub `artifacts/wheelkit-outrun-0652-vunu-20261018/run-01`.
-
-**Not installed yet.** The owner's Wheelkit is running, so the upgrade is a separate
-closed-app handoff through Wheelkit's installer route. The installed gap stays open
-until that upgrade is read back.
+The private successor `0.6.52+0c1c24f` carries only those five commits.
+- Qualified: 278/278 focused tests; the app publish and the 69-page and 109-page smoke checks passed.
+- Package `5F3A3C63…`; evidence in hub `artifacts/wheelkit-outrun-0652-vunu-20261018`.
+- **It is not installed.** The upgrade waits for the owner to close Wheelkit normally, then uses Wheelkit's own installer route.
