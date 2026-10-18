@@ -109,6 +109,18 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - Their cause is unproven, so they are not classified as a non-defect.
   - Install and real-route smoke follow in a fresh slot.
 
+### Install slot installed-smoke-01 (2026-10-18): deployment script defect, rolled back
+
+- **Setup:** Hule held the lease from 21:47:17Z to 21:48:25Z. It reused the accepted capture; target `E:/Games/OutRunDecompSmoke`.
+- **Steps that completed:** the deployer backed up 26 owner files to `.dbce-backups/consolidated-20261018-01`, then began staging UI assets. 83 of 257 were copied and verified, with the journal saved after each file.
+- **First failure:** a journal save (`Set-Content`, needing exclusive access) found `deployment.json` held by another process. The holder is unknown.
+- **Recovery:** the deployer rolled back at 21:48:22Z (journal state `rolled-back`) and removed the staged assets. The owner's files were verified unchanged.
+  - No exe, INI or capabilities change was made, and there was no game launch.
+  - LaunchBox was not touched (no registration receipt).
+  - The `-01` backup folder stays on the target as evidence.
+- **Correction (Hule):** an atomic journal writer (a unique temp file in the same folder, a durable write, then an atomic replace) with a bounded sharing-violation retry. It has focused tests for a held then released handle, a persistent lock and the first write.
+- **Next:** a fresh `-02` backup and a fresh install grant. No product rebuild.
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an
