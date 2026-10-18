@@ -227,6 +227,22 @@ def main():
             if row["editorState"] != 7: raise StageError("editor-complete: no completed editor state")
             stage("editor-complete", row)
         else:
+            # The welcome owner queries profiles only after title input
+            # (frontend_welcome.cpp: case 2 / native_runtime.cpp: 0x416380).
+            # A loaded bank goes directly to child 1; do not send the fresh
+            # route's second Enter into that menu.
+            wait_for("existing-title-ready", lambda r: r["mode"] == 32 and r["childState"] == 0, 10)
+            due, name = PREFIX[0]
+            while time.monotonic() - window_time < due:
+                if proc.poll() is not None: raise StageError("existing-title-advance: game exited")
+                time.sleep(.02)
+            key(name, .12)
+            row = wait_for("existing-title-advanced", lambda r: r["loaded"] >= 1 or r["childState"] != 0, 20)
+            if row["childState"] == 21:
+                # Key 21 is the chooser, whose +0x38 state and +0x44 cursor
+                # are not in this executable's trace: `selected` belongs to
+                # the name keyboard. Never guess an existing/new-slot action.
+                raise StageError("existing-license-chooser: chooser state/cursor unavailable in frontend trace")
             row = wait_for("existing-license-loaded", lambda r: r["loaded"] >= 1, 20)
             receipt["saveWitness"] = {str(p): {"bytes": p.stat().st_size, "sha256": baseline_save[p.name]}
                                       for p in (license_file, common_file)}
