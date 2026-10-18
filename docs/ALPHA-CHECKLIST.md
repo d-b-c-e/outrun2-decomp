@@ -31,8 +31,8 @@ a separate, owner-attended gate. A pass here does not imply it.
 | Request stack, loading picture `da4d126`, publisher `b173a48`, level-menu test `95a84bd`, prompt identity, route observation, presentation sound, countdown | No action | Equivalent changes are already in `main` ([review](UPSTREAM-REVIEW.md)) |
 | Controls rescan `235bbb3` | No action | Superseded by change-driven rescans and safer settings writes |
 | Copied-input bridge and profile inspection | No action | Owned by the toolkit's `native/shim`; the fork keeps its reviewed pin |
-| Startup diagnostic-environment report (S1) | **Fix**, Samo | Production reads about 120 `OR2_*` switches, several change behaviour, and no startup line lists which are set. One bounded line naming recognized switches only; values that could hold credentials or private paths are omitted |
-| Alpha opt-ins table (S2), `windows/docs/ALPHA-EXPERIMENTS.md` | **Fix**, Samo | Testers need the default and evidence level of the opt-ins that matter for the alpha. Not an inventory of every switch |
+| Startup diagnostic-environment report (S1, `cbb2ac2` + `5e29915`) | **Fixed** (merged `6ece3c8`) | Production reads 91 `OR2_*`/`DBCE_*` switches, several change behaviour, and no startup line listed which are set. Now one bounded line names the recognized switches that are set; values that could hold credentials or private paths are redacted. Formatter test 15/15 offline; desktop integration pending the candidate build |
+| Alpha opt-ins table (S2, `aadc2a3`) | **Fixed** (merged `6ece3c8`) | [ALPHA-EXPERIMENTS](../windows/docs/ALPHA-EXPERIMENTS.md): defaults and evidence level of the opt-ins that matter for the alpha. All defaults kept |
 | Async shader compiles (`c057309`..) | Defer | Diverges from the current device; needs a re-port and a cold-cache A/B on the rig. Not alpha-critical |
 | Hitch-probe and triple-projection diagnostics | Defer (archive) | Measurement only, default off; not a demonstrated improvement |
 | Slow-frame counter `1d9ca5e` | Defer | Kept on its diagnostic branch for the author (kobe 264530); the perf parser already tolerates its absence |
@@ -40,7 +40,8 @@ a separate, owner-attended gate. A pass here does not imply it.
 
 ## Before an alpha tag
 
-1. Merge the fix commits (S1, S2) into this branch; focused offline tests pass.
+1. Done: the fix commits (S1, S2) and the packaging checks are merged. The formatter
+   test (15/15) and the packaging tests (8/8) passed offline before merge.
 2. One serialized build of the integration tip, recorded with its exe hash. The
    packaged executable must come from that build, never from an older candidate.
 3. One batched candidate session, following Hule's gate matrix, records every
