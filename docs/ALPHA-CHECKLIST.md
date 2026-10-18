@@ -12,13 +12,26 @@ stabilization fixes (Samo), packaging and regression gates
 [the roadmap](../windows/ROADMAP.md). It does not qualify this candidate. Every
 runtime row stays **pending** until one serialized candidate session records it.
 
-| Criterion | Offline evidence on `main` | Runtime: historical / this candidate |
+| Criterion | Offline evidence | Runtime on this candidate (run-01, below) |
 | --- | --- | --- |
-| Boot, menus, actual driving | Consolidation build and focused CTests, 7 pass and 1 expected skip ([validation](CONSOLIDATION-VALIDATION.md)) | Planar race on the racing row, 199/199 samples (2026-10-14); F6 pages rendered (ac68a6f) / **pending** |
-| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | F6 saving by keyboard or mouse never checked in game / **pending**: save, exit, relaunch, value applied |
-| Rendering, including the requested triples modes | `triple_screens` and the traffic outer-edge culling fixture (`594609f`) | `Screens` Off/Surround/Separate planar seen at the rig; `Views = Angled` gave three projections with documented start-area limits (2026-10-12) / **pending** for both |
-| Exit and relaunch | Settings apply at the next start; shutdown is documented in [P21-SHUTDOWN](../windows/docs/P21-SHUTDOWN.md) | **pending**: normal exit (LB+RB+Menu or window close), clean relaunch, no stranded process or force |
-| No known crash or save regression | Resource-lifetime null read fixed (`ff90127`); upstream #2 not reproduced by the `c2c_goal_sequence` fixture | No open crash report found (hcom search, 2026-10-14..18) / **pending**: a race finish with save and reload |
+| Boot, menus, actual driving | Candidate build: 17 focused tests pass, 1 expected skip | **PASS (A)**: the game's own trace shows the license created and saved at 15.1 s and GAME entered at 33.2 s, followed by a 60 s weave drive. Telemetry: 4007 packets, top HUD speed 60.37 m/s (about 217 km/h), gear 4, throttle 255. **Pending**: heading change and brake response (not in the telemetry route) |
+| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | **Partial**: A created `OutRunDesktop.ini` and B read the same file without importing again. **Pending**: saving through F6, and a changed value applied after relaunch |
+| Rendering, including the requested triples modes | `triple_screens` and the traffic outer-edge culling fixture (`594609f`) | **Pending**: A drove the default single view but asserted no picture. Triples were excluded from this slot and remain a separate gate (historical: planar modes seen at the rig; `Views = Angled` gave three projections on 2026-10-12) |
+| Exit and relaunch | Settings apply at the next start; shutdown is documented in [P21-SHUTDOWN](../windows/docs/P21-SHUTDOWN.md) | **PASS**: A and B each closed cleanly (exit 0, not forced) with owned processes gone, and B cold-relaunched to the title |
+| No known crash or save regression | Resource-lifetime null read fixed (`ff90127`); upstream #2 not reproduced by the `c2c_goal_sequence` fixture | **Partial**: no crash in A or B; A wrote `License1.dat` (1040 B) and `common.dat` (68584 B). **Pending**: reload of that license (B failed, see below) |
+
+### Candidate run-01 (2026-10-18)
+
+- **Candidate:** source `289ade5`. Build passed in 8 min 4 s. The exe is `OutRunDesktop.exe`, SHA-256 `1929D25FACE3270F237E79F64A22F772F19C89A1EC2D7BC058A9D9D1CB92E064`, 24021504 bytes.
+- **Tests:** all 18 selected tests were found. 17 passed and `d3d9_resource_lifetime` skipped (no `OR2_EXE`), with 0 failures.
+- **Lease and data:** Hule held the lease from 19:40:16Z to 19:53:10Z and used a fresh disposable copy. Owner source files were unchanged afterwards.
+- **Diagnostics line:** both launches logged exactly the five declared names: `DBCE_FFB_MUTE`, the runner's two frontend-trace variables and the two telemetry variables. No force or vibration output.
+- **Run B failure (first and only):** the `existing-license-loaded` wait timed out after 20 s at the title (mode 32, child 0, profiles never queried).
+  - Cause: the runner. Its existing-license branch sends no title or menu input before waiting for the load; the title prefix runs only on the fresh path.
+  - Not evidence of save corruption: A's save files are on disk.
+  - Next: a runner-only correction (Samo; `run_observed_license.py` and its test), then a B-only cold-relaunch slot against the same exe hash.
+
+The candidate is **not alpha-qualified** yet.
 
 A physical check of wheel feel, force output, telemetry fields and angled triples is
 a separate, owner-attended gate. A pass here does not imply it.
