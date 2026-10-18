@@ -34,6 +34,10 @@ int main() {
     check(std::count(capped.begin(), capped.end(), '=') == int(StartupDiagnosticMaxEntries), "entry count bounded");
     check(capped.find(std::to_string(names.size() - StartupDiagnosticMaxEntries) + " omitted") != std::string::npos, "truncation explicit");
     check(format_startup_diagnostics({{"OR2_NOCOURSE\n", "1"}}) == "diagnostics: none", "name injection ignored");
+    const auto included = format_startup_diagnostics({{"OR2_NET_TR", "4"}, {"OR2_XBOX_RENDER_BEGIN", "60"},
+        {"OR2_XBOX_RENDER_END", "120"}, {"OR2_XBOX_RENDER_EVERY", "30"}});
+    check(included == "diagnostics: 4 set: OR2_NET_TR=<redacted>; OR2_XBOX_RENDER_BEGIN=<redacted>; OR2_XBOX_RENDER_END=<redacted>; OR2_XBOX_RENDER_EVERY=<redacted>",
+        "included network/render frame readers cannot be omitted from a default-path report");
     std::printf("startup diagnostics: %d checks passed\n", checks);
     return 0;
 }
