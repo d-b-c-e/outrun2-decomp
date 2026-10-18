@@ -3,7 +3,7 @@
 # game, plus wheels, pedals, shifters and button boxes through DirectInput,
 # bound by the wheel toolkit's controls contract (vendor/controls). Built with
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
-add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_monitor.cpp source/desktop_settings.cpp source/wheel_input.cpp
+add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_monitor.cpp source/startup_diagnostics.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp source/render_test.cpp source/render_test_capture.cpp shim/parse.cpp
     source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
@@ -39,6 +39,14 @@ target_include_directories(test_startup_monitor PRIVATE source ${PROJECT_SOURCE_
 target_compile_features(test_startup_monitor PRIVATE cxx_std_17)
 target_compile_options(test_startup_monitor PRIVATE /W4 /WX)
 add_test(NAME startup_monitor COMMAND test_startup_monitor)
+
+# Pure startup diagnostic formatting only: no game, environment mutation, device or window.
+add_executable(test_startup_diagnostics tests/test_startup_diagnostics.cpp source/startup_diagnostics.cpp)
+target_include_directories(test_startup_diagnostics PRIVATE source)
+target_compile_features(test_startup_diagnostics PRIVATE cxx_std_17)
+target_compile_options(test_startup_diagnostics PRIVATE /W4 /WX)
+target_compile_definitions(test_startup_diagnostics PRIVATE _CRT_SECURE_NO_WARNINGS)
+add_test(NAME startup_diagnostics COMMAND test_startup_diagnostics)
 
 # Real host callback/PcSound, synthetic silent PCM and fake output/presenter; no device or game.
 add_executable(test_presentation_sound ${PROJECT_SOURCE_DIR}/tests/test_presentation_sound.cpp)
