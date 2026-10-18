@@ -1,3 +1,15 @@
+# d-b-c-e fork: upstream review
+
+This fork consolidates our Windows desktop, wheel/input, telemetry, display,
+renderer and OutRun2006Tweaks-parity work on top of r4dius's native port.
+Start with the [upstream review guide](docs/UPSTREAM-REVIEW.md) for the change
+map, validation limits and preserved development branches. The
+[Windows build guide](windows/README.md) contains configuration and build steps.
+
+The October 18, 2026 consolidation includes upstream `e1e1c59` without rewriting
+its history. This is a source review candidate, not a claim that every feature or
+platform is release-qualified. Game assets and binaries are not distributed here.
+
 # Status #
 
 It is not finished yet, so bugs are to be expected.

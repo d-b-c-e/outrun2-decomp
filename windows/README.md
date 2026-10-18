@@ -91,8 +91,9 @@ without a change (top gear, automatic transmission).
   GOAL and TIMEUP, and a parked packet (IsRaceOn 0, the same engine constants) at about 10 Hz in the menus. The
   layout is Forza Horizon's 324 bytes (SimHub: a Forza Horizon 5 game on that port); `Layout = FM7` sends the
   311-byte FM7 Dash of the OutRun 2006 mod instead.
-- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM is synthesized from
-  speed and gear as the mod does, since OutRun has none. In GAME, steering, accelerator and brake are the game's
+- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM defaults to a
+  speed/gear approximation. Opt-in `[Telemetry] EngineRpm = Game` reads the game's HUD tachometer follower;
+  see [field provenance and remaining live checks](docs/TELEMETRY-FIELDS.md). In GAME, steering, accelerator and brake are the game's
   consumed 7D6810 channels, whichever device drives. START/pause/goal/time-up inputs are neutral. Forza's lateral
   acceleration stays zero (unavailable): the previously used car +0x264/+0x268 fields are road-edge distances.
 - The mod's 76-byte shared-memory block (`OutRun2006TelemetryData`, version 1) under `SharedMemName`

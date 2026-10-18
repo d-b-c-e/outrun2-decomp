@@ -34,6 +34,18 @@ SOFTWARE.
 
 ## Libraries used by the builds
 
+### Vendored Windows components
+
+The Windows fork also includes source under `windows/vendor`: DBCE controls,
+input/session/telemetry/force interfaces and the native panel, with their
+component LICENSE, README and provenance files retained. The panel includes
+Dear ImGui and its Direct3D 11 backend under
+`windows/vendor/native/third_party/imgui/LICENSE.txt` (MIT). See
+`windows/vendor/native/README.md` and `windows/vendor/shim.lock.json` for pins.
+These component licenses do not change the license of unrelated upstream code.
+
+### External build dependencies
+
 Not included in this repository; fetched and built by the build scripts at
 pinned versions, each under its own licence.
 
