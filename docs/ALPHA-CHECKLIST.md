@@ -109,6 +109,42 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - Their cause is unproven, so they are not classified as a non-defect.
   - Install and real-route smoke follow in a fresh slot.
 
+### Install slot installed-smoke-01 (2026-10-18): deployment script defect, rolled back
+
+- **Setup:** Hule held the lease from 21:47:17Z to 21:48:25Z. It reused the accepted capture; target `E:/Games/OutRunDecompSmoke`.
+- **Steps that completed:** the deployer backed up 26 owner files to `.dbce-backups/consolidated-20261018-01`, then began staging UI assets with the journal saved after each file. 82 were copied and verified, plus one copy intent, out of 257.
+- **First failure:** a journal save (`Set-Content`, needing exclusive access) found `deployment.json` held by another process. The holder is unknown.
+- **Recovery:** the deployer rolled back at 21:48:22Z (journal state `rolled-back`) and removed the staged assets. The owner's files were verified unchanged.
+  - No exe, INI or capabilities change was made, and there was no game launch.
+  - LaunchBox was not touched (no registration receipt).
+  - The `-01` backup folder stays on the target as evidence.
+- **Correction (Hule), `Deploy-Consolidated.ps1` SHA-256 `A64A9483E978D4234D61E1563E91600C027D92EEBBDBBF980BF3D60BB403ED9D`:**
+  - **Writer:** a unique `CreateNew` temp file in the same folder, the complete JSON flushed to disk, then an atomic `File.Replace` (`File.Move` for the first write), with no delete-then-write gap.
+  - **Retries:** only sharing and lock errors are retried, up to 10 x 150 ms, clipped to the original work deadline.
+  - **Recovery:** it still rolls back when the journal itself cannot be written.
+  - **Tests:** first write; a held reader followed by an atomic replace; a persistent lock that refuses at the deadline and keeps the old JSON; partial copy; refusal after an edited asset or INI; rollback with an unwritable journal. All pass.
+- **Next:** a fresh `-02` backup and a fresh install grant. No product rebuild.
+
+### Install slot install-smoke-02 (2026-10-18): DEPLOYED; LaunchBox UI smoke pending
+
+- **Setup:** wrapper `B031376D…`, corrected deployer `A64A9483…`. Hule held the lease from 21:54:15Z to 22:00:23Z.
+- **Install PASS (applied 21:57:30Z) on `E:/Games/OutRunDecompSmoke`:**
+  - Fresh backup `.dbce-backups/consolidated-20261018-02` with 26 files; `-01` is preserved.
+  - 257/257 UI assets staged and verified.
+  - Installed and read back exactly: exe `A92CDCB6`, INI `C2D4AD15`, capabilities `5BB46931`.
+  - Owner settings, saves, controls, force and unknown keys preserved. Deployment scope verified, with no journal temps left.
+- **LaunchBox route registered:** entry `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, "OutRun 2006: Coast 2 Coast (Decomp)", with the relative `ApplicationPath` to the Smoke exe and one Outrun Collection row.
+  - 7 art files created.
+  - Receipt `Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`; both XML files matched their post-apply hashes at readback.
+  - The Tweaks and Redux entries are unchanged.
+- **Real-route smoke: PENDING.** The owned LaunchBox stayed on its "Populating Games" splash through the bounded wait (to 22:00:09Z). No game launch, no input, no alternate route.
+- **Closure gap, corrected:** after the first release, `Core\LaunchBox.exe` (PID 12008, started 21:57:31Z by the owned launcher stub, and its child 13048) was still running. Closing the repo-root stub had not closed the real frontend.
+  - Custody recovery: Hule held the lease from 22:01:31Z to 22:02:43Z, inside the original deadline. 12008 was closed normally at 22:02:14Z and 13048 exited normally.
+  - No LaunchBox, BigBox or OutRun process remains, and the owner's 16 files read back exactly.
+  - `Windows.xml` and the Outrun playlist still exactly match their post-apply hashes. The owner's edits and the new entry are intact, and the registration receipt can still roll back.
+  - Record: hub `installed-smoke-02/custody-recovery.json`. The original stub-only quiescence claim is superseded, not rewritten.
+  - Future runners must watch the `Core` descendants, not the root stub.
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an

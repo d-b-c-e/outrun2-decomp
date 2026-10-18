@@ -84,6 +84,16 @@ First deployment choices:
 - `UIScalingMode` stays `2`.
 - The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
 
+## Status (2026-10-18)
+
+**Deployed** to `E:/Games/OutRunDecompSmoke` (install-smoke-02, applied 21:57:30Z):
+- **Installed:** exe `A92CDCB6`, INI `C2D4AD15` and capabilities `5BB46931`, read back exactly. The 257 UI assets are staged and verified.
+- **Backups:** backup `consolidated-20261018-02`; the failed attempt's `-01` is preserved.
+- **LaunchBox:** entry `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, "OutRun 2006: Coast 2 Coast (Decomp)", is registered. Its rollback receipt is `Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`.
+- **Open:** the real-route smoke. LaunchBox stayed on "Populating Games" through the bounded wait, so no game launched through it yet.
+- **Separate gates:** Wheelkit 0.6.52 install, physical feel, F6 save, and brake against coasting.
+- The full record is in [ALPHA-CHECKLIST](ALPHA-CHECKLIST.md).
+
 ## Known limitations shown to the owner
 
 - **Start-grid wedges (Angled triples).** While the car stands on the start grid, the outer edges of both side panels show black wedges: below the grandstand on the left, and beyond the ground on the right. They fill once the car moves.
