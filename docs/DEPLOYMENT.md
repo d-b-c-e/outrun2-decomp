@@ -71,12 +71,16 @@ presentation; the deployment sets the following.
 Rules:
 - Never modify the owner's originals; read them only.
 - Keep packs and game files out of git and out of the private ZIP.
-- Copy only the UI banks named in the existing manifests into the install's `textures/load`, from the Tweaks pack (read only). That is 32 banks, 257 DDS, plus the newer START assets their completed provenance covers. Use no link or path bypass.
+- Copy into the install's `textures/load` from the Tweaks pack (read only), with no link or path bypass:
+  - the 209 DDS (10 banks, 1,965,124,564 B) named in the historical `pack-copy-manifest.csv`;
+  - the remaining 48 compatible UI files, enumerated by exact name and recorded in a supplemental copy/hash receipt during staging;
+  - the newer START assets that their completed provenance covers.
+  Each file's inclusion and provenance is recorded as it actually is.
 
 First deployment choices:
 - UI replacement on; scene replacement off. Scene replacement is the next toggle once the smoke shows memory headroom.
 - `widescreen=1` at 2560x1440 (already set in the target).
-- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. Fall back to `Planar` if the smoke shows an angled defect.
+- `[Triple] Screens = Separate monitors`, `Views = Angled`, with the rig keys. The live Wheelkit rig profile is 3x2560x1440, separate, 32-inch, eye 660 mm, sides 70°, bezel 8 mm, 1500R curve, mapped through the existing geometry mapper. The decomp has no curvature warp, so no curved-rendering claim is made. Fall back to `Planar` if the smoke shows an angled defect.
 - `UIScalingMode` stays `2`.
 - The owner's `[Controls]` (native Moza triple bindings), saves and unknown keys are preserved byte for byte.
 
@@ -95,9 +99,11 @@ Hule owns the receipt. Read-only facts so far:
 - Rollback restores the backed-up exe, INI, `options.ini` and capabilities, and removes the staged `textures/load`.
 
 **Launch route.** The real launch path gets its own LaunchBox entry, added with
-the Launchbox-Racing tooling `scripts/add-outrun-decomp.py` (`a2cf580`).
+the Launchbox-Racing tooling `scripts/add-outrun-decomp.py` (latest local commit; not pushed, because that repo's `master` holds 16 other unpushed commits).
 - It registers "OutRun 2006: Coast 2 Coast (Decomp)", runs `OutRunDesktop.exe` in the target via a relative `ApplicationPath`, and adds it to the Outrun Collection playlist.
-- It is a dry run by default. `--apply` refuses while LaunchBox or BigBox runs and backs up both XML files.
+- It is a dry run by default.
+- `--apply` needs `--expect-sha256` (the deployed exe), refuses while LaunchBox or BigBox runs, refuses a duplicate title or resolved target, backs up both XML files, and writes a receipt.
+- `--rollback RECEIPT` restores the backups only while the XML still matches its post-apply hashes, and removes only the media the run created.
 - The Tweaks and Redux entries and their Stream Deck key are unchanged.
 
 **Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d` carries only
