@@ -145,6 +145,13 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - Record: hub `installed-smoke-02/custody-recovery.json`. The original stub-only quiescence claim is superseded, not rewritten.
   - Future runners must watch the `Core` descendants, not the root stub.
 
+### LaunchBox UI smoke 03 (2026-10-18): no entry, capture provider unreliable
+
+- **Prepared:** UI-only wrapper `C5314730…` with the Core-custody adapter `54FE02D8…` (15 synthetic, 68 and 25 helper fixtures pass). Readiness requires the visible game browser to be proven before any input.
+- **Pre-launch check:** the supported capture provider was aimed at a known window (an Explorer window, identified correctly through accessibility). Its screenshots showed a different window's content (a Firefox new tab), twice, with no API error. Reliable selected-target capture was not established, so the slot stopped before LaunchBox, as the grant requires.
+- **Nothing ran:** no lease, launcher, game or input; all frontend and game processes were absent. Evidence: hub `provider-preflight-03/result.json` (`F489389D…`).
+- **Status:** the installation is unchanged and complete. The real-route gate is still open, waiting for a provider-owned capture correction or another explicitly chosen route (for example, owner-attended confirmation).
+
 ## Disposition
 
 The 289ade5 exe is a **private alpha candidate**. It is suitable for an
