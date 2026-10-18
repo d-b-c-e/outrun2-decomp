@@ -49,14 +49,31 @@ public release. Proven on this exe: a fresh license through menus to actual
 driving, clean exit, and a cold relaunch that reloads the saved license and
 drives again, with no crash and no save change.
 
-Gates still open before any tag, each needing its own bounded slot or the owner:
+The remaining work splits into two tiers.
 
-1. Rendering. A picture assertion of the default single view, and the requested
-   triples modes (`Screens = Separate`, `Views = Angled`, via the existing
-   `shim_first_loop/run.py --render` route).
-2. Settings saved through F6, then applied after relaunch.
-3. Heading, brake response and the physical wheel (owner-attended).
-4. A race finish with its records saved and reloaded.
+**Playable alpha.** General readiness; muted, private, synthetic input is enough.
+
+| Gate | State |
+| --- | --- |
+| Boot, menus, actual driving | PASS (A, run-02) |
+| Clean exit and cold relaunch | PASS |
+| License save and reload, bytes preserved | PASS |
+| No crash | PASS over three launches |
+| Brake: speed drops faster than when coasting | Pending: next functional batch (Hule) |
+| Steering changes heading | Pending: next batch, if an existing route observes heading |
+| A value changed in F6 survives a relaunch | Pending: next batch, if an existing UI route can drive the panel |
+| Default single view shows a correct picture | Pending |
+| A race finish saves and reloads its records | Pending |
+
+**Rig features.** Qualified separately; these do not block a clearly labelled
+muted private alpha.
+
+| Feature | State |
+| --- | --- |
+| Rendered triples (`Screens = Separate`, `Views = Angled`) | Pending: a separately scoped render pass (`shim_first_loop/run.py --render`), with its own fences |
+| Physical wheel, pedals and bindings | Pending: owner-attended |
+| Force feel | Owner acceptance |
+| Telemetry field accuracy against a receiver; gamepad vibration | Pending |
 
 A physical check of wheel feel, force output, telemetry fields and angled triples is
 a separate, owner-attended gate. A pass here does not imply it.
