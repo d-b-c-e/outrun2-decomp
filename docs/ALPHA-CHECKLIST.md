@@ -103,7 +103,11 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - The cause is **not proven**: missing content, viewport or depth clipping, unloaded banks and prop placement remain uninstrumented.
   - Samo confirmed the same outlines and placement as the historical shots (N1, RC1, RC2). There is no new location or shape, and frames 30 and 59 fill both. That is not a pixel-identity claim.
   - No evidence-driven code correction is justified.
-- **No overall visual PASS was given, so nothing was installed.** Recommended disposition (kobe decides): the HD, widescreen and three-view passes stand, and the start-grid wedges are an owner-visible known limitation.
+- **No overall visual PASS was given in that slot, so nothing was installed.** The stop receipt is preserved.
+- **Later disposition (kobe 270778):** the HD, widescreen and Separate/Angled visual evidence is **qualified for this alpha**, with the start-grid black wedges documented.
+  - The wedges match the history and are absent from moving frames.
+  - Their cause is unproven, so they are not classified as a non-defect.
+  - Install and real-route smoke follow in a fresh slot.
 
 ## Disposition
 
