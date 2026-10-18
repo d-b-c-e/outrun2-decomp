@@ -138,7 +138,12 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - Receipt `Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`; both XML files matched their post-apply hashes at readback.
   - The Tweaks and Redux entries are unchanged.
 - **Real-route smoke: PENDING.** The owned LaunchBox stayed on its "Populating Games" splash through the bounded wait (to 22:00:09Z). No game launch, no input, no alternate route.
-- **Closure gap (open):** after release, `Core\LaunchBox.exe` (PID 12008, started 21:57:31Z by the owned launcher stub, and its child 13048) was still running. Closing the repo-root stub did not close the real frontend. It has been reported for normal close and custody recovery; the XML is to be re-verified afterwards.
+- **Closure gap, corrected:** after the first release, `Core\LaunchBox.exe` (PID 12008, started 21:57:31Z by the owned launcher stub, and its child 13048) was still running. Closing the repo-root stub had not closed the real frontend.
+  - Custody recovery: Hule held the lease from 22:01:31Z to 22:02:43Z, inside the original deadline. 12008 was closed normally at 22:02:14Z and 13048 exited normally.
+  - No LaunchBox, BigBox or OutRun process remains, and the owner's 16 files read back exactly.
+  - `Windows.xml` and the Outrun playlist still exactly match their post-apply hashes. The owner's edits and the new entry are intact, and the registration receipt can still roll back.
+  - Record: hub `installed-smoke-02/custody-recovery.json`. The original stub-only quiescence claim is superseded, not rewritten.
+  - Future runners must watch the `Core` descendants, not the root stub.
 
 ## Disposition
 
