@@ -100,12 +100,15 @@ Hule owns the receipt. Read-only facts so far:
 
 **Launch route.** The real launch path gets its own LaunchBox entry, added with
 the Launchbox-Racing tooling `scripts/add-outrun-decomp.py`. It is published alone on
-`d-b-c-e/LaunchboxRacingRedux` branch `demo/outrun-decomp-launch-route`, commit `68155a9`
-on `origin/master` `a04a6fa`. That commit's only change is this script.
+`d-b-c-e/LaunchboxRacingRedux` branch `demo/outrun-decomp-launch-route`, head `597a0c2`
+on `origin/master` `a04a6fa`. The branch changes only this script and its offline test
+`tests/test-add-outrun-decomp.py`. Run it against the live root with
+`--root <LaunchBox root>`; the live checkout's own files are not changed.
 - It registers "OutRun 2006: Coast 2 Coast (Decomp)", runs `OutRunDesktop.exe` in the target via a relative `ApplicationPath`, and adds it to the Outrun Collection playlist.
 - It is a dry run by default.
-- `--apply` needs `--expect-sha256` (the deployed exe), refuses while LaunchBox or BigBox runs, refuses a duplicate title or resolved target, backs up both XML files, and writes a receipt.
-- `--rollback RECEIPT` restores the backups only while the XML still matches its post-apply hashes, and removes only the media the run created.
+- `--apply` needs `--expect-sha256` (the deployed exe). It refuses while LaunchBox or BigBox runs, failing closed if the process list can't be read, and refuses a duplicate title or resolved target.
+- It records both XML backups and their post-apply hashes in the receipt before writing either file.
+- `--rollback RECEIPT` restores each XML file only while it is in its backup state or its exact post-apply state, so a partial write is recoverable and later edits are kept. It removes only the media the run created.
 - The Tweaks and Redux entries and their Stream Deck key are unchanged.
 
 **Wheelkit.** Vunu's isolated successor of the installed `c4a4e6d` carries only
