@@ -35,16 +35,24 @@ fork with force feedback (`dbce-mods-outrun-2006`) are a DLL on the original
 
 ## Wheelkit (separate repository)
 
-`dbce-wheelkit` `origin/main` (`1c0edd0`, 2026-10-16) lacks about 30 OutRun settings
-branches from 2026-10-16/17. They expose the native options above in Wheelkit:
-cursor, login, gamepad, pacing, presentation, monitor picker, level select,
-extraction, CD switcher, fast load, textures, compatibility, highway, Holly,
-character appearance and menus.
+Every completed OutRun settings branch in `dbce-wheelkit` is integrated in its
+local `main` `1248cb2` (2026-10-17). The tip that contains them all,
+`haru/outrun-fastload-mode1-20261017` `6d36997`, is an ancestor of that main. The
+decomp's readers for every such row are in this fork's `main`.
 
-All of them are contained in one tip, `haru/outrun-fastload-mode1-20261017`
-`6d36997`, which is 270 commits ahead of that main. Consolidating Wheelkit and
-deploying its app are a separate decision. The decomp build reads the same keys
-whether or not Wheelkit writes them.
+The rig's installed Wheelkit, `0.6.49+c4a4e6d`, lacks 5 of those OutRun commits:
+
+| Commit | Change | Decomp key it writes |
+| --- | --- | --- |
+| `f7cb7d8` (+ `184b4bd` docs, `10d3c6d` catalog test) | Fine steering and Engine RPM rows | `[Misc] FineSteering`, `[Telemetry] EngineRpm` |
+| `6d36997` | The loading-only VSync-kept mode | `[Performance] FramerateFastLoad` |
+| `5dd4219` | Borderless cursor visibility | `[Window] WindowedHideMouseCursor` |
+
+Without them the owner can still set these keys in OutRunDesktop.ini or through F6.
+Picking them up means a new Wheelkit build from local `main`, and that build also
+carries 43 non-OutRun commits (trucking, Sonic, SCS and others). It therefore needs
+Wheelkit's own qualification and installer route. Wheelkit's `origin/main` is 305
+commits behind local `main` (unpushed).
 
 ## Asset and configuration dependencies
 
