@@ -14,6 +14,10 @@ namespace dbce { namespace panel {
 
 static Config g_cfg;
 static volatile LONG g_open;
+static volatile LONG g_statusActive;
+static SRWLOCK g_statusLock = SRWLOCK_INIT;
+static char g_statusText[256];
+static StatusTone g_statusTone = StatusTone::Recording;
 static Page g_page = PAGE_HELP;
 static bool g_pageChanged = true;
 static bool g_advanced;
@@ -93,12 +97,30 @@ void SetOpen(bool open)
     if (open) g_pageChanged = true;
 }
 void Toggle() { SetOpen(!IsOpen()); }
+bool StatusLineActive() { return InterlockedCompareExchange(&g_statusActive, 0, 0) != 0; }
+void SetStatusLine(const char *text, StatusTone tone)
+{
+    size_t length = 0;
+    if (text) {
+        while (length < sizeof(g_statusText) - 1 && text[length]) ++length;
+        // A capped UTF-8 string must not end in part of a code point.
+        if (length == sizeof(g_statusText) - 1)
+            while (length && (static_cast<unsigned char>(text[length]) & 0xc0) == 0x80) --length;
+    }
+    AcquireSRWLockExclusive(&g_statusLock);
+    if (length) memcpy(g_statusText, text, length);
+    g_statusText[length] = 0;
+    g_statusTone = tone;
+    InterlockedExchange(&g_statusActive, length ? 1 : 0);
+    ReleaseSRWLockExclusive(&g_statusLock);
+}
+void ClearStatusLine() { SetStatusLine(nullptr, StatusTone::Recording); }
 bool StopFfbAvailable() { return g_cfg.ffbOn && g_cfg.stopFfb; }
 void StopFfbFromKey()
 {
     if (!StopFfbAvailable() || !g_cfg.ffbOn()) return;
-    g_cfg.stopFfb();
     NoteSaved(true, "FFB stopped");
+    g_cfg.stopFfb();   // callback persistence feedback, especially failure, takes precedence
     logf("panel: F8 stopped force feedback");
 }
 bool Advanced() { return g_advanced; }
@@ -384,6 +406,8 @@ static void drawHelp(bool advanced)
         savePref("Scale", v);
     }
     EndGroup();
+    // Host-owned issue/report actions precede the unobtrusive repository links.
+    if (g_cfg.drawPage) g_cfg.drawPage(PAGE_HELP, advanced);
     const bool modLink = g_cfg.modRepositoryUrl && *g_cfg.modRepositoryUrl;
     const bool wheelkitLink = g_cfg.wheelkitRepositoryUrl && *g_cfg.wheelkitRepositoryUrl;
     if (modLink || wheelkitLink) {
@@ -394,12 +418,54 @@ static void drawHelp(bool advanced)
         ImGui::PopFont();
         EndGroup();
     }
-    if (g_cfg.drawPage) g_cfg.drawPage(PAGE_HELP, advanced);
     if (!g_cfg.pages[PAGE_CAMERAS]) drawFrameRate();
 }
 
 // ---- the frame ----------------------------------------------------------------------------------------------
-void Draw(int width, int height)
+static void drawStatusLine(int width, int height)
+{
+    if (!StatusLineActive() || width < 64 || height < 64) return;
+    char text[256];
+    StatusTone tone;
+    AcquireSRWLockShared(&g_statusLock);
+    memcpy(text, g_statusText, sizeof text);
+    tone = g_statusTone;
+    ReleaseSRWLockShared(&g_statusLock);
+    if (!text[0]) return;
+    // Same center-display geometry as SessionStatusPresentation.Layout.
+    const float scale = (std::max)(.8f, (std::min)(2.0f, height / 1080.0f));
+    const float displayWidth = width >= height * 2.5f ? width / 3.0f : (float)width;
+    const float boxWidth = (std::max)(1.0f, (std::min)(760 * scale, displayWidth - 24 * scale));
+    const float inset = 14 * scale;
+    ImGui::SetNextWindowPos(ImVec2((width - boxWidth) / 2, 12 * scale), ImGuiCond_Always);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(boxWidth, 48 * scale), ImVec2(boxWidth, (float)height));
+    // F6Palette Window/Text/Accent/Warning; recording/problem use the existing native error tone.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(18/255.f, 19/255.f, 21/255.f, .94f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(231/255.f, 234/255.f, 240/255.f, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(inset, 12 * scale));
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("##dbce-session-status", nullptr, flags)) {
+        ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow()); // display order only, never focus
+        ImGui::PushFont(g_body);
+        ImGui::SetWindowFontScale(scale / g_scale);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + boxWidth - 2 * inset);
+        ImGui::TextUnformatted(text);
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        const ImVec2 pos = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+        const ImVec4 color = tone == StatusTone::Recording || tone == StatusTone::Problem ? kError :
+            tone == StatusTone::Busy ? ImVec4(224/255.f, 163/255.f, 62/255.f, 1) :
+            tone == StatusTone::Success ? kGood : ImVec4(85/255.f, 185/255.f, 232/255.f, 1);
+        ImGui::GetWindowDrawList()->AddRectFilled(pos, ImVec2(pos.x + 5 * scale, pos.y + size.y), ImGui::ColorConvertFloat4ToU32(color));
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+}
+
+static void drawPanel(int width, int height)
 {
     if (!IsOpen()) return;
     const float s = g_scale;
@@ -484,6 +550,12 @@ void Draw(int width, int height)
     ImGui::End();
 }
 
+
+void Draw(int width, int height)
+{
+    drawPanel(width, height);
+    drawStatusLine(width, height);
+}
 
 // ---- dev channel (unattended checks; Config::devFile) --------------------------------------------------------
 void PollDev()

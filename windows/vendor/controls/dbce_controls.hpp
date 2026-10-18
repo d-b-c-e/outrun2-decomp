@@ -231,11 +231,12 @@ inline bool calibrationFits(Shape shape, const Binding &b)
     return std::fabs(double(b.cal[1]) - double(b.cal[0])) * 8.0 >= span;
 }
 
-// Does the binding's kind fit the action? "" when it does, else a reason code: unknown-action, wrong-kind, rest-at-full,
-// bad-calibration.
-inline std::string fits(const std::string &action, const Binding &b)
+// Does the binding's kind fit the shape? "" when it does, else a reason code: unknown-action, wrong-kind, rest-at-full,
+// bad-calibration. The shape form serves destinations outside the 31 (a game's declared extras); the action form below
+// is exactly this with the action's own shape.
+inline std::string fits(Shape shape, const Binding &b)
 {
-    switch (shapeOf(action)) {
+    switch (shape) {
     case Shape::Unknown: return "unknown-action";
     case Shape::Centred:
         if (b.kind != Kind::Axis) return "wrong-kind";
@@ -250,6 +251,7 @@ inline std::string fits(const std::string &action, const Binding &b)
     }
     return "unknown-action";
 }
+inline std::string fits(const std::string &action, const Binding &b) { return fits(shapeOf(action), b); }
 
 inline double clampd(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -262,7 +264,7 @@ inline bool diButtonDown(long byte) { return (byte & 0x80) != 0; }
 // fit the action (calibrationFits) is refused explicitly: the value is neutral (0: steer centred, pedal released), never
 // read through out-of-range points nor through the schema-1 fields (mufa 62480 F2, sana 62527). The managed twin throws
 // unless Fits is "".
-inline double normalize(const std::string &action, const Binding &b, long raw)
+inline double normalize(Shape shape, const Binding &b, long raw)
 {
     if (b.kind == Kind::Button) return raw != 0 ? 1.0 : 0.0;
     if (b.kind == Kind::Hat) {
@@ -275,8 +277,8 @@ inline double normalize(const std::string &action, const Binding &b, long raw)
     // sum, span and rest-to-end distance overflow a 32-bit long.
     const double lo = double(b.min), hi = double(b.max);
     const bool cal = !b.cal.empty();
-    if (cal && !calibrationFits(shapeOf(action), b)) return 0.0;   // refused: neutral
-    if (shapeOf(action) == Shape::Centred) {
+    if (cal && !calibrationFits(shape, b)) return 0.0;   // refused: neutral
+    if (shape == Shape::Centred) {
         double n;
         if (cal) {   // schema 2: two-sided around the measured centre, saturating beyond the measured locks
             const double l = double(b.cal[0]), c = double(b.cal[1]), h = double(b.cal[2]), v = double(raw);
@@ -292,6 +294,7 @@ inline double normalize(const std::string &action, const Binding &b, long raw)
     const double n = clampd((double(raw) - rest) / (full - rest), 0.0, 1.0);
     return b.inverted ? 1.0 - n : n;   // the player's explicit inversion, once, after the captured travel or calibration
 }
+inline double normalize(const std::string &action, const Binding &b, long raw) { return normalize(shapeOf(action), b, raw); }
 
 // Normalized -> raw sample (the exact inverse; rounded half away from zero, clamped to the range; buttons the shared
 // boolean, which a DirectInput writer delivers as 0x80). Test injection only.
