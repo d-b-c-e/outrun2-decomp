@@ -99,7 +99,9 @@ Hule owns the receipt. Read-only facts so far:
 - Rollback restores the backed-up exe, INI, `options.ini` and capabilities, and removes the staged `textures/load`.
 
 **Launch route.** The real launch path gets its own LaunchBox entry, added with
-the Launchbox-Racing tooling `scripts/add-outrun-decomp.py` (latest local commit; not pushed, because that repo's `master` holds 16 other unpushed commits).
+the Launchbox-Racing tooling `scripts/add-outrun-decomp.py`. It is published alone on
+`d-b-c-e/LaunchboxRacingRedux` branch `demo/outrun-decomp-launch-route`, commit `68155a9`
+on `origin/master` `a04a6fa`. That commit's only change is this script.
 - It registers "OutRun 2006: Coast 2 Coast (Decomp)", runs `OutRunDesktop.exe` in the target via a relative `ApplicationPath`, and adds it to the Outrun Collection playlist.
 - It is a dry run by default.
 - `--apply` needs `--expect-sha256` (the deployed exe), refuses while LaunchBox or BigBox runs, refuses a duplicate title or resolved target, backs up both XML files, and writes a receipt.
