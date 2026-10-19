@@ -190,9 +190,22 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - The model's centring force pushes toward positive steer, and that steer has the sign of DirectInput X (to the right).
   - The force reached `SetDeviceForcesXY` unchanged. On the MOZA R12 a positive x turns the wheel left, as two earlier measurements on this rig found.
   - So the spring was delivered as anti-centring.
-  - Correction: `02808e8` (branch `demo/ffb-r12-sign-20261019`). It drives only a wheel with a measured direction (the R12, -1) and refuses others before any device call. The focused offline checks pass. It is not built, merged or installed.
+  - Correction: `02808e8` (branch `demo/ffb-r12-sign-20261019`). It drives only a wheel with a measured direction (the R12, -1) and refuses others before any device call. It is built in candidate-build-01 (below) and is not installed.
 - **Strength:** this is the provisional profile by design, not a scaling defect. The only terms are a spring of `0.30 x steer x min(v/30 m/s, 1)` at 50% and a shift pulse. For example, a 20% steer at 100 km/h gives about 5.6% of full scale. Defaults stay unchanged until the corrected direction is felt.
 - **Shifter:** Manual drove as sequential because `[Controls] Transmission = Sequential`. Native acts on the H-pattern gates (gear1..6) only with `Transmission = H-pattern` (kobe 275448). Physical H-pattern is unverified.
+
+### Combined candidate build, candidate-build-01 (2026-10-19)
+
+- **Source:** `54eca08` (merged here). It combines:
+  - the R12 force direction `02808e8`;
+  - Samo's F6 player essentials and graphics presets `cf52537`, the refusal reasons `1d5234d`, and the shared-input binding editor `fcd9e01` with its review fixes `bf76151`;
+  - the bridge fixture `818732a`.
+- **Slot:** handoff kobe 277611, 04:37:11Z to 04:44:34Z. Script `Build-Candidate54eca08.ps1` (`3935340368CB…`). Clean exit: lease released, no children left.
+- **Result:** 14/14 affected CTests pass, among them the new desktop_bindings and panel_preferences tests and wheelffb_bridge.
+  - Exe `4D5BE954DEFB…` (24236544 B). Consumer `CC105A02F61F…`.
+  - The consumer's fixture report is byte-identical to producer-build-01's, and the ffb marker and the delivered/unsupported sets equal the installed caps `7D713A1A`.
+- **Not done:** install, game, UI, device and force. Evidence: hub `.local/outrun-alpha-demo-20261019/candidate-build-01/result.json`.
+- **Next** (kobe 277807): prepare a tuple, receipt and reversible updater as artifacts only. The attended acceptance targets the shared (Shim) backend after Wheelkit's upgrade and an explicit profile transition. There is no separate Native sign-off.
 
 ## Disposition
 
@@ -237,7 +250,7 @@ muted private alpha.
 | --- | --- |
 | Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
 | Physical wheel, pedals and bindings | Owner drive 2026-10-18: the wheel controls worked. H-pattern is not active (`Transmission = Sequential`), and physical H-pattern is pending |
-| Force feel | Owner drive 2026-10-18: output present, felt weak and pushing outward. The direction cause is found, and the correction `02808e8` is unbuilt. Pending: a corrected build, then an attended turn-and-release check at speed |
+| Force feel | Owner drive 2026-10-18: output present, felt weak and pushing outward. The direction cause is found, and the correction is built (candidate-build-01) but not installed. Pending: install, then an attended turn-and-release check at speed on the shared backend |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
 | Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
 
