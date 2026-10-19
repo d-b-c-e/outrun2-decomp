@@ -152,6 +152,21 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 - **Nothing ran:** no lease, launcher, game or input; all frontend and game processes were absent. Evidence: hub `provider-preflight-03/result.json` (`F489389D…`).
 - **Status:** the installation is unchanged and complete. The real-route gate is still open, waiting for a provider-owned capture correction or another explicitly chosen route (for example, owner-attended confirmation).
 
+### Force correction build, producer-build-01 (2026-10-19)
+
+- **Why:** the legacy force model reads car `+0x1D0`/`+0x1D4` as steering and steering rate, but their producers write speed deltas (`pc_common_control.cpp:2329-2332`), and `+0x264`/`+0x268` hold road-edge distances (Samo's source findings). kobe 272265 put this correction ahead of any feel acceptance.
+- **Change:** `e4f4d0c` (Samo, approach (c), kobe 272782), reviewed by Demo.
+  - Legacy is a software trace-only reference and is refused before `WheelFfb.dll` loads, even with a saved `Output = wheel`.
+  - Only an explicit `[FFB] Model = outrun-producer@2` can drive the wheel, through the unchanged gated delivery.
+  - F6 offers the model choice and writes only `Model`; Output stays independent.
+  - One header (`ffb_capability.hpp`) holds the policy for both the refusal and the controls consumer's `ffb` marker.
+- **Build:** Hule held the lease from 02:02:24Z to 02:10:10Z on a clean isolated tree of `e4f4d0c`. Configure, compile, discovery, CTest, the native consumer, the read-only owner readiness and the metadata all passed.
+  - Exe `00491F111BB03A99C38051133CA37A363B648CF98FAD52FDFB6F6128E115B7C3`, 24028160 B. Consumer `47490D8A…`.
+  - 7/7 focused tests: ffb_outrun, ffb_producer2, ffb_shadow, ffb_player_model, ffb_delivery, ffb_wiring, controls_consumer.
+  - The consumer reported the exact marker, and the assembled `session-capabilities.json` (`7D713A1A…`) carries it.
+  - Tuple `BF693C39…` against the installed baseline (`A92CDCB6`, INI `C2D4AD15`, capabilities `5BB46931`, receipt for `4652a18`).
+- **Not done:** no install, no game, no force output. Hule's evidence is `producer-build-01/result.json`. Installing it is a separate, reviewed slot.
+
 ## Disposition
 
 The deployed exe `A92CDCB6` (built from `4652a18` in main-build-01) is installed on the
@@ -192,7 +207,7 @@ muted private alpha.
 | --- | --- |
 | Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
 | Physical wheel, pedals and bindings | Pending: owner-attended |
-| Force feel | Owner acceptance, only after the force input meanings are corrected in source (kobe 272265; queued for Samo) |
+| Force feel | Owner acceptance, only after the corrected force build is installed. The correction `e4f4d0c` is on `main` and built (producer-build-01); the install is pending |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
 | Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
 

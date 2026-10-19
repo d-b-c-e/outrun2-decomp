@@ -10,7 +10,7 @@ release or tag. Test evidence is in [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
 | Item | Value |
 | --- | --- |
 | Install | `E:/Games/OutRunDecompSmoke` (the owner's maintained decomp install) |
-| Executable | `OutRunDesktop.exe`, SHA-256 `A92CDCB6468D27082970F7D14D8B909A4A346A14A77608AB0367F7296AE234AF`, 24023040 B. Built from `4652a18`; fork `main`'s product source (`src`, `xbox`, `windows/source`, `windows/vendor`) is identical to it |
+| Executable | `OutRunDesktop.exe`, SHA-256 `A92CDCB6468D27082970F7D14D8B909A4A346A14A77608AB0367F7296AE234AF`, 24023040 B. Built from `4652a18`. Fork `main` has since moved on: it carries the force-model correction from `e4f4d0c`, built as `00491F11…` but **not installed** (see below) |
 | Settings | `OutRunDesktop.ini` SHA-256 `C2D4AD15…`: the owner's file with `[Graphics]` and `[Triple]` sections appended. The owner's controls, saves, force and unknown keys are kept byte for byte. `session-capabilities.json` `5BB46931…` comes from install tuple `87B3BE6D…` |
 | HD interface | `[Graphics] UITextureReplacement = true`, `TextureBaseFolder = textures-consolidated-20261018-01`. That folder holds 257 UI DDS copied read-only from the owner's Tweaks pack (receipt `FDB2CAF1…`). Scene replacement is off |
 | Widescreen | `options.ini` `widescreen=1`, `resolution=2560x1440`, `antialiasing=msaa4` (the owner's existing values) |
@@ -36,11 +36,16 @@ panel; LB+RB+Menu exits.
 - **Real-route smoke through LaunchBox: open.**
   - During the install slot LaunchBox stayed on "Populating Games" for the whole bounded wait, so no game was launched through it.
   - Its log stops after a Steam play-time sync. `RunLibraryScanOnStartup` and ROM auto-import are on; a startup scan or a hidden prompt are the candidates, neither proven.
-- **Force feedback is off and needs a source correction first.**
+- **Force feedback is off. The correction is on `main` and built, but not installed.**
   - The installed INI has no `[FFB]` section, so no force is computed or sent.
-  - The default model (`outrun-legacy@1`) reads car `+0x1D0`/`+0x1D4` as steering and steering rate. A source audit found those fields hold speed deltas ([roadmap](../windows/ROADMAP.md) step 6).
-  - The opt-in `outrun-producer@2` uses the consumed steering, but it is unproven in an ordinary run.
-  - Confirming and correcting this comes before any feel acceptance (kobe 272265).
+  - The installed exe predates the correction. Its default model (`outrun-legacy@1`) would read car `+0x1D0`/`+0x1D4` as steering and steering rate, but those fields hold speed deltas ([roadmap](../windows/ROADMAP.md) step 4).
+  - The correction, `e4f4d0c` (Samo; kobe 272265, approach (c)):
+    - Legacy becomes a software trace-only reference, refused before `WheelFfb.dll` loads even with `Output = wheel`.
+    - Wheel output needs an explicit `[FFB] Model = outrun-producer@2`, which uses the consumed steering.
+    - F6 has a separate next-start model choice; Output never selects a model.
+    - The build's own controls consumer reports an `ffb` capability marker, which the install tuple carries for Wheelkit.
+  - Built in producer-build-01: exe `00491F111BB03A99C38051133CA37A363B648CF98FAD52FDFB6F6128E115B7C3`, 7/7 focused tests ([checklist](ALPHA-CHECKLIST.md)).
+  - Installing it is a separate, planned slot (Hule). Feel acceptance follows that install.
 - **Not yet qualified on this build:** physical wheel feel and force, saving through F6 and applying it on relaunch, brake response against coasting, a race finish with its records saved and reloaded, and the Wheelkit 0.6.52 install (below).
 
 ## Deployment history
@@ -52,13 +57,16 @@ panel; LB+RB+Menu exits.
 | render-deploy-01 | The game's own full-width capture: HD, widescreen and three views. It stopped on the start-grid wedges; later qualified (kobe 270778) with them documented |
 | installed-smoke-01 | A journal-save sharing violation (holder unknown); rolled back, owner unchanged. The deployer was fixed to write the journal atomically |
 | installed-smoke-02 | **Installed**, readback exact; LaunchBox UI smoke pending. The real `Core\LaunchBox.exe` outlived the stub close and was recovered by a normal close, with the XML unchanged |
+| LaunchBox UI smoke 03 | Stopped before entry: the capture provider returned the wrong window. The real-route launch is still open |
+| producer-build-01 | Build PASS of the force correction `e4f4d0c`: exe `00491F11`, 7/7 focused tests, exact `ffb` marker. Tuple `BF693C39` assembled, **not installed** |
 
 ## Source coverage
 
 What `main` contains:
 - the cumulative branch `54b2c46`, angled traffic culling `594609f` and the resource fixture `e87299a`;
 - every in-source row of the [roadmap](../windows/ROADMAP.md) Tweaks table: texture replacement, music, CD switcher, fast load, pacing and VSync, vibration, level select, Holly, highway sets, compatibility fixes, telemetry RPM, fine steering, login protection, the opt-in network, triples, and the F6 pages;
-- from this consolidation: the startup diagnostics line, the toolkit F6 panel fixes and controls overloads (re-vendored from toolkit `5cb9953`, which is not on the toolkit's origin), runner fixes, the HD render-capture harness, and `tools/alpha`.
+- from this consolidation: the startup diagnostics line, the toolkit F6 panel fixes and controls overloads (re-vendored from toolkit `5cb9953`, which is not on the toolkit's origin), runner fixes, the HD render-capture harness, and `tools/alpha`;
+- after the install: the force-model correction `e4f4d0c`, with its capability marker. Its `src`, `xbox` and `windows` trees are identical on `main`.
 
 Not merged, each with its reason:
 
@@ -87,3 +95,9 @@ The private successor `0.6.52+0c1c24f` carries only those five commits.
 - Qualified: 278/278 focused tests; the app publish and the 69-page and 109-page smoke checks passed.
 - Package `5F3A3C63…`; evidence in hub `artifacts/wheelkit-outrun-0652-vunu-20261018`.
 - **It is not installed.** The upgrade waits for the owner to close Wheelkit normally, then uses Wheelkit's own installer route.
+
+The proposed consolidated successor is `0.6.53+7b801ac` (Vunu, on the same `0c1c24f` base). It adds the force UI that matches the correction.
+- With the build-owned `ffb` marker, trusted only through the hash-bound exe/capabilities/receipt tuple, it shows the model choice and marks Legacy as trace only. It also refuses `Output = wheel` without `outrun-producer@2`.
+- Without the marker, as on the current install, it behaves as before.
+- Tests: 262/262 focused tests at `8a5f634`, plus one focused case for the `7b801ac` hardening. Publishing and packaging wait for a serialized slot.
+- Once qualified, it is preferred over 0.6.52, which stays the fallback.
