@@ -117,7 +117,9 @@ struct Rig {
         in=new fakecom::Input;in->add(wheel());in->add(shifter());
         inner=std::make_shared<DInputProvider>(in,nullptr);
         bridge=std::make_shared<WheelFfbBridge>(inner,&a,W());
-        CoreConfig cfg;core=std::make_unique<Core>(*bridge,cfg);
+        // A step fixture: an absent device is looked for on every pass, as test_shim's step Rig does since the 250 ms
+        // missing-device wait (24dc0f8). With the default wait the wheel is read through the slot one interval later.
+        CoreConfig cfg;cfg.missing_rescan_us=0;core=std::make_unique<Core>(*bridge,cfg);
         core->set_profile(read_profile(profile()));
     }
     ~Rig(){core.reset();bridge->shutdown();inner->shutdown(200);}
