@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <string>
 #include <cstring>   // _stricmp
+#include <vector>
+namespace dbce::controls::edit { struct AcceptedObservation; }
 namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::desktop {
 // Before the game starts: keeps the plan and the exact [Controls] bytes. Nothing is opened.
@@ -53,6 +55,10 @@ std::string shim_input_playback_badge();   // the present thread: "PLAYBACK" whi
 // For the F6 panel's Controls page: the ordinary shim backend's devices (open / not, each one's state); empty when this
 // backend is not the one in use. Game thread (the input sample's thread).
 std::string shim_input_status_text();
+// Input-thread copies from the ordinary host's already accepted tick and adopted device reports.
+// No tick/read/open/enumeration occurs here. Recording, tests, playback and stopped readers are excluded.
+bool shim_input_binding_edit_allowed();
+std::vector<dbce::controls::edit::AcceptedObservation> shim_input_binding_observations();
 // The steering wheel as the ordinary shim backend reads it, for force feedback (INPUT-SHIM.md section 6, one owner):
 // the [Controls] steer binding's device instance and product, from the profile bytes Core parses (no second mapping
 // store), joined to Core's live report of that instance. `opened` only when that report is open and its product (Core

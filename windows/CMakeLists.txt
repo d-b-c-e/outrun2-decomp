@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/desktop_panel.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
@@ -32,6 +32,21 @@ target_compile_features(test_fast_load_config PRIVATE cxx_std_17)
 target_compile_definitions(test_fast_load_config PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_options(test_fast_load_config PRIVATE /W4 /WX)
 add_test(NAME fast_load_config COMMAND test_fast_load_config)
+
+# Shared binding drafts, accepted fake Core samples and disposable-file Save/Cancel; no reader or device.
+add_executable(test_desktop_bindings tests/test_desktop_bindings.cpp source/desktop_bindings.cpp source/controls_store.cpp source/desktop_settings.cpp)
+target_include_directories(test_desktop_bindings PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)
+target_compile_features(test_desktop_bindings PRIVATE cxx_std_17)
+target_compile_definitions(test_desktop_bindings PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_desktop_bindings PRIVATE /W4 /WX)
+add_test(NAME desktop_bindings COMMAND test_desktop_bindings)
+
+# Exact shared production preference persistence, disposable INIs only; no renderer/window/input.
+add_executable(test_panel_preferences vendor/native/panel/test/test_preferences.cpp)
+target_compile_features(test_panel_preferences PRIVATE cxx_std_17)
+target_compile_definitions(test_panel_preferences PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_panel_preferences PRIVATE /W4 /WX)
+add_test(NAME panel_preferences COMMAND test_panel_preferences)
 
 # Synthetic identities/rectangles only: no active monitor query, window, topology change or game.
 add_executable(test_startup_monitor tests/test_startup_monitor.cpp)

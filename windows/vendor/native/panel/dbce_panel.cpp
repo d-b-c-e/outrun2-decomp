@@ -1,5 +1,6 @@
 // Shared F6 settings panel: frame, navigation and standard widgets (see dbce_panel.h; UX-1 in docs/CONSUMER-UX.md).
 #include "dbce_panel.h"
+#include "dbce_panel_preferences.hpp"
 #include "dbce_frame_stats.hpp"
 #include "../third_party/imgui/imgui.h"
 #include "../third_party/imgui/imgui_internal.h"
@@ -75,7 +76,7 @@ static void loadPrefs()
 static void savePref(const char *key, const char *value)
 {
     if (!g_cfg.iniPath) return;
-    if (!WritePrivateProfileStringA("Panel", key, value, g_cfg.iniPath)) {
+    if (!PersistPreference(g_cfg, key, value)) {
         NoteSaved(false, "Settings could not be saved");
         logf("panel: could not save [Panel] %s (%lu)", key, GetLastError());
     }

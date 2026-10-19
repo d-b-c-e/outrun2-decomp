@@ -7,7 +7,9 @@
 //           used here (with the shim input backend also the read slots and GetReadSlotCaps, native 0.11.0, which the
 //           shim's WheelFfb bridge reads the wheel through). No library state is created before the open.
 //   open    in the race and in front (an exclusive handle is not acquired behind another window, and the game never
-//           takes the focus), with the input layer reading that same instance as the steering device; the instance is
+//           takes the focus), with the input layer reading that same instance as the steering device; its product has
+//           a measured force direction (wheel_direction: an unmeasured wheel is released before any device call, never
+//           driven with a guessed sign); the instance is
 //           one of the library's force-feedback devices; strict selection opens exactly it (never a name or an
 //           index); the exit guards install; the hold watchdog is set (SetHoldTimeoutMs); then an accepted zero
 //           (SetDeviceForcesXY(0, 0) returns 1) before anything else. One attempt per process.
@@ -63,6 +65,14 @@ struct Config {
 std::string load_refusal(const Config&);
 // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}", any case; nothing else.
 bool parse_guid(const std::string&,GUID&);
+// The SetDeviceForcesXY x sign that pushes a steering device's wheel toward positive steer, by its product GUID. The
+// force model's output (force_model.h) pushes toward positive steer when positive, and the steer is the device's
+// DirectInput X axis, which increases to the right; which x sign does that is a per-wheel fact, measured, never derived
+// (toolkit knowledge/DIRECTINPUT-FFB.md). MOZA R12 Base {0006346e-0000-0000-0000-504944564944}: -1. A positive x turns
+// it to the left: art-of-sim-rally through this library's encoding (2026-09-02: +Fy, which has the steer's sign,
+// centres; a left turn pushes the wheel right) and cruisn-collection (2026-08: a positive SDL level turns it left).
+// 0 for any other product, empty or malformed text: not measured.
+int wheel_direction(const std::string& product);
 enum class Phase { Off, Waiting, Open, Released, Stopped };
 const char* phase_name(Phase);
 // One input sample of the game.
@@ -71,6 +81,7 @@ struct Sample {
     bool front{};              // the game window is this process's and the foreground window
     void* hwnd{};
     std::string steer_dev;     // the input layer's connected steering device ("" none)
+    std::string steer_prod;    // that device's product GUID, as the input layer verified it ("" not known)
     std::uint64_t ms{};        // a monotonic clock
     bool steer_live{};         // with an Owner: the steer action is applied from a valid, fresh sample of that device
     std::uint32_t steer_epoch{};   // with an Owner: that device's input epoch
@@ -95,7 +106,8 @@ public:
     bool start(const WheelFfbApi&,const Config&);
     // With the shim input backend, before the open (Waiting only): the wheel's owner. Config::shim never opens without.
     void set_owner(Owner*);
-    // Once per input sample; `command` (DirectInput units, already x FFBGlobalStrength) is used in the race only.
+    // Once per input sample; `command` (SetDeviceForcesXY's x: DirectInput units, already in the device's direction,
+    // wheel_direction) is used in the race only. The open refuses a Sample whose steer_prod has no measured direction.
     void frame(const Sample&,std::int32_t command);
     // PanicStop when opened, FreeDirectInput when the library holds any state; the library is not called again.
     void shutdown();

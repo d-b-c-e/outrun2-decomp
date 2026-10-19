@@ -37,6 +37,17 @@ bool parse_guid(const std::string& s,GUID& out){
     return true;
 }
 
+int wheel_direction(const std::string& product){
+    // DirectInput's product GUID: Data1 is PID << 16 | VID, Data4 "PIDVID"; MOZA R12 Base is VID 346E, PID 0006.
+    static const struct { GUID product; int direction; } Measured[]{
+        {{0x0006346eUL,0x0000,0x0000,{0x00,0x00,0x50,0x49,0x44,0x56,0x49,0x44}},-1},
+    };
+    GUID g;
+    if(!parse_guid(product,g))return 0;
+    for(const auto& m:Measured)if(IsEqualGUID(g,m.product))return m.direction;
+    return 0;
+}
+
 std::string load_refusal(const Config& c){
     if(!c.output)return "[FFB] Output is not wheel (the default: no force output)";
     if(c.muted)return "DBCE_FFB_MUTE=1";
@@ -201,6 +212,11 @@ void Delivery::frame(const Sample& s,std::int32_t command){
             if(s.race&&s.front)why_="waiting: the input layer does not read "+cfg_.steer_dev+" as the steering device";
             return;
         }
+        // Before any hand-over or device call: a wheel whose force direction is not measured is never driven (the
+        // input keeps reading it; only the force is off for the session).
+        if(!wheel_direction(s.steer_prod)){
+            release("this steering wheel's force direction is not measured (product "+(s.steer_prod.empty()?std::string("unknown"):
+                s.steer_prod)+"), so no force is sent; the controls are unaffected");return;}
         if(cfg_.shim&&!owner_){why_="waiting: the shim input has no owner hand-over for the wheel";return;}
         if(owner_){
             if(!handing_over_){
