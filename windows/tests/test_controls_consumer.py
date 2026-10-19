@@ -6,6 +6,16 @@ import json, pathlib, subprocess, sys
 
 exe, folder = str(pathlib.Path(sys.argv[1]).resolve()), pathlib.Path(sys.argv[2])
 checks = failed = 0
+ffb_capability = {"models": ["outrun-legacy@1", "outrun-producer@2"],
+                  "wheelOutput": ["outrun-producer@2"], "legacy": "trace-only"}
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate native consumer key: " + key)
+        result[key] = value
+    return result
 def check(ok, what):
     global checks, failed
     checks += 1
@@ -13,7 +23,10 @@ def check(ok, what):
 def read(name):
     r = subprocess.run([exe, str(folder / name)], capture_output=True, text=True)
     check(r.returncode == 0, "%s: exit %d %s" % (name, r.returncode, r.stderr.strip()))
-    return json.loads(r.stdout)
+    native = json.loads(r.stdout, object_pairs_hook=unique_object)
+    check(native["capability"].get("ffb") == ffb_capability, name + ": exact build-owned FFB capability")
+    check(list(native["capability"]["ffb"]) == list(ffb_capability), name + ": FFB capability field order")
+    return native
 
 a = read("shim-hpattern.ini")
 check(a["schema"] == "outrun.controls-consumer@1", "schema")

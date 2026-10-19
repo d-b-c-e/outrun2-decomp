@@ -1,7 +1,8 @@
 // OutRun force feedback, F2 + F4 (ffb_live.hpp): the software force stream computed in the game, and its delivery to
-// the wheel when [FFB] Output = wheel (ffb_device.hpp; off by default).
+// the wheel only for outrun-producer@2 with [FFB] Output = wheel (off by default). Legacy is software-only.
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
+#include "ffb_capability.hpp"
 #include "ffb_shadow_live.hpp"
 #include "native_window.hpp"
 #include "wheel_input.hpp"
@@ -27,7 +28,7 @@ struct Row:ffb::Sink {
 };
 struct Live {
     bool on{};
-    bool selected{},row_ready{},delivery_gate_open{};
+    bool selected{},row_ready{},delivery_gate_open{},legacy_reference{};
     bool last_model_gate{},last_front{};
     int last_output_gate{-1};
     unsigned gate_notes{};
@@ -175,11 +176,13 @@ void stop_device(){
     unload();
 }
 // F4: the wheel output, when every gate allows it (ffb_device.hpp); false leaves WheelFfb.dll unloaded.
-bool start_output(const Ini& settings,bool latched,std::string& notes){
+bool start_output(const Ini& settings,bool latched,std::string& notes,ffb::player::Model model){
     const auto cfg=ffb_output_config(settings,latched,std::getenv("DBCE_FFB_MUTE"),notes);
     const auto off=[](const std::string& why){f.off=why;std::printf("ffb: no wheel output: %s\n",why.c_str());return false;};
     f.shim=cfg.shim;f.requested=cfg.output;
     if(!cfg.output){f.off=ffbdev::load_refusal(cfg);return false;}   // the default: no line of its own
+    if(!ffb::capability::wheel_output(model))
+        return off("outrun-legacy@1 is software trace-only; select outrun-producer@2 for wheel output");
     if(const auto why=ffbdev::load_refusal(cfg);!why.empty())return off(why);
     wchar_t exe[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,exe,MAX_PATH);
     std::wstring path=n&&n<MAX_PATH?std::wstring(exe,n):std::wstring();
@@ -217,13 +220,17 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
         }
         f.selected=f.on=true;
         std::string notes;
-        f.output=start_output(settings,latched,notes);
+        f.output=start_output(settings,latched,notes,choice.model);
         if(!notes.empty())std::printf("ffb: %s\n",notes.c_str());
         std::printf("ffb: outrun-producer@2 selected, steering %d%%, shift %d%%; output %s\n",
             choice.strengths.steering_percent,choice.strengths.shift_percent,f.output?"WheelFfb (gated)":"none");
         std::fflush(stdout);return;
     }
+    f.legacy_reference=true;
     std::string notes,source;
+    // The shared build-owned policy refuses Legacy before DLL load or Delivery::start, even with a
+    // previously saved Output=wheel. Only explicit tracing enables its historical software computation.
+    f.output=start_output(settings,latched,notes,choice.model);
     const auto s=ffb_settings(settings,notes,source);
     std::string path;
     if(latched)path=latched_run_folder.empty()?std::string():latched_run_folder+"\\ffb-trace.csv";   // beside the capture
@@ -233,17 +240,13 @@ void ffb_configure(const Ini& settings,bool latched,const std::string& latched_r
     if(!model->invalid().empty()){
         if(!notes.empty())std::printf("ffb: %s\n",notes.c_str());
         std::printf("ffb: settings refused (%s); nothing computed, no output\n",model->invalid().c_str());std::fflush(stdout);return;}
-    f.output=start_output(settings,latched,notes);
     if(!notes.empty())std::printf("ffb: %s\n",notes.c_str());
-    if(path.empty()&&!f.output){
-        std::printf("ffb: no force output; the model is computed only with OR2_FFB_TRACE, in a latched run, or for [FFB] Output = wheel\n");
+    if(path.empty()){
+        std::printf("ffb: legacy software reference is computed only with OR2_FFB_TRACE or in a latched run\n");
         std::fflush(stdout);return;}
     f.model=std::move(model);
-    f.model->set_periodics(false,0,1);   // the CF fallback, as the mod without hardware periodics (F4 sends the constant only)
+    f.model->set_periodics(false,0,1);   // unchanged legacy CF fallback for the software reference
     f.trace_path=path;f.source=source;
-    if(path.empty()){
-        f.on=true;
-        std::printf("ffb: outrun-legacy@1 to the wheel (%s), no trace\n",source.c_str());std::fflush(stdout);return;}
     f.trace=std::fopen(path.c_str(),"w");
     if(!f.trace){
         std::printf("ffb: trace %s not writable; nothing computed, no output\n",path.c_str());std::fflush(stdout);
@@ -301,6 +304,7 @@ std::string ffb_status_text(){
     if(f.retained)return "stopping: a shim call is still inside WheelFfb; the library's watchdog silences the wheel, and the stop completes at the exit";
     if(!f.output){
         if(f.stopped)return "off (stopped)";
+        if(f.legacy_reference&&f.requested&&!f.off.empty())return "off: "+f.off;
         if(!f.shim||!f.requested||f.off.empty())return "off";
         // The shim backend: why the output did not start, and the steering wheel as the shim reads it.
         const auto s=shim_input_steer();

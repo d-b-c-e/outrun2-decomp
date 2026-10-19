@@ -51,25 +51,24 @@ go upstream as small pull requests (first: `tweaks-exe`).
      `Views = Angled`, `MatchGameFov = true`. The game's own full-span capture showed three projected views and the HD
      HUD. It is qualified for alpha with the start-grid wedges documented, cause unproven (kobe 270778;
      `docs/ALPHA-CHECKLIST.md` render-deploy-01, `docs/DEPLOYMENT.md`). The owner's physical check is still open.
-4. 🟡 **Force feedback**: the force model of the Tweaks fork
-   (`dbce-mods-outrun-2006`, profiles in `force-profiles.ini`), fed from the
-   car state in the decomp's own structures instead of game-memory hooks;
-   DirectInput effects on the wheel opened exclusively.
-   - Built and tested offline:
-     - the model;
-     - the delivery, which loads `WheelFfb.dll` from the game folder only with `[FFB] Output = wheel`, outside test
-       runs and without `DBCE_FFB_MUTE`;
-     - the shim's WheelFfb read-slot bridge.
-     The tests are test_ffb_outrun, test_ffb_delivery, test_ffb_wiring and test_wheelffb_bridge. The muted
-     integration passed (hub `artifacts/outrun-bridge-muted-20261012`).
-   - Packaged: the force add-on carries WheelFfb.dll (hub `artifacts/outrun-ffb-addon-20261012`).
-     - It was installed beside the owner's b08f143 on 2026-10-12, with the force off (no `[FFB] Output`), and
-       re-pinned to the owner's ac68a6f on 2026-10-13 (the same DLL, still no `[FFB] Output`).
-     - Its muted copy check logged the refusal under `DBCE_FFB_MUTE` and did not load the DLL.
-   - F6 saves the wheel output for the next start (f67f196). It is in the owner's ac68a6f TEST install and was
-     seen rendered muted, without the add-on (f6-ac68a6f-run1 above); saving it through the panel is not
-     checked in game.
-   - Not yet: the physical output on the wheel, and the feel against the art of rally reference (attended).
+4. 🟡 **Force feedback**: versioned software reference and corrected selected model.
+   - `outrun-legacy@1` retains the Tweaks-derived calculation, old tune keys, raw adapter, goldens and trace schemas
+     as software reference only. Its historical steering/rate fields are speed differences and its lateral fields
+     are road-edge distances. Absent or explicit Legacy refuses saved `Output = wheel` before DLL loading/start.
+   - Explicit `outrun-producer@2` uses consumed steer `+0x202`, HUD speed `+0x1F8` and gear `+0x208` for provisional
+     centering and shift cues, with independent `[FFBProducer2]` gains. Unsupported tire/load terms stay unavailable.
+     It uses the existing gated delivery and shim bridge; Output remains off by default and force-muted/latched
+     processes cannot load the force library. See `docs/FFB-PRODUCER2-PLAYER-BOUNDARY.md`.
+   - F6 provides an explicit next-start model selector and independent Output switch. Model edits write only Model;
+     Output On never silently selects a model. Legacy controls are labeled trace-only and no old gain is migrated.
+   - Historical offline model/delivery/bridge fixtures and muted integration passed (hub
+     `artifacts/outrun-bridge-muted-20261012`). Focused fixtures now cover Legacy refusal/trace preservation and
+     separate Model/Output persistence; the current source change still needs a fresh serialized build/test.
+   - Selected software run 02 at `0979631` retained 1,368 finite Computed rows, with no delivered torque evidence
+     (hub `artifacts/outrun-ffb-selected-20261013/run-02`). Run 01's foreground cause remains an inference.
+   - The force add-on was installed with output off, first on 2026-10-12 and re-pinned on 2026-10-13. The current
+     `A92CDCB6` install predates this Legacy refusal. Source readiness does not imply deployment; native semantics
+     must ship with their hash-bound capability marker. Physical polarity, onset, recovery, stop and feel are open.
 5. 🟡 **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
    toolkit `native/forza`), plus the Tweaks fork's shared memory for its SimHub plugin; see `README.md` Telemetry.
    - 2026-10-12: SimHub logged valid OutRun data on port 8000 during a shim run.
@@ -104,10 +103,11 @@ go upstream as small pull requests (first: `tweaks-exe`).
      - The physics readers of +0x202 are continuous in that i16, with 0x7f00 as full lock: pc_steering.cpp:57 and
        :78 (the 0x7000 correction), :106 (|+0x202| / 32512), pc_common_control.cpp:93, :237 and :1560.
      - The wheel arrives at 16 bits (shim record word 0x0E = lround(n*32767)).
-     - The legacy FFB adapter still reads car +0x1D0/+0x1D4 as steering/rate, although those fields are speed
-       deltas; Guru's separate source audit is at hub `artifacts/outrun-ffb-source-audit-20261013`. Since `6777eb3`,
-       Forza telemetry instead takes the GAME-consumed `analog_7d6810.current[0]` channel; shared-memory v1 still
-       copies raw +0x1D0 for byte compatibility. The game writes the consumed steering channel to car +0x202.
+     - The software-only legacy FFB adapter preserves +0x1D0/+0x1D4 as historical steering/rate fields although
+       their producers write speed deltas; +0x264/+0x268 are road-edge distances. It cannot drive wheel output.
+       Producer@2 instead reads actual consumed steering +0x202 and HUD speed +0x1F8. The source audit is at hub
+       `artifacts/outrun-ffb-source-audit-20261013`. Since `6777eb3`, Forza telemetry takes GAME-consumed
+       `analog_7d6810.current[0]`; shared-memory v1 still copies raw +0x1D0 for byte compatibility.
      - step_native_gameplay (pc_vehicle_control.cpp:293, clamped -128..127) has no caller.
      - The slice: on the analog path only, +0x202 = lround(steer*0x7f00), clamped. At k/127 that equals the PC's k<<8.
        current[0] and the consumed capture stay byte-identical. A latched run forces it off, and a recorded session
@@ -348,7 +348,7 @@ or rendered-result claim. See docs/UI-SCALING.md.
 | | hpattern gears 1-6 | 🟡 | pulses toward the gate's gear (car +208); R: the game has no reverse |
 | DirectInput.Aux | DeviceGuid, buttons | ✅ | any action may sit on any device (one binding per action) |
 | Telemetry | Enable, SharedMemName | 🟡 | step 5: `[Telemetry] Enabled`, `SharedMemName`, `Layout`; reception confirmed, per-field accuracy open |
-| FFB | all | 🟡 | step 4: built and tested offline; no owner package ships WheelFfb.dll yet |
+| FFB | all | 🟡 | step 4: Legacy is a software reference; explicit producer@2 supports gated output. F6 Model and Output stay independent. Existing add-on installed with output off; this source change awaits serialized build/test and paired deployment. Selected run 02 proves software computation, not wheel torque. Physical acceptance remains open. |
 | Graphics | resolution, AA, widescreen | ✅ | upstream rows (Options > Settings) |
 | | UIScalingMode | 🟡 | windows/docs/UI-SCALING.md: 2 (keep centered, the centered 4:3) by default here; 0 stretches the 2D over the 16:9 frame, or over a span's center panel only; 1 (Tweaks' Online Arcade) is partial: the 2D mapping widens at the 4:3 scale to the frame's edges (or the center panel's), and NaviPub_Disp's HUD is spaced to them with Tweaks' unspaced parts (rival labels / markers, hearts, LAN markers, and from the level / lap / countdown on). Step 2b adds time attack's forced sides, the put_scroll positions (time attack, rank, REV, heart number) and the ghost gap. Step 2c adds C2C scores, mission and GF request bubbles, and an 18-site source bridge for translated GF bubbles and rank positions; C2C GOAL now reuses the existing canonical request display with per-submission fruit/heart scope capture in source; the affected Release build and owned_request_course_phase pass at e4d9886, with rendered acceptance still open. Unit-tested (test_triple_screens; the device path in test_d3d11_vertex_path). Seen in game on the race route only (UI-SCALING.md, Step 4): the HUD moves ±240 px at 2560x1440 with no clipping. A start-camera "1P" banner drawn past the 4:3 edge appears in mode 1 only. Time attack and C2C have not been seen |
 | | UILetterboxing | 🟡 | 1 by default as in Tweaks (0 none, 1 outside the race, 2 always), only with UIScalingMode 1 or 2 and while the 2D is in the centered 4:3: black bars outside it, at the device's own 4:3 edges, under the badge and the F6 panel (desktop_panel.cpp, ClearView). F6 Cameras (Advanced) and Wheelkit's Cameras page offer it as Off / Outside the race (default) / Always. Tweaks' rule: outside GAME, SMPAUSEMENU, GOAL, TIMEUP, OUTRUNMILES, TRYAGAIN, and START before its stage 65 (pc_screen.hpp); tests/test_letterbox.cpp. Seen at 16:9 in a disposable copy, 2026-10-13 (hub `artifacts/outrun-letterbox-20261013/check-run1`): 2 bars menus, intro and race at the 4:3 edges; 1 and 0 leave the race at full 16:9. Not seen: 1's bars against 0 on a non-race screen with content outside the 4:3, the badge or F6 on top, UIScalingMode 1, a span |

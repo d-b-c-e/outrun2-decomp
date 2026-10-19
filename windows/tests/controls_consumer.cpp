@@ -6,6 +6,7 @@
 // would take. There is no device and no game, and nothing is written.
 //   outrun_controls_consumer <OutRunDesktop.ini>     exit 0 read (whatever it found), 1 the file cannot be read, 2 usage
 #include "desktop_settings.hpp"
+#include "ffb_capability.hpp"
 #include "outrun_adapter.hpp"
 #include "shim_input.hpp"
 #include "controls_store.hpp"
@@ -67,7 +68,7 @@ int main(int argc,char** argv){
         if(!why){o+=std::string(first?"":", ")+quoted(sh::action_name(i));first=false;}
         else{unsupported+=std::string(first_u?"":", ")+quoted(sh::action_name(i))+": "+quoted(why);first_u=false;}
     }
-    o+="], \"unsupported\": {"+unsupported+"}},\n";
+    o+="], \"unsupported\": {"+unsupported+"}, \"ffb\": "+desk::ffb::capability::json()+"},\n";
     char wheel[96];std::snprintf(wheel,sizeof wheel,"{\"sensitivity\": %.9g, \"deadZone\": %.9g}",double(steering.sensitivity),double(steering.dead_zone));
     o+=" \"wheel\": "+std::string(wheel)+"\n}\n";
     std::fputs(o.c_str(),stdout);

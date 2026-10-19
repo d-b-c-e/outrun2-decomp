@@ -101,7 +101,7 @@ struct Panel {
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
     ffb::player::Model player_model{ffb::player::Model::Legacy};
     ffb::producer2::Strengths applied_strengths{};
-    std::string model_refusal;
+    std::string model_refusal,legacy_refusal;
     bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
@@ -142,6 +142,8 @@ struct Values {
     bool telemetry{true};int layout{};
     int engine_rpm{};   // [Telemetry] EngineRpm: 0 Synthetic (default), 1 Game
     int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
+    int model_next{};   // 0 legacy, 1 producer@2, 2 unsupported saved identifier (preserved until explicitly changed)
+    bool selected_steering_invalid{},selected_shift_invalid{};
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
     bool fine_steering{},fine_steering_start{};   // [Misc] FineSteering, default off, next start only
@@ -160,6 +162,17 @@ struct Values {
     bool output_next{};   // [FFB] Output = wheel in the file (the wheel output at the next start)
 };
 Values v;
+// Read the next-start producer controls independently of the current model. Invalid saved text remains
+// untouched until its own control is explicitly edited; it never becomes a migrated legacy gain.
+bool producer_percent(const Ini& settings,const char* key,int& value){
+    if(!settings.has_value("FFBProducer2",key))return true;
+    const auto text=settings.text("FFBProducer2",key);
+    if(text.empty()||text.size()>3u)return false;
+    int parsed=0;
+    for(const char ch:text){if(ch<'0'||ch>'9')return false;parsed=parsed*10+(ch-'0');}
+    if(parsed>100)return false;
+    value=parsed;return true;
+}
 int pct(float f){return int(std::lround(double(f)*100.0));}
 std::string fraction(int percent){char t[16];std::snprintf(t,sizeof t,"%.2f",percent/100.0);return t;}
 // The toolkit's own lines already start with "panel:"; ours get the prefix here.
@@ -370,14 +383,28 @@ void page_ffb(bool advanced){
     dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
     if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
                                                  dbce::panel::Tone::Error);
+    // Explicit model choice changes only Model. Output remains an independent next-start setting.
+    static const char* const models[]{"Legacy (software trace only)","Centering and shift (outrun-producer@2)","Saved model unavailable"};
+    {const int before=v.model_next;
+     if(dbce::panel::Choice("Force model at the next start",models,v.model_next==2?3:2,&v.model_next,
+            "Legacy preserves the old software trace calculation and cannot drive a wheel. Centering and shift uses "
+            "consumed steering and HUD speed; its force feel and wheel polarity remain unqualified. Changing the model "
+            "does not turn output on or migrate strengths. Applies at the next game start."))
+         keep(&v.model_next,before,[&]{return v.model_next<2&&save("FFB","Model",v.model_next==1?
+             ffb::producer2::ModelId:ffb::player::LegacyId);});}
+    if(v.model_next==0)
+        dbce::panel::Status("Legacy model","software trace only; no wheel output, including when Output is saved On",dbce::panel::Tone::Warning);
+    else if(v.model_next==2)
+        dbce::panel::Status("Saved model","unavailable; choose a supported model before wheel output can run",dbce::panel::Tone::Warning);
     // The saved setting for the NEXT start ([FFB] Output = wheel | none), apart from the output above. It is never applied
     // live: On cannot start torque in this session, and Off does not stop a running output (Stop FFB and F8 do). The
     // delivery's own gates (a race, the game in front, the steering wheel, DBCE_FFB_MUTE) still decide when it runs.
     {const bool before=v.output_next;
      if(v.output_next||p.force_library){
          if(dbce::panel::OffOn("Wheel output at the next start",&v.output_next,
-                "Saved for the next start of the game. On: force on the steering wheel during a race, with the game in "
-                "front. Nothing changes in this session."))
+                "Saved for the next start. On requests wheel force only with the Centering and shift model "
+                "(outrun-producer@2), during a race with the game in front. Legacy refuses wheel output. "
+                "This switch never selects a model. Nothing changes in this session."))
              keep(&v.output_next,before,[&]{return save("FFB","Output",v.output_next?"wheel":"none");});
      }else dbce::panel::Status("Wheel output at the next start","off: turning it on needs the force add-on (WheelFfb.dll beside the game)");}
     if(ffb_output_running()&&!v.output_next)
@@ -386,26 +413,37 @@ void page_ffb(bool advanced){
         dbce::panel::Status("This session",p.force_muted?"not running: this process is force-muted (DBCE_FFB_MUTE)":"not running in this session; see Wheel output above",
                             dbce::panel::Tone::Normal);
     dbce::panel::Text("Stop FFB and F8 turn the output off now and at the next start.");
-    if(p.player_model!=ffb::player::Model::Legacy){
-        if(p.player_model==ffb::player::Model::Producer2){
-            dbce::panel::Status("Player model","outrun-producer@2 selected; the legacy FFB sliders do not tune it");
-            const auto active="steering "+std::to_string(p.applied_strengths.steering_percent)+"%, shift "+
-                std::to_string(p.applied_strengths.shift_percent)+"%";
-            dbce::panel::Status("Model in this session",active.c_str());
-            {const int before=v.selected_steering;
-             if(dbce::panel::Percent("Steering strength",&v.selected_steering,0,100,50,
-                 "Scales the selected model's provisional speed-and-steer centering estimate. Saved for the next game start."))
-                 keep(&v.selected_steering,before,[&]{return save("FFBProducer2","SteeringStrengthPercent",std::to_string(v.selected_steering));});}
-            {const int before=v.selected_shift;
-             if(dbce::panel::Percent("Shift strength",&v.selected_shift,0,100,50,
-                 "Scales the selected model's gear-change cue independently of steering. Saved for the next game start."))
-                 keep(&v.selected_shift,before,[&]{return save("FFBProducer2","ShiftStrengthPercent",std::to_string(v.selected_shift));});}
-            if(v.selected_steering!=p.applied_strengths.steering_percent||v.selected_shift!=p.applied_strengths.shift_percent)
-                dbce::panel::Text("The saved strengths apply at the next game start; this session keeps the strengths shown above.");
-        }else{
-            const auto state="settings refused: "+p.model_refusal+"; correct the model settings before force can run";
-            dbce::panel::Status("Player model",state.c_str(),dbce::panel::Tone::Warning);
-        }
+    if(p.player_model==ffb::player::Model::Producer2){
+        const auto active="outrun-producer@2; steering "+std::to_string(p.applied_strengths.steering_percent)+"%, shift "+
+            std::to_string(p.applied_strengths.shift_percent)+"%";
+        dbce::panel::Status("Model in this session",active.c_str());
+    }else if(p.player_model==ffb::player::Model::Legacy)
+        dbce::panel::Status("Model in this session","outrun-legacy@1: software trace only, no wheel output");
+    else{
+        const auto state="settings refused: "+p.model_refusal;
+        dbce::panel::Status("Model in this session",state.c_str(),dbce::panel::Tone::Warning);
+    }
+    dbce::panel::Text("Model and strength edits apply at the next game start.");
+    if(v.model_next==2)return;
+    if(v.model_next==1){
+        if(v.selected_steering_invalid||v.selected_shift_invalid)
+            dbce::panel::Status("Saved strengths","invalid value: output will be refused until corrected; the affected control shows its default",dbce::panel::Tone::Warning);
+        {const int before=v.selected_steering;
+         if(dbce::panel::Percent("Steering strength",&v.selected_steering,0,100,50,
+             "Scales the provisional speed-and-steer centering estimate. Saved for the next game start."))
+             keep(&v.selected_steering,before,[&]{const bool ok=save("FFBProducer2","SteeringStrengthPercent",std::to_string(v.selected_steering));
+                 if(ok)v.selected_steering_invalid=false;return ok;});}
+        {const int before=v.selected_shift;
+         if(dbce::panel::Percent("Shift strength",&v.selected_shift,0,100,50,
+             "Scales the gear-change cue independently of steering. Saved for the next game start."))
+             keep(&v.selected_shift,before,[&]{const bool ok=save("FFBProducer2","ShiftStrengthPercent",std::to_string(v.selected_shift));
+                 if(ok)v.selected_shift_invalid=false;return ok;});}
+        return;
+    }
+    dbce::panel::Text("Legacy software trace controls preserve the historical calculation; they do not tune wheel output or measured tire forces.");
+    if(!p.legacy_refusal.empty()){
+        dbce::panel::Status("Legacy settings at start",("refused: "+p.legacy_refusal+"; correct the saved reference settings before tracing").c_str(),
+                            dbce::panel::Tone::Warning);
         return;
     }
     const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
@@ -783,8 +821,10 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
         v.monitor_labels.push_back("Saved display (unavailable or ambiguous)");v.monitor_paths.push_back(saved_monitor);
         v.monitor_choice=int(v.monitor_paths.size()-1u);
     }
-    v.selected_steering=p.applied_strengths.steering_percent;
-    v.selected_shift=p.applied_strengths.shift_percent;
+    const auto model_id=settings.text("FFB","Model",ffb::player::LegacyId);
+    v.model_next=model_id==ffb::player::LegacyId?0:model_id==ffb::producer2::ModelId?1:2;
+    v.selected_steering_invalid=!producer_percent(settings,"SteeringStrengthPercent",v.selected_steering);
+    v.selected_shift_invalid=!producer_percent(settings,"ShiftStrengthPercent",v.selected_shift);
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
     v.projection=v.projection_start=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
@@ -859,8 +899,10 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;
      v.engine_rpm=t.game_rpm?1:0;}
-    if(p.player_model==ffb::player::Model::Legacy){
-        std::string notes,source;const auto s=ffb_settings(settings,notes,source);
+    {
+        std::string notes,source;auto s=ffb_settings(settings,notes,source);
+        p.legacy_refusal=ffb::validate(s);
+        if(!p.legacy_refusal.empty())s=ffb::LegacySettings{};   // never round invalid legacy floats for an unrelated producer model
         v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
         v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
         v.idle=pct(s.engine_idle);v.invert=s.invert;

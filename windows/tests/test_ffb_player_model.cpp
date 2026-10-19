@@ -99,6 +99,38 @@ void test_gain_save_roundtrip(){
           "selected keys remain plain integer percentages in their own section");
     file.close();std::remove(path.c_str());
 }
+void test_model_output_save_roundtrip(){
+    char dir[MAX_PATH];check(GetTempPathA(MAX_PATH,dir)>0,"temporary model settings folder");
+    const std::string path=std::string(dir)+"outrun_model_output_"+std::to_string(GetCurrentProcessId())+".ini";
+    const std::string preserved="FFBGlobalStrength = 0.80\r\nFFBSpringStrength = 0.45\r\nUnknownOwnerKey = kept\r\n"
+        "[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n"
+        "[Controls]\r\nSchema = 1\r\nsteer = \r\n";
+    const auto read=[&]{std::ifstream file(path,std::ios::binary);std::stringstream bytes;bytes<<file.rdbuf();return bytes.str();};
+    {std::ofstream file(path,std::ios::binary|std::ios::trunc);file<<"[FFB]\r\nOutput = none\r\n"<<preserved;}
+    std::string error;outrun::desktop::Ini saved;
+    // The same one-key writer as the F6 controls: enabling output must never choose a model.
+    check(outrun::desktop::write_key(path,"FFB","Output","wheel",error),"save output independently: "+error);
+    check(saved.load(path)&&!saved.has_value("FFB","Model")&&player::select(saved).model==player::Model::Legacy,
+          "Output On preserves the absent model and software-only legacy default");
+    check(read()=="[FFB]\r\nOutput = wheel\r\n"+preserved,"output edit preserves every other byte");
+    for(const auto* id:{producer::ModelId,player::LegacyId}){
+        check(outrun::desktop::write_key(path,"FFB","Model",id,error),"save explicit model: "+error);
+        check(saved.load(path)&&saved.text("FFB","Model")==id&&saved.text("FFB","Output")=="wheel",
+              "model selection preserves independent Output On");
+        auto bytes=read();const std::string model_line=std::string("Model = ")+id+"\r\n";
+        const auto model_at=bytes.find(model_line);check(model_at!=std::string::npos,"explicit model is stored as its existing identifier");
+        bytes.erase(model_at,model_line.size());
+        check(bytes=="[FFB]\r\nOutput = wheel\r\n"+preserved,"model selection changes only Model, preserving both gain sets, unknown keys and controls");
+        check(outrun::desktop::write_key(path,"FFB","Output","none",error),"save Output Off independently: "+error);
+        check(saved.load(path)&&saved.text("FFB","Model")==id,"Output Off preserves explicit model");
+        check(outrun::desktop::write_key(path,"FFB","Output","wheel",error),"save Output On independently: "+error);
+        check(saved.load(path)&&saved.text("FFB","Model")==id,"Output On preserves explicit model");
+        if(id==producer::ModelId){const auto choice=player::select(saved);
+            check(choice.strengths.steering_percent==25&&choice.strengths.shift_percent==75,
+                  "explicit producer choice reuses its own gains without legacy reinterpretation");}
+    }
+    std::remove(path.c_str());
+}
 void test_fake_sink(){
     const auto choose=[](int steering,int shift){
         return player::select(ini("[FFB]\nModel = outrun-producer@2\n[FFBProducer2]\nSteeringStrengthPercent = "+
@@ -153,7 +185,7 @@ void test_fake_sink(){
 }
 }
 int main(){
-    try{test_selection();test_gain_save_roundtrip();test_fake_sink();}
+    try{test_selection();test_gain_save_roundtrip();test_model_output_save_roundtrip();test_fake_sink();}
     catch(const std::exception& e){std::cerr<<"ffb player model: FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"ffb player model: "<<checks<<" checks passed, software fake sink only\n";
 }

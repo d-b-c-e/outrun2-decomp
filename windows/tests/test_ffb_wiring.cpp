@@ -1,7 +1,7 @@
 // F4b's load gates with the real ffb_live.cpp (romi 30155: muted, no DLL). A fake WheelFfb.dll beside this exe
 // (tests/fake_wheelffb.cpp, its own output folder) counts its attaches and logs every call it receives into the process
-// environment. Under the default, Output = none, DBCE_FFB_MUTE=1, a latched process, the shim input backend or no steer
-// device the module must never attach; with Output = wheel it attaches, receives only GetWheelFfbVersion until a race
+// environment. Legacy must never attach the module, including saved Output=wheel. Producer@2 must obey
+// Output=none, mute, latched and missing-device gates; eligible Output=wheel receives only GetWheelFfbVersion until a race
 // sample, and is unloaded at ffb_shutdown. Stubs stand in for the game window, the input filter slot and the two input
 // layers' steering devices only.
 #include "ffb_live.hpp"
@@ -58,7 +58,7 @@ outrun::desktop::Ini ini(const std::string& body){
     outrun::desktop::Ini i;i.load(path);return i;
 }
 // One configure + a non-race sample + shutdown; the attaches it caused and the calls the fake received.
-struct Result{int attached;std::wstring calls;bool loaded_after;};
+struct Result{int attached;std::wstring calls;bool loaded_after;std::string status;bool filter_installed;};
 // The game reads its switches with getenv (the CRT's copy, set at process start); _putenv_s updates that copy and the
 // process environment both.
 Result run(const std::string& body,bool latched,const char* mute){
@@ -71,9 +71,11 @@ Result run(const std::string& body,bool latched,const char* mute){
     outrun::desktop::ffb_wrap_input_filter();
     outrun::desktop::ffb_shadow_wrap_input_filter();
     if(auto f=outrun::xbox_runtime::input_filter()){outrun::platform::NativeInputState in{};f(in,nullptr);}   // a menu sample
+    const auto status=outrun::desktop::ffb_status_text();
+    const bool filter_installed=outrun::xbox_runtime::input_filter()!=nullptr;
     outrun::desktop::ffb_shutdown();
     outrun::xbox_runtime::input_filter()=nullptr;
-    return {attaches()-before,env(L"FAKE_WHEELFFB_CALLS"),GetModuleHandleW(L"WheelFfb.dll")!=nullptr};
+    return {attaches()-before,env(L"FAKE_WHEELFFB_CALLS"),GetModuleHandleW(L"WheelFfb.dll")!=nullptr,status,filter_installed};
 }
 }
 int main(){
@@ -92,11 +94,11 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"no [FFB] Output key: WheelFfb.dll never attached");
     r=run(Controls+"[FFB]\r\nOutput = none\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = none: never attached");
-    r=run(Controls+"[FFB]\r\nOutput = wheel\r\n",false,"1");
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,"1");
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel under DBCE_FFB_MUTE=1: never attached");
-    r=run(Controls+"[FFB]\r\nOutput = wheel\r\n",true,nullptr);
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",true,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel in a latched process: never attached");
-    r=run("[FFB]\r\nOutput = wheel\r\n",false,nullptr);
+    r=run("[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel without a steer device: never attached");
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
@@ -111,6 +113,17 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"unknown model refuses before loading the DLL");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n[FFBProducer2]\r\nSteeringStrengthPercent = 101\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"invalid producer gains refuse before loading the DLL");
+    // Absent and explicit Legacy are software-only even with otherwise eligible native or shim output.
+    for(const auto& model:{std::string(),std::string("Model = outrun-legacy@1\r\n")}){
+        for(const auto& backend:{std::string(),std::string("[Input]\r\nBackend = Shim\r\n")}){
+            r=run(Controls+backend+"[FFB]\r\n"+model+"Output = wheel\r\n",false,nullptr);
+            check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"legacy wheel request refuses before DLL attach or call");
+            check(r.status.find("software trace-only")!=std::string::npos&&r.status.find("select outrun-producer@2")!=std::string::npos,
+                  "legacy refusal explains the supported model for native and shim backends");
+            check(!r.filter_installed&&!outrun::desktop::ffb_shim_wheel_api(),
+                  "a refused legacy output request without a trace installs no computation or shim API");
+        }
+    }
     // One native observer feeds the selected producer and its optional CSV. The fake DLL records device calls;
     // no physical device is opened. A skipped callback must zero and re-prime before any new force.
     {
@@ -267,6 +280,7 @@ int main(){
         check(attaches()==before&&env(L"FAKE_WHEELFFB_CALLS").empty()&&
               GetModuleHandleW(L"WheelFfb.dll")==nullptr,"software-only request never loads or calls fake native");
         trace.close();DeleteFileA(trace_name.c_str());
+        outrun::xbox_runtime::input_filter()=nullptr;
     };
     software_only("none","none","");
     software_only("muted","wheel","1");
@@ -283,7 +297,7 @@ int main(){
         const int before=attaches();
         const std::string prod="{0006346e-0000-0000-0000-504944564944}";
         outrun::desktop::g_shim={Wheel,prod,"live",true,true,2};
-        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n"),false,std::string());
         outrun::desktop::ffb_wrap_input_filter();
         check(attaches()==before+1&&outrun::desktop::ffb_output_running(),"Backend = Shim, Output = wheel: the library loaded, the output started");
         check(outrun::desktop::ffb_shim_wheel_api()!=nullptr,"the shim's bridge is offered the library while the output waits");
@@ -299,7 +313,7 @@ int main(){
         outrun::desktop::ffb_shutdown();
         check(!GetModuleHandleW(L"WheelFfb.dll")&&outrun::desktop::ffb_shim_wheel_api()==nullptr,"unloaded at shutdown; no library offered");
         // Off with the shim backend: the reason, and the steering wheel as the shim reads it.
-        outrun::desktop::ffb_configure(ini("[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_configure(ini("[Input]\r\nBackend = Shim\r\n[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n"),false,std::string());
         auto status=outrun::desktop::ffb_status_text();
         check(status.find("steer names no device")!=std::string::npos&&status.find("live, epoch 2")!=std::string::npos,"status: off with the reason and the shim's live wheel");
         outrun::desktop::g_shim={Wheel,prod,"read-failed",false,false,2};
@@ -314,56 +328,53 @@ int main(){
     }
     // Positive control: the same exe and fake do attach when every gate allows it; only the version is asked, nothing
     // reaches a device outside the race, and the module is gone after shutdown.
-    r=run(Controls+"[FFB]\r\nOutput = wheel\r\n",false,nullptr);
+    r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
     check(r.attached==1,"Output = wheel, unmuted, ordinary: WheelFfb.dll attached once");
     check(r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;","only the version asked (start, start line); no device call outside the race");
     check(!r.loaded_after,"unloaded at ffb_shutdown");
 
-    // romi 31299: the wheel output on (the fake accepts the steering device: a fake sink, no force), race ticks through
-    // the real filter with a car state that makes a force, then the F6 panel opens: that same tick sends the zero, and
-    // nothing more goes out while it is open; closed again, an accepted zero before the force resumes.
-    {
-        _putenv_s("DBCE_FFB_MUTE","");_putenv_s("OR2_FFB_TRACE","");
+    // The historical raw adapter, settings and CSV remain a software reference. Saving Output=wheel
+    // changes neither ordinary nor latched Legacy rows and must never reach the DLL, including in a race.
+    const auto legacy_trace=[&](const std::string& model,const char* output,bool latched){
+        outrun::xbox_runtime::input_filter()=nullptr;
+        _putenv_s("DBCE_FFB_MUTE","");
+        const auto trace_name=folder()+"\\ffb-trace.csv";
+        _putenv_s("OR2_FFB_TRACE",latched?"":trace_name.c_str());
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
-        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
-        outrun::desktop::ffb_front_check()=[](void*){return true;};   // "in front" without taking the focus
-        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
-        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        const int before=attaches();
+        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\n"+model+"Output = "+output+
+            "\r\nFFBGlobalStrength = 0.80\r\n"),latched,latched?folder():std::string());
         outrun::desktop::ffb_wrap_input_filter();
-        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
-        rt->mode_state.current=16;
-        auto& car=rt->event_function36.car_select.car_799d18;
-        const auto putf=[&](std::size_t at,float v){std::memcpy(car.data()+at,&v,4);};
-        // Speed, steering, its rate and the lateral load (CarSignals: 1C4 / 1D0 / 1D4 / 264 / 268), in a long corner.
-        putf(0x1c4,40.f);putf(0x1d0,0.4f);putf(0x1d4,0.02f);putf(0x264,6.f);putf(0x268,6.f);
         const auto filter=outrun::xbox_runtime::input_filter();
-        check(filter!=nullptr,"the FFB filter is installed");
-        const auto tick=[&]{outrun::platform::NativeInputState in{};filter(in,rt.get());};
-        // The force commands the fake received so far, in order.
-        const auto forces=[]{std::vector<long> v;const auto c=env(L"FAKE_WHEELFFB_CALLS");const std::wstring k=L"SetDeviceForcesXY ";
-            for(std::size_t at=c.find(k);at!=std::wstring::npos;at=c.find(k,at+1))v.push_back(std::wcstol(c.c_str()+at+k.size(),nullptr,10));return v;};
-        for(int i=0;i<90;++i)tick();
-        auto sent=forces();
-        bool force=false;for(const auto x:sent)if(x!=0)force=true;
-        check(outrun::desktop::ffb_output_running()&&force,"the wheel output opened and a nonzero force went out");
-        check(sent.back()!=0,"the last command before the panel opens is a force");
-        outrun::desktop::g_panel_open=true;
-        const auto before=sent.size();
-        tick();
-        sent=forces();
-        check(sent.size()==before+1&&sent.back()==0,"opening the panel: that very tick sends exactly one command, a zero");
-        for(int i=0;i<30;++i)tick();
-        check(forces().size()==before+1,"while the panel is open nothing more is sent");
-        outrun::desktop::g_panel_open=false;
-        tick();
-        sent=forces();
-        check(sent.size()==before+3&&sent[before+1]==0&&sent[before+2]!=0,"closed again: an accepted zero, then the force");
-        outrun::desktop::ffb_shutdown();
-        check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"unloaded after shutdown");
-        const auto calls=env(L"FAKE_WHEELFFB_CALLS");
-        check(calls.find(L"PanicStop;FreeDirectInput;")!=std::wstring::npos,"shutdown: PanicStop then FreeDirectInput");
-        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
-    }
+        check(filter&&!outrun::desktop::ffb_output_running()&&!outrun::desktop::ffb_shim_wheel_api(),
+              "legacy trace computes without output or a shim library API");
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();rt->mode_state.current=16;
+        auto& car=rt->event_function36.car_select.car_799d18;
+        const auto putf=[&](std::size_t at,float value){std::memcpy(car.data()+at,&value,4);};
+        putf(0x1c4,40.f);putf(0x1d0,0.4f);putf(0x1d4,0.02f);putf(0x264,6.f);putf(0x268,6.f);
+        for(unsigned i=0;i<3;++i){rt->frame_state.frame_counter_95af0c=i;outrun::platform::NativeInputState in{};filter(in,rt.get());}
+        outrun::desktop::ffb_stop_output();
+        outrun::desktop::ffb_shutdown();outrun::xbox_runtime::input_filter()=nullptr;
+        check(attaches()==before&&env(L"FAKE_WHEELFFB_CALLS").empty()&&!GetModuleHandleW(L"WheelFfb.dll"),
+              "legacy trace race ticks, Stop FFB and shutdown never attach or call the DLL");
+        std::ifstream file(trace_name,std::ios::binary);std::string line,rows;unsigned count=0;
+        std::getline(file,line);
+        check(line.find("# dbce.outrun-decomp.ffb-trace,4,model=outrun-legacy@1,output=none (no device)")==0,
+              "legacy trace keeps its schema and software-only output header");
+        while(std::getline(file,line)){
+            if(line.empty()||line[0]=='#'||line.rfind("mode,",0)==0)continue;
+            // Only the wall clock is nondeterministic; retain every historical signal, setting and intent column.
+            std::size_t at=0;for(int column=0;column<4;++column)at=line.find(',',at)+1;
+            const auto end=line.find(',',at);line.erase(at,end-at);
+            rows+=line+'\n';++count;
+        }
+        check(count==3,"legacy trace retains one row per race tick");
+        file.close();DeleteFileA(trace_name.c_str());return rows;
+    };
+    const auto reference=legacy_trace("","none",false);
+    for(const bool latched:{false,true})for(const auto& model:{std::string(),std::string("Model = outrun-legacy@1\r\n")})
+        check(legacy_trace(model,"wheel",latched)==reference,"implicit/explicit legacy wheel refusal preserves ordinary/latched software rows");
+    _putenv_s("OR2_FFB_TRACE","");
 
     // The shim's owner may still have a call inside the library (a worker preparing the read slot, romi 32222): the
     // library stays loaded after the shutdown, never freed under a call; once quiet it is unloaded as before.
@@ -380,7 +391,7 @@ int main(){
         };
         for(const bool quiet:{false,true}){
             Owner o;o.quiet=quiet;
-            outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+            outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n"),false,std::string());
             outrun::desktop::ffb_set_shim_owner(&o);
             outrun::desktop::ffb_shutdown();
             const bool loaded=GetModuleHandleW(L"WheelFfb.dll")!=nullptr;
@@ -406,7 +417,7 @@ int main(){
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
         const std::string prod="{0006346e-0000-0000-0000-504944564944}";
         outrun::desktop::g_shim={Wheel,prod,"live",true,true,1};
-        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_configure(ini(Controls+"[Input]\r\nBackend = Shim\r\n[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n"),false,std::string());
         outrun::desktop::ffb_wrap_input_filter();
         Owner o;outrun::desktop::ffb_set_shim_owner(&o);
         auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
