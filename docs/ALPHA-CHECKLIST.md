@@ -167,11 +167,26 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
   - Tuple `BF693C39…` against the installed baseline (`A92CDCB6`, INI `C2D4AD15`, capabilities `5BB46931`, receipt for `4652a18`).
 - **Not done:** no install, no game, no force output. Hule's evidence is `producer-build-01/result.json`. Installing it is a separate, reviewed slot.
 
+### Force correction install, producer-install-01 (2026-10-19)
+
+- **Grant and plan:** kobe 273824. Wrapper `Install-ProducerCandidate.ps1` `B33A1339…` and plan `D30121B3…`, reviewed by Demo. Hule held the lease from 02:17:38Z to 02:17:54Z.
+- **Steps, all passed:** owner preflight, then the retained updater's Check and Apply, then the installed-pair readback.
+  - The preflight took a fresh baseline and found a unique old receipt, with no game or frontend running. It pinned the LaunchBox XML and the entry.
+- **Installed:**
+  - exe `00491F11…`;
+  - capabilities `7D713A1A…`, carrying the exact `ffb` marker;
+  - receipt `OutRunDesktop.install-e4f4d0c-20261019-021500.json`, the only matching installed receipt;
+  - backups `*.e4f4d0c-20261019-021500` of `A92CDCB6` and `5BB46931`.
+- **Unchanged:** INI `C2D4AD15` (no `[FFB]`, so force is off), saves, options, assets, LaunchBox and the historical receipts.
+- **Not done:** no game, UI or force. State `installed-not-runtime-tested`. Evidence: hub `producer-install-01/result.json`.
+
 ## Disposition
 
-The deployed exe `A92CDCB6` (built from `4652a18` in main-build-01) is installed on the
-owner's `E:/Games/OutRunDecompSmoke` as a **private alpha** (install-smoke-02;
-[DEPLOYMENT](DEPLOYMENT.md)). It is **not** ready for a tag or public release.
+The installed exe is `00491F11` (built from `e4f4d0c` in producer-build-01, installed in
+producer-install-01). It is `A92CDCB6` plus the force-model correction, on the owner's
+`E:/Games/OutRunDecompSmoke`, as a **private alpha** ([DEPLOYMENT](DEPLOYMENT.md)). It is
+**not** ready for a tag or public release. No runtime has been run on `00491F11` itself.
+The runtime evidence below comes from `A92CDCB6` and `289ade5`.
 
 - **Proven on the earlier `289ade5` exe**, which lacks only the toolkit panel and controls
   re-vendor: a fresh license through menus to actual driving, clean exit, and a cold
@@ -207,7 +222,7 @@ muted private alpha.
 | --- | --- |
 | Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
 | Physical wheel, pedals and bindings | Pending: owner-attended |
-| Force feel | Owner acceptance, only after the corrected force build is installed. The correction `e4f4d0c` is on `main` and built (producer-build-01); the install is pending |
+| Force feel | Owner acceptance. The corrected build is installed (producer-install-01) with force off. It needs an explicit `[FFB] Model = outrun-producer@2` plus Output On, then an owner-attended check |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
 | Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
 
