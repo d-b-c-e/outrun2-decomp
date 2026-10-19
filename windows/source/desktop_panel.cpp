@@ -6,6 +6,7 @@
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
 #include "desktop_quality.hpp"
+#include "desktop_bindings.hpp"
 #include "hud_toggle.hpp"
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include "dbce_panel.h"
 #include "dbce_panel_input.h"
 #include "imgui.h"
@@ -108,6 +110,9 @@ struct Panel {
     SettingsEdits quality_undo,quality_expected;
     int quality_pending{quality::Custom};
     bool quality_details{},quality_can_undo{},quality_ready{true};
+    std::unique_ptr<bindings::Editor> binding_editor;
+    bool binding_visible{},binding_shared{};
+    int binding_group{};
     bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
@@ -221,24 +226,126 @@ void graphics_slider(const char* label,int* value,int max,const char* key,const 
     if(dbce::panel::Slider(label,value,0,max,0,format,help))
         keep(value,before,[&]{return save("Graphics",key,std::to_string(*value));});
 }
+double binding_now(){return double(GetTickCount64())/1000.0;}
+bool binding_can_edit(){
+    if(p.latched||p.playback||!p.binding_shared||!p.binding_visible||!dbce::panel::IsOpen()||!shim_input_binding_edit_allowed())return false;
+    const auto window=static_cast<HWND>(xbox_runtime::native_window().hwnd);DWORD pid=0;
+    if(!window||GetForegroundWindow()!=window)return false;
+    GetWindowThreadProcessId(window,&pid);return pid==GetCurrentProcessId();
+}
+std::string binding_label(const std::optional<dbce::controls::Binding>& value){
+    if(!value)return "Unbound";
+    const auto& b=*value;std::string label;
+    if(b.kind==dbce::controls::Kind::Axis)label="Axis "+std::to_string(b.index+1);
+    else if(b.kind==dbce::controls::Kind::Button)label="Button "+std::to_string(b.index+1);
+    else label="D-pad direction";
+    if(!b.name.empty())label+=" on "+b.name;
+    if(!b.cal.empty())label+=" (calibrated)";
+    return label;
+}
+bool draw_binding_editor(){
+    if(!p.binding_editor||!p.binding_editor->opened()){p.binding_visible=false;return false;}
+    p.binding_visible=true;
+    auto state=p.binding_editor->view(binding_now(),binding_can_edit());
+    if(!state.opened){p.binding_visible=false;return false;}
+    const auto now=binding_now();const bool can_edit=binding_can_edit();
+    state=p.binding_editor->view(now,can_edit);
+    dbce::panel::Heading("Edit bindings");
+    dbce::panel::Text("Edit the saved controls below. Save keeps the draft for the next start; Cancel discards it. Current driving controls stay unchanged.");
+    if(state.restart_required){
+        dbce::panel::Status("Restart required",state.message.c_str(),dbce::panel::Tone::Error);
+        dbce::panel::Text("The backup and draft are kept. Close F6 and restart before editing again.");
+        return true;
+    }
+    if(!can_edit){
+        dbce::panel::Status("Editing",!p.binding_shared?"Shared input setup is needed. Apply the setup in Wheelkit, then restart.":
+            !shim_input_binding_edit_allowed()?"Ordinary shared input is unavailable or this is a recording session. Check setup and restart.":
+            "Bring the game into focus to continue editing.",dbce::panel::Tone::Warning);
+        if(dbce::panel::Command("Cancel editing"))p.binding_editor->cancel();
+        return true;
+    }
+    static const char* const modes[]{"Sequential","H-pattern (gears 1-6)","Keep saved mode"};
+    int mode=state.transmission=="Sequential"?0:state.transmission=="H-pattern"?1:2;
+    if(dbce::panel::Choice("Shifter input",modes,mode==2?3:2,&mode,
+            "H-pattern supports gears 1-6. Reverse and clutch are unavailable. Choose Manual separately in the game.")){
+        if(mode<2)p.binding_editor->transmission(mode==1?"H-pattern":"Sequential",can_edit);
+        state=p.binding_editor->view(now,can_edit);
+    }
+    static const char* const groups[]{"Driving","Shifting","Menus"};
+    dbce::panel::Choice("Action group",groups,3,&p.binding_group);
+    std::vector<const char*> actions,labels;
+    if(p.binding_group==0){actions={"steer","throttle","brake","camera","horn"};labels={"Steering","Throttle","Brake","Change view","Horn"};}
+    else if(p.binding_group==1&&state.transmission=="H-pattern"){
+        actions={"gear1","gear2","gear3","gear4","gear5","gear6"};labels={"Gear 1","Gear 2","Gear 3","Gear 4","Gear 5","Gear 6"};
+    }else if(p.binding_group==1){actions={"shiftUp","shiftDown"};labels={"Shift up","Shift down"};}
+    else{actions={"confirm","back","start","navUp","navDown","navLeft","navRight"};labels={"Confirm","Back","Start","Menu up","Menu down","Menu left","Menu right"};}
+    int action=-1;for(std::size_t i=0;i<actions.size();++i)if(state.action==actions[i])action=int(i);
+    if(action<0){action=0;p.binding_editor->select_action(actions[0]);state=p.binding_editor->view(now,can_edit);}
+    if(dbce::panel::Choice("Action",labels.data(),int(labels.size()),&action)){
+        p.binding_editor->select_action(actions[std::size_t(action)]);state=p.binding_editor->view(now,can_edit);
+    }
+    const auto bound=binding_label(state.binding);dbce::panel::Status("Saved / draft binding",bound.c_str());
+    std::vector<std::string> names{"Saved binding device"};
+    int device=0;
+    for(const auto& row:state.devices){
+        auto label=row.name.empty()?std::string("Controller"):row.name;
+        // An identity suffix disambiguates equal device names without guessing a target.
+        if(std::count_if(state.devices.begin(),state.devices.end(),[&](const auto& other){return other.name==row.name;})>1)
+            label+=" ("+row.instance.substr(1,8)+")";
+        names.push_back(std::move(label));
+        if(state.selection==dbce::controls::edit::SelectionMode::Explicit&&row.instance==state.selected_instance)device=int(names.size()-1);
+    }
+    if(state.selection==dbce::controls::edit::SelectionMode::Unavailable){device=int(names.size());names.push_back("Selected device unavailable");}
+    std::vector<const char*> devices;for(const auto& name:names)devices.push_back(name.c_str());
+    if(dbce::panel::Choice("Capture device",devices.data(),int(devices.size()),&device,
+            "Only devices already used by shared input are listed. Add a first or different device in Wheelkit.")){
+        if(device==0)p.binding_editor->select_device(std::nullopt,now,can_edit);
+        else if(device<=int(state.devices.size()))p.binding_editor->select_device(state.devices[std::size_t(device-1)],now,can_edit);
+    }
+    if(state.listening){if(dbce::panel::Command("Stop listening"))p.binding_editor->stop_capture();}
+    else if(!state.devices.empty()){if(dbce::panel::Command("Listen for input"))p.binding_editor->begin_capture(now,can_edit);}
+    else dbce::panel::Status("Capture","No current device sample. Check the connection or use Wheelkit setup.");
+    if(state.binding){
+        if(state.binding->kind==dbce::controls::Kind::Axis){
+            bool inverted=state.binding->inverted;
+            if(dbce::panel::OffOn("Invert input",&inverted))p.binding_editor->invert(inverted,can_edit);
+        }
+        if(dbce::panel::Command("Clear binding"))p.binding_editor->clear(can_edit);
+    }
+    state=p.binding_editor->view(now,can_edit);
+    if(!state.message.empty())dbce::panel::Text(state.message.c_str());
+    if(state.dirty&&dbce::panel::Command("Save bindings")){
+        const bool saved=p.binding_editor->save(can_edit);const auto result=p.binding_editor->view(now,can_edit);
+        dbce::panel::NoteSaved(saved,result.message.c_str());
+        if(saved)v.transmission_next=result.transmission=="H-pattern"?1:result.transmission=="Sequential"?0:2;
+    }
+    if(dbce::panel::Command("Cancel editing"))p.binding_editor->cancel();
+    return true;
+}
 void binding_setup(){
     dbce::panel::Heading("Bindings");
-    dbce::panel::Text("Bindings are currently edited in Wheelkit.");
-    static const char* const modes[]{"Sequential","H-pattern (gears 1-6)","Keep saved transmission mode"};
-    {const int before=v.transmission_next;
-     if(dbce::panel::Choice("Shifter input at next start",modes,v.transmission_next==2?3:2,&v.transmission_next,
-            "H-pattern uses gears 1-6. Reverse, higher gears and clutch are unavailable. Choose Manual in the game to shift manually."))
-         keep(&v.transmission_next,before,[&]{return v.transmission_next<2&&save("Controls","Transmission",
-             v.transmission_next==1?"H-pattern":"Sequential");});}
+    if(p.binding_editor){
+        if(dbce::panel::Command("Edit bindings")&&!p.binding_editor->open()){
+            const auto failed=p.binding_editor->view(binding_now(),false);
+            dbce::panel::NoteSaved(false,failed.message.c_str());
+        }
+        const auto state=p.binding_editor->view(binding_now(),false);
+        if(state.pending_restart)dbce::panel::Status("Bindings","Saved; restart to use them",dbce::panel::Tone::Good);
+        else if(!state.opened&&!state.message.empty())dbce::panel::Text(state.message.c_str());
+    }
+    const char* next=v.transmission_next==1?"H-pattern, gears 1-6":v.transmission_next==0?"Sequential":"Saved mode is kept";
+    dbce::panel::Status("Shifter at next start",next);
+    dbce::panel::Text("Change the shifter mode in Edit bindings, then Save. Choose Manual separately in the game.");
     dbce::panel::Status("Shifter in this session",p.transmission_current.c_str());
 }
 void page_controls(bool advanced){
+    if(draw_binding_editor())return;
     binding_setup();
     // The backend this process uses: [Input] Backend = Shim runs the shared input shim and never configures wheel_input.
     const auto shim=shim_input_status_text();
     dbce::panel::Status("Input",shim.empty()?"Native (the build's own wheel input)":"Shim (the shared input shim, [Input] Backend = Shim)");
     dbce::panel::Status("Controls",(shim.empty()?wheel_input_status_text():shim).c_str());
-    dbce::panel::Text("Bindings are set in Wheelkit ([Controls] of the settings file).");
+    dbce::panel::Text("Edit bindings here, or use Wheelkit to add devices.");
     dbce::panel::Status("Gamepad output",gamepad_vibration_status_text());
     {static const char* const modes[]{"Off (default)","Normal","Swap left/right","Merge motors"};
      const int before=v.vibration;
@@ -605,6 +712,7 @@ void page_telemetry(bool advanced){
 // Player pages deliberately remain small in both views. The full compatibility catalogue above is
 // available only through the explicit, read-only-at-start [Panel] DeveloperOptions opt-in.
 void player_controls(bool advanced){
+    if(draw_binding_editor())return;
     binding_setup();
     dbce::panel::Heading("Driving");
     {const int before=v.sensitivity;
@@ -770,6 +878,9 @@ void player_cameras(bool advanced){
     dbce::panel::Text("Changes apply after restarting the game.");
 }
 void draw_page(dbce::panel::Page page,bool advanced){
+    if(page!=dbce::panel::PAGE_CONTROLS){
+        p.binding_visible=false;if(p.binding_editor)p.binding_editor->hide();
+    }
     if(!pending_failure.empty()){dbce::panel::NoteSaved(false,pending_failure.c_str());pending_failure.clear();}   // after the toolkit's own note
     switch(page){
     case dbce::panel::PAGE_CONTROLS:if(p.developer_options)page_controls(advanced);else player_controls(advanced);break;
@@ -778,7 +889,7 @@ void draw_page(dbce::panel::Page page,bool advanced){
     case dbce::panel::PAGE_TELEMETRY:page_telemetry(advanced);break;
     case dbce::panel::PAGE_HELP:
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
-        dbce::panel::Text("Controls are bound in Wheelkit.");
+        dbce::panel::Text("Edit saved controls in Controls > Edit bindings. Use Wheelkit to add devices and apply shared input setup.");
         break;
     default:break;
     }
@@ -913,6 +1024,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     {const auto selected=ffb::player::select(settings);p.player_model=selected.model;
      p.applied_strengths=selected.strengths;p.model_refusal=selected.refusal;}
     p.ini=settings.path();p.quality_backup=p.ini+".graphics-undo.ini";
+    p.binding_shared=!latched&&!playback&&shim_backend_selected(settings);
+    p.binding_editor=std::make_unique<bindings::Editor>(p.ini,!latched&&!playback);
     {Ini undo;
      if(undo.load(p.quality_backup)&&quality::read_undo(undo,p.quality_undo,p.quality_expected))
          p.quality_can_undo=quality::snapshot(settings)==p.quality_expected;}
@@ -1053,6 +1166,12 @@ void desktop_panel_neutral_input(platform::NativeInputState& out){
 namespace {
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(p.inner)p.inner(out,rt);
+    if(p.binding_editor&&p.binding_editor->opened()){
+        if(desktop_panel_open()&&p.binding_visible){
+            try{p.binding_editor->observe(shim_input_binding_observations(),binding_now(),binding_can_edit());}
+            catch(...){p.binding_editor->hide();}   // capture failure never changes active controls
+        }else p.binding_editor->hide();
+    }
     if(!p.latched&&!p.playback)route_trace.observe(rt);
     // UILetterboxing: the race state for the present overlay (78026C, and START's stage 8367A8).
     if(rt)lb.in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
