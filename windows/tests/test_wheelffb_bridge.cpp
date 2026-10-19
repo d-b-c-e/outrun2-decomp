@@ -363,7 +363,10 @@ void test_delivery_with_worker_in_library(){
     dev::Delivery d;check(d.start(r.a,cfg),"the delivery starts with the shim exports");
     BridgeOwner o;o.b=r.bridge.get();d.set_owner(&o);
     std::uint64_t ms=0;
+    // The force direction is per product (dev::wheel_direction); the fake rig's product GUID is synthetic, so the sample
+    // names the measured MOZA R12 Base product the delivery requires before any hand-over.
     const auto sample=[&]{dev::Sample s;s.race=s.front=true;s.hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));s.steer_dev=W();
+        s.steer_prod="{0006346e-0000-0000-0000-504944564944}";
         s.steer_live=r.live("steer");s.steer_epoch=r.epoch("steer");s.ms=ms;ms+=16;return s;};
     for(int i=0;i<10&&d.phase()!=dev::Phase::Open;++i){r.step();d.frame(sample(),2000);}
     check(d.phase()==dev::Phase::Open&&r.bridge->phase()==WheelFfbBridge::Phase::Shared,"the delivery opened through the hand-over");
