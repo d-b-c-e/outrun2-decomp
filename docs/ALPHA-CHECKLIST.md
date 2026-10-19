@@ -12,11 +12,11 @@ stabilization fixes (Samo), packaging and regression gates
 [the roadmap](../windows/ROADMAP.md). It does not qualify this candidate. Every
 runtime row stays **pending** until one serialized candidate session records it.
 
-| Criterion | Offline evidence | Runtime on this candidate (run-01, below) |
+| Criterion | Offline evidence | Runtime (the runs below) |
 | --- | --- | --- |
-| Boot, menus, actual driving | Candidate build: 17 focused tests pass, 1 expected skip | **PASS (A)**: the game's own trace shows the license created and saved at 15.1 s and GAME entered at 33.2 s, followed by a 60 s weave drive. Telemetry: 4007 packets, top HUD speed 60.37 m/s (about 217 km/h), gear 4, throttle 255. **Pending**: heading change and brake response (not in the telemetry route) |
-| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | **Partial**: A created `OutRunDesktop.ini`; both later launches read the same file unchanged, with no second import. Synthetic keyboard input steered both ways (consumed steering -127..127). **Pending**: saving through F6, a changed value applied after relaunch, wheel or pad bindings |
-| Rendering, including the requested triples modes | `triple_screens` and the traffic outer-edge culling fixture (`594609f`) | **Pending**: A drove the default single view but asserted no picture. Triples were excluded from this slot and remain a separate gate (historical: planar modes seen at the rig; `Views = Angled` gave three projections on 2026-10-12) |
+| Boot, menus, actual driving | Candidate build: 17 focused tests pass, 1 expected skip | **PASS (A)**: the game's own trace shows the license created and saved at 15.1 s and GAME entered at 33.2 s, followed by a 60 s weave drive. Telemetry: 4007 packets, top HUD speed 60.37 m/s (about 217 km/h), gear 4, throttle 255. **Pending**: heading change. **Inconclusive** (run-03): brake response against coasting |
+| Controls and settings persistence | `desktop_controls`: refused reads, failed publishes and duplicate sections leave the file intact; one-time Tweaks import | **Partial**: A created `OutRunDesktop.ini`; both later launches read the same file unchanged, with no second import. Synthetic keyboard input steered both ways (consumed steering -127..127). **Pending**: saving through F6 (in run-03 the F6 key never reached the window), a changed value applied after relaunch, wheel or pad bindings |
+| Rendering, including the requested triples modes | `triple_screens` and the traffic outer-edge culling fixture (`594609f`) | **Qualified for alpha on `A92CDCB6`** (render-deploy-01, kobe 270778): the game's own full-span capture shows widescreen, the HD HUD and three `Views = Angled` projections. The start-grid wedges are documented, cause unproven. **Pending**: the default single view's picture as a gate (A drove it without asserting a picture) |
 | Exit and relaunch | Settings apply at the next start; shutdown is documented in [P21-SHUTDOWN](../windows/docs/P21-SHUTDOWN.md) | **PASS**: all three launches closed cleanly (exit 0, not forced) with owned processes gone. The cold relaunch (run-02) loaded the saved license and drove again |
 | No known crash or save regression | Resource-lifetime null read fixed (`ff90127`); upstream #2 not reproduced by the `c2c_goal_sequence` fixture | **PASS for the license save**: no crash in three launches. A wrote `License1.dat` (1040 B) and `common.dat` (68584 B); run-02 loaded them, and both files stayed byte-identical. **Pending**: a race finish with its records saved and reloaded |
 
@@ -154,11 +154,18 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 
 ## Disposition
 
-The 289ade5 exe is a **private alpha candidate**. It is suitable for an
-owner-attended trial from the private package. It is **not** ready for a tag or
-public release. Proven on this exe: a fresh license through menus to actual
-driving, clean exit, and a cold relaunch that reloads the saved license and
-drives again, with no crash and no save change.
+The deployed exe `A92CDCB6` (built from `4652a18` in main-build-01) is installed on the
+owner's `E:/Games/OutRunDecompSmoke` as a **private alpha** (install-smoke-02;
+[DEPLOYMENT](DEPLOYMENT.md)). It is **not** ready for a tag or public release.
+
+- **Proven on the earlier `289ade5` exe**, which lacks only the toolkit panel and controls
+  re-vendor: a fresh license through menus to actual driving, clean exit, and a cold
+  relaunch that reloads the saved license and drives again, with no crash and no save change.
+- **Proven on `A92CDCB6`:**
+  - the intended configuration, by the game's log (combined-01);
+  - HD, widescreen and Angled triples, in the game's own capture (render-deploy-01);
+  - an exact install readback (install-smoke-02).
+- The private package (`ec08d51f…`) holds the older `289ade5` exe.
 
 The remaining work splits into two tiers.
 
@@ -170,21 +177,24 @@ The remaining work splits into two tiers.
 | Clean exit and cold relaunch | PASS |
 | License save and reload, bytes preserved | PASS |
 | No crash | PASS over three launches |
-| Brake: speed drops faster than when coasting | Pending: next functional batch (Hule) |
-| Steering changes heading | Pending: next batch, if an existing route observes heading |
-| A value changed in F6 survives a relaunch | Pending: next batch, if an existing UI route can drive the panel |
+| Brake: speed drops faster than when coasting | Inconclusive (run-03): the brake and coast speed ranges overlap, and the coast may have left the road |
+| Steering changes heading | Pending: no existing route observes heading |
+| A value changed in F6 survives a relaunch | Pending: in run-03 the F6 key never reached the window |
 | Default single view shows a correct picture | Pending |
 | A race finish saves and reloads its records | Pending |
+| Installed with a backup and an exact readback | PASS (install-smoke-02) |
+| Launch through the LaunchBox entry | Open: UI smoke 03 stopped before entry (the capture provider returned the wrong window) |
 
 **Rig features.** Qualified separately; these do not block a clearly labelled
 muted private alpha.
 
 | Feature | State |
 | --- | --- |
-| Rendered triples (`Screens = Separate`, `Views = Angled`) | Pending: a separately scoped render pass (`shim_first_loop/run.py --render`), with its own fences |
+| Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
 | Physical wheel, pedals and bindings | Pending: owner-attended |
-| Force feel | Owner acceptance |
+| Force feel | Owner acceptance, only after the force input meanings are corrected in source (kobe 272265; queued for Samo) |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
+| Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
 
 A physical check of wheel feel, force output, telemetry fields and angled triples is
 a separate, owner-attended gate. A pass here does not imply it.
@@ -208,9 +218,12 @@ a separate, owner-attended gate. A pass here does not imply it.
 
 1. Done: the fix commits (S1, S2) and the packaging checks are merged. The formatter
    test (15/15) and the packaging tests (8/8) passed offline before merge.
-2. One serialized build of the integration tip, recorded with its exe hash. The
-   packaged executable must come from that build, never from an older candidate.
+2. Done: main-build-01 built the integration tip `4652a18` (exe `A92CDCB6`), and the
+   installed exe is that build. A packaged executable must also come from it, never from
+   an older candidate.
 3. One batched candidate session, following Hule's gate matrix, records every
    pending row above as pass, fail or not run, together with the `diagnostics:` line.
-4. Install and rollback instructions are verified against that package.
+4. Install verified for the deployed build (install-smoke-02, through the deployer, not
+   the private package). Rollback is documented in [DEPLOYMENT](DEPLOYMENT.md) and has
+   not been exercised on the installed state.
 5. Kobe reviews the evidence; only then is a tag or release considered.

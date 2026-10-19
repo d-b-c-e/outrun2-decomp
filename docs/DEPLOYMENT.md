@@ -36,6 +36,11 @@ panel; LB+RB+Menu exits.
 - **Real-route smoke through LaunchBox: open.**
   - During the install slot LaunchBox stayed on "Populating Games" for the whole bounded wait, so no game was launched through it.
   - Its log stops after a Steam play-time sync. `RunLibraryScanOnStartup` and ROM auto-import are on; a startup scan or a hidden prompt are the candidates, neither proven.
+- **Force feedback is off and needs a source correction first.**
+  - The installed INI has no `[FFB]` section, so no force is computed or sent.
+  - The default model (`outrun-legacy@1`) reads car `+0x1D0`/`+0x1D4` as steering and steering rate. A source audit found those fields hold speed deltas ([roadmap](../windows/ROADMAP.md) step 6).
+  - The opt-in `outrun-producer@2` uses the consumed steering, but it is unproven in an ordinary run.
+  - Confirming and correcting this comes before any feel acceptance (kobe 272265).
 - **Not yet qualified on this build:** physical wheel feel and force, saving through F6 and applying it on relaunch, brake response against coasting, a race finish with its records saved and reloaded, and the Wheelkit 0.6.52 install (below).
 
 ## Deployment history
