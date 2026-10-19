@@ -79,14 +79,21 @@ void deliver(bool race,std::int32_t intent){
     s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=ffb_front_check()(s.hwnd);
     if(f.shim){
         // The shim backend: the steer binding's instance, live from a valid, fresh sample in its epoch (romi 31707).
+        // Its product is the binding's, which Core checks against the opened handle; the hand-over (and so the force
+        // target, strict selection of that instance) starts only from a live sample of it.
         const auto st=shim_input_steer();
-        s.steer_dev=st.dev;s.steer_live=st.live;s.steer_epoch=st.epoch;
-    }else s.steer_dev=wheel_input_steer_device();
+        s.steer_dev=st.dev;s.steer_prod=st.prod;s.steer_live=st.live;s.steer_epoch=st.epoch;
+    }else{s.steer_dev=wheel_input_steer_device();s.steer_prod=wheel_input_steer_product();}
     s.ms=GetTickCount64();
     const auto before=f.delivery.phase();
-    f.delivery.frame(s,intent);
+    // The model's force pushes toward positive steer; the device's measured direction turns it into SetDeviceForcesXY's
+    // x, once, here (0 for an unmeasured wheel, which the delivery refuses before any device call).
+    f.delivery.frame(s,intent*ffbdev::wheel_direction(s.steer_prod));
     if(f.delivery.phase()!=before){
         std::printf("ffb: wheel %s%s%s\n",ffbdev::phase_name(f.delivery.phase()),f.delivery.why().empty()?"":": ",f.delivery.why().c_str());
+        if(f.delivery.phase()==ffbdev::Phase::Open)
+            std::printf("ffb: force direction %d for product %s (ffb_device.hpp wheel_direction)\n",
+                ffbdev::wheel_direction(s.steer_prod),s.steer_prod.c_str());
         std::fflush(stdout);
     }
 }

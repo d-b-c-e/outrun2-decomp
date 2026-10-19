@@ -19,6 +19,8 @@ namespace {
 const std::string Steer="{d71b8350-61b7-11f1-8001-444553540000}";      // the MOZA R12 Base instance of the rig logs
 const std::string SteerUpper="{D71B8350-61B7-11F1-8001-444553540000}";
 const std::string Other="{d9b1d890-6f3f-11f1-8002-444553540000}";
+const std::string R12="{0006346e-0000-0000-0000-504944564944}";        // its product: the one measured direction (-1)
+const std::string R5="{0004346e-0000-0000-0000-504944564944}";         // a real wheel whose direction is not measured
 struct Fake {
     std::vector<std::string> log;
     int version=1000,init=1,guards=1;
@@ -68,7 +70,7 @@ WheelFfbApi api(){
     return a;
 }
 Config on(){Config c;c.output=true;c.steer_dev=Steer;return c;}
-Sample race(std::uint64_t ms,bool front=true,const std::string& dev=Steer){Sample s;s.race=true;s.front=front;s.hwnd=reinterpret_cast<void*>(0x1234);s.steer_dev=dev;s.ms=ms;return s;}
+Sample race(std::uint64_t ms,bool front=true,const std::string& dev=Steer){Sample s;s.race=true;s.front=front;s.hwnd=reinterpret_cast<void*>(0x1234);s.steer_dev=dev;s.steer_prod=R12;s.ms=ms;return s;}
 Sample menu(std::uint64_t ms){Sample s=race(ms);s.race=false;return s;}
 void reset(){F=Fake{};}
 using Lines=std::vector<std::string>;
@@ -161,6 +163,27 @@ int main(){
      CHECK(!e.start(a,on())&&e.phase()==Phase::Released&&e.why()=="WheelFfb.dll has no FreeDirectInput"&&F.log.empty());
      reset();F.version=899;Delivery v;CHECK(!v.start(api(),on())&&v.phase()==Phase::Released&&!device_calls(F.log));
      step(v,race(0),5000);CHECK(!device_calls(F.log));}
+
+    // direction: only a measured product is driven (the MOZA R12 Base, -1, in any case). Any other product, an empty or
+    // malformed one releases at the first sample that could open, before any device call; the release is final.
+    {CHECK(wheel_direction(R12)==-1&&wheel_direction("{0006346E-0000-0000-0000-504944564944}")==-1);
+     for(const std::string& p:{std::string(),R5,Steer,std::string("{0006346e-0000-0000-0000-50494456494}"),std::string("MOZA R12 Base")})
+         CHECK(wheel_direction(p)==0);
+     for(const std::string& p:{std::string(),R5}){
+         reset();Delivery d;CHECK(d.start(api(),on()));const auto base=F.log.size();
+         Sample s=race(2);s.steer_prod=p;
+         Sample behind=s;behind.front=false;Sample outside=s;outside.race=false;
+         step(d,outside,3000);step(d,behind,3000);CHECK(d.phase()==Phase::Waiting);   // not yet a sample that could open
+         step(d,s,3000);
+         CHECK(d.phase()==Phase::Released&&d.why().find("force direction is not measured")!=std::string::npos&&
+               d.why().find(p.empty()?"unknown":p)!=std::string::npos&&d.why().find("controls are unaffected")!=std::string::npos);
+         step(d,race(3),3000);CHECK(d.phase()==Phase::Released);                     // a measured sample later: still final
+         finish(d);CHECK(since(base).empty());}                                     // no library call at all
+     // With an owner (the shim backend): released before the hand-over, so the input keeps its own handle.
+     FakeOwner o;reset();Delivery d;CHECK(d.start(shim_api(),shim_on()));d.set_owner(&o);const auto base=F.log.size();
+     Sample s=live(0,1);s.steer_prod=R5;step(d,s,2500);
+     CHECK(d.phase()==Phase::Released&&!o.entered);
+     finish(d);CHECK(since(base).empty());}
 
     // open: only in the race, in front, with the input layer reading the configured instance (any case); exact order.
     {reset();Delivery d;CHECK(d.start(api(),on()));const auto base=F.log.size();
