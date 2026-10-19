@@ -5,26 +5,27 @@ carries every completed Wheelkit-integration and Tweaks-parity change, installed
 the rig with a recoverable backup. This is a private rig deployment, not a public
 release or tag. Test evidence is in [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
 
-## What is installed (2026-10-18, 21:57:30Z)
+## What is installed (consolidated 2026-10-18 21:57:30Z; force correction 2026-10-19 02:17:54Z)
 
 | Item | Value |
 | --- | --- |
 | Install | `E:/Games/OutRunDecompSmoke` (the owner's maintained decomp install) |
-| Executable | `OutRunDesktop.exe`, SHA-256 `A92CDCB6468D27082970F7D14D8B909A4A346A14A77608AB0367F7296AE234AF`, 24023040 B. Built from `4652a18`. Fork `main` has since moved on: it carries the force-model correction from `e4f4d0c`, built as `00491F11…` but **not installed** (see below) |
-| Settings | `OutRunDesktop.ini` SHA-256 `C2D4AD15…`: the owner's file with `[Graphics]` and `[Triple]` sections appended. The owner's controls, saves, force and unknown keys are kept byte for byte. `session-capabilities.json` `5BB46931…` comes from install tuple `87B3BE6D…` |
+| Executable | `OutRunDesktop.exe`, SHA-256 `00491F111BB03A99C38051133CA37A363B648CF98FAD52FDFB6F6128E115B7C3`, 24028160 B, built from `e4f4d0c` (producer-build-01). Fork `main`'s product source (`src`, `xbox`, `windows`) is identical to it. It replaced `A92CDCB6…` (from `4652a18`), which differs only by the force-model correction. **No runtime has been run on this exe yet** |
+| Settings | `OutRunDesktop.ini` SHA-256 `C2D4AD15…`, unchanged by the force update: the owner's file with `[Graphics]` and `[Triple]` sections appended. The owner's controls, saves and unknown keys are kept byte for byte, and there is no `[FFB]` section, so force is off. `session-capabilities.json` `7D713A1A…` carries the build-owned `ffb` marker, from install tuple `BF693C39…`, receipt `OutRunDesktop.install-e4f4d0c-20261019-021500.json`. The earlier `5BB46931…` came from tuple `87B3BE6D…` |
 | HD interface | `[Graphics] UITextureReplacement = true`, `TextureBaseFolder = textures-consolidated-20261018-01`. That folder holds 257 UI DDS copied read-only from the owner's Tweaks pack (receipt `FDB2CAF1…`). Scene replacement is off |
 | Widescreen | `options.ini` `widescreen=1`, `resolution=2560x1440`, `antialiasing=msaa4` (the owner's existing values) |
 | Triple screens | `[Triple] Screens = Separate monitors`, `Views = Angled`, rig geometry from the live Wheelkit profile, `MatchGameFov = true`. There is no curvature warp, so the 1500R curve is not modelled |
 | 2D layout | `UIScalingMode = 2` (centred 4:3 UI) |
-| Backup | `E:/Games/OutRunDecompSmoke/.dbce-backups/consolidated-20261018-02` (26 files, journal `deployment.json`, state `installed-not-runtime-qualified`). The failed first attempt's `-01` is kept as evidence |
-| LaunchBox | Its own entry "OutRun 2006: Coast 2 Coast (Decomp)", ID `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, in the Outrun Collection playlist. The Tweaks and Redux entries and their Stream Deck key are unchanged |
+| Backup | Force update: `OutRunDesktop.exe.e4f4d0c-20261019-021500` (`A92CDCB6…`) and `session-capabilities.json.e4f4d0c-20261019-021500` (`5BB46931…`) beside the game. Consolidation: `.dbce-backups/consolidated-20261018-02` (26 files, journal `deployment.json`). The failed first attempt's `-01` is kept as evidence |
+| LaunchBox | Its own entry "OutRun 2006: Coast 2 Coast (Decomp)", ID `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9`, in the Outrun Collection playlist. The force update did not touch LaunchBox, so the entry's Version text still reads "decomp main e2ad163 (exe A92CDCB6468D)" (cosmetic). The Tweaks and Redux entries and their Stream Deck key are unchanged |
 
 **Launching.** Use the new LaunchBox entry, or run
 `E:\Games\OutRunDecompSmoke\OutRunDesktop.exe` from its own folder. F6 opens the settings
 panel; LB+RB+Menu exits.
 
 **Rolling back.** Close LaunchBox and the game first.
-- **The install:** run the deployer's `-Action Rollback` (hub `.local/outrun-alpha-hule-20261018/Deploy-Consolidated.ps1`, SHA-256 `A64A9483…`) inside a serialized lease. It restores the backed-up exe, INI and capabilities through the retained updater and removes `textures-consolidated-20261018-01`. It refuses if an owner file has changed since the install.
+- **The force update only (back to `A92CDCB6`):** inside a serialized lease, run the retained updater from the update package (hub `.local/outrun-alpha-hule-20261018/producer-build-01/metadata/retained-update/Update-QualifiedOwner.ps1`, SHA-256 `9B8CB3DF…`) with `-Action Rollback -Game E:/Games/OutRunDecompSmoke -Package <that folder> -TupleSha256 BF693C39BE805B9B6CB17837241A9245661EFDE8D629646553860DA3ED01DE44 -Tag e4f4d0c-20261019-021500` and the lease path and token. It restores the backed-up exe and capabilities and leaves the INI alone.
+- **The whole consolidation:** run the deployer's `-Action Rollback` (hub `.local/outrun-alpha-hule-20261018/Deploy-Consolidated.ps1`, SHA-256 `A64A9483…`) inside a serialized lease. It restores the backed-up exe, INI and capabilities through the retained updater and removes `textures-consolidated-20261018-01`. It refuses if an owner file has changed since the install.
 - **The LaunchBox entry:** run `scripts/add-outrun-decomp.py --root <LaunchBox root> --rollback Data/Platforms/Windows.xml.bak-outrun-decomp-20261018-165729.receipt.json`. This works only while the XML still matches its post-apply hashes. After LaunchBox's next normal exit rewrites the XML, delete the entry inside LaunchBox instead.
 
 ## Known limitations and open gates
@@ -36,17 +37,22 @@ panel; LB+RB+Menu exits.
 - **Real-route smoke through LaunchBox: open.**
   - During the install slot LaunchBox stayed on "Populating Games" for the whole bounded wait, so no game was launched through it.
   - Its log stops after a Steam play-time sync. `RunLibraryScanOnStartup` and ROM auto-import are on; a startup scan or a hidden prompt are the candidates, neither proven.
-- **Force feedback is off. The correction is on `main` and built, but not installed.**
+- **Force feedback: the correction is installed, and force is off.**
   - The installed INI has no `[FFB]` section, so no force is computed or sent.
-  - The installed exe predates the correction. Its default model (`outrun-legacy@1`) would read car `+0x1D0`/`+0x1D4` as steering and steering rate, but those fields hold speed deltas ([roadmap](../windows/ROADMAP.md) step 4).
-  - The correction, `e4f4d0c` (Samo; kobe 272265, approach (c)):
-    - Legacy becomes a software trace-only reference, refused before `WheelFfb.dll` loads even with `Output = wheel`.
-    - Wheel output needs an explicit `[FFB] Model = outrun-producer@2`, which uses the consumed steering.
-    - F6 has a separate next-start model choice; Output never selects a model.
-    - The build's own controls consumer reports an `ffb` capability marker, which the install tuple carries for Wheelkit.
-  - Built in producer-build-01: exe `00491F111BB03A99C38051133CA37A363B648CF98FAD52FDFB6F6128E115B7C3`, 7/7 focused tests ([checklist](ALPHA-CHECKLIST.md)).
-  - Installing it is a separate, planned slot (Hule). Feel acceptance follows that install.
-- **Not yet qualified on this build:** physical wheel feel and force, saving through F6 and applying it on relaunch, brake response against coasting, a race finish with its records saved and reloaded, and the Wheelkit 0.6.52 install (below).
+  - The correction `e4f4d0c` (Samo; kobe 272265, approach (c)) is installed:
+    - The old default model (`outrun-legacy@1`) read car `+0x1D0`/`+0x1D4` as steering and steering rate, but those fields hold speed deltas ([roadmap](../windows/ROADMAP.md) step 4). It is now a software trace-only reference, refused before `WheelFfb.dll` loads even with `Output = wheel`.
+    - Wheel output needs an explicit `[FFB] Model = outrun-producer@2` (centering and shift cues from the consumed steering). F6 has a separate next-start model choice, and Output never selects a model.
+  - To try force: F6 > force page > Force model = Centering and shift, plus Wheel output On, then restart the game. Feel, polarity, onset and stop are not yet qualified; that is an owner-attended check.
+- **Wheelkit 0.6.49 (installed) does not know about the marker yet.**
+  - Its "Wheel output at the next start" row still reads as if it works with the default model, while the game now refuses legacy output with a clear F6 status and log line.
+  - This fails closed. Wheelkit 0.6.53 (below) fixes the wording once installed.
+- **Not yet qualified on this build:**
+  - any runtime of `00491F11`; the runtime evidence is from `A92CDCB6` and `289ade5`, which differ from it only in the force path;
+  - physical wheel feel and force;
+  - saving through F6 and applying it on relaunch;
+  - brake response against coasting;
+  - a race finish with its records saved and reloaded;
+  - the Wheelkit 0.6.53 install (below).
 
 ## Deployment history
 
@@ -58,7 +64,8 @@ panel; LB+RB+Menu exits.
 | installed-smoke-01 | A journal-save sharing violation (holder unknown); rolled back, owner unchanged. The deployer was fixed to write the journal atomically |
 | installed-smoke-02 | **Installed**, readback exact; LaunchBox UI smoke pending. The real `Core\LaunchBox.exe` outlived the stub close and was recovered by a normal close, with the XML unchanged |
 | LaunchBox UI smoke 03 | Stopped before entry: the capture provider returned the wrong window. The real-route launch is still open |
-| producer-build-01 | Build PASS of the force correction `e4f4d0c`: exe `00491F11`, 7/7 focused tests, exact `ffb` marker. Tuple `BF693C39` assembled, **not installed** |
+| producer-build-01 | Build PASS of the force correction `e4f4d0c`: exe `00491F11`, 7/7 focused tests, exact `ffb` marker. Tuple `BF693C39` assembled |
+| producer-install-01 | **Installed** 2026-10-19 (lease 02:17:38Z-02:17:54Z): exe and capabilities only, a new receipt, and exactly one matching installed receipt. INI, saves, assets and LaunchBox are unchanged. No game run |
 
 ## Source coverage
 
@@ -66,7 +73,7 @@ What `main` contains:
 - the cumulative branch `54b2c46`, angled traffic culling `594609f` and the resource fixture `e87299a`;
 - every in-source row of the [roadmap](../windows/ROADMAP.md) Tweaks table: texture replacement, music, CD switcher, fast load, pacing and VSync, vibration, level select, Holly, highway sets, compatibility fixes, telemetry RPM, fine steering, login protection, the opt-in network, triples, and the F6 pages;
 - from this consolidation: the startup diagnostics line, the toolkit F6 panel fixes and controls overloads (re-vendored from toolkit `5cb9953`, which is not on the toolkit's origin), runner fixes, the HD render-capture harness, and `tools/alpha`;
-- after the install: the force-model correction `e4f4d0c`, with its capability marker. Its `src`, `xbox` and `windows` trees are identical on `main`.
+- the force-model correction `e4f4d0c`, with its capability marker (installed as `00491F11`). Its `src`, `xbox` and `windows` trees are identical on `main`.
 
 Not merged, each with its reason:
 
