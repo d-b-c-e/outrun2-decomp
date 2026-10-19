@@ -180,13 +180,28 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 - **Unchanged:** INI `C2D4AD15` (no `[FFB]`, so force is off), saves, options, assets, LaunchBox and the historical receipts.
 - **Not done:** no game, UI or force. State `installed-not-runtime-tested`. Evidence: hub `producer-install-01/result.json`.
 
+### Owner drive on `00491F11` (2026-10-18, owner-attended)
+
+- **Report** (kobe 275276): the game ran well and the wheel controls worked. The force was felt but very weak, and it seemed to push outward.
+- **Configuration**, read-only:
+  - INI `F1CB0F84`, saved by the owner's F6 at 22:26: `[FFB] Model = outrun-producer@2`, `Output = wheel`, default strengths (steering 50%, shift 50%), no `[Input]` (Native backend).
+  - The `runtime.log` of that session shows the R12 instance opened in the race: 1274 commands, 5 accepted zeros, 0 recoveries. Physical output is **present**. This was the first delivered producer@2 torque.
+- **Direction: cause found in source.**
+  - The model's centring force pushes toward positive steer, and that steer has the sign of DirectInput X (to the right).
+  - The force reached `SetDeviceForcesXY` unchanged. On the MOZA R12 a positive x turns the wheel left, as two earlier measurements on this rig found.
+  - So the spring was delivered as anti-centring.
+  - Correction: `02808e8` (branch `demo/ffb-r12-sign-20261019`). It drives only a wheel with a measured direction (the R12, -1) and refuses others before any device call. The focused offline checks pass. It is not built, merged or installed.
+- **Strength:** this is the provisional profile by design, not a scaling defect. The only terms are a spring of `0.30 x steer x min(v/30 m/s, 1)` at 50% and a shift pulse. For example, a 20% steer at 100 km/h gives about 5.6% of full scale. Defaults stay unchanged until the corrected direction is felt.
+- **Shifter:** Manual drove as sequential because `[Controls] Transmission = Sequential`. Native acts on the H-pattern gates (gear1..6) only with `Transmission = H-pattern` (kobe 275448). Physical H-pattern is unverified.
+
 ## Disposition
 
 The installed exe is `00491F11` (built from `e4f4d0c` in producer-build-01, installed in
 producer-install-01). It is `A92CDCB6` plus the force-model correction, on the owner's
 `E:/Games/OutRunDecompSmoke`, as a **private alpha** ([DEPLOYMENT](DEPLOYMENT.md)). It is
-**not** ready for a tag or public release. No runtime has been run on `00491F11` itself.
-The runtime evidence below comes from `A92CDCB6` and `289ade5`.
+**not** ready for a tag or public release. The owner has driven `00491F11` once (above: wheel
+controls worked, force present but inverted and weak). The automated runtime evidence below
+comes from `A92CDCB6` and `289ade5`.
 
 - **Proven on the earlier `289ade5` exe**, which lacks only the toolkit panel and controls
   re-vendor: a fresh license through menus to actual driving, clean exit, and a cold
@@ -221,8 +236,8 @@ muted private alpha.
 | Feature | State |
 | --- | --- |
 | Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
-| Physical wheel, pedals and bindings | Pending: owner-attended |
-| Force feel | Owner acceptance. The corrected build is installed (producer-install-01) with force off. It needs an explicit `[FFB] Model = outrun-producer@2` plus Output On, then an owner-attended check |
+| Physical wheel, pedals and bindings | Owner drive 2026-10-18: the wheel controls worked. H-pattern is not active (`Transmission = Sequential`), and physical H-pattern is pending |
+| Force feel | Owner drive 2026-10-18: output present, felt weak and pushing outward. The direction cause is found, and the correction `02808e8` is unbuilt. Pending: a corrected build, then an attended turn-and-release check at speed |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
 | Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
 
