@@ -735,30 +735,31 @@ void player_controls(bool advanced){
 }
 void player_ffb(bool advanced){
     const auto status=ffb_status_text();
-    const char* session="Off";
+    std::string session="Off";
     auto tone=dbce::panel::Tone::Normal;
     if(status.rfind("stopping:",0)==0){session="Stop pending; close the game to finish stopping";tone=dbce::panel::Tone::Warning;}
+    else if(status.rfind("off for this session: ",0)==0){session=status.substr(22);tone=dbce::panel::Tone::Warning;}
     else if(ffb_output_running()){
         if(status=="on"){session="On";tone=dbce::panel::Tone::Good;}
         else if(status.rfind("on: waits",0)==0)session="Waiting for a race, game focus and the steering wheel";
-        else{session="Stopped for this session; restart before enabling again";tone=dbce::panel::Tone::Warning;}
+        else{session="Off for this session";tone=dbce::panel::Tone::Warning;}
     }else if(p.force_muted)session="Disabled for this session";
     else if(p.player_model==ffb::player::Model::Refused)session="Off; saved force setup needs correction";
     else if(p.player_model==ffb::player::Model::Legacy)session="Off; wheel force setup is needed";
-    dbce::panel::Status("This session",session,tone);
+    dbce::panel::Status("This session",session.c_str(),tone);
     if(p.developer_options)dbce::panel::Status("Delivery detail",status.c_str());
     if(!stop_error.empty())dbce::panel::Status("Stop FFB","Output stopped, but saving Off failed. Try again before closing the game.",dbce::panel::Tone::Error);
     {const bool before=v.output_next;
      if(dbce::panel::OffOn("Enabled at next start",&v.output_next))
          keep(&v.output_next,before,[&]{
-             const char* why=v.output_next&&v.model_next!=1?"Set up wheel force in Wheelkit or developer settings before enabling it":
+             const char* why=v.output_next&&v.model_next!=1?"Set up wheel force in Wheelkit before enabling it":
                  v.output_next&&!p.force_library?"Wheel force support is not installed":
                  v.output_next&&(v.selected_steering_invalid||v.selected_shift_invalid)?"Correct the saved force strengths before enabling output":nullptr;
              if(why){pending_failure=why;dbce::panel::NoteSaved(false,why);return false;}
              return save("FFB","Output",v.output_next?"wheel":"none");
          });}
     if(v.model_next!=1){
-        dbce::panel::Status("Setup needed","Choose a supported wheel force setup in Wheelkit or developer settings.",dbce::panel::Tone::Warning);
+        dbce::panel::Status("Setup needed","Choose a supported wheel force setup in Wheelkit.",dbce::panel::Tone::Warning);
     }else{
         if(v.selected_steering_invalid||v.selected_shift_invalid)
             dbce::panel::Status("Saved strength","Invalid; check Strength and Advanced Shift cue before enabling output. The affected control shows the default.",dbce::panel::Tone::Warning);
