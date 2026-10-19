@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "kind": "outrun-native-binding-editor-source-successor",
+  "sourceCommit": "3ade9cf8704e742b2fdd2bdb3312e65afa12e4d4",
+  "baseToolkit": "5cb9953158907c6bcce51b488e19186f4a7ac6f6",
+  "files": {
+    "dbce_binding_editor.hpp": "FC3489B97D11F0B24A51193286515CFD91BA80E4C05A7ABBD0F01F153020D432",
+    "dbce_controls_store_win.hpp": "E3F979435048E52A73F3FE541F86FF5E4E35C7E76339B89FD3B7BF1B41F3582C"
+  },
+  "qualification": "Source pin and hashes only; OutRun host fixtures unrun. Shared-source qualification is maintained by its source owner. Historical de17086/a817ed7 qualification does not qualify changed header bytes.",
+  "reader": "Existing shared Core observations only; no second reader or unbound-device admission.",
+  "sharedQualification": {
+    "sourceCommit": "3ade9cf8704e742b2fdd2bdb3312e65afa12e4d4",
+    "compiler": "MSVC x64 C++17 /O2 /MT /W4 /WX /EHsc",
+    "checks": 63,
+    "result": "E:/Source/dbce-project-mgmt/artifacts/wheelkit-outrun-shared-transition-vunu-20261018/RESULT.md",
+    "scope": "Shared fake/disposable draft/store fixture only; does not qualify OutRun host, rendered UI, device capture or physical input."
+  }
+}
