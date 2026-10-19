@@ -5,6 +5,8 @@
 // [Window] the build's own options. The OutRun2006Tweaks [DirectInput] keys are
 // read only by the one-time import into [Controls].
 #include <map>
+#include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 namespace outrun::desktop {
@@ -46,6 +48,12 @@ SettingsPublish& settings_publish();
 // [Controls] among them, are kept): every line of that key (any case) becomes "key = value", or the line is added;
 // the section's other lines, comments included, and the rest of the file are kept (write_section).
 bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error);
+// One explicit multi-key edit in one section replacement. nullopt removes a key (Undo restores absence).
+// Optional expected values are checked in the same read before any temp file is written. Other keys,
+// comments and sections are retained; duplicate sections, invalid edits and changed expectations refuse.
+using SettingsEdits=std::vector<std::pair<std::string,std::optional<std::string>>>;
+bool write_keys(const std::string& path,const std::string& section,const SettingsEdits& values,std::string& error,
+                const SettingsEdits* expected=nullptr);
 // OutRunDesktop.ini in `folder`, written with comments when it does not exist. When it is new and the folder has
 // an OutRun2006Tweaks.ini, the new file is left without [Controls] so that the Tweaks bindings get imported.
 // create_if_missing=false (a latched test process): read only; a missing file is simply empty.
