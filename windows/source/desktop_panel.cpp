@@ -5,6 +5,7 @@
 #include "gamepad_vibration_live.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
+#include "desktop_quality.hpp"
 #include "hud_toggle.hpp"
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
@@ -97,11 +98,16 @@ struct FrontendRouteTrace {
 };
 FrontendRouteTrace route_trace;
 struct Panel {
-    bool configured{},latched{},input{},backend{},was_open{},playback{};
+    bool configured{},latched{},input{},backend{},was_open{},playback{},developer_options{};
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
     ffb::player::Model player_model{ffb::player::Model::Legacy};
     ffb::producer2::Strengths applied_strengths{};
-    std::string model_refusal,legacy_refusal;
+    std::string model_refusal,transmission_current;
+    Ini quality_settings;
+    std::string quality_backup;
+    SettingsEdits quality_undo,quality_expected;
+    int quality_pending{quality::Custom};
+    bool quality_details{},quality_can_undo{},quality_ready{true};
     bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
     ID3D11Device* device{};
@@ -141,9 +147,9 @@ struct Values {
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
     int engine_rpm{};   // [Telemetry] EngineRpm: 0 Synthetic (default), 1 Game
-    int global{100},spring{},damper{},weight{},grip{},transfer{},wall{},gear{},road{},slip{},idle{};bool invert{};
     int model_next{};   // 0 legacy, 1 producer@2, 2 unsupported saved identifier (preserved until explicitly changed)
     bool selected_steering_invalid{},selected_shift_invalid{};
+    int transmission_next{};   // Sequential, H-pattern, or an unsupported/automatic saved value retained until an explicit choice
     int selected_steering{50},selected_shift{50};   // [FFBProducer2] integer percentages for the next start
     int sensitivity{100},dead_zone{};
     bool fine_steering{},fine_steering_start{};   // [Misc] FineSteering, default off, next start only
@@ -173,6 +179,15 @@ bool producer_percent(const Ini& settings,const char* key,int& value){
     if(parsed>100)return false;
     value=parsed;return true;
 }
+void refresh_quality_values(){
+    p.quality_pending=quality::detect(p.quality_settings);
+    v.ui_textures=p.quality_settings.flag("Graphics","UITextureReplacement",false);
+    v.scene_textures=p.quality_settings.flag("Graphics","SceneTextureReplacement",false);
+    v.anisotropic=std::clamp(p.quality_settings.integer("Graphics","AnisotropicFiltering",0),0,16);
+    const int edge=p.quality_settings.integer("Graphics","ReflectionResolution",128);
+    static const int pixels[]{64,128,256,512,1024,2048,4096};v.reflection=1;
+    for(int i=0;i<7;++i)if(edge==pixels[i])v.reflection=i;
+}
 int pct(float f){return int(std::lround(double(f)*100.0));}
 std::string fraction(int percent){char t[16];std::snprintf(t,sizeof t,"%.2f",percent/100.0);return t;}
 // The toolkit's own lines already start with "panel:"; ours get the prefix here.
@@ -186,18 +201,16 @@ bool save(const char* section,const char* key,const std::string& value){
     if(p.latched){pending_failure="a test run saves nothing";dbce::panel::NoteSaved(false,pending_failure.c_str());return false;}
     std::string error;
     const bool ok=write_key(p.ini,section,key,value,error);
-    if(ok)pending_failure.clear();else pending_failure="not saved: "+error;
+    if(ok){
+        pending_failure.clear();
+        if(std::strcmp(section,"Graphics")==0){p.quality_ready=p.quality_settings.load(p.ini);if(p.quality_ready)refresh_quality_values();}
+    }else pending_failure="not saved: "+error;
     dbce::panel::NoteSaved(ok,ok?"applies at the next game start":pending_failure.c_str());
     std::printf("panel: [%s] %s = %s %s\n",section,key,value.c_str(),ok?"saved":pending_failure.c_str());std::fflush(stdout);
     return ok;
 }
 // A control's change saved, or put back to the value it had (the saved one).
 template<class T,class S> void keep(T* value,T before,S saved){if(!saved())*value=before;}
-bool percent_key(const char* label,int* value,int max,int def,const char* key,const char* help=nullptr){
-    const int before=*value;
-    if(!dbce::panel::Percent(label,value,0,max,def,help))return false;
-    keep(value,before,[&]{return save("FFB",key,fraction(*value));});return true;
-}
 void graphics_flag(const char* label,bool* value,const char* key,const char* help,const char* section="Graphics"){
     const bool before=*value;
     if(dbce::panel::OffOn(label,value,help))
@@ -208,7 +221,19 @@ void graphics_slider(const char* label,int* value,int max,const char* key,const 
     if(dbce::panel::Slider(label,value,0,max,0,format,help))
         keep(value,before,[&]{return save("Graphics",key,std::to_string(*value));});
 }
+void binding_setup(){
+    dbce::panel::Heading("Bindings");
+    dbce::panel::Text("Bindings are currently edited in Wheelkit.");
+    static const char* const modes[]{"Sequential","H-pattern (gears 1-6)","Keep saved transmission mode"};
+    {const int before=v.transmission_next;
+     if(dbce::panel::Choice("Shifter input at next start",modes,v.transmission_next==2?3:2,&v.transmission_next,
+            "H-pattern uses gears 1-6. Reverse, higher gears and clutch are unavailable. Choose Manual in the game to shift manually."))
+         keep(&v.transmission_next,before,[&]{return v.transmission_next<2&&save("Controls","Transmission",
+             v.transmission_next==1?"H-pattern":"Sequential");});}
+    dbce::panel::Status("Shifter in this session",p.transmission_current.c_str());
+}
 void page_controls(bool advanced){
+    binding_setup();
     // The backend this process uses: [Input] Backend = Shim runs the shared input shim and never configures wheel_input.
     const auto shim=shim_input_status_text();
     dbce::panel::Status("Input",shim.empty()?"Native (the build's own wheel input)":"Shim (the shared input shim, [Input] Backend = Shim)");
@@ -377,90 +402,6 @@ void page_controls(bool advanced){
              keep(&v.jp_clarissa,before,[&]{return save("Misc","RestoreJPClarissa",v.jp_clarissa?"true":"false");});}
         dbce::panel::Text("Character appearance choices apply at the next game start.");
     }
-}
-void page_ffb(bool advanced){
-    const auto status=ffb_status_text();
-    dbce::panel::Status("Wheel output",status.c_str(),ffb_output_running()?dbce::panel::Tone::Good:dbce::panel::Tone::Normal);
-    if(!stop_error.empty())dbce::panel::Status("Stop FFB",("the output stopped, but turning it off for the next start failed: "+stop_error).c_str(),
-                                                 dbce::panel::Tone::Error);
-    // Explicit model choice changes only Model. Output remains an independent next-start setting.
-    static const char* const models[]{"Legacy (software trace only)","Centering and shift (outrun-producer@2)","Saved model unavailable"};
-    {const int before=v.model_next;
-     if(dbce::panel::Choice("Force model at the next start",models,v.model_next==2?3:2,&v.model_next,
-            "Legacy preserves the old software trace calculation and cannot drive a wheel. Centering and shift uses "
-            "consumed steering and HUD speed; its force feel and wheel polarity remain unqualified. Changing the model "
-            "does not turn output on or migrate strengths. Applies at the next game start."))
-         keep(&v.model_next,before,[&]{return v.model_next<2&&save("FFB","Model",v.model_next==1?
-             ffb::producer2::ModelId:ffb::player::LegacyId);});}
-    if(v.model_next==0)
-        dbce::panel::Status("Legacy model","software trace only; no wheel output, including when Output is saved On",dbce::panel::Tone::Warning);
-    else if(v.model_next==2)
-        dbce::panel::Status("Saved model","unavailable; choose a supported model before wheel output can run",dbce::panel::Tone::Warning);
-    // The saved setting for the NEXT start ([FFB] Output = wheel | none), apart from the output above. It is never applied
-    // live: On cannot start torque in this session, and Off does not stop a running output (Stop FFB and F8 do). The
-    // delivery's own gates (a race, the game in front, the steering wheel, DBCE_FFB_MUTE) still decide when it runs.
-    {const bool before=v.output_next;
-     if(v.output_next||p.force_library){
-         if(dbce::panel::OffOn("Wheel output at the next start",&v.output_next,
-                "Saved for the next start. On requests wheel force only with the Centering and shift model "
-                "(outrun-producer@2), during a race with the game in front. Legacy refuses wheel output. "
-                "This switch never selects a model. Nothing changes in this session."))
-             keep(&v.output_next,before,[&]{return save("FFB","Output",v.output_next?"wheel":"none");});
-     }else dbce::panel::Status("Wheel output at the next start","off: turning it on needs the force add-on (WheelFfb.dll beside the game)");}
-    if(ffb_output_running()&&!v.output_next)
-        dbce::panel::Status("This session","the output still runs until the game closes; Stop FFB or F8 stops it now",dbce::panel::Tone::Warning);
-    else if(v.output_next&&!ffb_output_running())
-        dbce::panel::Status("This session",p.force_muted?"not running: this process is force-muted (DBCE_FFB_MUTE)":"not running in this session; see Wheel output above",
-                            dbce::panel::Tone::Normal);
-    dbce::panel::Text("Stop FFB and F8 turn the output off now and at the next start.");
-    if(p.player_model==ffb::player::Model::Producer2){
-        const auto active="outrun-producer@2; steering "+std::to_string(p.applied_strengths.steering_percent)+"%, shift "+
-            std::to_string(p.applied_strengths.shift_percent)+"%";
-        dbce::panel::Status("Model in this session",active.c_str());
-    }else if(p.player_model==ffb::player::Model::Legacy)
-        dbce::panel::Status("Model in this session","outrun-legacy@1: software trace only, no wheel output");
-    else{
-        const auto state="settings refused: "+p.model_refusal;
-        dbce::panel::Status("Model in this session",state.c_str(),dbce::panel::Tone::Warning);
-    }
-    dbce::panel::Text("Model and strength edits apply at the next game start.");
-    if(v.model_next==2)return;
-    if(v.model_next==1){
-        if(v.selected_steering_invalid||v.selected_shift_invalid)
-            dbce::panel::Status("Saved strengths","invalid value: output will be refused until corrected; the affected control shows its default",dbce::panel::Tone::Warning);
-        {const int before=v.selected_steering;
-         if(dbce::panel::Percent("Steering strength",&v.selected_steering,0,100,50,
-             "Scales the provisional speed-and-steer centering estimate. Saved for the next game start."))
-             keep(&v.selected_steering,before,[&]{const bool ok=save("FFBProducer2","SteeringStrengthPercent",std::to_string(v.selected_steering));
-                 if(ok)v.selected_steering_invalid=false;return ok;});}
-        {const int before=v.selected_shift;
-         if(dbce::panel::Percent("Shift strength",&v.selected_shift,0,100,50,
-             "Scales the gear-change cue independently of steering. Saved for the next game start."))
-             keep(&v.selected_shift,before,[&]{const bool ok=save("FFBProducer2","ShiftStrengthPercent",std::to_string(v.selected_shift));
-                 if(ok)v.selected_shift_invalid=false;return ok;});}
-        return;
-    }
-    dbce::panel::Text("Legacy software trace controls preserve the historical calculation; they do not tune wheel output or measured tire forces.");
-    if(!p.legacy_refusal.empty()){
-        dbce::panel::Status("Legacy settings at start",("refused: "+p.legacy_refusal+"; correct the saved reference settings before tracing").c_str(),
-                            dbce::panel::Tone::Warning);
-        return;
-    }
-    const ffb::LegacySettings d;   // the mod's compiled defaults, for each slider's Default
-    percent_key("Strength",&v.global,100,pct(d.global_strength),"FFBGlobalStrength");
-    if(!advanced)return;
-    percent_key("Centering",&v.spring,200,pct(d.spring),"FFBSpringStrength");
-    percent_key("Damping",&v.damper,200,pct(d.damper),"FFBDamperStrength");
-    percent_key("Cornering load",&v.weight,200,pct(d.steering_weight),"FFBSteeringWeight");
-    percent_key("Grip loss",&v.grip,100,pct(d.grip_loss),"FFBGripLoss");
-    percent_key("Weight transfer",&v.transfer,200,pct(d.weight_transfer),"FFBWeightTransfer");
-    percent_key("Wall impact",&v.wall,200,pct(d.wall_impact),"FFBWallImpact");
-    percent_key("Gear shift",&v.gear,200,pct(d.gear_shift),"FFBGearShift");
-    percent_key("Road texture",&v.road,200,pct(d.road_texture),"FFBRoadTexture");
-    percent_key("Tire slip",&v.slip,200,pct(d.tire_slip),"FFBTireSlip");
-    percent_key("Engine idle",&v.idle,100,pct(d.engine_idle),"FFBEngineIdle");
-    {const bool before=v.invert;
-     if(dbce::panel::OffOn("Invert force",&v.invert))keep(&v.invert,before,[&]{return save("FFB","FFBInvertForce",v.invert?"true":"false");});}
 }
 void page_cameras(bool advanced){
     static const char* const modes[]{"Off","Surround","Separate monitors"};
@@ -661,12 +602,179 @@ void page_telemetry(bool advanced){
     }
     dbce::panel::Text("Changes apply at the next game start.");
 }
+// Player pages deliberately remain small in both views. The full compatibility catalogue above is
+// available only through the explicit, read-only-at-start [Panel] DeveloperOptions opt-in.
+void player_controls(bool advanced){
+    binding_setup();
+    dbce::panel::Heading("Driving");
+    {const int before=v.sensitivity;
+     if(dbce::panel::Slider("Steering sensitivity",&v.sensitivity,10,300,100,"%d%%"))
+         keep(&v.sensitivity,before,[&]{return save("Wheel","SteeringSensitivity",fraction(v.sensitivity));});}
+    {const int before=v.dead_zone;
+     if(dbce::panel::Percent("Steering dead zone",&v.dead_zone,0,90,0))
+         keep(&v.dead_zone,before,[&]{return save("Wheel","SteeringDeadZone",fraction(v.dead_zone));});}
+    {const bool before=v.manual_default;
+     if(dbce::panel::OffOn("Start transmission menu on Manual",&v.manual_default,
+            "Preselects Manual in the game's transmission menu. This is separate from your shifter binding mode."))
+         keep(&v.manual_default,before,[&]{return save("Misc","DefaultManualTransmission",v.manual_default?"true":"false");});}
+    if(advanced){
+        dbce::panel::Heading("Dashboard");
+        {const bool before=v.telemetry;
+         if(dbce::panel::OffOn("Telemetry",&v.telemetry,"Sends driving data to SimHub and other dashboards."))
+             keep(&v.telemetry,before,[&]{return save("Telemetry","Enabled",v.telemetry?"true":"false");});}
+    }
+    dbce::panel::Text("Changes apply after restarting the game.");
+}
+void player_ffb(bool advanced){
+    const auto status=ffb_status_text();
+    const char* session="Off";
+    auto tone=dbce::panel::Tone::Normal;
+    if(status.rfind("stopping:",0)==0){session="Stop pending; close the game to finish stopping";tone=dbce::panel::Tone::Warning;}
+    else if(ffb_output_running()){
+        if(status=="on"){session="On";tone=dbce::panel::Tone::Good;}
+        else if(status.rfind("on: waits",0)==0)session="Waiting for a race, game focus and the steering wheel";
+        else{session="Stopped for this session; restart before enabling again";tone=dbce::panel::Tone::Warning;}
+    }else if(p.force_muted)session="Disabled for this session";
+    else if(p.player_model==ffb::player::Model::Refused)session="Off; saved force setup needs correction";
+    else if(p.player_model==ffb::player::Model::Legacy)session="Off; wheel force setup is needed";
+    dbce::panel::Status("This session",session,tone);
+    if(p.developer_options)dbce::panel::Status("Delivery detail",status.c_str());
+    if(!stop_error.empty())dbce::panel::Status("Stop FFB","Output stopped, but saving Off failed. Try again before closing the game.",dbce::panel::Tone::Error);
+    {const bool before=v.output_next;
+     if(dbce::panel::OffOn("Enabled at next start",&v.output_next))
+         keep(&v.output_next,before,[&]{
+             const char* why=v.output_next&&v.model_next!=1?"Set up wheel force in Wheelkit or developer settings before enabling it":
+                 v.output_next&&!p.force_library?"Wheel force support is not installed":
+                 v.output_next&&(v.selected_steering_invalid||v.selected_shift_invalid)?"Correct the saved force strengths before enabling output":nullptr;
+             if(why){pending_failure=why;dbce::panel::NoteSaved(false,why);return false;}
+             return save("FFB","Output",v.output_next?"wheel":"none");
+         });}
+    if(v.model_next!=1){
+        dbce::panel::Status("Setup needed","Choose a supported wheel force setup in Wheelkit or developer settings.",dbce::panel::Tone::Warning);
+    }else{
+        if(v.selected_steering_invalid||v.selected_shift_invalid)
+            dbce::panel::Status("Saved strength","Invalid; check Strength and Advanced Shift cue before enabling output. The affected control shows the default.",dbce::panel::Tone::Warning);
+        {const int before=v.selected_steering;
+         if(dbce::panel::Percent("Strength",&v.selected_steering,0,100,50))
+             keep(&v.selected_steering,before,[&]{const bool ok=save("FFBProducer2","SteeringStrengthPercent",std::to_string(v.selected_steering));
+                 if(ok)v.selected_steering_invalid=false;return ok;});}
+        // Only the supported saved wheel model implements an independent shift cue.
+        if(advanced){const int before=v.selected_shift;
+         if(dbce::panel::Percent("Shift cue",&v.selected_shift,0,100,50,"Strength of the gear-change cue; independent of steering."))
+             keep(&v.selected_shift,before,[&]{const bool ok=save("FFBProducer2","ShiftStrengthPercent",std::to_string(v.selected_shift));
+                 if(ok)v.selected_shift_invalid=false;return ok;});}
+    }
+    dbce::panel::Text("Enable and strength changes apply after restart. Stop FFB or F8 stops output now.");
+}
+void quality_apply(bool undo){
+    if(p.latched){dbce::panel::NoteSaved(false,"a test run saves nothing");return;}
+    const auto previous=quality::snapshot(p.quality_settings);
+    const auto next=undo?p.quality_undo:quality::preset(p.quality_pending);
+    const auto& expected=undo?p.quality_expected:previous;
+    std::string error;
+    Ini old_backup;const bool backup_exists=GetFileAttributesA(p.quality_backup.c_str())!=INVALID_FILE_ATTRIBUTES;
+    if(!undo){
+        SettingsEdits before_backup,expected_backup;
+        if(backup_exists&&(!old_backup.load(p.quality_backup)||!quality::read_undo(old_backup,before_backup,expected_backup))){
+            pending_failure="graphics backup is not recognized; nothing saved";dbce::panel::NoteSaved(false,pending_failure.c_str());return;
+        }
+        if(!write_section(p.quality_backup,"GraphicsUndo",quality::undo_document(previous,next),error)){
+            pending_failure="could not preserve the graphics backup: "+error;dbce::panel::NoteSaved(false,pending_failure.c_str());return;
+        }
+    }
+    if(!write_keys(p.ini,"Graphics",next,error,&expected)){
+        // A failed main-file write must retain the last usable Undo, including across restart.
+        std::string restore_error;
+        if(!undo){
+            const bool restored=backup_exists?write_section(p.quality_backup,"GraphicsUndo",old_backup.section_lines("GraphicsUndo"),restore_error):
+                DeleteFileA(p.quality_backup.c_str())!=0;
+            if(!restored)error+="; the graphics backup could not be restored";
+        }
+        pending_failure="not saved: "+error;dbce::panel::NoteSaved(false,pending_failure.c_str());return;
+    }
+    if(undo)p.quality_can_undo=false;   // keep the rollback sidecar; its expected preset no longer matches the restored settings
+    else{p.quality_undo=previous;p.quality_expected=next;p.quality_can_undo=true;}
+    pending_failure.clear();p.quality_ready=p.quality_settings.load(p.ini);
+    if(p.quality_ready)refresh_quality_values();
+    dbce::panel::NoteSaved(p.quality_ready,p.quality_ready?"graphics saved; applies after restart":"graphics saved, but cannot reread; restart before more changes");
+    log_line(undo?"graphical tweaks undone; restart to apply":"graphical tweaks applied; restart to use saved values");
+}
+void player_quality(bool advanced){
+    dbce::panel::Heading("Quality");
+    if(!p.quality_ready){
+        dbce::panel::Status("Saved graphics","Cannot reread the settings. Reload or restart before changing them.",dbce::panel::Tone::Error);
+        if(dbce::panel::Command("Reload saved graphics")){p.quality_ready=p.quality_settings.load(p.ini);if(p.quality_ready)refresh_quality_values();}
+        return;
+    }
+    const int current=quality::detect(p.quality_settings);
+    dbce::panel::Status("Saved quality",quality::Names[current]);
+    dbce::panel::Choice("Graphical Tweaks",quality::Names,6,&p.quality_pending,
+        "Off disables the optional tweaks listed below, not the game's graphics or compatibility fixes. Higher levels improve detail and use more GPU time and memory. HD options need installed packs.");
+    if(dbce::panel::Command(p.quality_details?"Hide changes":"Show changes"))p.quality_details=!p.quality_details;
+    if(p.quality_details){
+        for(const auto& setting:quality::Settings){
+            const auto before=quality::display(setting,p.quality_settings.text("Graphics",setting.key,setting.fallback));
+            const auto after=p.quality_pending<quality::Custom?quality::display(setting,setting.levels[std::size_t(p.quality_pending)]):before;
+            const auto value=before==after?before:before+" -> "+after;
+            dbce::panel::Status(setting.label,value.c_str());
+        }
+        dbce::panel::Text("Display geometry and visibility, controls, force, calibration, pacing and compatibility fixes are kept.");
+        if(dbce::panel::Command("Reload saved graphics")){p.quality_ready=p.quality_settings.load(p.ini);if(p.quality_ready)refresh_quality_values();}
+    }
+    if(p.quality_pending<quality::Custom&&p.quality_pending!=current){
+        dbce::panel::Text("Review the changes, then Apply. Nothing changes in this session.");
+        if(dbce::panel::Command("Apply graphics changes"))quality_apply(false);
+    }
+    if(p.quality_can_undo&&dbce::panel::Command("Undo last graphics apply"))quality_apply(true);
+    if(advanced&&p.quality_details){
+        dbce::panel::Heading("Individual overrides");
+        graphics_flag("HD menus and HUD",&v.ui_textures,"UITextureReplacement","Uses an installed menu and HUD texture pack.");
+        graphics_flag("HD cars and stages",&v.scene_textures,"SceneTextureReplacement","Uses an installed car and stage texture pack.");
+        graphics_slider("Texture filtering",&v.anisotropic,16,"AnisotropicFiltering","%d","0 keeps the game's filtering. Higher values sharpen textures viewed at an angle.");
+        static const char* const labels[]{"64","128 (default)","256","512","1024","2048","4096"};
+        static const int pixels[]{64,128,256,512,1024,2048,4096};const int before=v.reflection;
+        if(dbce::panel::Choice("Car reflection detail",labels,7,&v.reflection,"Higher detail uses more GPU time and memory."))
+            keep(&v.reflection,before,[&]{return save("Graphics","ReflectionResolution",std::to_string(pixels[v.reflection]));});
+    }
+}
+void player_cameras(bool advanced){
+    dbce::panel::Heading("Display");
+    {std::vector<const char*> labels;
+     for(const auto& label:v.monitor_labels)labels.push_back(label.c_str());
+     const int before=v.monitor_choice;
+     if(dbce::panel::Choice("Gameplay display",labels.data(),int(labels.size()),&v.monitor_choice,
+            "Chooses where the game opens. Separate monitors uses this as the center screen."))
+         keep(&v.monitor_choice,before,[&]{return save("Window","MonitorDevicePath",v.monitor_paths[std::size_t(v.monitor_choice)]);});}
+    static const char* const layouts[]{"Single screen","Surround","Separate monitors"};
+    {const int before=v.triple;
+     if(dbce::panel::Choice("Screen layout",layouts,3,&v.triple))
+         keep(&v.triple,before,[&]{return save("Triple","Screens",triple_screens_name(TripleScreens(v.triple)));});}
+    if(v.triple!=int(TripleScreens::off)){
+        static const char* const projections[]{"One wide view","Three projected views"};
+        const int before=v.projection;
+        if(dbce::panel::Choice("Projection",projections,2,&v.projection))
+            keep(&v.projection,before,[&]{return save("Triple","Views",triple_projection_name(TripleProjection(v.projection)));});
+    }
+    const auto& st=triple_screens_status();
+    const auto current=std::string(triple_screens_name(st.mode))+(st.mode==TripleScreens::off?"":
+        st.applied==TripleProjection::angled?", three projected views":", one wide view");
+    dbce::panel::Status("This session",current.c_str());
+    if(st.requested==TripleProjection::angled&&st.applied!=TripleProjection::angled)
+        dbce::panel::Status("Projection","Three projected views are unavailable in this session",dbce::panel::Tone::Warning);
+    if(advanced){static const char* const boxing[]{"Off","Outside the race","Always"};
+        const int before=v.letterbox;
+        if(dbce::panel::Choice("Black bars",boxing,3,&v.letterbox))
+            keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});
+    }
+    player_quality(advanced);
+    dbce::panel::Text("Changes apply after restarting the game.");
+}
 void draw_page(dbce::panel::Page page,bool advanced){
     if(!pending_failure.empty()){dbce::panel::NoteSaved(false,pending_failure.c_str());pending_failure.clear();}   // after the toolkit's own note
     switch(page){
-    case dbce::panel::PAGE_CONTROLS:page_controls(advanced);break;
-    case dbce::panel::PAGE_FFB:page_ffb(advanced);break;
-    case dbce::panel::PAGE_CAMERAS:page_cameras(advanced);break;
+    case dbce::panel::PAGE_CONTROLS:if(p.developer_options)page_controls(advanced);else player_controls(advanced);break;
+    case dbce::panel::PAGE_FFB:player_ffb(advanced);break;
+    case dbce::panel::PAGE_CAMERAS:if(p.developer_options)page_cameras(advanced);else player_cameras(advanced);break;
     case dbce::panel::PAGE_TELEMETRY:page_telemetry(advanced);break;
     case dbce::panel::PAGE_HELP:
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
@@ -800,15 +908,24 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
     p=Panel{};
     p.latched=latched;p.playback=playback;
+    p.developer_options=settings.flag("Panel","DeveloperOptions",false);
+    p.quality_settings=settings;p.quality_pending=quality::detect(settings);
     {const auto selected=ffb::player::select(settings);p.player_model=selected.model;
      p.applied_strengths=selected.strengths;p.model_refusal=selected.refusal;}
-    p.ini=settings.path();
+    p.ini=settings.path();p.quality_backup=p.ini+".graphics-undo.ini";
+    {Ini undo;
+     if(undo.load(p.quality_backup)&&quality::read_undo(undo,p.quality_undo,p.quality_expected))
+         p.quality_can_undo=quality::snapshot(settings)==p.quality_expected;}
     const auto slash=p.ini.find_last_of("\\/");
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
     if(!folder.empty()&&!playback)p.dev=folder+"\\OutRunDesktop.panel-dev.txt";   // none for a latched run without its folder, nor in playback
     p.name="OutRun 2006 desktop (decomp)";
     // The pages' values as the settings file holds them now (the same readers the game uses at start).
     v=Values{};
+    const auto transmission=settings.text("Controls","Transmission");
+    v.transmission_next=transmission=="Sequential"?0:transmission=="H-pattern"?1:2;
+    p.transmission_current=transmission=="H-pattern"?"H-pattern, gears 1-6":transmission=="Sequential"?"Sequential":
+        "No H-pattern input; saved transmission mode is kept";
     v.monitor_labels={"Default placement"};v.monitor_paths={""};
     const auto saved_monitor=settings.text("Window","MonitorDevicePath");
     for(const auto& monitor:startup_monitor_state().monitors)if(monitor.paths.size()==1u){
@@ -899,14 +1016,6 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;
      v.engine_rpm=t.game_rpm?1:0;}
-    {
-        std::string notes,source;auto s=ffb_settings(settings,notes,source);
-        p.legacy_refusal=ffb::validate(s);
-        if(!p.legacy_refusal.empty())s=ffb::LegacySettings{};   // never round invalid legacy floats for an unrelated producer model
-        v.global=pct(s.global_strength);v.spring=pct(s.spring);v.damper=pct(s.damper);v.weight=pct(s.steering_weight);v.grip=pct(s.grip_loss);
-        v.transfer=pct(s.weight_transfer);v.wall=pct(s.wall_impact);v.gear=pct(s.gear_shift);v.road=pct(s.road_texture);v.slip=pct(s.tire_slip);
-        v.idle=pct(s.engine_idle);v.invert=s.invert;
-    }
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
     {std::string notes;const auto o=ffb_output_config(settings,false,std::getenv("DBCE_FFB_MUTE"),notes);
      v.output_next=o.output;p.force_muted=o.muted;}
@@ -916,7 +1025,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     c.modRepositoryUrl="https://github.com/d-b-c-e/outrun2-decomp";
     c.wheelkitRepositoryUrl="https://github.com/d-b-c-e/dbce-wheelkit";
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing
-    for(const auto page:{dbce::panel::PAGE_CONTROLS,dbce::panel::PAGE_FFB,dbce::panel::PAGE_CAMERAS,dbce::panel::PAGE_TELEMETRY})c.pages[page]=true;
+    for(const auto page:{dbce::panel::PAGE_CONTROLS,dbce::panel::PAGE_FFB,dbce::panel::PAGE_CAMERAS})c.pages[page]=true;
+    c.pages[dbce::panel::PAGE_TELEMETRY]=p.developer_options;
     c.drawPage=draw_page;
     c.ffbOn=ffb_output_running;c.stopFfb=stop_ffb;   // Stop FFB / F8 (STD-004)
     c.log=log_line;
@@ -927,7 +1037,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     xbox_runtime::present_overlay()=overlay;
     p.configured=true;
     if(playback)std::printf("panel: F6 is off in a playback process (the PLAYBACK badge only)\n");
-    else std::printf("panel: F6 settings panel ready (Controls, FFB, Cameras, Telemetry, Help; %s; dev channel %s)\n",
+    else std::printf("panel: F6 settings panel ready (Controls, FFB, Cameras, Help; %s; dev channel %s)\n",
         latched?"a test run: nothing saved":"saves to the settings file",p.dev.empty()?"off":p.dev.c_str());
     std::fflush(stdout);
 }
