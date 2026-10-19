@@ -99,5 +99,10 @@ The private successor `0.6.52+0c1c24f` carries only those five commits.
 The proposed consolidated successor is `0.6.53+7b801ac` (Vunu, on the same `0c1c24f` base). It adds the force UI that matches the correction.
 - With the build-owned `ffb` marker, trusted only through the hash-bound exe/capabilities/receipt tuple, it shows the model choice and marks Legacy as trace only. It also refuses `Output = wheel` without `outrun-producer@2`.
 - Without the marker, as on the current install, it behaves as before.
-- Tests: 262/262 focused tests at `8a5f634`, plus one focused case for the `7b801ac` hardening. Publishing and packaging wait for a serialized slot.
-- Once qualified, it is preferred over 0.6.52, which stays the fallback.
+- Tests: 262/262 focused tests at `8a5f634`, plus one focused case for the `7b801ac` hardening.
+- **Packaged (2026-10-19, lease 02:12:46Z-02:14:40Z):**
+  - `Wheelkit-0.6.53-private-7b801ac22b23-win-x64.zip`, SHA-256 `1405DB3234878B123E17EAB3B2231C86A5F5C9B02008A4EA82E962F7AD3400AD`, 518/518 members verified. App `0.6.53+7b801ac`.
+  - The 69-page and 109-page smoke checks passed.
+  - Evidence: hub `artifacts/wheelkit-outrun-0653-vunu-20261018/package-01`.
+  - Not yet seen: the marker-present force UI (the generic smoke does not cover it).
+- **Not installed.** It is preferred over 0.6.52 (whose ZIP `5F3A3C63…` is unchanged and stays the fallback). It waits for the owner to close Wheelkit normally.
