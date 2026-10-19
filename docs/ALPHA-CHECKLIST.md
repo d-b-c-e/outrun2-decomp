@@ -207,13 +207,21 @@ Runner for the functional slot: integration `7030594`, `windows/tests/perf` tree
 - **Not done:** install, game, UI, device and force. Evidence: hub `.local/outrun-alpha-demo-20261019/candidate-build-01/result.json`.
 - **Next** (kobe 277807): prepare a tuple, receipt and reversible updater as artifacts only. The attended acceptance targets the shared (Shim) backend after Wheelkit's upgrade and an explicit profile transition. There is no separate Native sign-off.
 
+### Candidate install, tuple03-install-01 (2026-10-19, owner request)
+
+- **Grant:** kobe 278496: the owner asked for the latest OutRun and Wheelkit. Demo installs OutRun first, then Vunu installs Wheelkit 0.6.54.
+- **Pre-checks:** installed state exact (exe `00491F11`, caps `7D713A1A`, receipt `00C6AEC7`, INI `F1CB0F84`); no game or frontend running; lease free.
+- **Install:** retained updater `F7504691…` with tuple-03 `8C4AC329…`. Samo prepared both; Demo reviewed them (278234). Check PASS, then Apply PASS, tag `54eca08-20261019-051719`.
+- **Installed:** exe `4D5BE954…` and caps `4FBD348A…`, with receipt `5A234358…` the sole match. Backups hold `00491F11` and `7D713A1A`.
+- **Unchanged:** INI, WheelFfb `856BF2A5` and the session script. Lease released.
+- **Not done:** no game, UI or force. Evidence: hub `.local/outrun-alpha-demo-20261019/install-tuple03-01/result.json`.
+
 ## Disposition
 
-The installed exe is `00491F11` (built from `e4f4d0c` in producer-build-01, installed in
-producer-install-01). It is `A92CDCB6` plus the force-model correction, on the owner's
-`E:/Games/OutRunDecompSmoke`, as a **private alpha** ([DEPLOYMENT](DEPLOYMENT.md)). It is
-**not** ready for a tag or public release. The owner has driven `00491F11` once (above: wheel
-controls worked, force present but inverted and weak). The automated runtime evidence below
+The installed exe is `4D5BE954` (candidate `54eca08`, built in candidate-build-01 and installed in
+tuple03-install-01) on the owner's `E:/Games/OutRunDecompSmoke`, as a **private alpha** ([DEPLOYMENT](DEPLOYMENT.md)).
+It is **not** ready for a tag or public release, and it has not been run. The owner drove the previous `00491F11` once
+(above: wheel controls worked, force present but inverted and weak). The automated runtime evidence below
 comes from `A92CDCB6` and `289ade5`.
 
 - **Proven on the earlier `289ade5` exe**, which lacks only the toolkit panel and controls
@@ -250,9 +258,9 @@ muted private alpha.
 | --- | --- |
 | Rendered triples (`Screens = Separate`, `Views = Angled`) | Qualified for alpha (render-deploy-01, kobe 270778), start-grid wedges documented; the physical check is owner-attended |
 | Physical wheel, pedals and bindings | Owner drive 2026-10-18: the wheel controls worked. H-pattern is not active (`Transmission = Sequential`), and physical H-pattern is pending |
-| Force feel | Owner drive 2026-10-18: output present, felt weak and pushing outward. The direction cause is found, and the correction is built (candidate-build-01) but not installed. Pending: install, then an attended turn-and-release check at speed on the shared backend |
+| Force feel | Owner drive 2026-10-18: output present, felt weak and pushing outward. The direction correction is installed (tuple03-install-01) and unverified. Pending: an attended turn-and-release check at speed on the shared backend |
 | Telemetry field accuracy against a receiver; gamepad vibration | Pending |
-| Wheelkit 0.6.52 install | Waits for the owner to quit Wheelkit normally |
+| Wheelkit upgrade | 0.6.54 install by Vunu (kobe 278496), after the OutRun install; then the explicit shared/H-pattern profile transition |
 
 A physical check of wheel feel, force output, telemetry fields and angled triples is
 a separate, owner-attended gate. A pass here does not imply it.
