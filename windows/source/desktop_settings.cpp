@@ -232,6 +232,42 @@ bool write_key(const std::string& path,const std::string& section,const std::str
         return lines;
     },error);
 }
+bool write_keys(const std::string& path,const std::string& section,const SettingsEdits& values,std::string& error,const SettingsEdits* expected){
+    error.clear();
+    const auto safe=[](const std::string& text){return text.find_first_of("\r\n")==std::string::npos&&text.find('\0')==std::string::npos;};
+    const auto valid=[&](const SettingsEdits& edits){
+        std::map<std::string,bool> seen;
+        for(const auto& edit:edits){const auto& key=edit.first;
+            if(key.empty()||trim(key)!=key||key.find_first_of("=[];#")!=std::string::npos||!safe(key)||
+               (edit.second&&!safe(*edit.second))||!seen.emplace(lower(key),true).second)return false;}
+        return true;
+    };
+    if(section.empty()||!safe(section)||section.find_first_of("[]")!=std::string::npos||values.empty()||!valid(values)||(expected&&!valid(*expected))){
+        error="invalid settings edit; nothing written";return false;}
+    struct Changed {};
+    try{return rewrite_section(path,section,[&](std::vector<std::string> lines){
+        if(expected){
+            std::string text="["+section+"]\n";for(const auto& line:lines)text+=line+'\n';
+            Ini actual;actual.load_text(text,path);
+            for(const auto& edit:*expected){
+                const bool present=actual.has_value(section,edit.first);
+                if(present!=bool(edit.second)||(present&&actual.text(section,edit.first)!=*edit.second))throw Changed{};
+            }
+        }
+        for(const auto& edit:values){
+            bool found=false;std::vector<std::string> next;
+            for(const auto& line:lines){
+                const auto text=trim(line);const auto equal=text.find('=');
+                const bool match=!text.empty()&&text[0]!=';'&&text[0]!='#'&&equal!=std::string::npos&&lower(trim(text.substr(0,equal)))==lower(edit.first);
+                if(!match)next.push_back(line);
+                else{found=true;if(edit.second)next.push_back(edit.first+" = "+*edit.second);}
+            }
+            if(!found&&edit.second)next.push_back(edit.first+" = "+*edit.second);
+            lines=std::move(next);
+        }
+        return lines;
+    },error);}catch(const Changed&){error="these settings changed since the preview; nothing written";return false;}
+}
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     Ini ini;
     const auto own=folder+"/OutRunDesktop.ini";

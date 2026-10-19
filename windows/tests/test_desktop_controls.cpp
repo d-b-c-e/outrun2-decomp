@@ -2,6 +2,7 @@
 // the settings writer and the test-injection session/commands/delivery.
 #include "controls_store.hpp"
 #include "desktop_settings.hpp"
+#include "desktop_quality.hpp"
 #include "test_injection.hpp"
 #define DIRECTINPUT_VERSION 0x0800
 #include <windows.h>
@@ -279,6 +280,55 @@ void test_write_key(){
     {Ini dup;dup.load(path);check(dup.text("Window","FrameLatency")=="1"&&dup.text("FFB","FFBSpringStrength")=="0.60","the reader's view after it");}
     std::remove(path.c_str());
 }
+void test_graphical_presets(){
+    char dir[MAX_PATH];GetTempPathA(MAX_PATH,dir);
+    const std::string path=std::string(dir)+"or2_quality_"+std::to_string(GetCurrentProcessId())+".ini";
+    const std::string protected_sections="[Controls]\r\nSchema = 2\r\nTransmission = Sequential\r\nsteer = axis 0 dev="+Wheel+
+        " prod="+WheelProd+" range=0..65535 rest=33265 travel=-1 cal=1000..33265..64000\r\n"
+        "[FFB]\r\nModel = outrun-producer@2\r\nOutput = none\r\n[Triple]\r\nScreens = Separate monitors\r\nViews = Angled\r\n";
+    const std::string original=protected_sections+"[Graphics]\r\n; owner's graphics\r\nAnisotropicFiltering = 3\r\nUITextureReplacement = yes\r\nOwnerUnknown = kept\r\n";
+    {std::ofstream file(path,std::ios::binary);file<<original;}
+    const auto read=[&]{std::ifstream file(path,std::ios::binary);std::stringstream bytes;bytes<<file.rdbuf();return bytes.str();};
+    Ini settings;check(settings.load(path),"load quality fixture");
+    check(quality::detect(settings)==quality::Custom&&read()==original,"opening a custom quality profile never rewrites it");
+    const auto previous=quality::snapshot(settings);std::string error;
+    for(int level=0;level<quality::Custom;++level){
+        const auto next=quality::preset(level);
+        check(write_keys(path,"Graphics",next,error),"explicit quality preset write: "+error);
+        check(settings.load(path)&&quality::detect(settings)==level,"each quality level has its own actual key values");
+        check(read().find(protected_sections)==0&&settings.text("Graphics","OwnerUnknown")=="kept",
+              "visual presets preserve controls/calibration/force/triples and unknown keys");
+        for(int other=0;other<level;++other)check(next!=quality::preset(other),"no two quality levels are identical");
+    }
+    const auto applied=quality::preset(4);
+    const auto backup_path=path+".graphics-undo.ini";
+    check(write_section(backup_path,"GraphicsUndo",quality::undo_document(previous,applied),error),"persist restart-safe Undo: "+error);
+    Ini backup;SettingsEdits undo_previous,undo_expected;
+    check(backup.load(backup_path)&&quality::read_undo(backup,undo_previous,undo_expected)&&undo_previous==previous&&undo_expected==applied,
+          "a fresh reader recovers exact prior values/absence and the expected applied preset");
+    std::remove(backup_path.c_str());
+    check(write_keys(path,"Graphics",previous,error,&applied),"undo restores original values and missing keys: "+error);
+    check(settings.load(path)&&settings.text("Graphics","AnisotropicFiltering")=="3"&&settings.text("Graphics","UITextureReplacement")=="yes"&&
+          !settings.has_value("Graphics","ReflectionResolution")&&quality::detect(settings)==quality::Custom,"Undo restores exact prior values and absence");
+    check(read().find(protected_sections)==0&&settings.text("Graphics","OwnerUnknown")=="kept","Undo preserves other settings");
+    const auto before_failure=read();const auto publish=settings_publish();
+    settings_publish()=[](const std::string&,const std::string&){return false;};
+    const bool failed=write_keys(path,"Graphics",applied,error,&previous);settings_publish()=publish;
+    check(!failed&&read()==before_failure,"failed multi-key publish preserves every original byte");
+    check(write_keys(path,"Graphics",applied,error,&previous),"apply after a failed publish: "+error);
+    check(write_key(path,"Graphics","AnisotropicFiltering","7",error),"external graphics change");
+    const auto changed=read();
+    check(!write_keys(path,"Graphics",previous,error,&applied)&&read()==changed,"Undo refuses changed managed keys without overwriting the edit");
+    check(settings.load(path)&&quality::detect(settings)==quality::Custom,"individual override shows Custom");
+    check(write_key(path,"Controls","Transmission","H-pattern",error),"explicit shifter mode change: "+error);
+    check(settings.load(path)&&settings.text("Controls","Transmission")=="H-pattern"&&
+          settings.text("Controls","steer").find("cal=1000..33265..64000")!=std::string::npos&&settings.text("Controls","Schema")=="2",
+          "transmission-only write preserves schema and measured endpoints");
+    const auto unchanged=read();
+    check(!write_keys(path,"Graphics",{{"OwnerUnknown",std::string("bad\nInjected = true")}},error)&&read()==unchanged,
+          "multi-key values cannot introduce extra settings");
+    std::remove(path.c_str());
+}
 void test_injection(){
     std::string nonce,why;std::uint64_t expires=0;
     check(inject::parse_session("nonce=abcdefgh\nexpires=1000",900,nonce,expires,why)&&nonce=="abcdefgh"&&expires==1000,"session");
@@ -331,7 +381,7 @@ void test_wheel_steering(){
 }
 
 int main(){
-    try{test_report();test_import();test_import_steering_calibration();test_import_pedal_calibration();test_write_section();test_write_key();test_injection();test_wheel_steering();}
+    try{test_report();test_import();test_import_steering_calibration();test_import_pedal_calibration();test_write_section();test_write_key();test_graphical_presets();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;

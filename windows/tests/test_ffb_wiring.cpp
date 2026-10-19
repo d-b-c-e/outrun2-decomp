@@ -32,6 +32,8 @@ outrun::platform::NativeCarProducerObserver& car_producer_observer(){
 namespace outrun::desktop {
 std::string g_steer;   // what the wheel input layer reports as the connected steering device
 std::string wheel_input_steer_device(){return g_steer;}
+std::string g_steer_prod;   // and its product
+std::string wheel_input_steer_product(){return g_steer_prod;}
 ShimSteer g_shim;      // the shim backend's steering wheel, as the test sets it
 ShimSteer shim_input_steer(){return g_shim;}
 bool g_panel_open=false;
@@ -46,6 +48,7 @@ std::wstring env(const wchar_t* name){
 }
 int attaches(){return _wtoi(env(L"FAKE_WHEELFFB_ATTACH").c_str());}
 const std::string Wheel="{d71b8350-61b7-11f1-8001-444553540000}";
+const std::string R12Prod="{0006346e-0000-0000-0000-504944564944}";   // the measured direction: -1 (ffb_device.hpp)
 const std::string Controls="[Controls]\r\nSchema = 1\r\nProfile = Rig\r\nRevision = abc\r\n"
     "steer = axis 0 dev="+Wheel+" prod={0006346e-0000-0000-0000-504944564944} range=0..65535 rest=33265 travel=-1\r\n";
 std::string folder(){
@@ -80,7 +83,7 @@ Result run(const std::string& body,bool latched,const char* mute){
 }
 int main(){
     CreateDirectoryA(folder().c_str(),nullptr);
-    outrun::desktop::g_steer=Wheel;
+    outrun::desktop::g_steer=Wheel;outrun::desktop::g_steer_prod=R12Prod;
     // The fake is really beside this exe (else a "never attached" would prove nothing).
     {wchar_t exe[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,exe,MAX_PATH);std::wstring p(exe,n);
      p=p.substr(0,p.find_last_of(L"\\/")+1)+L"WheelFfb.dll";
@@ -181,7 +184,16 @@ int main(){
         request.source_tick=1;expected.step(request);request.source_tick=2;
         const auto row=expected.step(request);
         const auto direct=std::lround(std::clamp(row.shaped_force,-1.0f,1.0f)*10000.0f);
-        check(sent.back()==direct,"selected request converts once to DirectInput units without legacy global gain");
+        check(sent.back()==-direct,"selected request converts once to DirectInput units without legacy global gain, in the R12's direction");
+        // The sign at the device (wheel_direction -1: a positive x turns the R12 left): the model centres a right turn
+        // with a negative force, which must reach the R12 as a positive x; a left turn mirrors it; centred is zero.
+        check(row.request.steer>0.0f&&row.shaped_force<0.0f&&direct<0&&sent.back()>0,
+              "right steer: the model's centring force reaches the R12 as a positive x (toward the left, the centre)");
+        // A tick delivers the request of the previous tick's car callback, so each new steer reaches the fake one tick later.
+        put(0x202,std::int16_t(-16384));tick();tick();sent=forces();
+        check(sent.back()<0&&sent.back()==direct,"left steer: the same magnitude as a negative x (toward the right, the centre)");
+        put(0x202,std::int16_t(0));tick();tick();sent=forces();check(sent.back()==0,"centred steer: zero");
+        put(0x202,std::int16_t(16384));tick();tick();sent=forces();check(sent.back()==-direct,"right steer again: the same positive x");
         tick(false);tick(false);
         sent=forces();check(sent.back()==0,"missing callback sends zero without waiting for another valid car");
         tick();tick();
@@ -325,6 +337,40 @@ int main(){
         outrun::desktop::ffb_shutdown();
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
         outrun::desktop::g_shim={};
+    }
+    // The force target's product on either backend (the native layer's listing, the shim binding Core checked): one
+    // without a measured direction (a MOZA R5 here) is released at the first race tick in front, before any device call
+    // or hand-over, with the reason in the status; the input is not touched.
+    for(const bool shim:{false,true}){
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
+        _putenv_s("DBCE_FFB_MUTE","");_putenv_s("OR2_FFB_TRACE","");
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
+        outrun::xbox_runtime::input_filter()=nullptr;
+        outrun::desktop::ffb_front_check()=[](void*){return true;};
+        outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
+        const std::string r5="{0004346e-0000-0000-0000-504944564944}";
+        outrun::desktop::g_steer_prod=r5;
+        outrun::desktop::g_shim={Wheel,r5,"live",true,true,2};
+        outrun::desktop::ffb_configure(ini(Controls+(shim?"[Input]\r\nBackend = Shim\r\n":"")+
+            "[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n"),false,std::string());
+        outrun::desktop::ffb_wrap_input_filter();
+        check(outrun::desktop::ffb_output_running(),"an unmeasured wheel still loads the library and waits for the race");
+        auto rt=std::make_unique<outrun::platform::NativeRuntimeContext>();
+        rt->mode_state.current=16;
+        const auto filter=outrun::xbox_runtime::input_filter();
+        for(int i=0;i<3;++i){outrun::platform::NativeInputState in{};filter(in,rt.get());}
+        const auto status=outrun::desktop::ffb_status_text();
+        check(status.rfind("off for this session: ",0)==0&&status.find("force direction is not measured")!=std::string::npos&&
+              status.find(r5)!=std::string::npos&&status.find("controls are unaffected")!=std::string::npos,
+              "an unmeasured wheel: the status says why the force is off");
+        check(env(L"FAKE_WHEELFFB_CALLS")==L"GetWheelFfbVersion;GetWheelFfbVersion;"&&outrun::desktop::ffb_shim_wheel_api()==nullptr,
+              shim?"shim: released before the hand-over; no device call, the bridge is not offered the library":
+                   "native: released before any device call");
+        outrun::desktop::ffb_shutdown();
+        check(!GetModuleHandleW(L"WheelFfb.dll"),"unloaded at shutdown after the release");
+        outrun::desktop::g_steer_prod=R12Prod;outrun::desktop::g_shim={};
+        SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+        outrun::xbox_runtime::input_filter()=nullptr;
     }
     // Positive control: the same exe and fake do attach when every gate allows it; only the version is asked, nothing
     // reaches a device outside the race, and the module is gone after shutdown.

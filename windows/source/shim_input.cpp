@@ -1,5 +1,6 @@
 // The input shim in a latched (test) process (shim_input.hpp).
 #include "shim_input.hpp"
+#include "desktop_bindings.hpp"
 #include "controls_store.hpp"
 #include "control_journal.hpp"
 #include "desktop_keyboard.hpp"
@@ -367,6 +368,14 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
     log_signals(g.adapter->signals(),sh::run_name(live.run),g.log);
 }
 
+bool shim_input_binding_edit_allowed(){
+    return o.configured&&!o.stopped&&o.host&&o.frame&&!o.record&&!o.rec.armed();
+}
+std::vector<dbce::controls::edit::AcceptedObservation> shim_input_binding_observations(){
+    if(!shim_input_binding_edit_allowed())return {};
+    try{return bindings::accepted_observations(*o.frame,o.host->device_reports(),double(GetTickCount64())/1000.0);}
+    catch(...){return {};}   // capture unavailability must not change ordinary controls/gameplay
+}
 std::string shim_input_status_text(){
     if(!o.configured)return {};
     if(!o.host)return o.started?(o.owned.empty()?"the shared input shim did not start (see runtime.log); the keyboard and the pad still drive"
