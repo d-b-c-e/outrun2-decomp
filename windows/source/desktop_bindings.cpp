@@ -51,13 +51,14 @@ bool action_kind(const std::string& action,ctl::Kind kind){
 struct Editor::Impl {
     std::mutex mutex;
     std::filesystem::path path;
-    bool ordinary{},opened{},pending_restart{},restart_required{};
+    bool ordinary{},opened{},pending_restart{},restart_required{},file_changed{};
     std::string action{"steer"},message;
     std::unique_ptr<edit::ProfileDraft> draft;
     edit::CaptureFlow capture{action_kind};
     edit::DeviceSelection selection;
     explicit Impl(const std::string& fixed,bool allowed):path(std::filesystem::absolute(std::filesystem::u8path(fixed)).lexically_normal()),ordinary(allowed){}
     bool editable(bool can_edit){
+        if(file_changed){message="Stop FFB saved Off. Binding edits are kept but cannot be saved; cancel editing and reopen to use the updated file.";return false;}
         if(!ordinary||!opened||!draft||restart_required||!can_edit){
             message=restart_required?"Restart before editing again; the backup and draft are kept":
                 "Editing needs ordinary shared input, the Controls page and game focus";
@@ -68,7 +69,7 @@ struct Editor::Impl {
     std::uintptr_t host()const{return reinterpret_cast<std::uintptr_t>(this);}
     void refresh(double now,bool can_edit){
         const bool listening=!capture.action().empty();
-        capture.refresh(now,can_edit&&ordinary&&opened&&!restart_required);
+        capture.refresh(now,can_edit&&ordinary&&opened&&!restart_required&&!file_changed);
         if(listening&&capture.action().empty())message=capture.message();
         selection.reconcile(host(),capture.devices(now),now);
     }
@@ -82,7 +83,7 @@ bool Editor::open(){
     if(s.opened)return true;
     try{
         s.draft=std::make_unique<edit::ProfileDraft>(edit::store_detail::read_path(s.path),action_kind,false,ControlsReads);
-        s.capture.cancel();s.selection.select_saved();s.opened=true;s.message="Editing saved bindings; active controls are unchanged";
+        s.capture.cancel();s.selection.select_saved();s.opened=true;s.file_changed=false;s.message="Editing saved bindings; active controls are unchanged";
         return true;
     }catch(const std::exception& e){s.message=std::string("Cannot edit saved bindings: ")+e.what();return false;}
 }
@@ -96,9 +97,16 @@ void Editor::hide(){
     auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
     if(!s.capture.action().empty()){s.capture.cancel();s.message="Listening canceled; the binding draft is kept";}
 }
+void Editor::saved_file_changed(){
+    auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    if(!s.opened)return;
+    s.capture.cancel();s.file_changed=true;
+    s.message="Stop FFB saved Off. Binding edits are kept but cannot be saved; cancel editing and reopen to use the updated file.";
+}
 View Editor::view(double now,bool can_edit){
     auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);s.refresh(now,can_edit);
     View out;out.opened=s.opened;out.pending_restart=s.pending_restart;out.restart_required=s.restart_required;
+    out.file_changed=s.file_changed;
     out.action=s.action;out.message=s.capture.action().empty()?s.message:s.capture.message();
     out.listening=!s.capture.action().empty();out.selection=s.selection.mode();out.devices=s.capture.devices(now);
     if(s.selection.selected())out.selected_instance=s.selection.selected()->instance;
@@ -107,7 +115,7 @@ View Editor::view(double now,bool can_edit){
 }
 void Editor::observe(const std::vector<edit::AcceptedObservation>& rows,double now,bool can_edit){
     auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
-    const bool eligible=can_edit&&s.ordinary&&s.opened&&!s.restart_required;
+    const bool eligible=can_edit&&s.ordinary&&s.opened&&!s.restart_required&&!s.file_changed;
     const bool listening=!s.capture.action().empty();bool captured=false;
     for(const auto& old:s.capture.devices(now))if(std::none_of(rows.begin(),rows.end(),[&](const auto& row){return row.instance==old.instance;}))
         s.capture.remove(old.instance,"Capture device is unavailable; the draft is kept");

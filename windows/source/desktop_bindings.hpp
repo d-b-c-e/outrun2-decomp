@@ -10,7 +10,7 @@ std::vector<edit::AcceptedObservation> accepted_observations(const dbce::shim::F
     const std::vector<dbce::shim::DeviceReport>&,double local_now);
 bool action_kind(const std::string& action,dbce::controls::Kind kind);
 struct View {
-    bool opened{},dirty{},pending_restart{},restart_required{},listening{};
+    bool opened{},dirty{},pending_restart{},restart_required{},file_changed{},listening{};
     std::string action,transmission,message,selected_instance;
     edit::SelectionMode selection{edit::SelectionMode::Saved};
     std::optional<dbce::controls::Binding> binding;
@@ -26,6 +26,7 @@ public:
     bool opened()const;
     void cancel();                         // discard local edits only
     void hide();                           // cancel capture, preserve draft
+    void saved_file_changed();             // Stop FFB persisted Off; retain stale draft, require explicit Cancel
     View view(double now,bool can_edit);
     void observe(const std::vector<edit::AcceptedObservation>&,double now,bool can_edit);
     bool select_action(const std::string&);

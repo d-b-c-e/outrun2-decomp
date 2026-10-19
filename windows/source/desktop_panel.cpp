@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include "dbce_panel.h"
 #include "dbce_panel_input.h"
 #include "imgui.h"
@@ -111,7 +112,7 @@ struct Panel {
     int quality_pending{quality::Custom};
     bool quality_details{},quality_can_undo{},quality_ready{true};
     std::unique_ptr<bindings::Editor> binding_editor;
-    bool binding_visible{},binding_shared{};
+    bool binding_shared{};
     int binding_group{};
     bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
@@ -120,6 +121,8 @@ struct Panel {
     LARGE_INTEGER freq{},last{};
 };
 Panel p;
+// Draw publishes visibility to input_filter; keep this atomic outside the resettable Panel.
+std::atomic<bool> binding_visible{false};
 // UILetterboxing, outside Panel (desktop_panel_configure resets that): the race state the game thread saw last
 // (input_filter), for the present overlay; and the context's ClearView interface (D3D11.1), queried once per context.
 struct Letterbox {
@@ -200,14 +203,24 @@ void log_line(const char* line){std::printf(std::strncmp(line,"panel:",6)==0?"%s
 // A failed save's note, shown again at the next drawn frame: the toolkit's own Stop FFB path notes success after the
 // callback returns, which would hide a failure.
 std::string pending_failure,stop_error;
+// F8 may arrive on the input thread. Serialize its Off write with editor Save and ordinary panel writes.
+std::mutex settings_save_mutex;
 // One key into OutRunDesktop.ini (the file Wheelkit reads); never in a test run. False: not saved (the caller puts
 // its control back to the saved value, so the page shows only what the next start will use).
-bool save(const char* section,const char* key,const std::string& value){
+bool binding_save_blocked(){
+    if(!p.binding_editor||!p.binding_editor->opened())return false;
+    pending_failure="Save or cancel binding edits first";
+    dbce::panel::NoteSaved(false,pending_failure.c_str());return true;
+}
+bool save(const char* section,const char* key,const std::string& value,bool stop_output=false){
+    std::lock_guard<std::mutex> lock(settings_save_mutex);
     if(p.latched){pending_failure="a test run saves nothing";dbce::panel::NoteSaved(false,pending_failure.c_str());return false;}
+    if(!stop_output&&binding_save_blocked())return false;
     std::string error;
     const bool ok=write_key(p.ini,section,key,value,error);
     if(ok){
         pending_failure.clear();
+        if(stop_output&&p.binding_editor)p.binding_editor->saved_file_changed();
         if(std::strcmp(section,"Graphics")==0){p.quality_ready=p.quality_settings.load(p.ini);if(p.quality_ready)refresh_quality_values();}
     }else pending_failure="not saved: "+error;
     dbce::panel::NoteSaved(ok,ok?"applies at the next game start":pending_failure.c_str());
@@ -228,7 +241,7 @@ void graphics_slider(const char* label,int* value,int max,const char* key,const 
 }
 double binding_now(){return double(GetTickCount64())/1000.0;}
 bool binding_can_edit(){
-    if(p.latched||p.playback||!p.binding_shared||!p.binding_visible||!dbce::panel::IsOpen()||!shim_input_binding_edit_allowed())return false;
+    if(p.latched||p.playback||!p.binding_shared||!binding_visible.load(std::memory_order_relaxed)||!dbce::panel::IsOpen()||!shim_input_binding_edit_allowed())return false;
     const auto window=static_cast<HWND>(xbox_runtime::native_window().hwnd);DWORD pid=0;
     if(!window||GetForegroundWindow()!=window)return false;
     GetWindowThreadProcessId(window,&pid);return pid==GetCurrentProcessId();
@@ -244,10 +257,10 @@ std::string binding_label(const std::optional<dbce::controls::Binding>& value){
     return label;
 }
 bool draw_binding_editor(){
-    if(!p.binding_editor||!p.binding_editor->opened()){p.binding_visible=false;return false;}
-    p.binding_visible=true;
+    if(!p.binding_editor||!p.binding_editor->opened()){binding_visible.store(false,std::memory_order_relaxed);return false;}
+    binding_visible.store(true,std::memory_order_relaxed);
     auto state=p.binding_editor->view(binding_now(),binding_can_edit());
-    if(!state.opened){p.binding_visible=false;return false;}
+    if(!state.opened){binding_visible.store(false,std::memory_order_relaxed);return false;}
     const auto now=binding_now();const bool can_edit=binding_can_edit();
     state=p.binding_editor->view(now,can_edit);
     dbce::panel::Heading("Edit bindings");
@@ -255,6 +268,11 @@ bool draw_binding_editor(){
     if(state.restart_required){
         dbce::panel::Status("Restart required",state.message.c_str(),dbce::panel::Tone::Error);
         dbce::panel::Text("The backup and draft are kept. Close F6 and restart before editing again.");
+        return true;
+    }
+    if(state.file_changed){
+        dbce::panel::Status("Binding draft needs reopening",state.message.c_str(),dbce::panel::Tone::Warning);
+        if(dbce::panel::Command("Cancel editing"))p.binding_editor->cancel();
         return true;
     }
     if(!can_edit){
@@ -315,6 +333,7 @@ bool draw_binding_editor(){
     state=p.binding_editor->view(now,can_edit);
     if(!state.message.empty())dbce::panel::Text(state.message.c_str());
     if(state.dirty&&dbce::panel::Command("Save bindings")){
+        std::lock_guard<std::mutex> lock(settings_save_mutex);
         const bool saved=p.binding_editor->save(can_edit);const auto result=p.binding_editor->view(now,can_edit);
         dbce::panel::NoteSaved(saved,result.message.c_str());
         if(saved)v.transmission_next=result.transmission=="H-pattern"?1:result.transmission=="Sequential"?0:2;
@@ -324,7 +343,7 @@ bool draw_binding_editor(){
 }
 void binding_setup(){
     dbce::panel::Heading("Bindings");
-    if(p.binding_editor){
+    if(p.binding_shared&&p.binding_editor){
         if(dbce::panel::Command("Edit bindings")&&!p.binding_editor->open()){
             const auto failed=p.binding_editor->view(binding_now(),false);
             dbce::panel::NoteSaved(false,failed.message.c_str());
@@ -335,7 +354,15 @@ void binding_setup(){
     }
     const char* next=v.transmission_next==1?"H-pattern, gears 1-6":v.transmission_next==0?"Sequential":"Saved mode is kept";
     dbce::panel::Status("Shifter at next start",next);
-    dbce::panel::Text("Change the shifter mode in Edit bindings, then Save. Choose Manual separately in the game.");
+    if(!p.binding_shared&&!p.latched&&!p.playback){
+        static const char* const modes[]{"Sequential","H-pattern (gears 1-6)","Keep saved mode"};
+        const int before=v.transmission_next;
+        if(dbce::panel::Choice("Shifter input",modes,before==2?3:2,&v.transmission_next,
+                "Saves the shifter mode for the next start. Choose Manual separately in the game.")){
+            if(v.transmission_next<2)keep(&v.transmission_next,before,[&]{return save("Controls","Transmission",v.transmission_next==1?"H-pattern":"Sequential");});
+        }
+        dbce::panel::Text("Binding capture needs shared input. Apply setup in Wheelkit, then restart.");
+    }else dbce::panel::Text("Change the shifter mode in Edit bindings, then Save. Choose Manual separately in the game.");
     dbce::panel::Status("Shifter in this session",p.transmission_current.c_str());
 }
 void page_controls(bool advanced){
@@ -776,7 +803,9 @@ void player_ffb(bool advanced){
     dbce::panel::Text("Enable and strength changes apply after restart. Stop FFB or F8 stops output now.");
 }
 void quality_apply(bool undo){
+    std::lock_guard<std::mutex> lock(settings_save_mutex);
     if(p.latched){dbce::panel::NoteSaved(false,"a test run saves nothing");return;}
+    if(binding_save_blocked())return;
     const auto previous=quality::snapshot(p.quality_settings);
     const auto next=undo?p.quality_undo:quality::preset(p.quality_pending);
     const auto& expected=undo?p.quality_expected:previous;
@@ -880,7 +909,7 @@ void player_cameras(bool advanced){
 }
 void draw_page(dbce::panel::Page page,bool advanced){
     if(page!=dbce::panel::PAGE_CONTROLS){
-        p.binding_visible=false;if(p.binding_editor)p.binding_editor->hide();
+        binding_visible.store(false,std::memory_order_relaxed);if(p.binding_editor)p.binding_editor->hide();
     }
     if(!pending_failure.empty()){dbce::panel::NoteSaved(false,pending_failure.c_str());pending_failure.clear();}   // after the toolkit's own note
     switch(page){
@@ -900,7 +929,7 @@ void draw_page(dbce::panel::Page page,bool advanced){
 void stop_ffb(){
     ffb_stop_output();
     if(p.latched)return;
-    if(save("FFB","Output","none")){v.output_next=false;stop_error.clear();}
+    if(save("FFB","Output","none",true)){v.output_next=false;stop_error.clear();}
     else stop_error=pending_failure;
 }
 bool triples_on(){const auto& st=triple_screens_status();return st.mode!=TripleScreens::off&&st.aspect>0.f;}
@@ -1019,6 +1048,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
     p=Panel{};
+    binding_visible.store(false,std::memory_order_relaxed);
     p.latched=latched;p.playback=playback;
     p.developer_options=settings.flag("Panel","DeveloperOptions",false);
     p.quality_settings=settings;p.quality_pending=quality::detect(settings);
@@ -1139,6 +1169,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     c.modRepositoryUrl="https://github.com/d-b-c-e/outrun2-decomp";
     c.wheelkitRepositoryUrl="https://github.com/d-b-c-e/dbce-wheelkit";
     c.iniPath=latched?nullptr:p.ini.c_str();   // a test process saves nothing
+    c.canSavePreferences=[]{return !binding_save_blocked();};
     for(const auto page:{dbce::panel::PAGE_CONTROLS,dbce::panel::PAGE_FFB,dbce::panel::PAGE_CAMERAS})c.pages[page]=true;
     c.pages[dbce::panel::PAGE_TELEMETRY]=p.developer_options;
     c.drawPage=draw_page;
@@ -1168,7 +1199,7 @@ namespace {
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(p.inner)p.inner(out,rt);
     if(p.binding_editor&&p.binding_editor->opened()){
-        if(desktop_panel_open()&&p.binding_visible){
+        if(desktop_panel_open()&&binding_visible.load(std::memory_order_relaxed)){
             try{p.binding_editor->observe(shim_input_binding_observations(),binding_now(),binding_can_edit());}
             catch(...){p.binding_editor->hide();}   // capture failure never changes active controls
         }else p.binding_editor->hide();

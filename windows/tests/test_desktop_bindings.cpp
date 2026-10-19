@@ -133,13 +133,38 @@ void capture_and_conflict(const fs::path& root){
     editor.cancel();check(read(path)==changed,"Cancel never overwrites an external edit");
     check(!editor.select_action("clutch"),"unsupported actions are never offered as functional bindings");
 }
+void transmission_and_stop(const fs::path& root){
+    const auto path=root/"stop.ini";auto original=profile();
+    original.replace(original.find("Output = none"),13,"Output = wheel");write(path,original);
+    outrun::desktop::Ini before;check(before.load(path.u8string()),"read original metadata and bindings");
+    b::Editor editor(path.u8string(),true);check(editor.open(),"open mode-only draft without capture");
+    check(editor.transmission("H-pattern",true)&&editor.save(true),"mode-only Save uses the shared draft store without device capture");
+    outrun::desktop::Ini saved;check(saved.load(path.u8string()),"read mode-only Save");
+    check(saved.text("Controls","Transmission")=="H-pattern"&&saved.text("Controls","Revision").find("f6-")==0&&
+          saved.text("Controls","Profile")==before.text("Controls","Profile")&&
+          saved.text("Controls","steer")==before.text("Controls","steer")&&
+          saved.text("Controls","throttle")==before.text("Controls","throttle"),
+          "mode-only editor Save replaces Revision and preserves Profile and exact binding values");
+    check(editor.open()&&editor.invert(true,true),"open another dirty draft before Stop FFB");
+    editor.hide();check(editor.opened()&&editor.view(1,false).dirty,"page hide retains an open dirty draft; other panel saves must stay blocked");
+    std::string error;
+    check(outrun::desktop::write_key(path.u8string(),"FFB","Output","none",error),"Stop FFB persists Off despite an open draft");
+    editor.saved_file_changed();const auto stopped=read(path);
+    auto state=editor.view(1,true);
+    check(state.opened&&state.dirty&&state.file_changed&&!state.listening,"Stop marks the retained draft stale and stops capture");
+    check(!editor.save(true)&&read(path)==stopped&&editor.view(1,true).dirty,"stale binding Save cannot restore Output wheel or discard the draft");
+    editor.cancel();check(!editor.opened()&&read(path)==stopped,"explicit Cancel discards stale edits without changing saved Off");
+    check(editor.open()&&!editor.view(1,true).file_changed&&editor.transmission("Sequential",true)&&editor.save(true),
+          "explicit reopen uses the stopped file for a new draft");
+    check(saved.load(path.u8string())&&saved.text("FFB","Output")=="none","later new-draft Save retains Stop FFB Off");
+}
 }
 int main(){
     fs::path root;
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}

@@ -40,6 +40,9 @@ struct Config {
     // leaves that link out. Issue reporting stays in the mod's own Help action.
     const char *modRepositoryUrl = nullptr;
     const char *wheelkitRepositoryUrl = nullptr;
+    // Optional host guard for Page/View/Scale persistence, e.g. while a whole-file binding draft is open.
+    // False keeps the preference session-only; the callback may explain why. Null preserves existing saves.
+    bool (*canSavePreferences)() = nullptr;
 };
 
 // Called once by the mod before the overlay starts (not from DllMain).

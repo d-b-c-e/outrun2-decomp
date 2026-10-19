@@ -41,6 +41,13 @@ target_compile_definitions(test_desktop_bindings PRIVATE NOMINMAX WIN32_LEAN_AND
 target_compile_options(test_desktop_bindings PRIVATE /W4 /WX)
 add_test(NAME desktop_bindings COMMAND test_desktop_bindings)
 
+# Exact shared production preference persistence, disposable INIs only; no renderer/window/input.
+add_executable(test_panel_preferences vendor/native/panel/test/test_preferences.cpp)
+target_compile_features(test_panel_preferences PRIVATE cxx_std_17)
+target_compile_definitions(test_panel_preferences PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_panel_preferences PRIVATE /W4 /WX)
+add_test(NAME panel_preferences COMMAND test_panel_preferences)
+
 # Synthetic identities/rectangles only: no active monitor query, window, topology change or game.
 add_executable(test_startup_monitor tests/test_startup_monitor.cpp)
 target_include_directories(test_startup_monitor PRIVATE source ${PROJECT_SOURCE_DIR}/xbox/source ${PROJECT_SOURCE_DIR}/src)
