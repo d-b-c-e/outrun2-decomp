@@ -103,10 +103,73 @@ implementation from toolkit e8fca59. The desktop adapter supplies the OutRun
 and Wheelkit repository URLs; Help uses the shared secondary font and text-link
 widget, with no large GitHub buttons. URLs open only on an explicit click. The
 existing Help callback and any issue-report action stay separate; this change
-does not implement the still-pending native issue/report flow.
+did not implement the native issue/report flow, which the October 22 source
+successor below now adds.
 
 This is uncompiled source on an isolated branch based on 8203db2. The frozen
 D374 course/loading runtime05 candidate stays unchanged and does not contain
 these links. Native compilation, offline Help-frame review and later game
 presentation remain pending. No input, force, INI, recording or device behavior
 changes, owner install, browser opening or runtime test occurred here.
+
+## Source follow-up: reviewed diagnostic issue drafts (October 22)
+
+The existing Help callback now offers **Report a problem**, preserving all Help
+content and the small Mod/Wheelkit GitHub links. Enter a title and description;
+optionally select the known `runtime.log` beside the ordinary settings file.
+Nothing is collected by opening Help or the report editor. **Prepare preview**
+reads only that explicitly selected log, using the shared 24,000-byte tail budget.
+No configs, saves, directory scans, other logs or support ZIPs are collected.
+
+The complete immutable title/body preview is scrollable, with best-effort
+redaction wording: private data may remain and the user must read it before
+sharing. Every title, description or selection edit clears the snapshot and
+consent; preparation failure clears both too. Review consent can be revoked.
+Only the explicit reviewed action opens a prefilled issue at
+`d-b-c-e/outrun2-decomp`; nothing submits an issue automatically. Opening sends
+the draft text to GitHub. Metadata truthfully identifies an unversioned desktop
+source build, its adapter compile date/time and F6 Help as the reporting app;
+there is no invented release version or claim about the installed candidate.
+
+Long drafts first offer a new local `.txt` export through the Windows save dialog.
+The shared create-new writer refuses existing files, missing parents, linked or
+device paths and non-text destinations. Cancellation or export failure opens no
+browser. Instructions explain attaching the one exported file, immediate upload
+on attachment, and manual submission in GitHub. Missing logs, invalid inputs,
+picker/export and browser-launch failures give bounded feedback without raw
+report contents; a failed write can leave a partial file and requires a new name.
+Browser retries retain the frozen reviewed report and never reread logs.
+
+`desktop_support_report.cpp/.hpp` adapts the exact toolkit native reporter under
+`windows/vendor/native/support`, with its MIT license and
+[source/hash provenance](../vendor/native/support/PROVENANCE.md). Vendored source
+is token-redaction successor `5090bf9c4ea6931696a00944056f15ad5a1facd8`, including
+plain token, refresh_token and auth_token labels. The toolkit's existing 94-check
+qualification and original hub evidence are retained, not rerun here.
+
+The latched-test/playback adapter refuses preparation, export and browser actions;
+the existing playback panel suppression stays intact. Reporting changes no
+settings, input filter, playback policy, device reader or FFB path. Offline tests
+exercise the same state/preparation implementation with fake picker/browser
+actions and disposable synthetic files only.
+
+At base `8817536f01d42b7ea240354012fef8249c529261` plus this source change,
+the affected **OutRunDesktop ClangCL x64 Release build passes** with the real
+installed Clang 19 builtins and existing read-only audio dependencies. The new
+`desktop_support_report` CTest passes **1/1, 43 checks, zero skipped**, covering
+review invalidation/revocation, failed preparation, opt-in/missing runtime log,
+frozen dispatch, short draft, long fallback, exact full export, cancellation,
+overwrite/extension/missing-parent refusal, safe failure feedback and latched
+side-effect refusal. The final source received an incremental affected rebuild
+and the same fixture run. Unchanged engine sources emit existing compiler
+warnings; no zero-warning whole-build claim is made.
+
+Evidence is in ignored `build-help-diagnostics`: `configure.log`,
+`build-initial.log`, `ctest-initial.log`, final `build.log`, `ctest.log`,
+`native/Testing/Temporary/LastTest.log`, `vendor-hashes.txt` and `result.json`.
+`bootstrap-failures.txt` records the corrected initial shell/environment setup
+failure. Checks used Kobe's bounded exclusive build custody, parallel 4; no game,
+devices, actual browser, network, owner config or install was used. Source delivery
+does not accept rendered Help/preview layout, normal F6 keyboard/mouse interaction,
+save-dialog behavior, browser presentation, issue submission, runtime/gameplay or
+physical acceptance. Those remain separate runtime/owner checks.

@@ -1,6 +1,8 @@
 // The F6 panel (desktop_panel.hpp): the toolkit panel's frame sequence on our own D3D11 device, as the toolkit's
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
 #include "desktop_panel.hpp"
+#include "desktop_support_report.hpp"
+#include <stdexcept>
 #include "enhancements/gamepad_vibration.hpp"
 #include "gamepad_vibration_live.hpp"
 #include "desktop_keyboard.hpp"
@@ -35,6 +37,8 @@
 #include "imgui.h"
 #include "backends/imgui_impl_dx11.h"
 #include <windows.h>
+#include <commdlg.h>
+#include <shellapi.h>
 #include <d3d11.h>
 #include <d3d11_1.h>
 #include <cstdio>
@@ -122,6 +126,54 @@ struct Panel {
     LARGE_INTEGER freq{},last{};
 };
 Panel p;
+std::unique_ptr<support::Draft> help_report;
+char report_title[801]{},report_description[40001]{};
+bool report_log{},report_visible{};
+void draw_report(){
+    if(!dbce::panel::Command("Report a problem")&&!report_visible)return;
+    report_visible=true;
+    dbce::panel::Text("Prepare a GitHub issue draft. Nothing is submitted automatically. Only the optional runtime.log is read, on Prepare; no configs or saves are collected.");
+    if(p.latched||p.playback){dbce::panel::Text("Reporting is disabled in tests and playback.");return;}
+    bool changed=ImGui::InputText("Report title",report_title,sizeof report_title);
+    changed|=ImGui::InputTextMultiline("What happened",report_description,sizeof report_description,ImVec2(-1,100));
+    changed|=ImGui::Checkbox("Include runtime.log (optional, bounded text tail)",&report_log);
+    if(changed)help_report->inputs(report_title,report_description,report_log);
+    dbce::panel::Text("Redaction is best effort: user paths, known token/credential forms and email addresses may be removed. Other private data can remain. Read the complete preview before sharing.");
+    if(dbce::panel::Command("Prepare preview"))help_report->prepare();
+    if(help_report->report()){
+        const auto& report=*help_report->report();
+        const auto preview=report.preview();
+        dbce::panel::Heading("Complete prepared report");
+        ImGui::BeginChild("Reviewed report",ImVec2(0,220),true);
+        ImGui::PushTextWrapPos(0);ImGui::TextUnformatted(preview.c_str());ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+        dbce::panel::Text("Opening a draft sends its prefilled text to GitHub. Long drafts first need a new .txt export; attach it yourself. Attaching uploads immediately. Only you submit the issue in GitHub.");
+        bool reviewed=help_report->reviewed();
+        if(ImGui::Checkbox("I reviewed this complete preview and want to share it",&reviewed))help_report->review(reviewed);
+        if(help_report->submission())dbce::panel::Text(help_report->submission()->instructions.c_str());
+        if(help_report->reviewed()&&dbce::panel::Command(help_report->submission()->needs_attachment?"Export .txt and open reviewed GitHub draft":"Open reviewed GitHub draft")){
+            support::Actions actions;
+            actions.choose_export=[]{
+                wchar_t path[32768]=L"support-report.txt";
+                OPENFILENAMEW dialog{};dialog.lStructSize=sizeof dialog;dialog.hwndOwner=GetActiveWindow();
+                dialog.lpstrFilter=L"Text report (*.txt)\0*.txt\0\0";dialog.lpstrFile=path;dialog.nMaxFile=32768;
+                dialog.lpstrTitle=L"Create a new reviewed report file";dialog.lpstrDefExt=L"txt";
+                dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST;
+                if(GetSaveFileNameW(&dialog))return std::optional<std::filesystem::path>{path};
+                if(CommDlgExtendedError())throw std::runtime_error("Export picker failed");
+                return std::optional<std::filesystem::path>{};
+            };
+            actions.open_browser=[](const std::string& url){
+                // Reporter URLs contain only percent-escaped ASCII and the fixed GitHub destination.
+                const std::wstring wide(url.begin(),url.end());
+                return reinterpret_cast<INT_PTR>(ShellExecuteW(GetActiveWindow(),L"open",wide.c_str(),nullptr,nullptr,SW_SHOWNORMAL))>32;
+            };
+            help_report->open(actions);
+        }
+    }
+    if(!help_report->message().empty())dbce::panel::Text(help_report->message().c_str());
+    if(dbce::panel::Command("Close report"))report_visible=false;
+}
 // Draw publishes visibility to input_filter; keep this atomic outside the resettable Panel.
 std::atomic<bool> binding_visible{false};
 std::mutex prompt_mutex;
@@ -1036,6 +1088,7 @@ void draw_page(dbce::panel::Page page,bool advanced){
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
         dbce::panel::Text("Camera shortcuts: Cameras > Adjustment bindings shows actual assignments; Advanced edits each mounted view and per-press steps.");
         dbce::panel::Text("Edit saved controls in Controls > Edit bindings. Use Wheelkit to add devices and apply shared input setup.");
+        draw_report();
         break;
     default:break;
     }
@@ -1209,6 +1262,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
          p.quality_can_undo=quality::snapshot(settings)==p.quality_expected;}
     const auto slash=p.ini.find_last_of("\\/");
     const std::string folder=latched?run_folder:(slash==std::string::npos?std::string("."):p.ini.substr(0,slash));
+    help_report=std::make_unique<support::Draft>(!latched&&!playback,std::filesystem::u8path(folder)/"runtime.log");
+    report_title[0]=report_description[0]='\0';report_log=report_visible=false;
     if(!folder.empty()&&!playback)p.dev=folder+"\\OutRunDesktop.panel-dev.txt";   // none for a latched run without its folder, nor in playback
     p.name="OutRun 2006 desktop (decomp)";
     // The pages' values as the settings file holds them now (the same readers the game uses at start).

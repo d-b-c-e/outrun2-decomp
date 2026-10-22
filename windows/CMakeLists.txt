@@ -9,12 +9,19 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
-    source/ffb_device.cpp source/camera_adjustment.cpp source/desktop_panel.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/camera_adjustment.cpp source/desktop_panel.cpp source/desktop_support_report.cpp vendor/native/support/support_report.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
     vendor/native/panel vendor/native/third_party/imgui)
-target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 dinput8 dxguid bcrypt ws2_32 crypt32)
+target_link_libraries(OutRunDesktop PRIVATE outrun_xbox_core shell32 comdlg32 dinput8 dxguid bcrypt ws2_32 crypt32)
+
+# Reviewed issue draft adapter, private synthetic files and fake UI actions only.
+add_executable(test_desktop_support_report tests/test_desktop_support_report.cpp source/desktop_support_report.cpp vendor/native/support/support_report.cpp)
+target_include_directories(test_desktop_support_report PRIVATE source)
+target_compile_features(test_desktop_support_report PRIVATE cxx_std_17)
+target_compile_options(test_desktop_support_report PRIVATE /W4 /WX /EHsc)
+add_test(NAME desktop_support_report COMMAND test_desktop_support_report "${CMAKE_BINARY_DIR}/support-report-fixture")
 # A PDB with the public symbols, to name the function of a crash address.
 target_link_options(OutRunDesktop PRIVATE /DEBUG /STACK:16777216)
 
