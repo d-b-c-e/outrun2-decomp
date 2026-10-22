@@ -1,0 +1,299 @@
+{
+  "schema": "dbce.ffb-normalization-reference",
+  "version": 1,
+  "id": "art-of-rally-50-v1",
+  "game": "Art of Rally",
+  "strengthPercent": 50,
+  "modelVersion": "0.4.1",
+  "sourceCommit": "ddabadaccb02f43a93a6492b0fb647555133b33e",
+  "authority": "Owner 2026-10-06; STD-021 refines STD-003",
+  "policy": "Art is fixed; tune other games toward similar event strength and character at Strength 50. Physical acceptance requires the same wheel/base profile and owner comparison.",
+  "defaults": {
+    "Strength": 50.0,
+    "FyReference": 11500.0,
+    "Smoothing": 0.2,
+    "LandingStrength": 5.0,
+    "CrashStrength": 50.0,
+    "ShiftStrength": 5.0,
+    "Invert": false,
+    "ForceFeedbackEnabled": true,
+    "LandingEffectsEnabled": true,
+    "CrashEffectsEnabled": false,
+    "ShiftEffectsEnabled": false
+  },
+  "steering": {
+    "gainAt50": 1,
+    "referenceNewtons": 11500,
+    "smoothing": 0.2,
+    "model": "AxleForceCurve@1",
+    "referenceEvidence": "Two original owner steering captures in the immutable October 6 normalization baseline; different drives are not matching workloads."
+  },
+  "impactControlSemantics": "Landing, crash and shift strengths are independent of steering Strength. Optional crash/shift default off. Synthetic cases explicitly enable a component to define its response, without changing installed settings.",
+  "effects": [
+    {
+      "kind": "Crash",
+      "intensity": 0.25,
+      "effectStrength": 50,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "constant-pulse",
+          "amplitude": 0.125,
+          "hz": 0,
+          "durationMs": 120,
+          "fadeMs": 0
+        },
+        {
+          "family": "sine-rattle",
+          "amplitude": 0.0625,
+          "hz": 25,
+          "durationMs": 250,
+          "fadeMs": 150
+        }
+      ],
+      "logicalDurationMs": 250
+    },
+    {
+      "kind": "Crash",
+      "intensity": 0.5,
+      "effectStrength": 50,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "constant-pulse",
+          "amplitude": 0.25,
+          "hz": 0,
+          "durationMs": 120,
+          "fadeMs": 0
+        },
+        {
+          "family": "sine-rattle",
+          "amplitude": 0.125,
+          "hz": 25,
+          "durationMs": 250,
+          "fadeMs": 150
+        }
+      ],
+      "logicalDurationMs": 250
+    },
+    {
+      "kind": "Crash",
+      "intensity": 1,
+      "effectStrength": 50,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "constant-pulse",
+          "amplitude": 0.5,
+          "hz": 0,
+          "durationMs": 120,
+          "fadeMs": 0
+        },
+        {
+          "family": "sine-rattle",
+          "amplitude": 0.25,
+          "hz": 25,
+          "durationMs": 250,
+          "fadeMs": 150
+        }
+      ],
+      "logicalDurationMs": 250
+    },
+    {
+      "kind": "Crash",
+      "intensity": 2,
+      "effectStrength": 50,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "constant-pulse",
+          "amplitude": 0.5,
+          "hz": 0,
+          "durationMs": 120,
+          "fadeMs": 0
+        },
+        {
+          "family": "sine-rattle",
+          "amplitude": 0.25,
+          "hz": 25,
+          "durationMs": 250,
+          "fadeMs": 150
+        }
+      ],
+      "logicalDurationMs": 250
+    },
+    {
+      "kind": "Landing",
+      "intensity": 0.25,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.0125,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Landing",
+      "intensity": 0.5,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.025,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Landing",
+      "intensity": 1,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.05,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Landing",
+      "intensity": 2,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.05,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Shift",
+      "intensity": 0.25,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.0125,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Shift",
+      "intensity": 0.5,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.025,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Shift",
+      "intensity": 1,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.05,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    },
+    {
+      "kind": "Shift",
+      "intensity": 2,
+      "effectStrength": 5,
+      "enabledForSyntheticTrial": true,
+      "commands": [
+        {
+          "family": "sine-burst",
+          "amplitude": 0.05,
+          "hz": 25,
+          "durationMs": 120,
+          "fadeMs": 0
+        }
+      ],
+      "logicalDurationMs": 120
+    }
+  ],
+  "effectEvidence": {
+    "type": "synthetic-production-requests",
+    "checks": 63,
+    "deviceCalls": 0,
+    "physicalAcceptance": false,
+    "scope": "Production LandingFeedback at synthetic normalized intensity; does not establish equal collision severity across games, native driver waveform, or aggregate torque."
+  },
+  "sources": [
+    {
+      "path": "src/ArtOfSimRally.Mod/LandingFeedback.cs",
+      "sha256": "3e132afd187f2848849bf79907c260d7be1225f5e658ca7e9b14e6dcfe22e3d3"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/ImpactMixer.cs",
+      "sha256": "6db651b815460af4059e5840fdf730a43c76271e874cb18190d78d19b0525127"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/Settings.cs",
+      "sha256": "3bdcd038164311cf92c4f7bf08b791269fc030c3b70b326a912b70a2df06080f"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/ImpactController.cs",
+      "sha256": "2f463a82ade25ebed8eb427bc93ac87732c6bfab7b27c44cff176c1d3940b918"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/CrashSignal.cs",
+      "sha256": "851f3c5af2131b4e1595cb8b3dbd62447cf12379b6e0db6e6ca3745cc483424d"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/LandingSignal.cs",
+      "sha256": "38634cbe3f472f5e709257ba14f99eb163b0aa8c9da7026de9939e4d59b435b9"
+    },
+    {
+      "path": "src/ArtOfSimRally.Mod/ForceCurve.cs",
+      "sha256": "c0b7cdf940404b7798216c2356158e0bc446dc91720fe6d1f0c374dacbd3b396"
+    }
+  ],
+  "comparisonRules": [
+    "Match effect family and comparable maneuver/event severity, with speed and reset history.",
+    "Compare peak/amplitude, duration, frequency, fade, onset and repeat/overlap rules; retain original request and output-gate state.",
+    "Do not multiply clipped/smoothed output or equalize whole-drive RMS.",
+    "Missing components or severity channels are unavailable, not zero; do not invent an effect absent in Art or another game.",
+    "Do not add spring/damper coefficients or periodic amplitude to constant force as if they were measured torque.",
+    "Art runtime source is pinned independently of release publication and installed owner preferences."
+  ]
+}

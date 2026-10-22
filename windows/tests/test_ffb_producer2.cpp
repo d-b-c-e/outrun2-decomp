@@ -5,7 +5,10 @@
 #include "driving/pc_common_control.hpp"
 #include "driving/pc_transmission.hpp"
 #include <cmath>
+#include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -170,9 +173,77 @@ void test_event_expiry_and_retrigger(){
         }
     }
 }
+// Nominal conversion at ffb_live.cpp's selected-request boundary, before product direction/delivery gates.
+std::int32_t nominal_di(float request){
+    check(std::isfinite(request),"nominal conversion requires finite production output");
+    return std::int32_t(std::lround(std::clamp(request,-1.f,1.f)*10000.f));
 }
-int main(){
-    try{test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();test_event_expiry_and_retrigger();}
+void test_normalization(std::ostream* csv){
+    check(nominal_di(-1.2f)==-10000&&nominal_di(1.2f)==10000&&nominal_di(0.f)==0&&
+          nominal_di(.00005f)==1&&nominal_di(-.00005f)==-1,
+          "nominal conversion clamps, preserves sign and rounds half away from zero");
+    if(csv)*csv<<"scenario,steering_percent,shift_percent,time,valid,nominal_di,"<<
+        p2::trace_header().substr(p2::trace_header().find('\n')+1);
+    std::uint32_t scenario=0;
+    double time=0.;
+    // Synthetic holds cover analyzer speed bands, model full speed and its plateau.
+    for(float hz:{60.f,120.f})for(float kmh:{0.f,12.f,40.f,108.f,180.f})
+    for(int steer:{-127,-64,0,64,127})for(bool shift:{false,true}){
+        ++scenario;
+        const float dt=1.f/hz;
+        const int samples=int(hz/2)+1; // final row terminates the last known hold
+        Car cue;put<float>(cue.bytes,0x1f8,kmh);
+        p2::Stream cue_stream;cue_stream.step(cue.frame(1));
+        std::vector<float> cue_force;
+        std::vector<std::uint8_t> work(0x800),parameters(0x2650);
+        put<std::uint32_t>(parameters,0x10a0,6u);
+        if(shift)dr::manual_transmission(cue.view(),{work.data(),work.size()},
+            {parameters.data(),parameters.size()},false,true,false);
+        float balance=0.f;
+        for(int i=0;i<samples;++i){
+            auto f=cue.frame(std::uint64_t(i+2));f.dt_seconds=dt;
+            const auto row=cue_stream.step(f);cue_force.push_back(row.shaped_force);balance+=row.shaped_force;
+        }
+        check(std::fabs(balance)<1e-6f&&cue_force.back()==0.f,"supported shift is balanced and expires at both tick rates");
+        if(shift)check(std::fabs(cue_force.front()-.05f)<1e-6f,"default shift starts at provisional 0.05");
+        for(int steering_gain:{0,50,100})for(int shift_gain:{0,50,100}){
+            Car c;put<float>(c.bytes,0x1f8,kmh);
+            dr::operation_input_49fad0(c.view(),{16,steer,0,0});
+            check(get<std::int16_t>(c.bytes,0x202)==steer*256,"normalization uses production consumed-steer writer");
+            p2::Stream stream({steering_gain,shift_gain});stream.step(c.frame(1,scenario));
+            if(shift)dr::manual_transmission(c.view(),{work.data(),work.size()},
+                {parameters.data(),parameters.size()},false,true,false);
+            const float center=-float(steer)/127.f*.30f*(float(steering_gain)/50.f)*std::min(kmh/108.f,1.f);
+            for(int i=0;i<samples;++i){
+                auto f=c.frame(std::uint64_t(i+2),scenario);f.dt_seconds=dt;
+                const auto row=stream.step(f);
+                check(row.state==p2::State::Computed&&row.request.gear_shift==(shift&&i==0),
+                      "normalization exports computed production rows with one supported shift edge");
+                check(std::fabs(row.shaped_force-(center+cue_force[std::size_t(i)]*float(shift_gain)/50.f))<2e-6f,
+                      "independent 0/50/100 gains scale centering and shift without cross coupling");
+                check(std::fabs(row.shaped_force)<.701f&&row.model_force==row.shaped_force,
+                      "supported full-gain requests retain headroom without saturation or hidden shaping");
+                check(!row.request.has_front_lateral_force&&!row.request.has_lateral_g&&!row.request.has_slip&&
+                      !row.request.has_steer_rate&&!row.request.has_longitudinal_g&&!row.request.has_drift&&
+                      row.request.impact==0.f&&row.request.texture==0.f,"normalization never invents unavailable channels");
+                if(csv)*csv<<scenario<<','<<steering_gain<<','<<shift_gain<<','<<std::setprecision(17)
+                    <<time+double(i)/hz<<",1,"<<nominal_di(row.shaped_force)<<','<<p2::trace_csv(row);
+            }
+        }
+        time+=double(samples)/hz;
+    }
+}
+}
+int main(int argc,char** argv){
+    try{
+        std::ofstream csv;
+        if(argc==3&&std::string(argv[1])=="--normalization-csv"){
+            csv.open(argv[2]);if(!csv)throw std::runtime_error("cannot open normalization CSV");
+        }else if(argc!=1)throw std::runtime_error("usage: test_ffb_producer2 [--normalization-csv OUTPUT]");
+        test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();test_event_expiry_and_retrigger();
+        test_normalization(csv.is_open()?&csv:nullptr);
+        if(csv.is_open()){csv.flush();if(!csv)throw std::runtime_error("normalization CSV write failed");}
+    }
     catch(const std::exception& e){std::cerr<<"producer@2: FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"producer@2 software preview: "<<checks<<" checks passed\n";
 }
