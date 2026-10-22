@@ -106,3 +106,9 @@ This project is developed and maintained in my free time.
 If you enjoy the project and would like to support its development, donations are appreciated but entirely optional:
 
 https://ko-fi.com/r4dius
+
+Optional desktop WAV/FLAC decoding uses the separate -Music prefix.
+-FFmpegOnly -Offline reuses existing zlib/Vorbis and requires cached pinned
+FFmpeg source. See [FLAC music qualification](../windows/docs/FLAC-MUSIC.md)
+for the isolated recipe and focused checks. Bink-only output and default-off
+replacement settings remain unchanged.
