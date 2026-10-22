@@ -2,6 +2,7 @@
 // race SE queue 9563E8 (424940's ring: 32 entries, read 9560C0 / write 956124, gated by event 383).
 #include "platform/native_runtime.hpp"
 #include "platform/race_sound_runtime.hpp"
+#include "platform/race_area_runtime.hpp"
 #include "platform/pc_screen.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -64,6 +65,8 @@ int main(){
     // same callback, so a loop still queued plays after the clear. The real 424790 destroy runs the production 427630.
     reset();c->mode_state.current=16u;native_race_horn(*c,true);
     req(entry(0)==0x9bcu&&c->race.sound.horn_active,"a loop is queued");
+    // Destroy reads no AREA records; an empty current-frame mapping avoids rebuilding unrelated retail EXE data.
+    native_race_area(*c).memory_frame=c->completed_frames+1u;
     {const auto clears=c->race.sound.clear_alls;
      req(native_race_sound_invoke(*c,0x424790u,nullptr)&&c->race.sound.clear_alls==clears+1u,"the production ClearAllSound ran (424790)");}
     req(c->race.sound.horn_active,"after the clear the horn still owes its stop");

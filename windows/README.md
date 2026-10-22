@@ -48,7 +48,9 @@ steer = axis 0 dev={d71b8350-...} prod={0006346e-...} range=0..65535 rest=33265 
 Wheelkit writes it when it applies a rig profile. Devices are matched by their
 instance GUID only. Mapped actions: `steer`, `throttle`, `brake`, `shiftUp`,
 `shiftDown`, `gear1`..`gear6` (with `Transmission = H-pattern`), `confirm`,
-`back`, `start`, `navUp/Down/Left/Right`, `camera`. Others are reported as
+`back`, `start`, `navUp/Down/Left/Right`, `camera`, `horn`. Horn is a separate
+held action, enabled by `[Audio] AllowHorn = true` (the default); it never shifts.
+Others are reported as
 unavailable with the reason (no clutch, handbrake, neutral or reverse in the game;
 `modMenu` and `muteFfb` are not mapped yet: F6 opens the panel, and its Force page sets the output). At start
 `runtime.log` gets the standard line
@@ -59,7 +61,7 @@ Without a `[Controls]` section, the OutRun2006Tweaks `[DirectInput]`,
 folder's `OutRun2006Tweaks.ini`) are imported **once** at the first start with
 their devices connected: a copy of the file is kept as
 `OutRunDesktop.ini.pre-controls-import` and `[ControlsImport]` records it. Tweaks'
-`ButtonX` / `ButtonY` have no contract action and are not imported. `[Wheel]
+`ButtonX` imports as `horn`; `ButtonY` has no contract action and is not imported. `[Wheel]
 SteeringSensitivity` and `SteeringDeadZone` (0..0.9) shape the steering after the
 binding.
 

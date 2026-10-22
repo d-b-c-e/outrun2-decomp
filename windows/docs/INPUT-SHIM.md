@@ -818,11 +818,87 @@ that resolves anywhere else refuses admission.
 - **What remains for the fenced live run.** Writers that need the running game (rankings, ghosts) are proven there by
   the harness's before-and-after snapshot of the game folder (STD-034 item 7).
 
+### Horn source qualification (2026-10-22)
+
+Clean cumulative source candidate: `f5561327b152a17bde68ade3dd2b070f039dd78f`.
+The existing implementation (`fdc8aa7`, reviewed repairs `bc3fbf6` and `07723be`)
+is preserved. Those commits and the AllowHorn roadmap row recorded fixtures as
+unbuilt/pending; no horn-specific passing execution was found in the checked
+repository documentation or retained test logs before this run. The existing
+F6 Horn persistence gate in `docs/ALPHA-CHECKLIST.md` remains pending.
+
+`OutRunDesktop` and the five focused fixture targets built in the existing
+Release `build-ninja` tree with the installed VS 2022 clang-cl toolchain.
+Desktop EXE SHA256: `A6C81D331D88BED1666AC1981CB2637E97ECD6C4A1A8DE29A6AC76D9F8B8C7C5`;
+all six binary hashes are retained in `binaries-sha256.txt` below.
+All evidence is ignored under `work/horn-qualification-20261022/`; binaries stay
+under ignored `build-ninja/`. No game, device, display or installed file was used.
+Fixture TEMP/TMP were redirected into the evidence directory.
+
+| Existing check | Result | Coverage |
+| --- | --- | --- |
+| `race_horn` | PASS, 22 checks after fixture repair | GAME loop, held/released, deduplication, leaving GAME, AllowHorn=false, deferred stop on paused/full queue, ClearAllSound obligation, final replayed input |
+| `outrun_adapter` | PASS, 439 checks | Independent held/released horn without a shift; shift-down does not honk; 20 delivered and 11 unavailable actions |
+| `outrun_capture2` | PASS, 199 checks | `final.horn` round-trip, old rows default released, invalid horn value refused |
+| `desktop_controls` | PASS, 215 checks | Tweaks `ButtonX` imports as horn |
+| `controls_consumer` | PASS, 21 checks | Game-owned consumer declares the exact 20-action delivered set including horn |
+
+The initial five-check run is preserved in `ctest.log`: four passes and
+`race_horn` access violation `0xc0000005`. Diagnostic output retained in
+`race-horn-diagnostic.log` locates it after the first 16 passing assertions,
+when the ClearAllSound case rebuilds AREA and copies unavailable retail EXE
+data through `native_race_requests_map`. The only code repair is fixture setup:
+an empty current-frame AREA mapping, since destroy reads no AREA records.
+The production `native_race_sound_invoke(424790)` and every original assertion
+remain. Only `race_horn` was rebuilt/retested after that repair; the four other
+passing checks were preserved. Final result: `race-horn-repair-ctest.log`.
+
+Build failures are preserved too: `build.log` has the MSBuild FileTracker
+initialization failure; `build-ninja.log` has missing `__udivti3` because the
+Ninja configuration does not discover the VS-instance compiler runtime;
+`build-ninja-retry.log` records a failed quoted-path attempt. The local cache
+then explicitly linked a checkout-local copy of the installed
+`clang_rt.builtins-x86_64.lib` (`CMAKE_EXE_LINKER_FLAGS`); successful desktop and
+fixture links are in `build-ninja-final.log`. No shared build/source repair.
+Existing unrelated failure logs, including `build-test-e69225b.ctest.log`, were
+left intact; no broader regression result is claimed by these five checks.
+
+Reproduction after loading the installed `vcvars64.bat` environment:
+
+```powershell
+cmake --build build-ninja --parallel 4 --target OutRunDesktop test_race_horn test_outrun_adapter test_outrun_capture2 test_desktop_controls outrun_controls_consumer
+ctest --test-dir build-ninja --output-on-failure --verbose -R '^(race_horn|outrun_adapter|outrun_capture2|desktop_controls|controls_consumer)$'
+```
+
+The game's 20-action declaration is **not external Wheelkit acceptance**.
+Wheelkit compatibility/setup for this capability remains unverified and open;
+no Wheelkit or shared toolkit files were inspected or changed to close it.
+Packaging/admission must retain that prerequisite. Runtime and audible horn
+acceptance are unchanged.
+
+The existing next runtime route is
+`windows/tests/shim_first_loop/run.py --horn` (R1 only), with explicit
+`--candidate`, `--game`, `--publisher-tool`, `--finalizer`, `--replay-tool` and
+a fresh `--result`. Run its `--check-only` preflight first in a separately
+authorized coordinated slot. Prerequisites: matching candidate/test-copy EXE
+hashes, original game data and exact runner PROFILE in the dedicated test
+copy, built `control_publish.exe` and matching `capture_replay.exe`, reviewed
+`P21Finalizer.dll`, no leftover injection/render request files or running
+OutRunDesktop, owner-idle gate and shared rig lease. These dependencies were
+not built, installed or runtime-qualified by this source task.
+The runner temporarily binds R12 button 27, enables AllowHorn, and injects a
+1.5-second hold after the steer holds, then releases it. Positive **played**
+counts for both `9BC` loop and `81BC` stop in the exit race-sound status are
+required; queued/refused/missing commands are insufficient. This proves the
+command path, not that a person heard it. The runner holds custody through
+seal, replay, evidence and receipt; an unresolved close retains process/lease
+custody for its supervisor. See the [existing route](../tests/shim_first_loop/README.md).
+
 **Unsupported, with reasons:**
 - clutch, handbrake, neutral and reverse: not in the game;
 - gear7 and gear8;
 - select;
-- lookBack, reset and horn: not mapped yet;
+- lookBack and reset: not mapped yet;
 - modMenu: until the F6 panel;
 - muteFfb: until force feedback.
 
