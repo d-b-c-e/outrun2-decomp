@@ -1,0 +1,2 @@
+# Preserve the reference snapshots' original bytes and SHA-256 across checkouts.
+*.json -text

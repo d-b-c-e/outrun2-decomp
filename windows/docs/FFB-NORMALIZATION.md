@@ -109,6 +109,41 @@ global settings are needed. `build.cmd` and original configure/build diagnostics
 for this attempt are retained under the work directory, including unsuccessful
 VS compiler discovery and missing-local-ZLIB attempts.
 
+## Recorded result, 2026-10-22
+
+**PASS, software scope only.** Tested candidate
+`87c8e3b116e0fd05bad73e606a8642a52d2992c7`, after the separate prompt change
+`bef12a4` landed in this shared checkout. The focused fixture passed **208,503
+checks** in its single export run. The adapter and shared analyzer passed once;
+all 18 series contain 2,300 rows and 25 eligible seconds. The original logs,
+raw requests, hash-bound manifest, provenance and analyzer JSON/Markdown are in
+`work/ffb-normalization/run-01`. Configure/build originals remain in its parent.
+The fixture executable SHA-256 is
+`1adbc5b93a68cb9776f6349f26ab9da08d5bfb425f8774b312c9796bc5179ab1`;
+raw export SHA-256 is
+`8916713a84061533c23d7b886d0916124d13a777b5e3346dc922371647c36043`.
+Observed toolkit HEAD was `ee8014d4ca7f3b38604b0fcc2baef460aabf7021`, with the
+exact model/analyzer/helper bytes pinned above and in the adapter. Initial
+dependency-library compilation had existing deprecated-CRT/unused-function
+warnings; the candidate fixture rebuild passed without additional warnings.
+
+| Steering / shift gains | Steady peak | Combined shift-case peak | Minimum remaining unit headroom |
+|---|---:|---:|---:|
+| 0 / 0 | 0 | 0 | 100% |
+| 50 / 50 | 0.300000012 | 0.350000024 | about 65% |
+| 100 / 100 | 0.600000024 | 0.700000048 | about 30% |
+
+No row or eligible hold reached the unit cap. At 50/50, steady full-steer peaks
+for 0/12/40/108/180 km/h were 0/0.03333334/0.11111112/0.30000001/0.30000001.
+Both steering signs were asserted. With zero steering and no shift, requests
+were zero at every speed and gain; a shift at zero steering isolated the cue,
+including its negative return and expiry. All nine gain pairs passed the
+independence assertion at both tick rates. These figures describe nominal
+software range and this synthetic grid; matched Art workload coverage and
+physical equality remain unavailable. The later result-recording commit changes
+documentation and reference byte-preservation metadata only; the tested C++ and
+adapter are unchanged.
+
 ## Attended check still required
 
 Use the exact installed candidate/toolkit/settings tuple and a controlled,
