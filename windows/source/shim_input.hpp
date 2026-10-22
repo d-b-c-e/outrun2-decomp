@@ -59,6 +59,8 @@ std::string shim_input_status_text();
 // No tick/read/open/enumeration occurs here. Recording, tests, playback and stopped readers are excluded.
 bool shim_input_binding_edit_allowed();
 std::vector<dbce::controls::edit::AcceptedObservation> shim_input_binding_observations();
+// Input thread only: display labels from the exact startup profile and accepted ordinary backend tick.
+std::vector<std::string> shim_input_wheel_prompts();
 // The steering wheel as the ordinary shim backend reads it, for force feedback (INPUT-SHIM.md section 6, one owner):
 // the [Controls] steer binding's device instance and product, from the profile bytes Core parses (no second mapping
 // store), joined to Core's live report of that instance. `opened` only when that report is open and its product (Core

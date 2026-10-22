@@ -20,6 +20,27 @@ cmake --build build-xbox-pc --config Release --target OutRunDesktop
 
 Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe`.
 
+Ordinary play with `[Input] Backend = Shim` shows compact wheel binding hints
+inside the centered game UI: Start / Confirm / Back in menus (including pause),
+Camera / Shift up / Shift down in gameplay with a player car. Only bound actions
+with live accepted backend samples appear; disconnected, stale and invalid
+bindings disappear. Buttons and hats use one-based numbers, with hat directions;
+profiles spanning devices also show the device name and a distinct device number.
+`Binding.name` is the device name, never a custom button caption.
+
+Hints use the startup Controls profile consumed by the backend. F6 drafts and
+saves take effect on the next start; saving does not relabel the running profile.
+Hints hide while F6 is open. Other backends, playback and latched tests retain
+their existing overlay behavior, including recording/playback badges and artwork.
+No extra device reader is used.
+
+Game-free coverage: build `test_wheel_button_prompts` and `test_desktop_bindings`,
+then run `ctest --test-dir <build> -C Release --output-on-failure -R
+'^(wheel_button_prompts|desktop_bindings)$'`. Build the affected `OutRunDesktop`
+target under the existing serialized build custody. Fixtures establish labels,
+availability, context and startup-profile isolation; rendered layout and physical
+device acceptance require separate runtime observation.
+
 ## Install and run
 
 Copy `OutRunDesktop.exe` into the game folder (beside `OR2006C2C.EXE`: Steam, or a

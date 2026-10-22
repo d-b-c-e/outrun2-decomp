@@ -1,6 +1,7 @@
 // The input shim in a latched (test) process (shim_input.hpp).
 #include "shim_input.hpp"
 #include "desktop_bindings.hpp"
+#include "wheel_button_prompts.hpp"
 #include "controls_store.hpp"
 #include "control_journal.hpp"
 #include "desktop_keyboard.hpp"
@@ -73,6 +74,8 @@ struct BridgeOwner final:ffbdev::Owner {
 };
 struct Ordinary {
     std::string profile,transmission,folder;
+    dbce::controls::Section active_profile;
+    GameView game_view;
     bool configured{},started{},stopped{};
     std::unique_ptr<h::ProviderHost<OrdinaryRecorder>> host;
     // Play with Recording: the request (shim_input_arm_recording), then the recorder handle (unarmed without one; the
@@ -371,6 +374,10 @@ void shim_input_filter(platform::NativeInputState& out,const platform::NativeRun
 bool shim_input_binding_edit_allowed(){
     return o.configured&&!o.stopped&&o.host&&o.frame&&!o.record&&!o.rec.armed();
 }
+std::vector<std::string> shim_input_wheel_prompts(){
+    if(!o.configured||o.stopped||!o.host||!o.frame)return {};
+    return prompts::contextual(o.active_profile,*o.frame,o.host->device_reports(),o.game_view.mode,o.game_view.car);
+}
 std::vector<dbce::controls::edit::AcceptedObservation> shim_input_binding_observations(){
     if(!shim_input_binding_edit_allowed())return {};
     try{return bindings::accepted_observations(*o.frame,o.host->device_reports(),double(GetTickCount64())/1000.0);}
@@ -401,6 +408,7 @@ void shim_input_configure_ordinary(const Ini& settings,const std::string& folder
     o.profile="[Controls]\n";
     for(const auto& line:settings.section_lines("Controls"))o.profile+=line+"\n";
     const auto parsed=sh::read_profile(o.profile,ControlsReads);
+    o.active_profile=parsed.ok?parsed.section:dbce::controls::Section{};
     o.transmission=parsed.ok?parsed.section.transmission:"";
     o.steer.reset();
     if(parsed.ok)if(const auto* b=dbce::controls::find(parsed.section,"steer"))o.steer=*b;
@@ -500,6 +508,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     const sh::Frame& frame=o.host?o.host->tick():no_shim;
     o.frame=o.host?&frame:nullptr;
     const auto v=view(runtime);
+    o.game_view=v;
     o.adapter->apply(frame,v,out,&kb);
     if(o.rec.armed()&&o.host){
         ++o.ticks;

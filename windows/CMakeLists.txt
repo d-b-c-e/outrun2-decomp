@@ -5,7 +5,7 @@
 # the Xbox PC configuration (-DOR2_XBOX=ON, clang-cl); see windows/README.md.
 add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_monitor.cpp source/startup_diagnostics.cpp source/desktop_settings.cpp source/wheel_input.cpp
     source/controls_store.cpp source/test_injection.cpp source/test_fence.cpp source/render_test.cpp source/render_test_capture.cpp shim/parse.cpp
-    source/shim_input.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
+    source/shim_input.cpp source/wheel_button_prompts.cpp source/outrun_adapter.cpp shim/core.cpp shim/dinput_provider.cpp shim/wheelffb_bridge.cpp
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
@@ -41,6 +41,13 @@ target_compile_features(test_desktop_bindings PRIVATE cxx_std_17)
 target_compile_definitions(test_desktop_bindings PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_options(test_desktop_bindings PRIVATE /W4 /WX)
 add_test(NAME desktop_bindings COMMAND test_desktop_bindings)
+
+# Pure contextual labels over startup profiles and accepted synthetic ticks; no game or devices.
+add_executable(test_wheel_button_prompts tests/test_wheel_button_prompts.cpp source/wheel_button_prompts.cpp shim/parse.cpp)
+target_include_directories(test_wheel_button_prompts PRIVATE source shim vendor/controls)
+target_compile_features(test_wheel_button_prompts PRIVATE cxx_std_17)
+target_compile_options(test_wheel_button_prompts PRIVATE /W4 /WX)
+add_test(NAME wheel_button_prompts COMMAND test_wheel_button_prompts)
 
 # Exact shared production preference persistence, disposable INIs only; no renderer/window/input.
 add_executable(test_panel_preferences vendor/native/panel/test/test_preferences.cpp)

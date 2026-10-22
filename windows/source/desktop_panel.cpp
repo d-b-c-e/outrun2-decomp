@@ -123,6 +123,9 @@ struct Panel {
 Panel p;
 // Draw publishes visibility to input_filter; keep this atomic outside the resettable Panel.
 std::atomic<bool> binding_visible{false};
+std::mutex prompt_mutex;
+std::vector<std::string> wheel_prompts;
+ULONGLONG prompt_tick{};
 // UILetterboxing, outside Panel (desktop_panel_configure resets that): the race state the game thread saw last
 // (input_filter), for the present overlay; and the context's ClearView interface (D3D11.1), queried once per context.
 struct Letterbox {
@@ -959,6 +962,24 @@ void draw_badge(const std::string& text,int w,int h){
     if(recording)list->AddCircleFilled(ImVec2(at.x+dot*0.4f,at.y+size.y*0.5f),dot*0.35f,tone);
     list->AddText(ImVec2(at.x+dot,at.y),tone,text.c_str());
 }
+void draw_wheel_prompts(const std::vector<std::string>& lines,int w,int h){
+    const auto ui=xbox_runtime::ui_scaling_rect(xbox_runtime::g_ui_scaling_mode,xbox_runtime::g_widescreen,
+        platform::g_pc_wide_aspect,double(w)/double(h));
+    const float wide=std::min(float(w),float(h)*float(ui.on?ui.aspect:4./3.));
+    const float pad=8.f*dbce::panel::Scale(),left=(float(w)-wide)*0.5f+pad;
+    const float available=std::max(1.f,wide-4.f*pad);
+    auto* list=ImGui::GetForegroundDrawList();
+    float height=0.f;
+    for(const auto& line:lines)height+=ImGui::CalcTextSize(line.c_str(),nullptr,false,available).y+pad*0.5f;
+    float y=float(h)-height-3.f*pad;
+    list->PushClipRect(ImVec2(left-pad,0),ImVec2(left+wide-2.f*pad,float(h)),true);
+    list->AddRectFilled(ImVec2(left-pad,y-pad),ImVec2(left+available+pad,y+height+pad*0.5f),IM_COL32(0,0,0,185),4.f*dbce::panel::Scale());
+    for(const auto& line:lines){
+        list->AddText(ImGui::GetFont(),ImGui::GetFontSize(),ImVec2(left,y),IM_COL32(255,255,255,255),line.c_str(),nullptr,available);
+        y+=ImGui::CalcTextSize(line.c_str(),nullptr,false,available).y+pad*0.5f;
+    }
+    list->PopClipRect();
+}
 // UILetterboxing (pc_screen.hpp): black outside the centred 4:3, on the back buffer before the badge and the panel.
 // ClearView takes no pipeline state, so the renderer's bindings are untouched. Without ID3D11DeviceContext1 no bars
 // are drawn, and the log says so once.
@@ -1000,10 +1021,15 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     }
     // UILetterboxing's bars first, every frame, so the badge and the panel are drawn over them.
     if(context&&view&&width&&height)letterbox(static_cast<ID3D11DeviceContext*>(context),static_cast<ID3D11RenderTargetView*>(view),width,height);
-    // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
+    // Copy display-only labels; an input thread stall expires the last accepted hint snapshot.
     const bool open=!p.playback&&dbce::panel::IsOpen();
     const auto badge=shim_input_recording_badge();
-    if((!open&&badge.empty())||!device||!context||!view||!width||!height)return;
+    std::vector<std::string> hints;
+    if(!open&&!p.latched&&!p.playback&&p.binding_shared){
+        std::lock_guard<std::mutex> lock(prompt_mutex);
+        if(GetTickCount64()-prompt_tick<=100)hints=wheel_prompts;
+    }
+    if((!open&&badge.empty()&&hints.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
         release_backend();
@@ -1032,6 +1058,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     dbce::panel::DrainInput(w,h);   // closed: nothing queued; it keeps the panel's open / close transitions
     ImGui::NewFrame();
     if(open)dbce::panel::Draw(w,h);
+    if(!hints.empty())draw_wheel_prompts(hints,w,h);
     if(!badge.empty())draw_badge(badge,w,h);
     ImGui::Render();
     // On the back buffer, then the renderer's targets back (the DX11 backend restores the rest of its state itself).
@@ -1208,6 +1235,11 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     // UILetterboxing: the race state for the present overlay (78026C, and START's stage 8367A8).
     if(rt)lb.in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
     const bool open=desktop_panel_open();
+    if(!p.latched&&!p.playback&&p.binding_shared){
+        auto hints=(!open&&rt)?shim_input_wheel_prompts():std::vector<std::string>{};
+        std::lock_guard<std::mutex> lock(prompt_mutex);
+        wheel_prompts=std::move(hints);prompt_tick=GetTickCount64();
+    }
     if(open!=p.was_open){desktop_keys_clear();p.was_open=open;}
     if(open)desktop_panel_neutral_input(out);
 }

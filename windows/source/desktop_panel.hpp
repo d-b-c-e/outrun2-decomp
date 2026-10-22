@@ -2,7 +2,7 @@
 // The F6 panel (docs/F6-PANEL.md; STD-030 / 004 / 017 / 023): the wheel toolkit's native panel (vendor/native/panel,
 // Dear ImGui) drawn by this build's own renderer through xbox_runtime::present_overlay, not the toolkit's Present hook.
 // Step 1: the frame and the Help page (version, UI scale, frame rate). F6 toggles, Esc closes; closed, every other key
-// reaches the game untouched and the per-frame cost is the frame-rate note and the dev-channel poll.
+// reaches the game untouched. Ordinary shared-Shim play also draws contextual live binding hints while closed.
 //   - Ordinary process: the panel keeps [Panel] View / Scale / Page in OutRunDesktop.ini (the file Wheelkit reads).
 //   - Latched (test) process: nothing is saved (no ini path); the panel opens only through the dev channel.
 //   - Dev channel (unattended checks, no OS input): a file "OutRunDesktop.panel-dev.txt" beside the settings (a latched
