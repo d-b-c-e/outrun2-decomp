@@ -34,7 +34,8 @@ target_compile_options(test_fast_load_config PRIVATE /W4 /WX)
 add_test(NAME fast_load_config COMMAND test_fast_load_config)
 
 # Shared binding drafts, accepted fake Core samples and disposable-file Save/Cancel; no reader or device.
-add_executable(test_desktop_bindings tests/test_desktop_bindings.cpp source/desktop_bindings.cpp source/controls_store.cpp source/desktop_settings.cpp)
+add_executable(test_desktop_bindings tests/test_desktop_bindings.cpp source/desktop_bindings.cpp source/controls_store.cpp source/desktop_settings.cpp
+    source/outrun_adapter.cpp shim/parse.cpp)
 target_include_directories(test_desktop_bindings PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)
 target_compile_features(test_desktop_bindings PRIVATE cxx_std_17)
 target_compile_definitions(test_desktop_bindings PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)

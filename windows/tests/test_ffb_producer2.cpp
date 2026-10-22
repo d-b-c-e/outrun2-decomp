@@ -124,9 +124,55 @@ void test_epoch_menu_respawn_and_trace(){
     check(csv.find("new-epoch-or-car")!=std::string::npos&&csv.find(",0,0,0,0,0,0,0,0,")!=std::string::npos,
           "trace records reset reason and unavailable channels");
 }
+void test_event_expiry_and_retrigger(){
+    // Tweaks 51acc20: a retained crash/shift countdown must not feed a fresh event every tick.
+    for(const float dt:{1.f/60.f,1.f/120.f}){
+        auto settings=p2::preview_model_settings();
+        settings.impact_strength=0.4f; // synthetic impact: producer@2 has no measured crash channel
+        dbce::force::Model model(settings);
+        std::vector<float> first;
+        for(int pass=0;pass<2;++pass){
+            float sum=0.f;
+            for(int tick=0;tick<40;++tick){
+                dbce::force::Inputs input;input.gear_shift=tick==0;
+                const float force=model.compute(input,dt);sum+=force;
+                if(pass==0)first.push_back(force);
+                else check(force==first[std::size_t(tick)],"a later shift reproduces the expired double pulse");
+                if(tick==0)check(force>0.f&&model.last_was_event,"shift starts with a positive model pulse");
+                if(tick>=20)check(force==0.f&&!model.last_was_event,"shift expires without a repeated input event");
+            }
+            check(std::fabs(sum)<1e-6f,"shift pulse balances to zero after expiry");
+        }
+        first.clear();
+        for(int pass=0;pass<2;++pass){
+            for(int tick=0;tick<40;++tick){
+                dbce::force::Inputs input;input.impact=tick==0?0.75f:0.f;input.impact_direction=-1.f;
+                const float force=model.compute(input,dt);
+                if(pass==0)first.push_back(force);
+                else check(force==first[std::size_t(tick)],"a later impact reproduces the expired envelope");
+                if(tick==0)check(std::fabs(force+0.3f)<1e-6f&&model.last_was_event,"impact preserves normalized magnitude and direction");
+                if(tick>=20)check(force==0.f&&!model.last_was_event,"impact expires without a repeated input event");
+            }
+        }
+    }
+    // The production seam must send an edge, then let the shared model finish and re-arm.
+    Car car;p2::Stream stream;std::uint64_t tick=1;stream.step(car.frame(tick++));
+    std::vector<float> first;
+    for(std::uint32_t gear:{3u,4u}){
+        put<std::uint32_t>(car.bytes,0x208,gear);
+        for(int sample=0;sample<20;++sample){
+            const auto row=stream.step(car.frame(tick++));
+            check(row.state==p2::State::Computed&&row.request.gear_shift==(sample==0)&&row.request.impact==0.f,
+                  "producer emits one shift edge and never invents a crash event");
+            if(gear==3u)first.push_back(row.shaped_force);
+            else check(row.shaped_force==first[std::size_t(sample)],"second real gear transition has the same force envelope");
+            if(sample>=10)check(row.shaped_force==0.f&&!row.model_event,"steady gear returns to quiet output");
+        }
+    }
+}
 }
 int main(){
-    try{test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();}
+    try{test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();test_event_expiry_and_retrigger();}
     catch(const std::exception& e){std::cerr<<"producer@2: FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"producer@2 software preview: "<<checks<<" checks passed\n";
 }

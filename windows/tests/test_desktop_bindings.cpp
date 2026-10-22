@@ -2,6 +2,8 @@
 // No provider, reader, enumeration, input injection, game, window or physical force.
 #include "desktop_bindings.hpp"
 #include "desktop_settings.hpp"
+#include "controls_store.hpp"
+#include "outrun_adapter.hpp"
 #include <windows.h>
 #include <filesystem>
 #include <fstream>
@@ -158,13 +160,52 @@ void transmission_and_stop(const fs::path& root){
           "explicit reopen uses the stopped file for a new draft");
     check(saved.load(path.u8string())&&saved.text("FFB","Output")=="none","later new-draft Save retains Stop FFB Off");
 }
+void transmission_roundtrip(const fs::path& root){
+    const auto path=root/"transmission.ini";auto original=profile();
+    std::string bindings;
+    for(int gear=1;gear<=6;++gear)bindings+="gear"+std::to_string(gear)+" = button "+std::to_string(gear+1)+" dev="+Wheel+" prod="+Product+"\r\n";
+    bindings+="shiftUp = button 8 dev="+Wheel+" prod="+Product+"\r\nshiftDown = button 9 dev="+Wheel+" prod="+Product+"\r\n";
+    original.insert(original.find("[FFB]"),bindings);write(path,original);
+    for(const char* mode:{"H-pattern","Sequential"}){
+        b::Editor editor(path.u8string(),true);
+        check(editor.open()&&editor.transmission(mode,true)&&editor.save(true),"explicit mode saves through a fresh shared binding draft");
+        outrun::desktop::Ini saved;check(saved.load(path.u8string()),"fresh reader loads saved shifter mode");
+        const auto native=ctl::parseSection(saved.section_lines("Controls"),outrun::desktop::ControlsReads);
+        const auto shared=sh::read_profile(read(path),outrun::desktop::ControlsReads);
+        check(native.error.empty()&&shared.ok&&shared.section.error.empty()&&native.transmission==mode&&shared.section.transmission==mode,
+              "Native and shared input read the same explicitly saved transmission");
+        check(read(path).find(bindings)!=std::string::npos&&saved.text("Input","Backend")=="Shim"&&
+              saved.text("FFB","Model")=="outrun-producer@2"&&saved.text("FFB","Output")=="none"&&
+              saved.text("Controls","steer").find("cal=1000..32767..64000")!=std::string::npos,
+              "mode switches preserve exact native gate/sequential bindings, calibration, backend and force setup");
+        for(int gear=1;gear<=6;++gear){
+            const auto action="gear"+std::to_string(gear);
+            const auto* n=ctl::find(native,action);const auto* s=ctl::find(shared.section,action);
+            check(n&&s&&n->kind==ctl::Kind::Button&&n->index==gear+1&&ctl::format(*n)==ctl::format(*s),
+                  "all six native gate bindings survive shared mode persistence");
+        }
+        outrun::desktop::Adapter adapter(shared.section.transmission);
+        outrun::desktop::GameView game;game.mode=16;game.car=true;game.gear=3;
+        sh::Frame frame;frame.seq=1;frame.boundary_us=16000;
+        auto& gate=frame.action[std::size_t(sh::action_index("gear6"))];gate.value=1.f;gate.status=sh::Status::Live;
+        outrun::platform::NativeInputState out;adapter.apply(frame,game,out); // scene change releases first
+        out={};++frame.seq;frame.boundary_us+=16000;adapter.apply(frame,game,out);
+        const bool hpattern=shared.section.transmission=="H-pattern";
+        check(out.shift_up==hpattern&&((out.pc_device.buttons_04&0x2u)!=0)==hpattern&&!out.shift_down,
+              "saved H-pattern enables gate pulses and saved Sequential leaves gates inert");
+        out={};++frame.seq;frame.boundary_us+=16000;gate.value=0.f;
+        frame.action[std::size_t(sh::action_index("shiftDown"))].value=1.f;
+        frame.down=std::uint64_t{1}<<sh::action_index("shiftDown");adapter.apply(frame,game,out);
+        check(out.shift_down&&(out.pc_device.buttons_04&0x8u)!=0,"explicit sequential binding remains usable after either mode save");
+    }
+}
 }
 int main(){
     fs::path root;
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);transmission_roundtrip(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}
