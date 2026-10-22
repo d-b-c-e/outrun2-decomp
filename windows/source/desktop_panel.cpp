@@ -899,7 +899,7 @@ void player_quality(bool advanced){
 HHOOK camera_capture_hook{};
 LRESULT CALLBACK camera_capture_message(int code,WPARAM wp,LPARAM lp){
     if(code==HC_ACTION&&wp==PM_REMOVE){
-        const auto* msg=reinterpret_cast<const MSG*>(lp);
+        auto* msg=reinterpret_cast<MSG*>(lp);
         if(msg&&(msg->message==WM_KEYDOWN||msg->message==WM_SYSKEYDOWN)&&!(msg->lParam&(1LL<<30))){
             std::lock_guard<std::recursive_mutex> lock(camera::mutex());
             auto& m=camera::model();
@@ -911,6 +911,8 @@ LRESULT CALLBACK camera_capture_message(int code,WPARAM wp,LPARAM lp){
                         (GetAsyncKeyState(VK_MENU)&0x8000)||(GetAsyncKeyState(VK_LWIN)&0x8000)||(GetAsyncKeyState(VK_RWIN)&0x8000);
                     m.capture({scan},true,chord,binding_now());
                 }
+                // A captured or rejected key must not also activate a panel control; keep panel/Stop FFB keys live.
+                if(msg->wParam!=VK_F6&&msg->wParam!=VK_F8)msg->message=WM_NULL;
             }
         }
     }
