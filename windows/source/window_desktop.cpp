@@ -46,6 +46,7 @@
 #include "test_fence.hpp"
 #include <sstream>
 #include "desktop_keyboard.hpp"
+#include "camera_adjustment.hpp"
 #include "platform/pc_input_devices.hpp"
 #include <windows.h>
 #include <shellapi.h>
@@ -710,11 +711,45 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::render_test_start_capture(render_test,plan.run_root);
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
     outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
+    {
+        using namespace outrun::desktop;
+        std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+        camera::model().load(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
+        desktop_presentation_key()=[](unsigned scan){
+            std::lock_guard<std::recursive_mutex> guard(camera::mutex());
+            const auto& m=camera::model();if(!m.enabled)return false;
+            return std::find(m.effective.bindings.begin(),m.effective.bindings.end(),scan)!=m.effective.bindings.end();
+        };
+        outrun::driving::mounted_camera_context().sample=[](outrun::driving::Bytes c){
+            std::lock_guard<std::recursive_mutex> guard(camera::mutex());
+            auto& m=camera::model();camera::KeyStates down{};bool physical=false;
+            for(const auto& key:camera::keys()){
+                down[key.scan]=desktop_key(key.scan);
+                const auto vk=MapVirtualKeyW(key.scan,MAPVK_VSC_TO_VK_EX);
+                if(vk&&(GetAsyncKeyState(int(vk))&0x8000))physical=true;
+                unsigned numpad=0;
+                switch(key.scan){case 0x48:numpad=VK_NUMPAD8;break;case 0x50:numpad=VK_NUMPAD2;break;
+                case 0x49:numpad=VK_NUMPAD9;break;case 0x51:numpad=VK_NUMPAD3;break;case 0x4b:numpad=VK_NUMPAD4;break;
+                case 0x4d:numpad=VK_NUMPAD6;break;case 0x47:numpad=VK_NUMPAD7;break;case 0x4f:numpad=VK_NUMPAD1;break;
+                case 0x4c:numpad=VK_NUMPAD5;break;}
+                if(numpad&&(GetAsyncKeyState(int(numpad))&0x8000))physical=true;
+            }
+            const bool focused=GetForegroundWindow()==static_cast<HWND>(outrun::xbox_runtime::native_window().hwnd);
+            return m.tick(int(c.u8(0x34a)),outrun::driving::mounted_camera_context().armed&&outrun::driving::mounted_camera_eligible(c),down,physical,
+                double(GetTickCount64())/1000.,desktop_key_clears(),desktop_panel_open()||!focused||
+                    (GetAsyncKeyState(VK_CONTROL)&0x8000)||(GetAsyncKeyState(VK_SHIFT)&0x8000)||
+                    (GetAsyncKeyState(VK_MENU)&0x8000)||(GetAsyncKeyState(VK_LWIN)&0x8000)||(GetAsyncKeyState(VK_RWIN)&0x8000));
+        };
+    }
     outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     struct PadOutputCleanup {~PadOutputCleanup(){outrun::desktop::gamepad_vibration_shutdown();}} pad_output_cleanup;
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::gamepad_vibration_shutdown();
+    {std::lock_guard<std::recursive_mutex> lock(outrun::desktop::camera::mutex());
+     outrun::desktop::camera::model().flush(double(GetTickCount64())/1000.,true);}
+    outrun::driving::mounted_camera_context().sample={};
+    outrun::desktop::desktop_presentation_key()=nullptr;
     outrun::desktop::desktop_panel_shutdown();
     outrun::desktop::ffb_shadow_shutdown();
     outrun::desktop::telemetry_shutdown();

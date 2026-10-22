@@ -55,6 +55,13 @@ and the saves in it.
   the next start. This does not change display placement or game input.
 - Gamepads work as on the Xbox (A / Menu confirm, LB+RB+Menu exits).
 
+## Camera adjustments
+
+F6 > Cameras also adjusts the existing bumper and in-car views, with independent
+saved poses/FOV, numpad shortcuts and keyboard rebinding. See
+[Camera adjustment](docs/CAMERA-ADJUSTMENT.md) for mappings, bounds, supported
+native states, save recovery, offline evidence and unverified runtime gates.
+
 ## Wheel settings
 
 `OutRunDesktop.ini` beside the executable, written with comments on the first

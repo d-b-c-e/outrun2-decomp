@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
+    source/ffb_device.cpp source/camera_adjustment.cpp source/desktop_panel.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
@@ -466,6 +466,15 @@ target_compile_options(test_wheelffb_bridge PRIVATE /W4)
 target_compile_definitions(test_wheelffb_bridge PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_wheelffb_bridge PRIVATE dinput8 dxguid)
 add_test(NAME wheelffb_bridge COMMAND test_wheelffb_bridge)
+
+# Mounted camera policy and persistence, disposable files only; native projection is tested separately.
+add_executable(test_camera_adjustment tests/test_camera_adjustment.cpp source/camera_adjustment.cpp source/desktop_settings.cpp)
+target_link_libraries(test_camera_adjustment PRIVATE outrun_driving)
+target_include_directories(test_camera_adjustment PRIVATE source)
+target_compile_features(test_camera_adjustment PRIVATE cxx_std_17)
+target_compile_options(test_camera_adjustment PRIVATE /W4 /WX)
+target_compile_definitions(test_camera_adjustment PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+add_test(NAME camera_adjustment COMMAND test_camera_adjustment ${CMAKE_BINARY_DIR}/camera-fixture)
 
 # Actual DPAPI adapter through the shared profile consumers; synthetic private files only.
 add_executable(test_login_protection_dpapi tests/test_login_protection_dpapi.cpp source/login_protection.cpp source/desktop_settings.cpp)

@@ -7,6 +7,7 @@
 #include "desktop_settings.hpp"
 #include "desktop_quality.hpp"
 #include "desktop_bindings.hpp"
+#include "camera_adjustment.hpp"
 #include "hud_toggle.hpp"
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
@@ -207,7 +208,7 @@ void log_line(const char* line){std::printf(std::strncmp(line,"panel:",6)==0?"%s
 // callback returns, which would hide a failure.
 std::string pending_failure,stop_error;
 // F8 may arrive on the input thread. Serialize its Off write with editor Save and ordinary panel writes.
-std::mutex settings_save_mutex;
+std::recursive_mutex& settings_save_mutex=camera::mutex();
 // One key into OutRunDesktop.ini (the file Wheelkit reads); never in a test run. False: not saved (the caller puts
 // its control back to the saved value, so the page shows only what the next start will use).
 bool binding_save_blocked(){
@@ -216,7 +217,7 @@ bool binding_save_blocked(){
     dbce::panel::NoteSaved(false,pending_failure.c_str());return true;
 }
 bool save(const char* section,const char* key,const std::string& value,bool stop_output=false){
-    std::lock_guard<std::mutex> lock(settings_save_mutex);
+    std::lock_guard<std::recursive_mutex> lock(settings_save_mutex);
     if(p.latched){pending_failure="a test run saves nothing";dbce::panel::NoteSaved(false,pending_failure.c_str());return false;}
     if(!stop_output&&binding_save_blocked())return false;
     std::string error;
@@ -336,7 +337,7 @@ bool draw_binding_editor(){
     state=p.binding_editor->view(now,can_edit);
     if(!state.message.empty())dbce::panel::Text(state.message.c_str());
     if(state.dirty&&dbce::panel::Command("Save bindings")){
-        std::lock_guard<std::mutex> lock(settings_save_mutex);
+        std::lock_guard<std::recursive_mutex> lock(settings_save_mutex);
         const bool saved=p.binding_editor->save(can_edit);const auto result=p.binding_editor->view(now,can_edit);
         dbce::panel::NoteSaved(saved,result.message.c_str());
         if(saved)v.transmission_next=result.transmission=="H-pattern"?1:result.transmission=="Sequential"?0:2;
@@ -440,8 +441,25 @@ void page_controls(bool advanced){
             "Shows or hides the race HUD when this key is released. Applies at the next game start. "
             "Off clears the key. Letters and digits depend on the keyboard layout. F6, F8 and F11 are reserved. "
             "The key still reaches the game; toggling is disabled during recording, playback and tests.")){
-            if(selected>=0&&selected<int(keys.size())&&save("Misc","HudToggleKey",keys[std::size_t(selected)]))
+            bool conflict=false;
+            if(selected>=0&&selected<int(keys.size())){
+                std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+                const auto key=parse_hud_toggle_key(keys[std::size_t(selected)],nullptr);
+                const auto& m=camera::model();
+                for(const auto scan:key.keys){
+                    for(const auto binding:m.effective.bindings)conflict|=scan==binding;
+                    if(m.proposal)for(const auto binding:m.proposal->bindings)conflict|=scan==binding;
+                }
+                if(conflict)dbce::panel::NoteSaved(false,"Key is assigned to a camera adjustment; clear that binding first");
+            }
+            if(!conflict&&selected>=0&&selected<int(keys.size())&&save("Misc","HudToggleKey",keys[std::size_t(selected)])){
                 v.hud_key=keys[std::size_t(selected)];
+                std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+                const auto key=parse_hud_toggle_key(v.hud_key,nullptr);
+                // Keep the running HUD key protected as well as the next-start assignment.
+                auto& reserved=camera::model().reserved;
+                reserved.insert(reserved.end(),key.keys.begin(),key.keys.end());
+            }
         }
         if(v.hud_key!=v.hud_key_start)dbce::panel::Text("The HUD key choice applies at the next game start.");
     }
@@ -806,7 +824,7 @@ void player_ffb(bool advanced){
     dbce::panel::Text("Enable and strength changes apply after restart. Stop FFB or F8 stops output now.");
 }
 void quality_apply(bool undo){
-    std::lock_guard<std::mutex> lock(settings_save_mutex);
+    std::lock_guard<std::recursive_mutex> lock(settings_save_mutex);
     if(p.latched){dbce::panel::NoteSaved(false,"a test run saves nothing");return;}
     if(binding_save_blocked())return;
     const auto previous=quality::snapshot(p.quality_settings);
@@ -878,6 +896,97 @@ void player_quality(bool advanced){
             keep(&v.reflection,before,[&]{return save("Graphics","ReflectionResolution",std::to_string(pixels[v.reflection]));});
     }
 }
+HHOOK camera_capture_hook{};
+LRESULT CALLBACK camera_capture_message(int code,WPARAM wp,LPARAM lp){
+    if(code==HC_ACTION&&wp==PM_REMOVE){
+        const auto* msg=reinterpret_cast<const MSG*>(lp);
+        if(msg&&(msg->message==WM_KEYDOWN||msg->message==WM_SYSKEYDOWN)&&!(msg->lParam&(1LL<<30))){
+            std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+            auto& m=camera::model();
+            if(msg->hwnd==static_cast<HWND>(xbox_runtime::native_window().hwnd)&&m.capturing()){
+                if(msg->wParam==VK_ESCAPE)m.cancel_capture();
+                else{
+                    const unsigned scan=((unsigned(msg->lParam)>>16)&0xffu)|((unsigned(msg->lParam)>>24)&1u?0x80u:0u);
+                    const bool chord=(GetAsyncKeyState(VK_CONTROL)&0x8000)||(GetAsyncKeyState(VK_SHIFT)&0x8000)||
+                        (GetAsyncKeyState(VK_MENU)&0x8000)||(GetAsyncKeyState(VK_LWIN)&0x8000)||(GetAsyncKeyState(VK_RWIN)&0x8000);
+                    m.capture({scan},true,chord,binding_now());
+                }
+            }
+        }
+    }
+    return CallNextHookEx(camera_capture_hook,code,wp,lp);
+}
+void camera_capture_poll(){
+    std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+    auto& m=camera::model();
+    const auto window=static_cast<HWND>(xbox_runtime::native_window().hwnd);
+    if(!desktop_panel_open()||GetForegroundWindow()!=window)m.cancel_capture();
+    if(m.capturing()){
+        if(!camera_capture_hook){
+            camera_capture_hook=SetWindowsHookExW(WH_GETMESSAGE,camera_capture_message,nullptr,GetWindowThreadProcessId(window,nullptr));
+            if(!camera_capture_hook)m.cancel_capture("Binding capture unavailable; previous assignment retained");
+        }
+        bool down=false;for(int vk=VK_BACK;vk<256;++vk)down=down||(GetAsyncKeyState(vk)&0x8000)!=0;
+        m.capture({},down,false,binding_now());
+    }
+    if(!m.capturing()&&camera_capture_hook){UnhookWindowsHookEx(camera_capture_hook);camera_capture_hook=nullptr;}
+}
+void camera_controls(bool advanced){
+    std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+    auto& m=camera::model();
+    dbce::panel::Heading("Mounted race views");
+    dbce::panel::Text("Bumper and in-car only. Change view keeps the game's cycle. Each view keeps its own saved adjustments.");
+    if(!m.enabled){dbce::panel::Text("Adjustments are disabled in tests, recording and playback.");return;}
+    if(binding_save_blocked()){dbce::panel::Text("Save or cancel Controls binding edits before camera changes.");return;}
+    if(m.active_view>=0)dbce::panel::Text(camera::values(m.active_view,m.effective.views[unsigned(m.active_view)]).c_str());
+    else dbce::panel::Text("Switch to a stable bumper or in-car race view to use shortcuts.");
+    static bool show_bindings=false;
+    dbce::panel::OffOn("Adjustment bindings",&show_bindings);
+    if(show_bindings){
+        dbce::panel::Text("Keyboard only. Physical wheel/gamepad buttons and chords are unsupported. F6/F8/F11, game keys and the HUD key are protected.");
+        dbce::panel::Text("Without a numpad, bind F1-F5, F7, F9, F10, F12 or punctuation keys such as brackets, comma and period.");
+        for(unsigned a=0;a<camera::Count;++a)dbce::panel::Status(camera::action_name(a),camera::key_name(m.effective.bindings[a]));
+        static int action=0;
+        const char* actions[camera::Count];for(unsigned a=0;a<camera::Count;++a)actions[a]=camera::action_name(a);
+        dbce::panel::Choice("Adjustment action",actions,int(camera::Count),&action);
+        if(m.capturing()){
+            if(dbce::panel::Command("Cancel binding"))m.cancel_capture();
+        }else if(!m.proposal){
+            if(dbce::panel::Command("Bind adjustment key"))m.begin_capture(unsigned(action),binding_now());
+            if(dbce::panel::Command("Clear adjustment key")){auto c=m.effective;c.bindings[unsigned(action)]=0;m.propose(c);}
+            if(dbce::panel::Command("Restore numpad defaults")){auto c=m.effective;c.bindings=camera::Config{}.bindings;m.propose(c);}
+        }
+    }else m.cancel_capture();
+    if(advanced&&!m.proposal){
+        static int view=0;static const char* views[]{"Bumper","In-car"};
+        dbce::panel::Choice("Adjust saved view",views,2,&view);
+        auto pose=m.effective.views[unsigned(view)];
+        int right=int(std::lround(pose.right*1000)),up=int(std::lround(pose.up*1000)),forward=int(std::lround(pose.forward*1000));
+        int tilt=int(std::lround(pose.tilt*10)),fov=int(std::lround(pose.fov*10));bool changed=false;
+        changed|=dbce::panel::Slider("Right / left",&right,-2000,2000,0,"%d mm");
+        changed|=dbce::panel::Slider("Up / down",&up,-2000,2000,0,"%d mm");
+        changed|=dbce::panel::Slider("Forward / back",&forward,-2000,2000,0,"%d mm");
+        changed|=dbce::panel::Slider("Look up / down",&tilt,-300,300,0,"%d tenths deg");
+        changed|=dbce::panel::Slider("FOV offset",&fov,-600,600,0,"%d tenths deg");
+        if(changed)m.edit_pose(unsigned(view),{right/1000.f,up/1000.f,forward/1000.f,tilt/10.f,fov/10.f},binding_now());
+        if(dbce::panel::Command("Reset selected view"))m.edit_pose(unsigned(view),{},binding_now());
+        auto c=m.effective;
+        int move=int(std::lround(c.move_step*1000)),ts=int(std::lround(c.tilt_step*10)),fs=int(std::lround(c.fov_step*10));
+        bool steps=false;
+        steps|=dbce::panel::Slider("Move per press",&move,1,200,20,"%d mm");
+        steps|=dbce::panel::Slider("Tilt per press",&ts,1,100,10,"%d tenths deg");
+        steps|=dbce::panel::Slider("FOV per press",&fs,1,100,20,"%d tenths deg");
+        if(steps){c.move_step=move/1000.f;c.tilt_step=ts/10.f;c.fov_step=fs/10.f;m.propose(c);}
+        if(dbce::panel::Command("Restore step defaults")){c.move_step=.02f;c.tilt_step=1;c.fov_step=2;m.propose(c);}
+        dbce::panel::Text("View reset changes only the selected pose/FOV. Step defaults change only per-press steps. Numpad defaults change only camera bindings.");
+    }
+    if(m.proposal){
+        dbce::panel::Text("A save proposal is retained. Effective bindings have not changed.");
+        if(dbce::panel::Command("Retry camera save"))m.retry();
+        if(dbce::panel::Command("Cancel camera save"))m.cancel_proposal();
+    }
+    if(!m.message.empty())dbce::panel::Text(m.message.c_str());
+}
 void player_cameras(bool advanced){
     dbce::panel::Heading("Display");
     {std::vector<const char*> labels;
@@ -911,6 +1020,7 @@ void player_cameras(bool advanced){
     dbce::panel::Text("Changes apply after restarting the game.");
 }
 void draw_page(dbce::panel::Page page,bool advanced){
+    if(page!=dbce::panel::PAGE_CAMERAS){std::lock_guard<std::recursive_mutex> lock(camera::mutex());camera::model().cancel_capture();}
     if(page!=dbce::panel::PAGE_CONTROLS){
         binding_visible.store(false,std::memory_order_relaxed);if(p.binding_editor)p.binding_editor->hide();
     }
@@ -918,10 +1028,11 @@ void draw_page(dbce::panel::Page page,bool advanced){
     switch(page){
     case dbce::panel::PAGE_CONTROLS:if(p.developer_options)page_controls(advanced);else player_controls(advanced);break;
     case dbce::panel::PAGE_FFB:player_ffb(advanced);break;
-    case dbce::panel::PAGE_CAMERAS:if(p.developer_options)page_cameras(advanced);else player_cameras(advanced);break;
+    case dbce::panel::PAGE_CAMERAS:camera_controls(advanced);if(p.developer_options)page_cameras(advanced);else player_cameras(advanced);break;
     case dbce::panel::PAGE_TELEMETRY:page_telemetry(advanced);break;
     case dbce::panel::PAGE_HELP:
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
+        dbce::panel::Text("Camera shortcuts: Cameras > Adjustment bindings shows actual assignments; Advanced edits each mounted view and per-press steps.");
         dbce::panel::Text("Edit saved controls in Controls > Edit bindings. Use Wheelkit to add devices and apply shared input setup.");
         break;
     default:break;
@@ -1023,12 +1134,18 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     if(context&&view&&width&&height)letterbox(static_cast<ID3D11DeviceContext*>(context),static_cast<ID3D11RenderTargetView*>(view),width,height);
     // Copy display-only labels; an input thread stall expires the last accepted hint snapshot.
     const bool open=!p.playback&&dbce::panel::IsOpen();
+    {std::lock_guard<std::recursive_mutex> lock(camera::mutex());
+     auto& m=camera::model();if(!open)m.cancel_capture();
+     if(!binding_save_blocked())m.flush(binding_now());}
     const auto badge=shim_input_recording_badge();
     std::vector<std::string> hints;
     if(!open&&!p.latched&&!p.playback&&p.binding_shared){
         std::lock_guard<std::mutex> lock(prompt_mutex);
         if(GetTickCount64()-prompt_tick<=100)hints=wheel_prompts;
     }
+    {std::lock_guard<std::recursive_mutex> lock(camera::mutex());const auto& m=camera::model();
+     if(!open&&m.active_view>=0&&binding_now()<m.feedback_until)hints.push_back(camera::values(m.active_view,m.effective.views[unsigned(m.active_view)]));}
+    camera_capture_poll();
     if((!open&&badge.empty()&&hints.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
@@ -1058,6 +1175,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     dbce::panel::DrainInput(w,h);   // closed: nothing queued; it keeps the panel's open / close transitions
     ImGui::NewFrame();
     if(open)dbce::panel::Draw(w,h);
+    camera_capture_poll();
     if(!hints.empty())draw_wheel_prompts(hints,w,h);
     if(!badge.empty())draw_badge(badge,w,h);
     ImGui::Render();
@@ -1255,6 +1373,8 @@ void desktop_panel_wrap_input_filter(){
 void desktop_panel_shutdown(){
     if(!p.configured)return;
     xbox_runtime::present_overlay()=nullptr;
+    {std::lock_guard<std::recursive_mutex> lock(camera::mutex());camera::model().cancel_capture();}
+    if(camera_capture_hook){UnhookWindowsHookEx(camera_capture_hook);camera_capture_hook=nullptr;}
     release_backend();
     if(lb.context1){lb.context1->Release();lb.context1=nullptr;}
     lb.context_for=nullptr;

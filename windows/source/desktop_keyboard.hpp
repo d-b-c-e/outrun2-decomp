@@ -6,7 +6,14 @@
 namespace outrun::desktop {
 inline std::array<std::uint8_t,256>& desktop_keys(){static std::array<std::uint8_t,256> keys{};return keys;}
 inline bool desktop_key(unsigned dik){return (desktop_keys()[dik&0xffu]&0x80u)!=0;}
-inline bool desktop_any_key(){for(auto k:desktop_keys())if(k&0x80u)return true;return false;}
+// Presentation shortcuts must not hand steering custody from a wheel to the keyboard.
+inline bool (*&desktop_presentation_key())(unsigned){static bool (*test)(unsigned)=nullptr;return test;}
+inline bool desktop_any_key(){
+    for(unsigned i=0;i<desktop_keys().size();++i){
+        if((desktop_keys()[i]&0x80u)&&(!desktop_presentation_key()||!desktop_presentation_key()(i)))return true;
+    }
+    return false;
+}
 // How many times every key was released at once (desktop_keys_clear). A reader that compares it can tell such a clear
 // from a key's own release (hud_toggle.hpp).
 inline std::uint32_t& desktop_key_clears(){static std::uint32_t clears{};return clears;}

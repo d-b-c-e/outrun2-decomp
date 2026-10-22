@@ -299,6 +299,17 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
             const auto depth=matrices_.depth;const auto offset=matrices_.current_offset;
+            struct MountedArm {
+                MountedArm(bool allow){driving::mounted_camera_context().armed=allow;}
+                ~MountedArm(){driving::mounted_camera_context().armed=false;}
+            } mounted_arm(mode_78026c==16u&&!pause_780248&&(blend.owner_flags_79fb4e&3u)!=2u&&
+                camera.u32(0x94)==0&&camera.u32(0x98)==0&&camera.u32(0x9c)==0);
+            if((!driving::mounted_camera_context().armed||!control.race||control.race->timer_8367bc>180u)&&driving::mounted_camera_context().sample){
+                const bool armed=driving::mounted_camera_context().armed;
+                driving::mounted_camera_context().armed=false;
+                driving::mounted_camera_context().sample(camera);
+                driving::mounted_camera_context().armed=armed;
+            }
             try{answered=driving::camera_control_485fe0(camera,matrices_,d,screen_,blend,control);}
             catch(const std::exception& e){
                 // The next frame's callbacks share this stack: drop the nesting the failed control

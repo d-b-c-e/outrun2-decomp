@@ -1,6 +1,7 @@
 #pragma once
 #include "driving/pc_matrix_stack.hpp"
 #include <array>
+#include <functional>
 #include <vector>
 namespace outrun::driving {
 // Event181/function0D camera (object at 79F574). Offsets are PC fields:
@@ -57,6 +58,16 @@ CameraZnearContext& camera_znear_context();
 // the game's own FOV returns at the next projection outside that window.
 struct CameraFovContext { float fov_y{}; };
 CameraFovContext& camera_fov_context();
+// Desktop opt-in only. Zero values leave the native camera byte-for-byte unchanged.
+struct MountedCameraPose { float right{},up{},forward{},tilt{},fov{}; }; // metres, degrees (positive tilt looks up)
+struct MountedCameraContext {
+    bool armed{};
+    std::function<MountedCameraPose(Bytes)> sample;
+    float fov_delta{};
+};
+MountedCameraContext& mounted_camera_context();
+bool mounted_camera_eligible(Bytes camera);
+void mounted_camera_pose(Bytes camera,const MountedCameraPose&);
 // Tweaks' rule: 1.0 in the chase or bumper view (+34A 2 or 0) with no camera switch running (+364 == 0) in GAME (0x10)
 // or GOAL (0x13); 0.1 during a switch or outside GAME; otherwise (the in-car view in GAME) 0.25, or 0.2 for the
 // 360SP (car model 7, which still shows a gap at 0.25).

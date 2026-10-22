@@ -356,6 +356,11 @@ void race_camera_race_4858d0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,const Pc
             }
         }
     }
+    auto& mounted=mounted_camera_context();
+    const auto pose=mounted.armed&&mounted.sample?mounted.sample(c):MountedCameraPose{};
+    if(mounted.armed&&mounted_camera_eligible(c))mounted_camera_pose(c,pose);
+    struct FovRestore { float old; ~FovRestore(){mounted_camera_context().fov_delta=old;} } restore{mounted.fov_delta};
+    mounted.fov_delta=mounted.armed&&mounted_camera_eligible(c)?pose.fov:0.f;
     race_camera_angles_484df0(c);
     camera_project_484bd0(c,s,d,screen,blend);
 }

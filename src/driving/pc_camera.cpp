@@ -4,6 +4,7 @@
 #include "driving/pc_d3dx.hpp"
 #include "driving/pc_x87.hpp"
 #include <cmath>
+#include <algorithm>
 #include <stdexcept>
 namespace outrun::driving {
 namespace {
@@ -93,6 +94,28 @@ void camera_view_482f20(Bytes c,PcMatrixStack& s,PcCameraDevice& d,float f){
     pc_matrix_pop(s);
     copy_words(c,0x384,0x128,3);copy_words(c,0x390,0xf8,3);copy_words(c,0x39c,0x104,3);
 }
+MountedCameraContext& mounted_camera_context(){static MountedCameraContext c;return c;}
+bool mounted_camera_eligible(Bytes c){
+    return c.size()>=0x3b4u&&c.u8(0x34a)<2u&&c.i16(0x33c)==0&&c.i16(0x340)==0&&
+        c.i16(0x344)==0&&c.f32(0x364)==0.f&&c.u32(0x94)==0&&c.u32(0x98)==0&&c.u32(0x9c)==0;
+}
+void mounted_camera_pose(Bytes c,const MountedCameraPose& p){
+    if(!std::isfinite(p.right)||!std::isfinite(p.up)||!std::isfinite(p.forward)||!std::isfinite(p.tilt)||
+       std::abs(p.right)>2.f||std::abs(p.up)>2.f||std::abs(p.forward)>2.f||std::abs(p.tilt)>30.f)return;
+    if(p.right==0.f&&p.up==0.f&&p.forward==0.f&&p.tilt==0.f)return;
+    const float dx=c.f32(0x104)-c.f32(0xf8),dy=c.f32(0x108)-c.f32(0xfc),dz=c.f32(0x10c)-c.f32(0x100);
+    const float h=std::hypot(dx,dz),length=std::hypot(h,dy);
+    if(!(h>0.0001f)||!std::isfinite(length))return;
+    const float fx=dx/h,fz=dz/h;
+    const float x=-fz*p.right+fx*p.forward,z=fx*p.right+fz*p.forward;
+    for(unsigned o:{0xf8u,0x104u}){c.putf(o,c.f32(o)+x);c.putf(o+4,c.f32(o+4)+p.up);c.putf(o+8,c.f32(o+8)+z);}
+    if(p.tilt!=0.f){
+        const float a=std::atan2(dy,h)+p.tilt*0.01745329252f;
+        c.putf(0x104,c.f32(0xf8)+fx*length*std::cos(a));
+        c.putf(0x108,c.f32(0xfc)+length*std::sin(a));
+        c.putf(0x10c,c.f32(0x100)+fz*length*std::cos(a));
+    }
+}
 CameraZnearContext& camera_znear_context(){static CameraZnearContext z;return z;}
 CameraFovContext& camera_fov_context(){static CameraFovContext f;return f;}
 float camera_fix_znear(Bytes c,std::uint32_t mode,std::int32_t car_model){
@@ -111,6 +134,11 @@ void camera_project_484bd0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,
     if(const float fov=camera_fov_context().fov_y;fov>0.f){
         c.putf(0xa0,fov);
         c.putf(0xa4,float(2.0*std::atan(std::tan(double(fov)*0.5)*double(screen.width_740c8c)/double(screen.height_740c90))));
+    }
+    if(const float delta=mounted_camera_context().fov_delta;delta!=0.f&&std::isfinite(delta)){
+        const float f=std::max(0.34906585f,std::min(2.44346095f,c.f32(0xa0)+delta*0.01745329252f));
+        c.putf(0xa0,f);
+        c.putf(0xa4,float(2.0*std::atan(std::tan(double(f)*0.5)*double(screen.width_740c8c)/double(screen.height_740c90))));
     }
     camera_perspective_404310(s,c.f32(0xa0),c.f32(0xb8),c.f32(0xbc),c.f32(0xc0),c.f32(0xc4),c.f32(0xc8),d);
     camera_device_store(s,d,1);
