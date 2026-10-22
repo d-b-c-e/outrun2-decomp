@@ -1,0 +1,77 @@
+{
+  "schema": "outrun-force-path-check@1",
+  "date": "2026-10-22",
+  "sourceRevision": "6481af9ee3cbee7a2d6983836d1a2d212b5d0680",
+  "branch": "fleet/eight-hour-outrun-20261022",
+  "scope": "Read-only source trace. No game launch, device, input, display or owner-settings action; no implementation edits; no tests rerun.",
+  "report": "Owner drove exe 00491F11 on 2026-10-18: force present but weak and pushing outward. Installed since: 4D5BE954 (candidate 54eca08), not yet run.",
+  "verdict": "No unconditional software sign or gain defect is demonstrable at 6481af9. The outward push is explained by, and fixed in, 02808e8 (installed in 54eca08, unrun). Weakness is the provisional profile by design, not a bug. One conditional sign gap exists (steering inversion) and is recorded, not fixed. The remaining step is the attended physical check.",
+  "singleSharedBackend": "Preserved. One path: game car record -> outrun-producer@2 (vendor force_model.h Model + Shaper) -> ffb_live.cpp deliver() -> ffbdev::Delivery -> WheelFfb SetDeviceForcesXY. The legacy model stays a trace-only reference with wheel output refused; nothing here proposes a legacy mode.",
+  "chain": [
+    {
+      "stage": "game steer input",
+      "where": "windows/source/ffb_producer2.cpp Stream::step; windows/docs/FFB-PRODUCER2.md Sample contract",
+      "fact": "steer_202 = consumed signed steer << 8 at car +0x202, range -32512..32512. request.steer = steer_202/32512 in [-1,1]. The sign is the sign of the steering device DirectInput X axis (right positive), per FFB-PRODUCER2.md and the 02808e8 message.",
+      "proof": "source reading; test_ffb_producer2 and test_ffb_wiring fixtures assert right steer gives steer>0. Not re-run."
+    },
+    {
+      "stage": "model sign",
+      "where": "windows/vendor/native/forcemodel/force_model.h Model::compute",
+      "fact": "f_spring = -steer * spring_strength * speed_norm. A positive output pushes toward positive steer, so a right turn yields a negative (centring) value. The model sign is correct in its own convention.",
+      "proof": "arithmetic from source."
+    },
+    {
+      "stage": "model scale (the weak-force cause)",
+      "where": "windows/source/ffb_producer2.cpp model_settings and preview_shaper_settings",
+      "fact": "spring_strength = 0.30 * steeringPercent/50 (default 50% gives 0.30); speed_norm = min(speed_mps/30, 1). Only the spring term and the 0.05-strength shift pulse are populated; damper, lateral load, texture and impact are off. Shaper: strength 50 gives gain 1.0; deadzone, deadband, smoothing, fade and ramp are 0; peak_limit 1.0.",
+      "calc": {
+        "fullLockAtOrAbove108kmh_percent50": "0.30 => 3000 of 10000 (30%)",
+        "fullLockAtOrAbove108kmh_percent100": "0.60 => 6000 of 10000 (60%); SteeringStrengthPercent accepts 0..100",
+        "steer20pct_at100kmh_percent50": "0.30*0.2*0.926 = 0.0556 => about 556 of 10000 (5.6%), matches FFB-PRODUCER2.md",
+        "steer50pct_at72kmh_percent50": "0.30*0.504*0.667 = 0.101 => about 1008 of 10000"
+      },
+      "finding": "Peak centring is 30% of the command range at default and typical corners are 5-10%. That is weak by construction. It is a documented provisional-profile choice, not an arithmetic defect. No change is evidenced."
+    },
+    {
+      "stage": "shaper and output clamp",
+      "where": "force_model.h Shaper::shape; ffb_live.cpp producer2 sink",
+      "fact": "The shaper clamps to +-peak_limit (1.0). The sink computes intent = lround(clamp(shaped,-1,1)*10000). Unity gain, no invert. The producer2 path does not apply the legacy FFBGlobalStrength scale (compute() and strength_scale() are legacy-only); strength is the model-side steering percent only.",
+      "finding": "The clamp is symmetric and does not truncate sign or scale. No defect."
+    },
+    {
+      "stage": "device direction (the outward-push cause)",
+      "where": "ffb_live.cpp deliver(): frame(s, intent*wheel_direction(product)); ffb_device.cpp wheel_direction",
+      "fact": "The direction table has one entry: MOZA R12 Base {0006346e-0000-0000-0000-504944564944} = -1, meaning a positive SetDeviceForcesXY x turns the R12 left. Right steer -> model negative -> x positive -> pushes left -> centres. Unlisted, empty or malformed products return 0 and are refused before any device call. The mapping is applied exactly once.",
+      "evidence": "Measured on this rig twice, both before this task: art-of-sim-rally 2026-09-02 (through this library's encoding, +Fy centres) and cruisn-collection 2026-08 (a positive SDL level turns the R12 left). Cited from commit 02808e8 and FFB-PRODUCER2.md; not re-measured here.",
+      "finding": "Before 02808e8 the model value reached x unchanged, which is anti-centring on the R12 (outward push, feeling weak because the spring is small). 54eca08 contains the fix. The 2026-10-18 drive was on the pre-fix exe, so the report is consistent with the already-fixed defect, and the current source shows no remaining unconditional inversion."
+    },
+    {
+      "stage": "device effect conversion",
+      "where": "ffb_device.cpp Delivery::frame",
+      "fact": "The command is clamped to +-10000 and sent via SetDeviceForcesXY(c, 0), with keep-alive repeats and zero gating on foreground, race, F6 and pause. The y axis is always 0.",
+      "unknown": "WheelFfb.dll and the R12 base apply their own constant-effect gain, outside this repo and unmeasured here (FFB-PRODUCER2.md says 'before the base's own gain')."
+    }
+  ],
+  "conditionalGap": {
+    "id": "steer-inversion-not-in-force-direction",
+    "severity": "latent; only if the owner's steer binding is inverted",
+    "description": "wheel_direction is a fixed per-product constant that assumes steer_202 has the DirectInput X sign. A shared-controls steer binding with the 'inverted' token (windows/vendor/controls/dbce_controls.hpp lines ~290 and ~310; editor desktop_bindings.cpp Editor::invert) or the legacy [DirectInput] SteeringInvert flips the sign of steer_202 relative to the physical wheel. A grep finds no use of binding.inverted or SteeringInvert in ffb_*.cpp or the delivery path, so the force would then be anti-centring again.",
+    "evidence": "grep over windows/source/ffb_*.cpp found no invert handling. Arithmetic: s=-x, command=s*k=-x*k; with R12 positive x turning left, a wheel turned right is pushed further right.",
+    "ownerBindingInverted": "Unknown. The owner's controls file is outside this repository and was not read.",
+    "smallestFixIfEvidenced": "Multiply the delivery sign by -1 when the active steer binding (shim: Core's parsed steer binding; native: steer_invert) is inverted. Not applied: the owner's binding is not shown to be inverted and this task allows no source edits. Make the change only if the attended check shows anti-centring on the new exe, or if the binding is read and found inverted."
+  },
+  "sourceFixRequiredNow": false,
+  "physicalUnknowns": [
+    "Whether the installed 4D5BE954 centres at the wheel (the decisive check): in a race at speed, turn and release; the wheel should return toward centre.",
+    "Whether the owner's steer binding carries 'inverted' (see conditionalGap).",
+    "Whether a 30% peak at default strength feels adequate on the R12, or needs a higher SteeringStrengthPercent (up to 100 => 60% peak), once direction is confirmed.",
+    "The base's own constant-force gain in WheelFfb and the MOZA driver settings.",
+    "Whether the 2026-09-02 and 2026-08 R12 direction measurements still hold with current firmware and driver settings (not re-measured)."
+  ],
+  "notRun": [
+    "Game, device, desktop, input, display or owner-settings actions.",
+    "Focused FFB tests were not re-run. Commit 02808e8 records test_ffb_delivery (3250 checks), test_ffb_wiring (125) and test_ffb_outrun (70) passing, and test_wheelffb_bridge failing at line 165 on unchanged main in a standalone compile (predates it; needs the CMake slot).",
+    "No recorded trace or fixture data from the owner's 2026-10-18 drive was found in the tree to replay."
+  ],
+  "recommendedNextStep": "Attended R12 check of 4D5BE954 at the next owner session: record direction first, then strength. This is an engineering finding and not a blocker for other work."
+}
