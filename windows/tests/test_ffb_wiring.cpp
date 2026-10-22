@@ -176,7 +176,7 @@ int main(){
         state.race_inits=1;state.producer_active=true;
         auto& car=state.car_799d18;
         const auto put=[&](std::size_t at,const auto& v){std::memcpy(car.data()+at,&v,sizeof v);};
-        const auto right=std::int16_t(std::lround(effective*32512.0));
+        const auto right=std::int16_t(inverted?-16384:16384);
         put(0x202,right);put(0x1f8,72.0f);put(0x208,std::uint32_t(2));
         const auto forces=[]{std::vector<long> v;const auto c=env(L"FAKE_WHEELFFB_CALLS");const std::wstring k=L"SetDeviceForcesXY ";
             for(std::size_t at=c.find(k);at!=std::wstring::npos;at=c.find(k,at+1))v.push_back(std::wcstol(c.c_str()+at+k.size(),nullptr,10));return v;};
