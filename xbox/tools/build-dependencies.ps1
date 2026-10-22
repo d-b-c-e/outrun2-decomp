@@ -4,13 +4,18 @@
 # no GPL or non-free parts).
 #
 #   powershell -File xbox/tools/build-dependencies.ps1 [-Out <folder>]
+# -Music adds bounded WAV/FLAC decoding in ffmpeg-audio, preserving ffmpeg/.
+# -FFmpegOnly reuses existing zlib/Vorbis; -Offline requires cached pinned archives.
 #
 # Needs Visual Studio 2026 (C++ desktop, C++ Clang tools), CMake and an MSYS2
 # bash with make (FFmpeg's configure). Prints the CMake options for xbox/README.md.
 param(
     [string]$Out = (Join-Path (Get-Location) "xbox-deps"),
     [string]$Bash = $(if (Test-Path "C:\msys64\usr\bin\bash.exe") { "C:\msys64\usr\bin\bash.exe" } else { "C:\devkitPro\msys2\usr\bin\bash.exe" }),
-    [string]$VsDir = "C:\Program Files\Microsoft Visual Studio\18\Community"
+    [string]$VsDir = "C:\Program Files\Microsoft Visual Studio\18\Community",
+    [switch]$Music,
+    [switch]$FFmpegOnly,
+    [switch]$Offline
 )
 $ErrorActionPreference = "Stop"
 $sources = @(
@@ -22,7 +27,11 @@ $sources = @(
 New-Item -ItemType Directory -Force $Out | Out-Null
 Set-Location $Out
 foreach ($s in $sources) {
-    if (-not (Test-Path $s.name)) { Invoke-WebRequest -Uri $s.url -OutFile $s.name }
+    if ($FFmpegOnly -and $s.name -ne "ffmpeg-7.1.1.tar.xz") { continue }
+    if (-not (Test-Path $s.name)) {
+        if ($Offline) { throw "Missing cached archive: $($s.name)" }
+        Invoke-WebRequest -Uri $s.url -OutFile $s.name
+    }
     if ((Get-FileHash $s.name -Algorithm SHA256).Hash.ToLower() -ne $s.sha) { throw "$($s.name): SHA-256 mismatch" }
     tar -xf $s.name
     if ($LASTEXITCODE -ne 0) { throw "cannot extract $($s.name)" }
@@ -37,6 +46,8 @@ function CMakeLib([string]$src, [string]$build, [string]$prefix, [string[]]$extr
     if ($LASTEXITCODE -ne 0) { throw "build $src" }
 }
 $zlib = Join-Path $Out "zlib"; $vorbis = Join-Path $Out "vorbis"; $ffmpeg = Join-Path $Out "ffmpeg"
+if ($Music) { $ffmpeg = Join-Path $Out "ffmpeg-audio" }
+if (-not $FFmpegOnly) {
 # zlib: only the static library (the DLL's resource file does not build with clang-cl).
 & $cmake -S "zlib-1.3.1" -B "zlib-build" -G "Visual Studio 18 2026" -A x64 -T ClangCL
 if ($LASTEXITCODE -ne 0) { throw "configure zlib" }
@@ -47,14 +58,16 @@ Copy-Item "zlib-1.3.1\zlib.h", "zlib-build\zconf.h" "$zlib\include"
 Copy-Item "zlib-build\Release\zlibstatic.lib" "$zlib\lib"
 CMakeLib "libogg-1.3.5" "ogg-build" $vorbis @("-DBUILD_SHARED_LIBS=OFF", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
 CMakeLib "libvorbis-1.3.7" "vorbis-build" $vorbis @("-DBUILD_SHARED_LIBS=OFF", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DOGG_INCLUDE_DIR=$vorbis/include", "-DOGG_LIBRARY=$vorbis/lib/ogg.lib")
+}
 
 # FFmpeg: configure needs a POSIX shell; clang-cl and the MSVC environment come from vcvars64.
 $prefix = $ffmpeg -replace '\\', '/'
+$audio = if ($Music) { "--enable-demuxer=flac,wav --enable-parser=flac --enable-decoder=flac,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le " } else { "" }
 $configure = "./configure --toolchain=msvc --cc=clang-cl --cxx=clang-cl --ld=lld-link --prefix=`"$prefix`" " +
     "--disable-everything --disable-programs --disable-doc --disable-network --disable-x86asm " +
     "--disable-avdevice --disable-avfilter --disable-postproc --disable-debug --enable-static --disable-shared " +
     "--enable-demuxer=bink --enable-decoder=bink,binkaudio_rdft,binkaudio_dct --enable-protocol=file " +
-    "--enable-swscale --enable-swresample --extra-cflags=-MD --disable-dxva2 --disable-d3d11va --disable-d3d12va " +
+    $audio + "--enable-swscale --enable-swresample --extra-cflags=-MD --disable-dxva2 --disable-d3d11va --disable-d3d12va " +
     "--disable-hwaccels --disable-mediafoundation && make -j8 && make install"
 $cmd = Join-Path $Out "ffmpeg-build.cmd"
 @(
@@ -68,4 +81,8 @@ $cmd = Join-Path $Out "ffmpeg-build.cmd"
 if ($LASTEXITCODE -ne 0) { throw "FFmpeg build failed" }
 
 "CMake options for both Xbox configurations (xbox/README.md):"
-"  -DZLIB_INCLUDE_DIR=$zlib/include -DZLIB_LIBRARY=$zlib/lib/zlibstatic.lib -DOR2_XBOX_VORBIS_ROOT=$vorbis -DOR2_XBOX_FFMPEG_ROOT=$ffmpeg"
+if ($FFmpegOnly) {
+    "  -DOR2_XBOX_FFMPEG_ROOT=$ffmpeg (reuse the existing zlib/Vorbis options)"
+} else {
+    "  -DZLIB_INCLUDE_DIR=$zlib/include -DZLIB_LIBRARY=$zlib/lib/zlibstatic.lib -DOR2_XBOX_VORBIS_ROOT=$vorbis -DOR2_XBOX_FFMPEG_ROOT=$ffmpeg"
+}

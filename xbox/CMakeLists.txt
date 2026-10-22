@@ -13,7 +13,9 @@
 # The PC build links these engines; UWP reuses their prebuilt libraries.
 # Do not compile a second decoder into outrun_xbox_core or the UWP entry.
 # clang-cl objects call the compiler-rt builtins (128-bit division in the engine).
-file(GLOB OR2_CLANG_BUILTINS "${CMAKE_GENERATOR_INSTANCE}/VC/Tools/Llvm/x64/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib")
+if(NOT OR2_CLANG_BUILTINS)
+    file(GLOB OR2_CLANG_BUILTINS "${CMAKE_GENERATOR_INSTANCE}/VC/Tools/Llvm/x64/lib/clang/*/lib/windows/clang_rt.builtins-x86_64.lib")
+endif()
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(OR2_XBOX_SHADERS "${CMAKE_CURRENT_BINARY_DIR}/generated/pc_hlsl_shaders.hpp")
@@ -47,6 +49,12 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
         endforeach()
         target_link_libraries(outrun_xbox_core PUBLIC bcrypt)
     endif()
+    # Disposable owned Sound files through the same lookup and mixer as the desktop.
+    add_executable(test_music_lookup ../tests/test_music_lookup.cpp)
+    target_link_libraries(test_music_lookup PRIVATE outrun_xbox_core)
+    target_compile_options(test_music_lookup PRIVATE /W4 /WX)
+    set(OR2_MUSIC_LOOKUP_FIXTURE_DIR "" CACHE PATH "Owned generated music fixture directory")
+    add_test(NAME music_lookup COMMAND test_music_lookup "${OR2_MUSIC_LOOKUP_FIXTURE_DIR}" "${PROJECT_SOURCE_DIR}/work/flac-integration/lookup")
     # The D3D11 GPU vertex path against its CPU path, headless on WARP (no game data).
     add_executable(test_d3d11_vertex_path tests/test_d3d11_vertex_path.cpp)
     target_link_libraries(test_d3d11_vertex_path PRIVATE outrun_xbox_core)
