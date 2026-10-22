@@ -204,6 +204,9 @@ struct GameData {
 bool load_game_data(platform::NativeRuntimeContext&,platform::RetailAssetStore&,const std::string& retail_root,GameData&,
                     const std::function<void(const std::string&)>& status,std::uint32_t& code,const char*& phase,std::string& error);
 
+// Production Sound lookup; selected replacement failures never retry another format.
+bool read_music_file(GameHost&,const char* name,std::vector<std::uint8_t>&,std::string& error);
+
 // ---- runtime binding ----
 struct RuntimeBinding {
     platform::NativeRuntimePlatform platform;

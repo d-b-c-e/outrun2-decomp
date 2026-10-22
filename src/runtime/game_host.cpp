@@ -233,7 +233,6 @@ bool menu_effect(void* user,unsigned id){
 }
 // 401000 (channel, track, loop): one stream (95B24C); a new request closes
 // the previous one. The volume 95B240 is .bss 0 (> -10000: always started).
-bool read_music_file(GameHost& s,const char* name,std::vector<std::uint8_t>& bytes,std::string& error);
 bool menu_music_play(void* user,unsigned,unsigned track,unsigned loop){
     auto& s=*static_cast<GameHost*>(user);
     std::lock_guard<std::recursive_mutex> audio_lock(audio_mutex());
@@ -343,7 +342,6 @@ bool read_sound_file(GameHost& s,const char* name,std::vector<std::uint8_t>& byt
     return pf::retail_asset_read_relative(*s.retail,"Sound/"+found,bytes,64u*1024u*1024u,&error);
 }
 
-namespace {
 bool read_music_file(GameHost& s,const char* name,std::vector<std::uint8_t>& bytes,std::string& error){
     const auto policy=pf::music_replacement_policy();
     // Defaults-off takes the exact original path; effects never use replacement lookup.
@@ -376,7 +374,6 @@ bool read_music_file(GameHost& s,const char* name,std::vector<std::uint8_t>& byt
     if(format!=pf::MusicFileFormat::Vorbis)std::printf("music: selected Sound/%s (no format fallback)\n",selected.c_str());
     if(!read_sound_file(s,selected.c_str(),bytes,error))return false;
     return pf::validate_music_file(format,bytes,error);
-}
 }
 
 // ---------------------------------------------------------------- runtime callbacks
