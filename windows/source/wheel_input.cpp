@@ -345,6 +345,11 @@ std::string wheel_input_steer_product(){
     return b?b->device->prod:std::string();
 }
 
+bool wheel_input_steer_inverted(){
+    const Bound* b=g.open.empty()?nullptr:find("steer");
+    return b&&b->binding.inverted;
+}
+
 std::string wheel_input_status_text(){
     if(!g.configured)return "the wheel input is not in use (another input backend)";
     if(g.section.schema==0)return "no [Controls] profile yet: bind the controls in Wheelkit";

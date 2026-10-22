@@ -8,6 +8,7 @@
 #include "ffb_shadow_live.hpp"
 #include "native_window.hpp"
 #include "shim_input.hpp"
+#include "controls_store.hpp"
 #include "platform/runtime_input.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/car_producer_observer.hpp"
@@ -34,6 +35,8 @@ std::string g_steer;   // what the wheel input layer reports as the connected st
 std::string wheel_input_steer_device(){return g_steer;}
 std::string g_steer_prod;   // and its product
 std::string wheel_input_steer_product(){return g_steer_prod;}
+bool g_steer_inverted=false;
+bool wheel_input_steer_inverted(){return g_steer_inverted;}
 ShimSteer g_shim;      // the shim backend's steering wheel, as the test sets it
 ShimSteer shim_input_steer(){return g_shim;}
 bool g_panel_open=false;
@@ -128,16 +131,38 @@ int main(){
         }
     }
     // One native observer feeds the selected producer and its optional CSV. The fake DLL records device calls;
-    // no physical device is opened. A skipped callback must zero and re-prime before any new force.
-    {
+    // no physical device is opened. Both input routes must undo effective binding inversion at delivery.
+    for(const bool shim:{false,true})for(const bool inverted:{false,true}){
         outrun::xbox_runtime::input_filter()=nullptr;
         _putenv_s("DBCE_FFB_MUTE","");
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_CALLS",nullptr);
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",L"{d71b8350-61b7-11f1-8001-444553540000}");
         outrun::desktop::ffb_front_check()=[](void*){return true;};
         outrun::xbox_runtime::native_window().hwnd=reinterpret_cast<void*>(std::intptr_t(0x1234));
-        outrun::desktop::ffb_configure(ini(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\nFFBGlobalStrength = 0\r\n"
-            "[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n"),false,{});
+        const auto settings=ini("[Controls]\r\nSchema = 1\r\nsteer = axis 0 dev="+Wheel+" prod="+R12Prod+
+            " range=0..65535 rest=32768 travel=+1"+(inverted?" inverted":"")+"\r\n"+
+            (shim?"[Input]\r\nBackend = Shim\r\n":"")+
+            "[DirectInput]\r\nSteeringInvert = "+(inverted?"false":"true")+"\r\n"+
+            "[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\nFFBGlobalStrength = 0\r\n"
+            "[FFBProducer2]\r\nSteeringStrengthPercent = 25\r\nShiftStrengthPercent = 75\r\n");
+        const auto section=dbce::controls::parseSection(settings.section_lines("Controls"),outrun::desktop::ControlsReads);
+        const auto* binding=dbce::controls::find(section,"steer");
+        check(binding&&binding->inverted==inverted,"fixture selects canonical inversion over conflicting legacy setting");
+        const auto effective=dbce::controls::normalize("steer",*binding,49152);
+        check(inverted?effective<0:effective>0,"effective right-wheel input follows binding inversion");
+        outrun::desktop::g_steer_inverted=binding->inverted;
+        outrun::desktop::g_shim={Wheel,R12Prod,"live",true,true,1,binding->inverted};
+        outrun::desktop::ffb_configure(settings,false,{});
+        struct Owner final:outrun::desktop::ffbdev::Owner {
+            bool begin_open()override{return true;}
+            void end_open(bool)override{}
+            void begin_release()override{}
+            void end_release()override{}
+            bool library_quiet()const override{return true;}
+            bool enter_library()override{return true;}
+            void leave_library()override{}
+        } owner;
+        if(shim)outrun::desktop::ffb_set_shim_owner(&owner);
         check(outrun::desktop::ffb_output_running()&&outrun::xbox_runtime::car_producer_observer().observe,
               "selected model starts delivery and registers the car observer");
         const auto trace_name=folder()+"\\selected.csv";
@@ -151,7 +176,8 @@ int main(){
         state.race_inits=1;state.producer_active=true;
         auto& car=state.car_799d18;
         const auto put=[&](std::size_t at,const auto& v){std::memcpy(car.data()+at,&v,sizeof v);};
-        put(0x202,std::int16_t(16384));put(0x1f8,72.0f);put(0x208,std::uint32_t(2));
+        const auto right=std::int16_t(std::lround(effective*32512.0));
+        put(0x202,right);put(0x1f8,72.0f);put(0x208,std::uint32_t(2));
         const auto forces=[]{std::vector<long> v;const auto c=env(L"FAKE_WHEELFFB_CALLS");const std::wstring k=L"SetDeviceForcesXY ";
             for(std::size_t at=c.find(k);at!=std::wstring::npos;at=c.find(k,at+1))v.push_back(std::wcstol(c.c_str()+at+k.size(),nullptr,10));return v;};
         std::uint64_t attempt=0;
@@ -175,7 +201,7 @@ int main(){
             for(std::size_t i=before.size();i<after.size();++i)all_zero=all_zero&&after[i]==0;
             check(all_zero,what);
         };
-        tick();tick();tick();
+        tick();outrun::desktop::g_shim.epoch=2;tick();tick();
         auto sent=forces();check(!sent.empty()&&sent.back()!=0,"primed producer reaches fake native with bounded force");
         outrun::desktop::ffb::producer2::Stream expected({25,75});
         outrun::desktop::ffb::producer2::Frame request{};
@@ -184,16 +210,16 @@ int main(){
         request.source_tick=1;expected.step(request);request.source_tick=2;
         const auto row=expected.step(request);
         const auto direct=std::lround(std::clamp(row.shaped_force,-1.0f,1.0f)*10000.0f);
-        check(sent.back()==-direct,"selected request converts once to DirectInput units without legacy global gain, in the R12's direction");
-        // The sign at the device (wheel_direction -1: a positive x turns the R12 left): the model centres a right turn
-        // with a negative force, which must reach the R12 as a positive x; a left turn mirrors it; centred is zero.
-        check(row.request.steer>0.0f&&row.shaped_force<0.0f&&direct<0&&sent.back()>0,
+        const auto physical=direct*(inverted?1:-1);
+        check(sent.back()==physical,"selected request undoes input inversion once without changing gain");
+        // A positive device x turns the R12 left: a physical right turn must get positive x with either input sign.
+        check((inverted?row.request.steer<0.0f:row.request.steer>0.0f)&&sent.back()>0,
               "right steer: the model's centring force reaches the R12 as a positive x (toward the left, the centre)");
         // A tick delivers the request of the previous tick's car callback, so each new steer reaches the fake one tick later.
-        put(0x202,std::int16_t(-16384));tick();tick();sent=forces();
-        check(sent.back()<0&&sent.back()==direct,"left steer: the same magnitude as a negative x (toward the right, the centre)");
+        put(0x202,std::int16_t(-right));tick();tick();sent=forces();
+        check(sent.back()<0&&sent.back()==-physical,"left steer: the same magnitude as a negative x (toward the right, the centre)");
         put(0x202,std::int16_t(0));tick();tick();sent=forces();check(sent.back()==0,"centred steer: zero");
-        put(0x202,std::int16_t(16384));tick();tick();sent=forces();check(sent.back()==-direct,"right steer again: the same positive x");
+        put(0x202,right);tick();tick();sent=forces();check(sent.back()==physical,"right steer again: the same positive x");
         tick(false);tick(false);
         sent=forces();check(sent.back()==0,"missing callback sends zero without waiting for another valid car");
         tick();tick();
@@ -248,6 +274,7 @@ int main(){
         trace.close();DeleteFileA(trace_name.c_str());
         outrun::xbox_runtime::input_filter()=nullptr;
         SetEnvironmentVariableW(L"FAKE_WHEELFFB_ACCEPT",nullptr);
+        outrun::desktop::g_shim={};outrun::desktop::g_steer_inverted=false;
     }
     // Software requests must advance with no physical output even when this process is not foreground. Output=none
     // and a wheel request refused by process mute both leave the fake native DLL entirely unloaded.

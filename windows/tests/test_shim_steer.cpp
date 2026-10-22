@@ -45,6 +45,10 @@ struct Rig {
 };
 
 void test_live_and_epochs(){
+    for(const bool inverted:{false,true}){
+        Rig r(profile({steer(W,WP)+(inverted?" inverted":"")}));r.step();
+        check(r.steer().live&&r.steer().inverted==inverted,"force direction carries Core's effective steer binding inversion");
+    }
     Rig r(profile({steer(W,WP),"confirm = button 0 dev="+W+" prod="+WP}));
     auto x=r.steer();
     check(x.dev==W&&x.prod==WP&&!x.opened&&!x.live&&x.epoch==0,"before the first open: the binding's identity, not open, epoch 0");

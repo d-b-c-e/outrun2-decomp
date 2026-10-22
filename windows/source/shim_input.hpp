@@ -66,7 +66,7 @@ std::vector<dbce::controls::edit::AcceptedObservation> shim_input_binding_observ
 // epoch, 0 before the first open). `live`: this tick's steer action is applied from a valid, fresh, not injected sample
 // of that device in that epoch (an open handle can still be pending, failed, stale or range-unqualified; romi 31707).
 // `dev` is empty when steer is not bound or this backend is not in use; `status` is Core's device status, or why there
-// is none. Game thread (the input sample's thread).
-struct ShimSteer { std::string dev,prod,status; bool opened{},live{}; std::uint32_t epoch{}; };
+// is none. `inverted` is that same parsed binding's input inversion. Game thread (the input sample's thread).
+struct ShimSteer { std::string dev,prod,status; bool opened{},live{}; std::uint32_t epoch{}; bool inverted{}; };
 ShimSteer shim_input_steer();
 }

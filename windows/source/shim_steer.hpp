@@ -12,7 +12,7 @@ inline ShimSteer shim_steer(const dbce::controls::Binding* steer,const std::vect
                             const dbce::shim::Frame* frame=nullptr){
     ShimSteer s;
     if(!steer){s.status="steer is not bound";return s;}
-    s.dev=steer->dev;s.prod=steer->prod;
+    s.dev=steer->dev;s.prod=steer->prod;s.inverted=steer->inverted;
     for(std::size_t i=0;i<reports.size();++i){
         const auto& d=reports[i];
         if(d.identity.dev!=steer->dev)continue;

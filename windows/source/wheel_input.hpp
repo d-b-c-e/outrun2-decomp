@@ -25,6 +25,8 @@ std::string wheel_input_steer_device();
 // That device's product GUID ("{...}", lower case, from its DirectInput listing), under the same conditions; "" otherwise.
 // The force output's measured direction is per product (ffb_device.hpp wheel_direction).
 std::string wheel_input_steer_product();
+// Inversion of that same effective binding (including a one-time legacy import), not a second settings read.
+bool wheel_input_steer_inverted();
 // For the F6 panel's Controls page: the profile and revision, how many bindings apply, and the steering device's state.
 std::string wheel_input_status_text();
 }

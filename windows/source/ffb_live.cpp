@@ -74,6 +74,7 @@ bool own_front(void* hwnd){
 // One sample to the wheel (outside the race too: the delivery zeroes there).
 void deliver(bool race,std::int32_t intent){
     ffbdev::Sample s;
+    bool inverted=false;
     // An open F6 panel counts as outside the race: the gates zero the wheel this sample (the panel's own filter runs
     // after this one in the same tick, and the open state changes only in the message pump between ticks).
     s.race=race&&!desktop_panel_open();s.hwnd=xbox_runtime::native_window().hwnd;s.front=ffb_front_check()(s.hwnd);
@@ -83,12 +84,16 @@ void deliver(bool race,std::int32_t intent){
         // target, strict selection of that instance) starts only from a live sample of it.
         const auto st=shim_input_steer();
         s.steer_dev=st.dev;s.steer_prod=st.prod;s.steer_live=st.live;s.steer_epoch=st.epoch;
-    }else{s.steer_dev=wheel_input_steer_device();s.steer_prod=wheel_input_steer_product();}
+        inverted=st.inverted;
+    }else{
+        s.steer_dev=wheel_input_steer_device();s.steer_prod=wheel_input_steer_product();
+        inverted=wheel_input_steer_inverted();
+    }
     s.ms=GetTickCount64();
     const auto before=f.delivery.phase();
     // The model's force pushes toward positive steer; the device's measured direction turns it into SetDeviceForcesXY's
-    // x, once, here (0 for an unmeasured wheel, which the delivery refuses before any device call).
-    f.delivery.frame(s,intent*ffbdev::wheel_direction(s.steer_prod));
+    // x, once, here, undoing the effective input binding's inversion (0 still refuses an unmeasured wheel).
+    f.delivery.frame(s,intent*ffbdev::wheel_direction(s.steer_prod)*(inverted?-1:1));
     if(f.delivery.phase()!=before){
         std::printf("ffb: wheel %s%s%s\n",ffbdev::phase_name(f.delivery.phase()),f.delivery.why().empty()?"":": ",f.delivery.why().c_str());
         if(f.delivery.phase()==ffbdev::Phase::Open)
