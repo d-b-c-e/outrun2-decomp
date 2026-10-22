@@ -64,6 +64,17 @@ native states, save recovery, offline evidence and unverified runtime gates.
 
 ## Wheel settings
 
+For a fresh/all-unbound profile, the optional private candidate includes the
+qualified standalone controls helper at
+`<private-game-directory>/Extras/StandaloneModSetup/`, with the entry
+`<private-game-directory>/Setup-Controls.ps1` beside `OutRunDesktop.exe`.
+See [Standalone controls setup](docs/STANDALONE-SETUP.md) for the exact private
+packaging command, matching current capability and actual installed-receipt
+prerequisites, existing-profile import, Preview / Apply / Cancel, restart and
+backup recovery. The game must be closed. F6 capture currently edits devices
+already owned by shared input; use the helper for first-device setup. Packaging
+does not install the candidate or prove physical controls, and remains private.
+
 `OutRunDesktop.ini` beside the executable, written with comments on the first
 run. **`[Controls]` is the game's only binding store**, in the wheel toolkit's
 `ini-controls-1` form (STD-033, `vendor/controls`): `Schema = 1`, `Profile`,

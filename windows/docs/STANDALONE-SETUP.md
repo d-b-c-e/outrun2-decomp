@@ -108,40 +108,105 @@ existence does not admit a new executable without matching capability and actual
 installation provenance; never copy the retained owner's receipt to bless a
 different build.
 
-## Packaging successor and preserved fallback
+## Private package route
 
-At inspected OutRun source `c28b443a449eeb163119714723d2cd0d42c37834`,
-`tools/alpha/package_candidate.py` is the existing explicit-input private alpha
-packager. It has **no helper flags**, launcher input or capability/receipt
-delivery. Helper-enabled OutRun packaging remains pending in WZ1. This document
-resolves its helper input; it does not claim that code or a delivered package
-already exists.
+`tools/alpha/package_candidate.py` supports an optional helper route. It admits
+only the exact ZIP and bundle-manifest pins above, all 528 exact members and
+every payload size/hash. It refuses unsafe Windows archive paths, aliases,
+links, encrypted entries and oversized inputs. It reads every output member
+back, retaining the existing deterministic archive and private-only fences.
+It reads named inputs only; it never sweeps neighboring build/helper folders.
+No game assets, saves, owner INIs, profiles, credentials, install receipts or
+force DLLs are added. The helper does not silently enable force.
 
-WZ1 should use the exact ZIP and manifest above through the existing package
-path, with explicit launcher input and manifest membership/hashes, refusing
-missing or wrong bytes. Preserve the no-helper/private-only route. Do not sweep
-neighbor directories, bundle proprietary game assets, owner profiles/receipts or
-force payloads, or add another installer. A current OutRun build needs its own
-matching capability/install-receipt admission; the retained 341B fixture proves
-the existing helper route only. Qualifying the exact successor archive and its
-launcher is separate from this finite documentation task.
-
-The currently supported **no-helper packaging command** remains the command in
-[the alpha guide](../../docs/ALPHA-READINESS.md), from a clean committed checkout:
+From a clean committed checkout, supply the **current** separately qualified
+EXE, its hash, matching capability bytes/hash and explicit committed launcher.
+No current build/capability inputs were supplied for this source change, so no
+real candidate archive or installed delivery is claimed. The old 341B fixture
+and its owner's receipt must never be substituted to admit a new build.
 
 ```powershell
 $candidateCommit = git rev-parse HEAD
-python -I -B tools/alpha/package_candidate.py --source-root . --source-commit $candidateCommit --exe <build-alpha/windows/Release/OutRunDesktop.exe> --exe-sha256 <64-character-build-receipt-hash> --zlib-license <zlib-source/LICENSE> --ogg-license <ogg-source/COPYING> --vorbis-license <vorbis-source/COPYING> --ffmpeg-license <ffmpeg-source/COPYING.LGPLv2.1> --output <new-private-output/candidate.zip>
+python -I -B tools/alpha/package_candidate.py --source-root . --source-commit $candidateCommit --exe <current-build/OutRunDesktop.exe> --exe-sha256 <current-build-sha256> --zlib-license <zlib-source/LICENSE> --ogg-license <ogg-source/COPYING> --vorbis-license <vorbis-source/COPYING> --ffmpeg-license <ffmpeg-source/COPYING.LGPLv2.1> --helper-zip E:/Source/dbce-project-mgmt/artifacts/shared-helper-hct-outrun-20261015/delivery-r1/helper/StandaloneModSetup-private-6cb66313d9e0-win-x64.zip --setup-launcher tools/alpha/Setup-Controls.ps1 --capabilities <current-build/session-capabilities.json> --capabilities-sha256 <current-capability-sha256> --output tools/alpha/build/private-candidate.zip
 ```
 
-Bracketed arguments are explicit operator inputs from the separately qualified
-build and its dependency sources. No helper-enabled packaging command is
-available at this revision; WZ1 must document its implemented invocation rather
-than treating proposed flags as supported. Omitting the helper preserves normal
-game/F6 configuration and any separately qualified Wheelkit setup route, with no
-claim of packaged first-time portable controls setup.
+All four helper arguments are required together. The capability hash must match
+the supplied bytes, and `gameBuildSha256` must match the supplied EXE; settings
+and controls must name the supported OutRun contracts. The helper retains its
+full action/backend/schema and actual-install admission checks at setup time.
+Packaging does not manufacture an installation receipt or install anything.
+Keep all generated candidates and evidence under the ignored `tools/alpha/build/`
+directory. Create that directory before invoking the command. Existing output
+ZIPs are never replaced.
 
-This resolution performed read-only source/evidence inspection and hash/member
-verification only. No build, test suite, helper execution, game, desktop/input,
-device, installation, download or publication occurred. No new runtime or owner
-acceptance is claimed.
+Omit all four helper arguments for the unchanged no-helper route documented in
+[the alpha guide](../../docs/ALPHA-READINESS.md). That route adds neither helper,
+launcher nor capability and retains the original game/F6 and separately
+qualified Wheelkit configuration paths.
+
+## Private placement and controls setup
+
+The package layout is exact and relative to the selected private game folder:
+
+```text
+<private-game-directory>/OutRunDesktop.exe
+<private-game-directory>/session-capabilities.json
+<private-game-directory>/Setup-Controls.ps1
+<private-game-directory>/Extras/StandaloneModSetup/bundle-manifest.json
+<private-game-directory>/Extras/StandaloneModSetup/Start-ModSetup.ps1
+<private-game-directory>/Extras/StandaloneModSetup/DbceModSetup.exe
+<private-game-directory>/Extras/StandaloneModSetup/<remaining exact helper payload>
+```
+
+Use only an authorized private copy with the owner's legitimately supplied game
+data. The existing private installation/update route must place the current EXE
+and matching capability in that folder and create its actual installed receipt;
+this ZIP is not an installer. Preserve existing game files and configuration.
+The exactly one matching `OutRunDesktop.install-*.json` receipt stays beside the
+EXE, outside the package; its requirements are above. A writable game directory,
+Windows x64, PowerShell 7 (`pwsh`) and a closed game are prerequisites. The
+self-contained helper needs no full Wheelkit installation.
+
+From the selected admitted private copy, run:
+
+```powershell
+pwsh -NoProfile -File "<private-game-directory>/Setup-Controls.ps1"
+```
+
+This entry verifies the pinned helper manifest and every exact helper payload
+before handing the selected game directory to the existing `Start-ModSetup.ps1`.
+It refuses changed, missing or extra helper files; it does not install, repair,
+write bindings itself or bypass the helper's capability/receipt admission.
+
+For a fresh or all-unbound profile, use this standalone helper's device discovery
+and binding capture to create a profile, select the intended devices and calibrate
+steering/pedals. For an existing profile, use the helper's existing profile import
+and review its bindings/calibration rather than replacing it with defaults.
+Choose the supported transmission; H-pattern maps gears 1-6, and the game's
+AT/MT choice still has to agree. Unsupported actions remain unavailable with
+their reasons. Schema2 calibration requires the capability's `[1,2]` declaration;
+Schema1-only builds keep their existing limits.
+
+Use **Preview** to inspect the proposed changes and selected game folder. Use
+**Apply** only after reviewing them; it uses the existing backup/write/readback
+path, preserves unrelated display/wheel/force settings and selects Shim for the
+next launch. **Cancel** leaves the preview unapplied; it does not undo an earlier
+Apply. Close setup and restart the game to load the saved profile. Current F6
+capture edits devices already owned by shared input; it does not establish a
+first-device capture route for a fresh/all-unbound profile. Use the helper for
+that setup, then F6 for supported edits on the owned devices.
+
+If admission fails, close the game and check that the selected private folder has
+the current EXE, matching capability, supported controls contract and exactly one
+matching actual install receipt. Use the existing installation/update recovery
+route for mismatches; never edit or copy an old owner receipt to make it pass.
+If helper integrity fails, restore the exact helper payload from the verified
+private package, without mixing versions or adding neighboring files. For a bad
+applied profile, close the game and restore the backup reported by the existing
+helper, then Preview again. Preserve saved calibration and unrelated settings.
+
+The retained helper qualification and old archive evidence above are unchanged.
+This source candidate adds synthetic fixture source for the dependent Claude
+game-free checks; it does not repeat old helper publish/CLI qualification.
+No real helper execution, game, UI, input/device/force, installation, download,
+public distribution or physical acceptance is claimed.
