@@ -92,3 +92,32 @@ Executable: 24,023,040 bytes, SHA-256
 Actual safe release: `2026-10-17T04:07:52.2522165Z`; direct Hera handoff
 preceded documentation. No DPAPI operation or account/network/device access
 occurred. Previous vibration/presentation evidence remains retained.
+
+
+## Actual DPAPI qualification (2026-10-22)
+
+Base `aafebff` plus the focused `windows/tests/test_login_protection_dpapi.cpp`
+(candidate commit hash is reported with the Fleet completion). The test links
+production `login_protection.cpp` and calls `login_protection_configure`, then
+the actual shared loader and both common-save consumers (`4164D0`, `416420`)
+on disposable synthetic 192-byte login data in a private temp directory.
+
+Commands (clang-cl Release, `build-login-dpapi-qualification`, logs retained there):
+`cmake -S . -B build-login-dpapi-qualification -G Ninja -DOR2_XBOX=ON ...`,
+`cmake --build build-login-dpapi-qualification --target test_login_protection_dpapi`,
+`ctest -R login_protection_dpapi -V`. Result: **passed, 33 checks, 1/1 test**.
+An earlier run failed one over-strict assertion (whole-common equality after save);
+it was corrected to compare the login region, as the fake-transform suite does.
+
+Verified through the real adapter: default, `false` and excluded-process
+(`ordinary=false`) configuration keep plaintext and create no sidecar; opt-in
+writes a non-plaintext `OnlineLoginData.dat`, zeros only the login region of
+`common.dat` (other bytes and envelope unchanged), retains live login bytes,
+and restores the exact synthetic login after reload on both save paths; a
+flipped ciphertext byte is rejected, clears the live login, refuses replacement
+and leaves sidecar and common unchanged (no plaintext fallback).
+
+The prior 79 fake-transform and 51 profile checks were not rerun. Limitations:
+same user/machine DPAPI only; no truncated-ciphertext, roaming-profile, F6, game,
+network or real-account coverage; the sidecar non-plaintext check searches two
+16-byte login slices, not an entropy analysis. Private fixtures were removed.

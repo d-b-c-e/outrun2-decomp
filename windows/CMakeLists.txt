@@ -466,3 +466,10 @@ target_compile_options(test_wheelffb_bridge PRIVATE /W4)
 target_compile_definitions(test_wheelffb_bridge PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(test_wheelffb_bridge PRIVATE dinput8 dxguid)
 add_test(NAME wheelffb_bridge COMMAND test_wheelffb_bridge)
+
+# Actual DPAPI adapter through the shared profile consumers; synthetic private files only.
+add_executable(test_login_protection_dpapi tests/test_login_protection_dpapi.cpp source/login_protection.cpp source/desktop_settings.cpp)
+target_link_libraries(test_login_protection_dpapi PRIVATE outrun_xbox_core crypt32)
+target_include_directories(test_login_protection_dpapi PRIVATE source)
+target_compile_options(test_login_protection_dpapi PRIVATE /W4 /WX)
+add_test(NAME login_protection_dpapi COMMAND test_login_protection_dpapi)
