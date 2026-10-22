@@ -105,14 +105,29 @@ in the linked static libraries. Evidence: work/flac-integration/numeric.log,
 numeric-result.txt and build-flac-integration/numeric-ninja/Testing/Temporary/LastTest.log.
 Older passing artifacts remain intact; unrelated suites were not rerun.
 
-Desktop build and lookup fixture: BLOCKED on authorized shared-build lease
-custody. Portfolio policy requires the serialized heavy-build lease, while this
-task's explicit write allowlist excludes the global coordination file at
-C:/Users/antho/AppData/Local/dbce/test-slot.txt. The Fleet owner-question tool
-returned answer unavailable or expired; this grants no scope exception.
-A coordinator must provide an exclusive borrowed lease window/token or reassign
-the remaining build/test with coordination-file writes authorized. No success
-is claimed for the unexecuted desktop link or integration fixture.
+Desktop link and lookup fixture (2026-10-22, source
+459b8c6545df7ad8fbfbf27de67c92a31b89f11d, clean tree): the earlier 11:47
+OutRunDesktop.exe in build-flac-integration/audio predated later desktop
+commits, so it was relinked; music/runtime/CMake sources were unchanged since
+4099259. Run under coordinator kobe's borrowed shared-build lease
+(lease=9348bbdc..., asserted with Stage-RigLease.ps1; parent release requested
+from kobe after the run, lease file never written by this task), same
+cache: FFmpeg 7.1.1 audio prefix above and Clang 19 builtins. No dependency
+rebuild, configure change or decoder rerun.
+
+- Link: work/flac-integration/link.cmd (vcvars64, the build command above,
+  incremental, 39 steps incl. CMake regenerate) exit 0; link.log.
+  OutRunDesktop.exe SHA-256
+  eb1ac83b053b2281a665e7f9d317161e104a54eb90f3cdad431bd9fcab031206,
+  test_music_lookup.exe
+  237f65db05517425945674e1c3770b6a8247176dc5a77e58cfd1a9950ca07675.
+- Lookup: the ctest command above, 1/1 PASS, "music_lookup: 843 checks
+  PASS"; lookup.log and lookup-LastTest.log. No source repair was needed.
+- Cleanup: the disposable work/flac-integration/lookup root is empty; no
+  ninja/clang-cl/lld-link/cmake/ctest/test process remained.
+
+Link and lookup results are separate from each other and from audible
+runtime acceptance, which was not attempted.
 
 The fixture creates a new disposable Sound child and removes only that child.
 Coverage: mixed-case same-stem selection, FLAC/WAV/Ogg precedence, disabled/
