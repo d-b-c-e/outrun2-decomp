@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -102,6 +103,23 @@ class PackageSafety(unittest.TestCase):
         return dict(helper_zip=self.helper_zip, setup_launcher=self.root / pkg.LAUNCHER_SOURCE,
                     capabilities=self.cap, capabilities_sha256=pkg.digest(self.cap.read_bytes()))
 
+    def test_qualified_helper_pins_match_documentation_and_launcher(self):
+        unpatched = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(unpatched)
+        docs = (Path(__file__).resolve().parents[2] / "windows/docs/STANDALONE-SETUP.md").read_text(encoding="utf-8")
+        for name, label in (("HELPER_SHA", "ZIP SHA256"),
+                            ("HELPER_MANIFEST_SHA", "`bundle-manifest.json` SHA256")):
+            with self.subTest(pin=name):
+                value = getattr(unpatched, name)
+                self.assertRegex(value, r"\A[0-9a-f]{64}\Z")
+                documented = re.search(r"\| " + re.escape(label) + r" \| `([^`]+)` \|", docs)
+                self.assertIsNotNone(documented)
+                self.assertEqual(value, documented.group(1).lower())
+        launcher = Path(__file__).with_name("Setup-Controls.ps1").read_text(encoding="utf-8")
+        literal = re.search(r"\$manifestSha = '([^']+)'", launcher)
+        self.assertIsNotNone(literal)
+        self.assertEqual(unpatched.HELPER_MANIFEST_SHA, literal.group(1))
+
     def test_helper_exact_members_hashes_and_exclusion(self):
         options = self.helper()
         (self.base / "OutRunDesktop.install-owner.json").write_bytes(b"PRIVATE-SENTINEL")
@@ -149,7 +167,8 @@ class PackageSafety(unittest.TestCase):
                 self.assertFalse(self.output.exists())
 
     def test_safe_helper_paths_and_size_bounds(self):
-        for name in ("../secret", "/absolute", "C:/secret", "a\\secret", "file:stream",
+        self.assertFalse(pkg.safe_member("a\\secret"))
+        for name in ("../secret", "/absolute", "C:/secret", "file:stream",
                      "a//b", "a/./b", "CON.txt", "a/trailing.", "a/trailing "):
             with self.subTest(name=name):
                 options = self.helper(changes={"payload/0.dll": None, name: b"unsafe"})
@@ -218,7 +237,7 @@ class PackageSafety(unittest.TestCase):
         launcher = self.base / "launcher.ps1"
         source = Path(__file__).with_name("Setup-Controls.ps1").read_text(encoding="utf-8")
         launcher.write_text(source.replace(
-            "635a8703f86384caea394b91a2ae8b05e369fd10234546afd4d2d185996dba395",
+            "635a8703f86384caea394b91a2ae8b05e369fd10234546af4d2d185996dba395",
             pkg.HELPER_MANIFEST_SHA), encoding="utf-8")
         # Extract only the production verifier AST; never evaluate the launch block.
         runner = self.base / "verify.ps1"

@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 
 function Test-StandaloneHelper([string]$Folder) {
-    $manifestSha = '635a8703f86384caea394b91a2ae8b05e369fd10234546afd4d2d185996dba395'
+    $manifestSha = '635a8703f86384caea394b91a2ae8b05e369fd10234546af4d2d185996dba395'
     $folderItem = Get-Item -LiteralPath $Folder -Force
     for ($parent = $folderItem; $null -ne $parent; $parent = $parent.Parent) {
         if ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Helper reparse path refused.' }
