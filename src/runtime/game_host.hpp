@@ -217,6 +217,10 @@ struct RuntimeBinding {
 // system tokens, then the SUMO_FE (32) mode request. The platform record is
 // the system one unless the platform set its own (ticks) before. False: the request failed.
 bool bind_runtime(GameHost&,platform::NativeRuntimeContext&,RuntimeBinding&);
+// Production frontend callbacks, also callable by offline fixtures without startup/device I/O.
+bool menu_music_play(void*,unsigned channel,unsigned track,unsigned loop);
+bool menu_music_stop(void*,unsigned channel);
+bool menu_volume(void*,unsigned pc,unsigned arg);
 // The PC scene renderer on the platform's D3D9 device, bound to the game state.
 void attach_pc_scene(GameHost&,platform::NativeRuntimeContext&,platform::RetailAssetStore&,platform::PcD3D9Device&);
 // Frontend text, title widgets, licence owners, saves, menu audio and the

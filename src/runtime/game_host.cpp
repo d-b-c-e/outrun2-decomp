@@ -231,6 +231,7 @@ bool menu_effect(void* user,unsigned id){
         ++s.race_effects_unplayed[id&0x7ffu];s.movie_error.clear();return false;}
     s.render_failed=true;return false;
 }
+}
 // 401000 (channel, track, loop): one stream (95B24C); a new request closes
 // the previous one. The volume 95B240 is .bss 0 (> -10000: always started).
 bool menu_music_play(void* user,unsigned,unsigned track,unsigned loop){
@@ -257,6 +258,7 @@ bool menu_music_stop(void* user,unsigned){
 // CD paths are explicit user configuration, distinct from title strings and the
 // retail-relative table. Retain the existing 64 MiB read bound, format validation,
 // MusicStream decoder, custom-loop validation and shared MenuAudio mixer.
+namespace {
 bool cd_music_play(void* user,const pf::CdTrack& track,std::size_t index,bool loop){
     auto& s=*static_cast<GameHost*>(user);
     if(!s.runtime||s.runtime->mode_state.current!=16u||!s.retail)return false;
@@ -304,6 +306,7 @@ bool cd_music_play(void* user,const pf::CdTrack& track,std::size_t index,bool lo
     ++s.music_failures;s.music_error=error;
     std::fprintf(stderr,"music: CD track %zu refused: %s\n",index,error.c_str());return false;
 }
+}
 // Options > Audio: 42EFA0 (SE master, integer level) and 42FC90 (BGM, float bits).
 bool menu_volume(void* user,unsigned pc,unsigned arg){
     auto& s=*static_cast<GameHost*>(user);
@@ -313,6 +316,7 @@ bool menu_volume(void* user,unsigned pc,unsigned arg){
     if(pc==0x42fc90u){float level;std::memcpy(&level,&arg,4);s.menu_audio.music_volume_42fc90(level);return true;}
     return false;
 }
+namespace {
 bool menu_platform(void* user,unsigned pc,const unsigned* args,std::size_t count,unsigned& result){
     if(pc!=0x4249f0||count!=1||!args)return false;
     result=0;return menu_effect(user,args[0]);
