@@ -4,6 +4,7 @@
 #include "controls_store.hpp"
 #include "desktop_settings.hpp"
 #include <windows.h>
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -211,13 +212,43 @@ void native_draft(const fs::path& root){
     const auto section=ctl::parseSection(saved.section_lines("Controls"),outrun::desktop::ControlsReads);
     check(section.error.empty()&&section.schema==1&&section.transmission=="H-pattern","the Native reader admits the saved Schema 1 section");
 }
+// Steering is centred: normalize reads its direction only from `inverted`, so a re-capture of the same device axis keeps
+// it (as a Tweaks SteerInvert import writes it); another axis starts non-inverted.
+void native_inverted_recapture(const fs::path& root){
+    const auto path=root/"native-inverted.ini";
+    auto original=native_profile();original.replace(original.find(NativeSteer),NativeSteer.size(),
+        NativeSteer.substr(0,NativeSteer.find(" name="))+" inverted name=\"MOZA R12 Base\"");
+    write(path,original);
+    b::Editor editor(path.u8string(),true);check(editor.open(),"an inverted Native steering profile opens");
+    auto sample=native_sample();auto rows=[&](double now){return b::native_observations({sample},now);};
+    auto capture=[&](int axis,double t){
+        editor.observe(rows(t),t,true);check(editor.begin_capture(t,true),"capture on the saved Native steering device");
+        ++sample.sequence;editor.observe(rows(t+1.01),t+1.01,true);
+        ++sample.sequence;sample.axes[std::size_t(axis)]=50000;editor.observe(rows(t+1.02),t+1.02,true);
+        sample.axes[std::size_t(axis)]=axis==0?33265:0;return editor.view(t+1.02,true).binding;
+    };
+    const auto same=capture(0,1);
+    check(same&&same->index==0&&same->inverted,"re-capturing the same steering axis keeps its inversion");
+    check(editor.save(true),"Save the re-captured steering");
+    outrun::desktop::Ini saved;check(saved.load(path.u8string()),"read the inverted Save");
+    const auto section=ctl::parseSection(saved.section_lines("Controls"),outrun::desktop::ControlsReads);
+    const auto steer=std::find_if(section.bound.begin(),section.bound.end(),[](const auto& e){return e.action=="steer";});
+    check(steer!=section.bound.end()&&steer->binding.inverted,"the next launch reads the steering still inverted");
+    b::Editor other(path.u8string(),true);check(other.open(),"reopen the saved profile");
+    sample=native_sample();sample.sequence=10;
+    other.observe(rows(10),10,true);check(other.begin_capture(10,true),"capture again on the steering device");
+    ++sample.sequence;other.observe(rows(11.01),11.01,true);
+    ++sample.sequence;sample.axes[1]=50000;other.observe(rows(11.02),11.02,true);
+    const auto moved=other.view(11.02,true).binding;
+    check(moved&&moved->index==1&&!moved->inverted,"a capture on another axis starts non-inverted");
+}
 }
 int main(){
     fs::path root;
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}

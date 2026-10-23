@@ -149,7 +149,13 @@ void Editor::observe(const std::vector<edit::AcceptedObservation>& rows,double n
         if(auto result=s.capture.take_result(now,eligible);result&&s.draft){
             captured=true;
             std::string why;
-            if(s.draft->set(result->action,result->binding,why))s.message="Binding captured in the draft; Save to keep it";
+            auto binding=result->binding;
+            // A centred axis takes its direction only from the explicit inversion (normalize ignores rest and travel),
+            // which capture cannot measure: re-capturing the same device axis keeps it, so steering never silently reverses.
+            if(ctl::shapeOf(result->action)==ctl::Shape::Centred)
+                if(const auto old=s.draft->binding(result->action);old&&old->kind==ctl::Kind::Axis&&old->dev==binding.dev&&
+                   old->prod==binding.prod&&old->index==binding.index)binding.inverted=old->inverted;
+            if(s.draft->set(result->action,binding,why))s.message="Binding captured in the draft; Save to keep it";
             else s.message=why;
         }
     }
