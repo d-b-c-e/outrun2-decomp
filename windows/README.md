@@ -72,9 +72,12 @@ and every two seconds only while a bound control has no open, connected device
 device connected after launch opens under its saved instance GUID; disconnects
 release its handle and neutralize its actions. Live rig qualification is pending.
 
-H-pattern: each gate holds its gear; the build pulses shift up / down, one every
-other frame, until the car's gear (+208) matches, and stops after four pulses
-without a change (top gear, automatic transmission).
+H-pattern on either backend: exactly one held gate selects a gear. The build
+pulses shift up / down until the car's gear (+208) matches the gate, releases for
+at least one tick and waits up to 250 ms for a response before retrying twice. Ambiguous
+gates and gear words outside 1–6 send no shift; pause spends no retries. A scene
+change releases the pulse and starts a fresh sequence on the following tick.
+Physical H-pattern acceptance remains pending.
 
 **Input backend** (`[Input] Backend`, default `Native`):
 - `Native` is the wheel path described above.

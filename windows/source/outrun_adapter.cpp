@@ -48,6 +48,12 @@ shim::Capability outrun_capability(){
 void HPattern::set(State s,const std::string& why){if(s!=state_||why!=status_){state_=s;status_=why;}}
 void HPattern::reset(){state_=State::Idle;status_.clear();target_=0;direction_=0;tries_=0;deadline_us_=0;gear_at_pulse_=0;}
 
+int HPattern::step_mode(const bool gates[6],std::uint32_t mode,bool car,std::uint32_t gear,std::int64_t now){
+    if(mode!=mode_){reset();released_tick();mode_=mode;return 0;}
+    if(mode==18u){released_tick();return 0;}
+    return step(gates,mode==16u,car,gear,now);
+}
+
 int HPattern::step(const bool gates[6],bool race,bool car,std::uint32_t gear,std::int64_t now){
     const bool just_pulsed=pulsed_last_;
     pulsed_last_=false;
@@ -104,7 +110,7 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     // A scene change resets what the adapter derived itself: no shift sequence is carried into another mode, and the
     // change's own tick sends no pulse, so a pulse is always followed by a released tick.
     const bool scene_change=g.mode!=last_mode_;
-    if(scene_change){gearbox_.reset();gearbox_.released_tick();pulse_prev_=0;last_mode_=g.mode;}
+    if(scene_change){pulse_prev_=0;last_mode_=g.mode;}
 
     auto& d=out.pc_device;
     const bool steer=live(f,"steer"),throttle=live(f,"throttle"),brake=live(f,"brake");
@@ -152,9 +158,7 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
         // The race's pause (mode 18) takes no shift (C1h run1: 16 pulses there, no gear change), so the gearbox is not
         // stepped: no pulse, no retry spent, no deadline running (sana 44117). The pause's own scene changes reset it,
         // so on the resume the gate held then starts afresh from the consumed gear, after a released tick.
-        const bool paused=g.mode==18u;
-        if(paused&&!scene_change)gearbox_.released_tick();
-        const int dir=scene_change||paused?0:gearbox_.step(gates,race,g.car,g.gear,f.boundary_us);
+        const int dir=gearbox_.step_mode(gates,g.mode,g.car,g.gear,f.boundary_us);
         if(dir>0)pulse=0x2u;else if(dir<0)pulse=0x8u;
     }
     signals_.gearbox=gearbox_.state();
@@ -207,7 +211,7 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
         static constexpr const char* Buttons[]{"start","shiftUp","back","shiftDown","camera","confirm","navUp","navDown","navLeft","navRight","horn"};
         static constexpr const char* Gates[]{"gear1","gear2","gear3","gear4","gear5","gear6"};
         bool wheel_button=false;for(const char* b:Buttons)wheel_button=wheel_button||held(f,b);
-        bool gear_change=pulse!=0u;for(const char* g:Gates)gear_change=gear_change||down(f,g);
+        bool gear_change=pulse!=0u;for(const char* gate:Gates)gear_change=gear_change||down(f,gate);
         const bool wheel_pressed=wheel_accel>=3u||wheel_brake>=3u||wheel_button||gear_change;
         if(!keyboard_drives_&&kb->any&&!wheel_pressed){keyboard_drives_=true;keyboard_anchor_=steer_word;}
         else if(keyboard_drives_&&(wheel_pressed||std::abs(steer_word-keyboard_anchor_)>983))keyboard_drives_=false;

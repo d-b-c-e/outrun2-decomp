@@ -290,6 +290,45 @@ void test_hpattern(){
     check(!(out.pc_device.buttons_04&0x2u)&&r.adapter->gearbox().state()==HPattern::State::Unavailable,"in a menu the gearbox is unavailable");
 }
 
+// The scene-aware gearbox entry point is shared by Native DirectInput and the shim adapter.
+void test_hpattern_modes(){
+    bool gates[6]{};gates[2]=true;
+    for(const std::int64_t tick:{16667,8333}){
+        HPattern h;std::int64_t now=0;
+        check(h.step_mode(gates,16,true,1,now)==0,"entering race: a released tick");
+        check(h.step_mode(gates,16,true,1,now+=tick)==1,"race: first up pulse");
+        for(int i=0;i<12;++i)check(h.step_mode(gates,16,true,1,now+=tick)==0,"slow gear response: no frame-based retry");
+        check(h.step_mode(gates,16,true,2,now+=tick)==1,"consumed gear advanced: next up pulse");
+        check(h.step_mode(gates,18,true,2,now+=tick)==0,"pause transition: released");
+        for(int i=0;i<240;++i)check(h.step_mode(gates,18,true,2,now+=tick)==0,"pause: no pulse or spent retry");
+        check(h.state()!=HPattern::State::Stopped,"long pause retains a fresh retry budget");
+        check(h.step_mode(gates,16,true,2,now+=tick)==0,"resume: released first");
+        check(h.step_mode(gates,16,true,2,now+=tick)==1,"resume: fresh pulse toward held gate");
+        check(h.step_mode(gates,16,true,3,now+=tick)==0,"target reached: release");
+        check(h.step_mode(gates,16,true,3,now+=tick)==0,"target reached: no shift");
+        check(h.step_mode(gates,3,false,0,now+=tick)==0,"menu transition: released");
+        check(h.step_mode(gates,3,false,0,now+=tick)==0,"menu: no shift");
+        check(h.step_mode(gates,16,true,1,now+=tick)==0,"new race: released first");
+        check(h.step_mode(gates,16,true,1,now+=tick)==1,"new race: no prior target or retry state");
+
+        HPattern stalled;now=0;int pulses=0;bool previous=false;
+        for(int i=0;i<240;++i){
+            const bool pulse=stalled.step_mode(gates,16,true,1,now+=tick)!=0;
+            check(!pulse||!previous,"a pulse always has a released tick");
+            previous=pulse;if(pulse)++pulses;
+        }
+        check(pulses==3&&stalled.state()==HPattern::State::Stopped,"unresponsive car: one pulse and two timed retries");
+    }
+    HPattern h;h.step_mode(gates,16,true,1,0);
+    gates[0]=true;
+    check(h.step_mode(gates,16,true,2,16000)==0&&h.state()==HPattern::State::Ambiguous,"two gates never select the higher one");
+    gates[0]=false;
+    for(std::uint32_t bad:{0u,7u,0xffffffffu})
+        check(h.step_mode(gates,16,true,bad,32000)==0,"invalid consumed gear: no shift");
+    check(h.step_mode(gates,16,false,1,48000)==0,"missing player car: no shift");
+    check(h.step_mode(gates,16,true,1,64000)==1,"valid unambiguous gate recovers");
+}
+
 // P25: pre-consumer exclusion of the WGI pad path.
 void test_pad_exclusion(){
     const std::vector<PadIdentity> pads{{0x346e,0x0006,"MOZA R12 Base"},{0x045e,0x02ff,"Xbox Controller"}};
@@ -560,7 +599,7 @@ void test_owned_pad_path(){
 }
 
 int main(){
-    try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_pad_exclusion();test_native_only();
+    try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_hpattern_modes();test_pad_exclusion();test_native_only();
         test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();
         test_action_table();test_hpattern_pause();test_owned_pad_path();test_horn();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}

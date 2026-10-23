@@ -1,5 +1,6 @@
 #include "wheel_input.hpp"
 #include "wheel_rescan.hpp"
+#include "outrun_adapter.hpp"
 #include "controls_store.hpp"
 #include "desktop_settings.hpp"
 #include "test_injection.hpp"
@@ -53,8 +54,7 @@ struct State {
     std::uint32_t previous_buttons{};
     std::chrono::steady_clock::time_point start;
     std::chrono::steady_clock::time_point next_scan;
-    std::uint32_t last_gear{},gear_stalls{},gear_target{};
-    bool gear_release{};
+    HPattern gearbox;
     bool keyboard_drives{};std::int32_t keyboard_anchor{};   // the race follows the keyboard (see wheel_input_filter)
     std::array<LONG,8> logged_axes{};
     unsigned rescans{};double rescan_ms_max{};   // after start (wheel_rescan.hpp): each one's reason and duration
@@ -319,19 +319,18 @@ void log_activity(){
         g.logged_axes[1],g.logged_axes[2],g.logged_axes[3],g.logged_axes[4],g.logged_axes[5],g.logged_axes[6],g.logged_axes[7]);
 }
 
-// H-pattern: one shift pulse every other frame toward the held gate's gear (car word +208). It stops after four
-// pulses without a gear change (top gear reached, automatic transmission, a shift the game refused).
-std::uint32_t gear_pulses(const platform::NativeRuntimeContext* runtime,bool race){
-    if(!race||!runtime||g.section.transmission!="H-pattern")return 0;
-    std::uint32_t target=0;
-    for(unsigned i=0;i<6;++i)if(value(GearActions[i])>=0.5)target=i+1;
-    if(!target){g.gear_target=0;return 0;}
-    std::uint32_t gear;std::memcpy(&gear,runtime->event_function36.car_select.car_799d18.data()+0x208,4);
-    if(gear!=g.last_gear||target!=g.gear_target){g.last_gear=gear;g.gear_target=target;g.gear_stalls=0;}
-    if(g.gear_release){g.gear_release=false;return 0;}
-    if(gear==target||g.gear_stalls>=4)return 0;
-    g.gear_release=true;++g.gear_stalls;
-    return 1u<<(gear<target?ShiftUp:ShiftDown);
+// Native and shared input use the same consumed-gear validation, retry timing and pause handling.
+std::uint32_t gear_pulses(const platform::NativeRuntimeContext* runtime){
+    if(g.section.transmission!="H-pattern")return 0;
+    bool gates[6];
+    for(unsigned i=0;i<6;++i)gates[i]=value(GearActions[i])>=0.5;
+    const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
+    const bool car=runtime&&(mode==16u||mode==18u);
+    std::uint32_t gear=0;
+    if(car)std::memcpy(&gear,runtime->event_function36.car_select.car_799d18.data()+0x208,4);
+    const auto now=std::chrono::duration_cast<std::chrono::microseconds>(WheelClock::now()-g.start).count();
+    const int dir=g.gearbox.step_mode(gates,mode,car,gear,now);
+    return dir?1u<<(dir>0?ShiftUp:ShiftDown):0u;
 }
 }
 
@@ -402,7 +401,7 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     if(!g.open.empty()){inject::poll();for(Device* d:g.open)poll(*d);log_activity();}
     std::uint32_t held=keys;
     if(!g.open.empty())for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
-    if(!g.open.empty())held|=gear_pulses(runtime,race);
+    held|=gear_pulses(runtime);
     const std::uint32_t down=held&~g.previous_buttons;
     g.previous_buttons=held;
     auto on=[](std::uint32_t bits,Button b){return (bits&(1u<<b))!=0;};
