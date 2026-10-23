@@ -191,6 +191,12 @@ int main(int argc,char** argv){
         const auto& banks=pmt_texture_replacement_banks();
         const auto& test=banks.at("cs_TEST_pmt");CHECK(test.folder&&test.looked==2&&test.replaced==1&&test.failed==1);
         CHECK(!banks.at("cs_OTHER_pmt").folder&&banks.at("cs_OTHER_pmt").looked==1&&banks.at("cs_SHORT_pmt").failed==1);
+        // The index keys are lexical (each path is the root plus its subpath): the same files and the same replacement
+        // however the root is spelled (a trailing separator, forward slashes, a "." part).
+        for(const auto& root:{dir.string()+"\\",dir.generic_string(),(dir/"."/"").string()}){
+            pmt_texture_replacement_configure(true,root);CHECK(pmt_texture_replacement_stats().files==3);
+            PcPmtResources r{};std::vector<std::uint8_t> v;bank("cs_TEST_pmt",r,v);Device d;load_synthetic(r,d);
+            CHECK(d.textures.size()==1&&d.texture_bytes[0]==dds);}
         pmt_texture_replacement_configure(false,{});fs::remove_all(dir);
     }
     // TextureMatchAnyFolder: the synthetic texture's file in other folders only (bank cs_VAR_pmt has no folder).

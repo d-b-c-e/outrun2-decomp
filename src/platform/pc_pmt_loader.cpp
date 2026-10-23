@@ -316,11 +316,14 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
     }
     if(!scene&&!ui)return;
     if(cache)try{r.file_cache=std::make_unique<TextureFileCache>(128u<<20);}catch(...){}
+    const auto started=std::chrono::steady_clock::now();
     std::error_code e;r.root=std::filesystem::u8path(load_folder);
     for(std::filesystem::recursive_directory_iterator it(r.root,e),end;!e&&it!=end;it.increment(e)){
         if(!it->is_regular_file(e))continue;
-        auto rel=std::filesystem::relative(it->path(),r.root,e).generic_u8string();
-        if(e||rel.size()<4||lower(rel.substr(rel.size()-4))!=".dds")continue;
+        // Lexical: the iterator's path is the root plus the subpath, so no filesystem call per file (relative() resolved
+        // both paths of every file, two handle opens each, before the window opened).
+        const auto rel=it->path().lexically_relative(r.root).generic_u8string();
+        if(rel.size()<4||lower(rel.substr(rel.size()-4))!=".dds")continue;
         const auto key=lower(std::string(rel.begin(),rel.end()));
         if(const auto slash=key.find('/');slash!=std::string::npos)r.folders.emplace(key.substr(0,slash),0);
         r.files.emplace(key,it->path());
@@ -329,8 +332,8 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
     const auto files=std::uint32_t(r.files.size());
     if(scene)r.stats.files=files;
     if(ui)r.ui_stats.files=files;
-    std::printf("texture replacement: %u files indexed under %s (scene %s, UI %s)\n",files,load_folder.c_str(),
-        scene?"on":"off",ui?"on":"off");
+    std::printf("texture replacement: %u files indexed under %s in %.0f ms (scene %s, UI %s)\n",files,load_folder.c_str(),
+        std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count(),scene?"on":"off",ui?"on":"off");
 }
 const PmtTextureReplacementStats& pmt_texture_replacement_stats(){return replacement().stats;}
 TextureFileCacheStats texture_file_cache_stats(){
