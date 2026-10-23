@@ -300,6 +300,18 @@ int main(){
         check(kept,"world-anchored 2D leaves the in-range quad's pixels as they were");
         const auto after=frame(0.);
         check(at(after,28,24,0)<50&&at(after,12,24,2)<50,"after the world-anchored draw the rectangle clips again");
+        // Three views (g_pc_triple_corrections): the camera's view is the centre third, so world-anchored 2D extends to
+        // that third's edges, not over the angled side panels. On 256 x 48 the thirds are 85.3 px wide and the 4:3
+        // rectangle is 96..160: the quad at -8..0 lands at 88..96 inside the centre third; the one at -24..-16 would land
+        // at 72..80, on the left panel, and stays clipped.
+        u.resize_back_buffer(256,48);
+        g_pc_triple_corrections=[](const float*,float*){return false;};g_pc_world_2d=true;
+        const auto three=frame(0.);
+        g_pc_world_2d=false;g_pc_triple_corrections=nullptr;
+        const auto at3=[&](unsigned x,unsigned ch){return three.size()>=256u*48u*4u?unsigned(three[(24u*256u+x)*4u+ch]):0u;};
+        check(at3(100,1)>200,"three views: the in-range quad at the rectangle's x 96..104");
+        check(at3(92,0)>200,"three views: world-anchored 2D draws out to the centre third's edge");
+        check(at3(76,2)<50,"three views: world-anchored 2D stays off the angled side panel");
     }
     // Texture CPU-copy lifetime (sana 44416): the D3D11 device uploads a file texture on its first draw and then releases
     // its RGBA copy (unless OR2_KEEP_TEXTURE_RGBA=1). The drawn texels are exact (point sampling, 2x magnification), and

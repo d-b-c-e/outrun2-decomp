@@ -237,8 +237,9 @@ inline float pc_world_2d_scale(){
 inline float pc_world_2d_x(float x){return x*pc_world_2d_scale();}
 // A 0..640 screen x (418CF0's particles) on the rectangle; unchanged when the factor is 1.
 inline float pc_world_2d_screen_x(float x){const float k=pc_world_2d_scale();return k==1.0f?x:320.0f+(x-320.0f)*k;}
-// While set, pretransformed back-buffer 2D may cover the whole back buffer at the rectangle's scale (d3d11_d3d9.cpp
-// ui_extension) instead of being clipped to the rectangle or mode 1's margin. Set around 418CF0's particle draw only:
+// While set, pretransformed back-buffer 2D may cover the camera's view at the rectangle's scale (d3d11_d3d9.cpp
+// ui_extension: the whole back buffer, or with three views its centre third) instead of being clipped to the rectangle
+// or mode 1's margin. Set around 418CF0's particle draw only:
 // the HUD keeps its clipping (the 4:3, or a span's centre panel).
 inline bool g_pc_world_2d=false;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;

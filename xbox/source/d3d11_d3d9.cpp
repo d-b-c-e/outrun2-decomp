@@ -536,9 +536,11 @@ void set_transparency_supersampling(bool on){g_transparency_supersampling=on;}
 float D3D11D3D9Device::ui_extension()const{
     if(!ui_rect_||colour_target_!=BackBuffer||soft_viewport_.x!=0.f||soft_viewport_.y!=0.f||
        soft_viewport_.w!=float(back_width_)||soft_viewport_.h!=float(back_height_))return 0.f;
-    if(platform::g_pc_world_2d){   // as far as the back buffer's edges at the rectangle's scale (apply_state's w)
+    if(platform::g_pc_world_2d){   // as far as the camera's view at the rectangle's scale (apply_state's w): the back
+        // buffer's edges, or with three views the centre third's (the side thirds show their own angled views).
         const double w=ui_aspect_==4./3.?double(back_h_)*4/3:double(back_h_)*ui_aspect_;
-        const double full=(double(back_w_)*back_width_/w-back_width_)/2;
+        const double view=platform::g_pc_triple_corrections?double(back_w_)/3.0:double(back_w_);
+        const double full=(view*back_width_/w-back_width_)/2;
         if(full>ui_spacing_)return float(full);
     }
     return float(ui_spacing_);

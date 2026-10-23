@@ -159,7 +159,8 @@ private:
     double ui_aspect_{4./3.},ui_spacing_{};
     // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport, all four
     // edges (sana 39535); any game sub-viewport, a full-width partial-height one included, keeps its own clipping.
-    // World-anchored 2D (pc_screen.hpp g_pc_world_2d) extends to the back buffer's edges instead.
+    // World-anchored 2D (pc_screen.hpp g_pc_world_2d) extends to the camera's view instead: the back buffer's edges, or
+    // with three views the centre third's.
     float ui_extension()const;
 };
 }
