@@ -118,6 +118,22 @@ const char* const FirstTimeSetup=
     "No saved controls to edit yet. Set up the wheel once in Wheelkit; after that, Edit bindings changes them here. "
     "With Native input, a Tweaks [DirectInput] setup is imported at start while its wheel is connected.";
 
+// What capture cannot measure, kept from the same device axis's saved binding: a centred axis's direction (normalize
+// takes it only from the explicit inversion, so steering never silently reverses) and a measured cal= that still fits
+// the captured range (a pedal's only in the captured direction). A calibration that no longer applies is dropped, and
+// the returned notice says so.
+static std::string carry_recapture(const std::string& action,const std::optional<ctl::Binding>& old,ctl::Binding& binding){
+    const bool same=old&&old->kind==ctl::Kind::Axis&&binding.kind==ctl::Kind::Axis&&old->dev==binding.dev&&
+        old->prod==binding.prod&&old->index==binding.index;
+    const auto shape=ctl::shapeOf(action);
+    if(same&&shape==ctl::Shape::Centred)binding.inverted=old->inverted;
+    if(!old||old->cal.empty())return {};
+    auto kept=binding;kept.cal=old->cal;
+    if(same&&old->min==binding.min&&old->max==binding.max&&ctl::calibrationFits(shape,kept)&&
+       (shape==ctl::Shape::Centred||(kept.cal[1]>kept.cal[0])==(binding.travel>0))){binding=kept;return {};}
+    return ". Its saved calibration no longer applies and was cleared; recalibrate this control in Wheelkit";
+}
+
 Editor::Editor(const std::string& path,bool ordinary):impl_(std::make_unique<Impl>(path,ordinary)){}
 Editor::~Editor()=default;
 bool Editor::opened()const{auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);return s.opened;}
@@ -171,12 +187,8 @@ void Editor::observe(const std::vector<edit::AcceptedObservation>& rows,double n
             captured=true;
             std::string why;
             auto binding=result->binding;
-            // A centred axis takes its direction only from the explicit inversion (normalize ignores rest and travel),
-            // which capture cannot measure: re-capturing the same device axis keeps it, so steering never silently reverses.
-            if(ctl::shapeOf(result->action)==ctl::Shape::Centred)
-                if(const auto old=s.draft->binding(result->action);old&&old->kind==ctl::Kind::Axis&&old->dev==binding.dev&&
-                   old->prod==binding.prod&&old->index==binding.index)binding.inverted=old->inverted;
-            if(s.draft->set(result->action,binding,why))s.message="Binding captured in the draft; Save to keep it";
+            const auto notice=carry_recapture(result->action,s.draft->binding(result->action),binding);
+            if(s.draft->set(result->action,binding,why))s.message="Binding captured in the draft; Save to keep it"+notice;
             else s.message=why;
         }
     }

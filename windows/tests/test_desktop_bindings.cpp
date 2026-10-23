@@ -106,8 +106,10 @@ void capture_and_conflict(const fs::path& root){
     sample.next();editor.observe(sample.rows(2.01),2.01,true); // one-second rest, then baseline
     sample.next();sample.frame.samples[0].physical.axes[0]=50000;editor.observe(sample.rows(2.02),2.02,true);
     auto state=editor.view(2.02,true);
-    check(state.dirty&&!state.listening&&state.binding&&state.binding->kind==ctl::Kind::Axis&&state.binding->cal.empty()&&read(path)==original,
-          "real capture flow stages a new axis without inventing calibration or saving");
+    // The same calibrated device axis, the same rest and direction: its measured cal= is kept, so nothing changes.
+    check(!state.dirty&&!state.listening&&state.binding&&state.binding->kind==ctl::Kind::Axis&&
+          state.binding->cal==std::vector<long>{1000,32767,64000}&&read(path)==original,
+          "real capture flow on the same calibrated axis keeps its measured calibration and saves nothing");
     editor.cancel();check(editor.open()&&read(path)==original,"Cancel after capture leaves exact original");
     sample.next();sample.frame.samples[0].physical.axes[0]=32767;editor.observe(sample.rows(3),3,true);
     check(editor.select_action("confirm")&&editor.select_device(sample.rows(3)[0],3,true)&&editor.begin_capture(3,true),
@@ -259,12 +261,57 @@ void first_time_setup(const fs::path& root){
     b::Editor editor(path.u8string(),true);check(editor.open()&&read(path)==valid,"a BOM and a lower-case header still open as the shared draft reads them");
     editor.cancel();
 }
+// A calibrated (Schema 2 cal=) Native profile. A same-axis re-capture keeps each measured calibration that still fits,
+// a pedal's only in the captured direction; a changed axis or direction clears it and the editor says to recalibrate.
+std::string native_cal_profile(){
+    ctl::Binding steer;steer.kind=ctl::Kind::Axis;steer.index=0;steer.dev=Wheel;steer.prod=Product;
+    steer.min=0;steer.max=65535;steer.rest=33265;steer.travel=1;steer.hasRange=steer.hasRest=true;
+    steer.cal={1000,33265,64000};steer.name="MOZA R12 Base";
+    auto throttle=steer;throttle.index=2;throttle.rest=500;throttle.cal={500,60000};
+    return "[Controls]\r\nSchema = 2\r\nProfile = Calibrated\r\nRevision = original\r\nTransmission = Sequential\r\n"
+        "steer = "+ctl::format(steer)+"\r\nthrottle = "+ctl::format(throttle)+"\r\n";
+}
+void native_calibration_recapture(const fs::path& root){
+    const auto path=root/"native-cal.ini";write(path,native_cal_profile());
+    auto sample=native_sample();double t=1;
+    // Listen on the saved device, then move one axis from `from` to `to` after the one-second rest.
+    auto capture=[&](b::Editor& editor,const char* action,int axis,std::int32_t from,std::int32_t to){
+        check(editor.select_action(action),"choose the action to re-capture");
+        sample.axes[std::size_t(axis)]=from;++sample.sequence;editor.observe(b::native_observations({sample},t),t,true);
+        check(editor.begin_capture(t,true),"capture on the saved Native device");
+        ++sample.sequence;editor.observe(b::native_observations({sample},t+1.01),t+1.01,true);
+        sample.axes[std::size_t(axis)]=to;++sample.sequence;editor.observe(b::native_observations({sample},t+1.02),t+1.02,true);
+        const auto state=editor.view(t+1.02,true);sample.axes[std::size_t(axis)]=from;t+=2;return state;
+    };
+    const auto recalibrate=[](const b::View& state){return state.message.find("recalibrate this control in Wheelkit")!=std::string::npos;};
+    b::Editor editor(path.u8string(),true);check(editor.open(),"a calibrated Native profile opens");
+    auto state=capture(editor,"steer",0,33265,50000);
+    check(state.binding&&state.binding->index==0&&state.binding->cal==std::vector<long>{1000,33265,64000}&&!recalibrate(state),
+          "re-capturing the same steering axis keeps its measured calibration");
+    state=capture(editor,"throttle",2,0,50000);
+    check(state.dirty&&state.binding&&state.binding->index==2&&state.binding->cal==std::vector<long>{500,60000}&&!recalibrate(state),
+          "re-capturing the same pedal axis in its calibrated direction keeps the calibration");
+    check(editor.save(true),"Save the re-captured controls");
+    outrun::desktop::Ini saved;check(saved.load(path.u8string()),"read the calibrated Save");
+    const auto section=ctl::parseSection(saved.section_lines("Controls"),outrun::desktop::ControlsReads);
+    auto cal=[&](const char* action){for(const auto& e:section.bound)if(e.action==action)return e.binding.cal;return std::vector<long>{};};
+    check(section.error.empty()&&section.schema==2&&cal("steer")==std::vector<long>{1000,33265,64000}&&cal("throttle")==std::vector<long>{500,60000},
+          "the next launch reads both calibrations");
+    b::Editor other(path.u8string(),true);check(other.open(),"reopen the saved calibrated profile");
+    state=capture(other,"steer",1,0,50000);
+    check(state.binding&&state.binding->index==1&&state.binding->cal.empty()&&recalibrate(state),
+          "a changed steering axis clears the calibration and says to recalibrate");
+    state=capture(other,"throttle",2,60000,1000);
+    check(state.binding&&state.binding->index==2&&state.binding->travel<0&&state.binding->cal.empty()&&recalibrate(state),
+          "a pedal captured in the other direction clears the calibration and says to recalibrate");
+    other.cancel();
+}
 int main(){
     fs::path root;
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);first_time_setup(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);first_time_setup(root);native_calibration_recapture(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}
