@@ -37,7 +37,8 @@ Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADM
   Tweaks' instruction addresses, so each Tweaks scope has to be mapped onto these functions.
 - `layer_429350` in `src/platform/pc_sprite_2d.cpp` is drawFootage's equivalent: it holds Tweaks' 4293F3, and the layer
   matrix it draws under is where the spacing shift goes.
-- `project_449940` in `race_particles_effects.cpp` is Calc3D2D.
+- `project_449940` in `race_particles_effects.cpp` is Calc3D2D. Its x rescale is `pc_screen.hpp` `pc_world_2d_x`,
+  applied at every hand-ported 449940 site except the lens flare (TRIPLE-SCREENS.md "World-anchored 2D").
 
 ## Proposal (small reviewed steps; default as Tweaks only after an in-game A/B)
 

@@ -7,6 +7,7 @@
 // colour interpolation 4160F0.
 #include "platform/race_particles_port.hpp"
 #include "driving/pc_d3dx.hpp"
+#include "platform/pc_screen.hpp"
 namespace outrun::platform::particles_detail {
 bool tire_smoke_test_41d180(P&,std::uint32_t);
 void smoke_born_41d1e0(P&,std::uint32_t);
@@ -90,7 +91,7 @@ void project_449940(P& p,float sx,float sy,std::uint32_t in,std::uint32_t out){
         p.putf(out+8,0.f);p.putf(out+4,0.f);p.putf(out,0.f);return;
     }
     const float inv=1.0f/(0.0f-l.z);
-    p.putf(out,(inv*sx)*l.x);
+    p.putf(out,pc_world_2d_x((inv*sx)*l.x));   // Tweaks' Calc3D2D (pc_screen.hpp)
     const float k=inv*sy;
     p.putf(out+4,l.y*k);
     p.putf(out+8,l.z);

@@ -253,7 +253,7 @@ bool mission_project_495d90(MissionRaceServices& r,bool flag,float& x,float& y){
     const float z=t.z;
     // fcomip eps,|z|; jbe: projection unless eps > |z| (NaN projects).
     if(1.1920928955078125e-07f>std::fabs(z))v={0,0,0};                        // fcomip: exact compare
-    else{const float w=1.0f/(0.0f-z);const float wx=w*a0;const float wy=w*a1;v={wx*t.x,t.y*wy,z};}
+    else{const float w=1.0f/(0.0f-z);const float wx=w*a0;const float wy=w*a1;v={pc_world_2d_x(wx*t.x),t.y*wy,z};}
     driving::pc_matrix_pop(st);                                             // 40A010
     x=v.x;y=0.0f-v.y;return true;
 }

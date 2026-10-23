@@ -472,6 +472,19 @@ Checks:
 - `test_triple_screens`: the factor per mode and topology, and the pixel identity on the device mapping;
 - `test_d3d11_vertex_path`: WARP, with the world flag drawing outside the rectangle at its scale, the HUD unchanged.
 
+P2, the Calc3D2D sites (`pc_world_2d_x`, Tweaks' x * screen_scale x / y right after the projection, before any clamp or
+angle, as the Tweaks hook does):
+- race_hud_navi: the rank-gap markers, 4BBC70, 4BB640 rivals, 4BB300 LAN, the 2C0023 marker, and 4295D0 sprite3d;
+- race_traffic's 449940 (the heart meter and eval, the heart objects, rings and their screen angle);
+- mission_manager 495E90, race_particles_effects' spark, and the translated external route at 4FAF3F.
+
+Out of scope until its draw path is proved: the lens flare at race_course_passes (`|x| < 470` also gates the flare).
+
+These are queued HUD draws, so they keep the HUD's clipping:
+- mode 1 at 16:9 shows them all, because its margin reaches the frame;
+- mode 2 and a span clip those outside the 4:3 or the centre panel, instead of drawing them squeezed inside it;
+- 4BBC70's ±290 clamp keeps its marker inside the 4:3, as in Tweaks.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,

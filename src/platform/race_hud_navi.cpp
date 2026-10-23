@@ -908,7 +908,7 @@ bool navi_rival_labels_4bad20_impl(NaviPubServices& s,std::uint32_t car){
         const auto t=driving::pc_matrix_point(st,p);
         const float a0=m.f32(camera+0xb0),a1=m.f32(camera+0xb4);
         if(1.1920928955078125e-07f>std::fabs(t.z))p={0,0,0};                  // fcomip: exact compare
-        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={wx*t.x,t.y*wy,t.z};}
+        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={pc_world_2d_x(wx*t.x),t.y*wy,t.z};}
         driving::pc_matrix_pop(st);
         const float z=p.z;const std::int32_t diff=rem-mine;
         if(z>200.0f||-500.0f>z||diff>0x7f||diff<-0x1a)continue;
@@ -998,7 +998,7 @@ bool marker_4bbc70(N& n,std::uint32_t target,std::uint32_t player,std::uint32_t 
     const auto t=driving::pc_matrix_point(st,p);
     const float a0=m.f32(camera+0xb0),a1=m.f32(camera+0xb4);
     if(1.1920928955078125e-07f>std::fabs(t.z))p={0,0,0};
-    else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={wx*t.x,t.y*wy,t.z};}
+    else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={pc_world_2d_x(wx*t.x),t.y*wy,t.z};}
     driving::pc_matrix_pop(st);                            // 40A010
     const std::int32_t bp=m.u16(target+0x260),bx=m.u16(player+0x260);
     const std::int32_t d=(m.u8(target+4)&0x60)?bp-bx:std::int32_t(m.u16(player+0x25e))-std::int32_t(m.u16(target+0x25e))-bx+bp;
@@ -1219,7 +1219,7 @@ bool rival_markers_4bb640(N& n){
         const auto t=driving::pc_matrix_point(st,p);
         const float a0=m.f32(cam+0xb0),a1=m.f32(cam+0xb4);
         if(1.1920928955078125e-07f>std::fabs(t.z))p={0,0,0};
-        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={wx*t.x,t.y*wy,t.z};}
+        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={pc_world_2d_x(wx*t.x),t.y*wy,t.z};}
         driving::pc_matrix_pop(st);
         const float z=p.z;
         std::int32_t lift=m.i32(0x689210)-cvtt(z*-2.0f);
@@ -1255,7 +1255,7 @@ bool lan_markers_4bb300(N& n){
         const auto t=driving::pc_matrix_point(st,p);
         const float a0=m.f32(cam+0xb0),a1=m.f32(cam+0xb4);
         if(1.1920928955078125e-07f>std::fabs(t.z))p={0,0,0};
-        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={wx*t.x,t.y*wy,t.z};}
+        else{const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;p={pc_world_2d_x(wx*t.x),t.y*wy,t.z};}
         driving::pc_matrix_pop(st);
         const float z=p.z;
         if(-500.0f>z)continue;                                               // 5B43F4 (comiss / ja)
@@ -1705,7 +1705,7 @@ bool target_marker_4bbaf0(N& n,std::uint32_t t){
     const auto q=driving::pc_matrix_point(st,p);
     const float a0=m.f32(cam+0xb0),a1=m.f32(cam+0xb4);
     if(1.1920928955078125e-07f>std::fabs(q.z))p={0,0,0};
-    else{const float w=1.0f/(0.0f-q.z);const float wx=w*a0;const float wy=w*a1;p={wx*q.x,q.y*wy,q.z};}
+    else{const float w=1.0f/(0.0f-q.z);const float wx=w*a0;const float wy=w*a1;p={pc_world_2d_x(wx*q.x),q.y*wy,q.z};}
     driving::pc_matrix_pop(st);
     float target;
     if(p.z>10.0f)target=0.0f;
@@ -1996,7 +1996,7 @@ bool navi_sprite3d_4295d0(NaviPubServices& s,std::uint32_t token,const std::arra
         driving::pc_matrix_pop(st);
         const float a0=m.f32(cam+0xb0),a1=m.f32(cam+0xb4);
         float px=0.0f,py=0.0f,pz=0.0f;
-        if(!(1.1920928955078125e-07f>std::fabs(t.z))){const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;px=wx*t.x;py=t.y*wy;pz=t.z;}
+        if(!(1.1920928955078125e-07f>std::fabs(t.z))){const float w=1.0f/(0.0f-t.z);const float wx=w*a0;const float wy=w*a1;px=pc_world_2d_x(wx*t.x);py=t.y*wy;pz=t.z;}
         const float nz=-pz;                                                        // fchs
         if(nz<m.f32(cam+0xbc))return true;                                        // behind the near plane
         float sc=0.0f;

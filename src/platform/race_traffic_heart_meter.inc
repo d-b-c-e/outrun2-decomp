@@ -6,7 +6,7 @@
         const float px=f32(f(0)),py=f32(f(4)),pz=f32(f(8));
         if(X87(K(0x6281f0u))>X87(std::fabs(pz))){pf(out+8,0.0f);pf(out+4,0.0f);pf(out,0.0f);return X87(K(0x619a34u));}
         const float r=sdiv(K(0x62806cu),ssub(0.0f,pz));
-        pf(out,smul(smul(r,a),px));const float s=smul(r,b);pf(out+4,smul(py,s));pf(out+8,pz);
+        pf(out,pc_world_2d_x(smul(smul(r,a),px)));const float s=smul(r,b);   // x: Tweaks' Calc3D2D (pc_screen.hpp)pf(out+4,smul(py,s));pf(out+8,pz);
         return X87(s);
     }
     // 4393A6 D3DXMatrixTranslation(out, x, y, z).

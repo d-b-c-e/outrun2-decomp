@@ -6,6 +6,7 @@
 #include "platform/title_owner.hpp"          // 465160 sprite resources (request objects)
 #include "platform/frontend_ui_resources.hpp"
 #include "platform/native_runtime.hpp"
+#include "platform/pc_screen.hpp"
 #include "platform/race_area_runtime.hpp"
 #include "platform/race_manager_runtime.hpp"
 #include "platform/native_race_effects.hpp"
@@ -104,7 +105,7 @@ const TranslatedModule* request_clock_module(){
                 memory.putf(out,0.f);memory.putf(out+4u,0.f);memory.putf(out+8u,0.f);
             }else{
                 const float inv=1.0f/(0.0f-p.z);
-                memory.putf(out,(inv*sx)*p.x);
+                memory.putf(out,pc_world_2d_x((inv*sx)*p.x));   // Tweaks' Calc3D2D (pc_screen.hpp)
                 memory.putf(out+4u,p.y*(inv*sy));
                 memory.putf(out+8u,p.z);
             }
