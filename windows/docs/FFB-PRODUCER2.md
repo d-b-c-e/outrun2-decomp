@@ -20,6 +20,15 @@ Only `Inputs.has_steer`, `steer`, `speed_mps` and one-tick `gear_shift` can be p
 
 `Row` also carries an observation-only wall classification; nothing reads it into the model, so impact stays zero. It reads the wall-rebound timer `+0x283`, contact side `+0x281` and wall-contact bit `+0x4 & 0x20000` (`car_body_wall_coli_check`). `+0x283` has one nonzero writer, `cw_rebound_status` setting 30 (`pc_wall_rebound.cpp:164`, original `0x503BC3`), counts down at `pc_common_control.cpp:689`, and is zeroed by car init at `0x4A7917`. A computed row reports `Rebound` when `+0x283` strictly rises against the previous computed or primed sample, and `Scrape` for wall contact without a rise. Priming takes the current timer as its baseline, so a timer still running at start, respawn, resume or after a reset is not a new rebound. The hit-reaction counter `+0x282` is excluded because a scrape re-arms it every contact tick; traffic hits are not covered. The trace schema is unchanged.
 
+The rebound is not wired into the toolkit impact term; two gaps remain:
+- **Direction is unproven.** The model's positive force pushes toward positive steer (right), so a signed `impact_direction` needs the wall side in steer terms.
+  - `+0x281` is the quadrant of the contact point in body-local x/z: `cbw_coli_wall`, `pc_wall_controller.cpp:146-147`, from `coli_set_obsolete`'s weighted body-shape points.
+  - Nothing proves whether local +x is left or right of +steer. Steering writes wheel angle `+0x32 = -(1/b) * +0x202 * p[0x18A4]` (`pc_steering.cpp:56-60`), with `b` built from the car parameters `p[0x18A4]`, `p[0x18F0]` and the geometry angle, so its sign is parameter data, not code.
+  - The rebound's own heading step (`+0x286`/`+0x288` in `cw_rebound_status` and `reb_pl_body_sub2_4a0320`) is a game yaw correction, not a wheel measurement.
+  - The model's `impact_direction = 0` fallback (`-sign(steer)`, or +1 at centre) is a feel heuristic, not a proven direction.
+  - Closing this needs a runtime witness of `+0x281`, `+0x202` and the visible wall side at a known left or right wall.
+- **Zero gain is not output-neutral in the existing term.** `Model::compute` marks `impact > 0` as an event for `impact_seconds` (0.12 s) even when `impact_strength` is 0. Unlike `gear_shift`, which checks `shift_strength > 0`, this changes `model_event`, and `Shaper::shape` then skips smoothing and slew for those ticks. An adapter must leave `Inputs.impact` at 0 unless its gain is above zero.
+
 The [player-model boundary](FFB-PRODUCER2-PLAYER-BOUNDARY.md) traces the recovery call sites and independent settings/selection work. The ordinary software witness does not qualify a physical output path.
 
 | Raw previous-tick sample | Normalized model request |
