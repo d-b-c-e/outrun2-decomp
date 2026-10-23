@@ -129,6 +129,28 @@ int main(){
         g.frame_counter=24;g.attempt=1;s.gate=g;throwing.before_frame(g);throwing.observe(s);
         require(throwing.active()&&throwing.trace_failed()&&requests==4,
                 "throwing trace writer cannot detach selected request sink");
+        // A rebound timer re-armed while paused is not reported as a rebound when play resumes.
+        std::array<std::uint8_t,0xd52> wall{};
+        put(wall,0x1f8,72.0f);put(wall,0x208,std::uint32_t(2));
+        producer::Row last{};
+        Core walls([](const std::string&){return true;},{},[&](const Gate&,const producer::Row& row){last=row;});
+        Gate w{};w.mode=16;w.generation=1;w.car_active=true;w.frame_counter=50;w.attempt=1;
+        Sample ws{};ws.car=wall.data();ws.car_bytes=wall.size();ws.producer_fresh=true;
+        auto wall_step=[&]{ws.gate=w;walls.before_frame(w);walls.observe(ws);};
+        wall_step();require(last.state==producer::State::Primed,"wall stream primes");
+        w.frame_counter=51;w.attempt=2;put(wall,0x283,std::uint8_t(30));wall_step();
+        require(last.wall_event==producer::WallEvent::Rebound,"shadow reports a fresh rebound");
+        w.frame_counter=52;w.attempt=3;put(wall,0x283,std::uint8_t(25));wall_step();
+        require(last.state==producer::State::Computed&&last.wall_event==producer::WallEvent::None,"countdown is quiet");
+        w.frame_counter=53;w.attempt=4;w.paused=true;walls.before_frame(w);
+        require(last.state==producer::State::Neutral&&last.wall_event==producer::WallEvent::None,"pause neutralizes");
+        put(wall,0x283,std::uint8_t(30));
+        w.frame_counter=54;w.attempt=5;w.paused=false;wall_step();
+        require(last.state==producer::State::Primed&&last.wall_event==producer::WallEvent::None,
+                "resume with a re-armed timer primes without a rebound");
+        w.frame_counter=55;w.attempt=6;put(wall,0x283,std::uint8_t(29));wall_step();
+        require(last.state==producer::State::Computed&&last.wall_event==producer::WallEvent::None,
+                "the countdown after resume stays quiet");
         std::printf("ffb shadow %d checks passed\n",checks);return 0;
     }catch(const std::exception& ex){std::fprintf(stderr,"ffb shadow failed: %s\n",ex.what());return 1;}
 }

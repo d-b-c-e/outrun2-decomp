@@ -18,6 +18,8 @@ The pure `Frame` requires an external, nonzero race epoch and car generation, a 
 
 Only `Inputs.has_steer`, `steer`, `speed_mps` and one-tick `gear_shift` can be populated. `has_steer_rate`, `has_front_lateral_force`, `has_lateral_g`, `has_longitudinal_g`, `has_slip` and `has_drift` stay false. Texture and impact stay zero. Car `+0x1D0/+0x1D4` are speed differences, and `+0x264/+0x268` are road-edge cross-distances, so they never enter these request fields. `+0x24C..+0x258` surface words can be stale when road result 1 skips their write, so they remain unavailable too.
 
+`Row` also carries an observation-only wall classification; nothing reads it into the model, so impact stays zero. It reads the wall-rebound timer `+0x283`, contact side `+0x281` and wall-contact bit `+0x4 & 0x20000` (`car_body_wall_coli_check`). `+0x283` has one nonzero writer, `cw_rebound_status` setting 30 (`pc_wall_rebound.cpp:164`, original `0x503BC3`), counts down at `pc_common_control.cpp:689`, and is zeroed by car init at `0x4A7917`. A computed row reports `Rebound` when `+0x283` strictly rises against the previous computed or primed sample, and `Scrape` for wall contact without a rise. Priming takes the current timer as its baseline, so a timer still running at start, respawn, resume or after a reset is not a new rebound. The hit-reaction counter `+0x282` is excluded because a scrape re-arms it every contact tick; traffic hits are not covered. The trace schema is unchanged.
+
 The [player-model boundary](FFB-PRODUCER2-PLAYER-BOUNDARY.md) traces the recovery call sites and independent settings/selection work. The ordinary software witness does not qualify a physical output path.
 
 | Raw previous-tick sample | Normalized model request |

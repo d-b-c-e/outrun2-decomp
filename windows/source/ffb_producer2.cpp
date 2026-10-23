@@ -65,7 +65,7 @@ std::string trace_csv(const Row& row){
 }
 
 Stream::Stream(const Strengths& strengths):model_(model_settings(strengths)),shaper_(preview_shaper_settings()){}
-void Stream::reset(){model_.reset();shaper_.reset();epoch_=generation_=gear_=0;tick_=0;armed_=false;}
+void Stream::reset(){model_.reset();shaper_.reset();epoch_=generation_=gear_=0;rebound_=0;tick_=0;armed_=false;}
 Row Stream::step(const Frame& frame){
     Row row;
     row.epoch=frame.race_epoch;row.car_generation=frame.car_generation;row.source_tick=frame.source_tick;
@@ -87,8 +87,12 @@ Row Stream::step(const Frame& frame){
     if(row.steer_202<-32512||row.steer_202>32512||row.steer_202%256!=0)return neutral(Reason::InvalidSteer);
     if(!std::isfinite(row.hud_kmh_1f8)||row.hud_kmh_1f8<0.f||row.hud_kmh_1f8>600.f)return neutral(Reason::InvalidSpeed);
     if(row.gear_208>7u)return neutral(Reason::InvalidGear);
+    row.rebound_283=at<std::uint8_t>(frame.car,0x283);
+    row.contact_side_281=at<std::uint8_t>(frame.car,0x281);
+    row.wall_contact=(at<std::uint32_t>(frame.car,0x4)&0x00020000u)!=0u;
     if(!armed_||epoch_!=frame.race_epoch||generation_!=frame.car_generation){
         reset();epoch_=frame.race_epoch;generation_=frame.car_generation;gear_=row.gear_208;tick_=frame.source_tick;armed_=true;
+        rebound_=row.rebound_283; // a timer already running at start/respawn/resume is not a new rebound
         row.state=State::Primed;row.reason=Reason::NewEpochOrCar;return row; // no output on start/respawn
     }
     if(frame.source_tick<=tick_||frame.source_tick-tick_!=1u)return neutral(Reason::DiscontinuousTick);
@@ -100,6 +104,8 @@ Row Stream::step(const Frame& frame){
     row.model_event=model_.last_was_event;
     row.shaped_force=shaper_.shape(row.model_force,row.hud_kmh_1f8,frame.dt_seconds,row.model_event);
     if(model_.last_input_rejected||shaper_.last_input_rejected)return neutral(Reason::Rejected);
+    row.wall_event=row.rebound_283>rebound_?WallEvent::Rebound:row.wall_contact?WallEvent::Scrape:WallEvent::None;
+    rebound_=row.rebound_283;
     gear_=row.gear_208;tick_=frame.source_tick;
     row.state=State::Computed;row.reason=Reason::None;
     return row;

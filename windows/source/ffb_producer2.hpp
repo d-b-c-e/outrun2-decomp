@@ -25,6 +25,11 @@ struct Frame {
 };
 
 enum class State { Neutral, Primed, Computed };
+// Observation only: nothing reads it into the model, so it adds no force. Rebound is a strict rise of the
+// wall-rebound timer +283, which only cw_rebound_status sets (30) and pc_common_control.cpp:689 counts down;
+// Scrape is wall contact (+4 bit 0x20000, car_body_wall_coli_check) without that rise. The hit counter +282 is
+// not used: a scrape re-arms it every contact tick. Traffic hits are not covered.
+enum class WallEvent { None, Rebound, Scrape };
 enum class Reason { None, OutsideGame, Unproven, ShortCar, StaleSteer, InvalidSteer, InvalidSpeed,
                     InvalidGear, InvalidTime, DiscontinuousTick, NewEpochOrCar, Rejected };
 
@@ -37,6 +42,10 @@ struct Row {
     std::int16_t steer_202{};         // signed game-consumed command << 8, not a wheel angle
     float hud_kmh_1f8{};             // HUD metric base, converted to m/s below
     std::uint32_t gear_208{};
+    std::uint8_t rebound_283{};       // wall-rebound timer, 30 at a rebound
+    std::uint8_t contact_side_281{};  // contact quadrant 0..3 from cbw_coli_wall
+    bool wall_contact{};              // +4 bit 0x20000 this tick
+    WallEvent wall_event{WallEvent::None};  // Computed rows only
     dbce::force::Inputs request{};   // only has_steer and speed_mps are populated; gear_shift is an event
     float model_force{},shaped_force{};
     bool model_event{};
@@ -59,6 +68,7 @@ private:
     dbce::force::Model model_;
     dbce::force::Shaper shaper_;
     std::uint32_t epoch_{},generation_{},gear_{};
+    std::uint8_t rebound_{};
     std::uint64_t tick_{};
     bool armed_{};
 };

@@ -124,9 +124,55 @@ void test_epoch_menu_respawn_and_trace(){
     check(csv.find("new-epoch-or-car")!=std::string::npos&&csv.find(",0,0,0,0,0,0,0,0,")!=std::string::npos,
           "trace records reset reason and unavailable channels");
 }
+void test_wall_rebound_observation(){
+    // Observation only: +283 rebound timer, +4 bit 0x20000 wall contact and +281 side. No force channel reads it.
+    Car c;p2::Stream s;
+    auto contact=[&](bool on){put<std::uint32_t>(c.bytes,0x4,on?0x00020000u:0u);};
+    auto timer=[&](std::uint8_t v){put<std::uint8_t>(c.bytes,0x283,v);};
+    auto r=s.step(c.frame(1));
+    check(r.state==p2::State::Primed&&r.wall_event==p2::WallEvent::None,"start primes with no wall event");
+    timer(30);contact(true);put<std::uint8_t>(c.bytes,0x281,2);
+    r=s.step(c.frame(2));
+    check(r.state==p2::State::Computed&&r.wall_event==p2::WallEvent::Rebound&&r.rebound_283==30&&
+          r.wall_contact&&r.contact_side_281==2,"a timer rise is one rebound, with its contact side");
+    timer(29);contact(false);
+    check(s.step(c.frame(3)).wall_event==p2::WallEvent::None,"the countdown is not a new rebound");
+    timer(28);contact(true);
+    check(s.step(c.frame(4)).wall_event==p2::WallEvent::Scrape,"contact without a timer rise is a scrape");
+    timer(30);
+    check(s.step(c.frame(5)).wall_event==p2::WallEvent::Rebound,"a re-arm during the countdown is a new rebound");
+    check(s.step(c.frame(6)).wall_event==p2::WallEvent::Scrape,"an unchanged timer is not another rebound");
+    timer(0);contact(false);
+    check(s.step(c.frame(7)).wall_event==p2::WallEvent::None,"a reset to zero cannot fire");
+    put<std::uint8_t>(c.bytes,0x282,24);
+    check(s.step(c.frame(8)).wall_event==p2::WallEvent::None,"the +282 hit counter alone is ignored");
+    timer(30);
+    r=s.step(c.frame(1,1,2));
+    check(r.state==p2::State::Primed&&r.wall_event==p2::WallEvent::None,"a respawn with a running timer primes silently");
+    timer(29);
+    check(s.step(c.frame(2,1,2)).wall_event==p2::WallEvent::None,"the respawn countdown stays quiet");
+    auto f=c.frame(3,1,2);f.mode=18;
+    check(s.step(f).state==p2::State::Neutral,"pause or menu is neutral");
+    timer(30);
+    r=s.step(c.frame(4,1,2));
+    check(r.state==p2::State::Primed&&r.wall_event==p2::WallEvent::None,"a timer raised across a pause primes, no rebound");
+    check(s.step(c.frame(6,1,2)).reason==p2::Reason::DiscontinuousTick,"a source-tick gap is neutral");
+    r=s.step(c.frame(7,1,2));
+    check(r.state==p2::State::Primed&&r.wall_event==p2::WallEvent::None,"after a gap the running timer primes silently");
+    // The model sees the same inputs with or without the wall bytes: impact stays unavailable and unwired.
+    Car plain,walled;
+    for(Car* car:{&plain,&walled})put<std::int16_t>(car->bytes,0x202,std::int16_t(16384));
+    p2::Stream a,b;a.step(plain.frame(1));b.step(walled.frame(1));
+    put<std::uint8_t>(walled.bytes,0x283,30);put<std::uint32_t>(walled.bytes,0x4,0x00020000u);
+    const auto pr=a.step(plain.frame(2)),wr=b.step(walled.frame(2));
+    check(wr.wall_event==p2::WallEvent::Rebound&&pr.wall_event==p2::WallEvent::None,"only the walled car reports a rebound");
+    check(wr.model_force==pr.model_force&&wr.shaped_force==pr.shaped_force&&wr.request.impact==0&&
+          wr.request.texture==0,"a rebound changes no force");
+}
 }
 int main(){
-    try{test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();}
+    try{test_game_producers_and_seam();test_unavailable_fields_and_guards();test_epoch_menu_respawn_and_trace();
+        test_wall_rebound_observation();}
     catch(const std::exception& e){std::cerr<<"producer@2: FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"producer@2 software preview: "<<checks<<" checks passed\n";
 }
