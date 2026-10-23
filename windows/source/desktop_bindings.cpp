@@ -39,6 +39,31 @@ std::vector<edit::AcceptedObservation> accepted_observations(const sh::Frame& fr
     }
     return out;
 }
+std::vector<edit::AcceptedObservation> native_observations(const std::vector<NativeSample>& samples,double now){
+    std::vector<edit::AcceptedObservation> out;
+    if(!std::isfinite(now)||samples.size()>64)return out;
+    for(const auto& s:samples){
+        if(!s.epoch||!s.sequence)continue;
+        edit::AcceptedObservation row;
+        row.instance=s.dev;row.product=s.prod;row.name=s.name;
+        // The Native reader has no interface path: its key is the instance it opened, renewed by the epoch at each reopen.
+        row.identity_key="native:"+s.dev;row.epoch=s.epoch;row.sequence=s.sequence;row.seen=now;
+        // shortcut: DIDEVCAPS gives axis counts, not which axes exist, so all eight are offered at the reader's 0..65535; an
+        // absent axis reads a constant 0 and never captures. Upgrade to GetObjectInfo if a device reports a phantom axis.
+        row.axis_mask=row.range_mask=0xffu;
+        for(std::size_t i=0;i<8;++i){row.minimum[i]=0;row.maximum[i]=65535;row.sample.axes[i]=s.axes[i];}
+        for(std::size_t i=0;i<std::min<std::size_t>(s.buttons,128);++i){row.button_mask.set(i);row.sample.buttons[i]=(s.button_state[i]&0x80u)!=0;}
+        for(std::size_t i=0;i<std::min<std::size_t>(s.povs,4);++i){
+            row.hat_mask|=1u<<i;
+            const auto angle=s.pov_state[i];
+            row.sample.hats[i]=(angle&0xffffu)==0xffffu?-1:angle<36000u?std::int32_t(angle):36000;
+        }
+        // A read outside the reader's range (its range set failed) or a malformed identity never enters capture.
+        if(edit::nonzero_guid(row.instance)&&edit::nonzero_guid(row.product)&&edit::ranges_valid(row)&&edit::valid_utf8(row.name))
+            out.push_back(std::move(row));
+    }
+    return out;
+}
 bool action_kind(const std::string& action,ctl::Kind kind){
     if(unavailable_reason(action))return false;
     switch(ctl::shapeOf(action)){
@@ -61,7 +86,7 @@ struct Editor::Impl {
         if(file_changed){message="Stop FFB saved Off. Binding edits are kept but cannot be saved; cancel editing and reopen to use the updated file.";return false;}
         if(!ordinary||!opened||!draft||restart_required||!can_edit){
             message=restart_required?"Restart before editing again; the backup and draft are kept":
-                "Editing needs ordinary shared input, the Controls page and game focus";
+                "Editing needs ordinary input, the Controls page and game focus";
             return false;
         }
         return true;

@@ -112,7 +112,7 @@ struct Panel {
     int quality_pending{quality::Custom};
     bool quality_details{},quality_can_undo{},quality_ready{true};
     std::unique_ptr<bindings::Editor> binding_editor;
-    bool binding_shared{};
+    bool binding_shared{},binding_native{};   // the ordinary capture host: the shared shim or the Native reader
     int binding_group{};
     bool wav_decoder{},flac_decoder{};   // optional music decoders in this build, queried once at startup
     xbox_runtime::InputFilter inner{};
@@ -240,8 +240,9 @@ void graphics_slider(const char* label,int* value,int max,const char* key,const 
         keep(value,before,[&]{return save("Graphics",key,std::to_string(*value));});
 }
 double binding_now(){return double(GetTickCount64())/1000.0;}
+bool binding_host_ready(){return p.binding_shared?shim_input_binding_edit_allowed():p.binding_native&&wheel_input_binding_edit_allowed();}
 bool binding_can_edit(){
-    if(p.latched||p.playback||!p.binding_shared||!binding_visible.load(std::memory_order_relaxed)||!dbce::panel::IsOpen()||!shim_input_binding_edit_allowed())return false;
+    if(p.latched||p.playback||!binding_host_ready()||!binding_visible.load(std::memory_order_relaxed)||!dbce::panel::IsOpen())return false;
     const auto window=static_cast<HWND>(xbox_runtime::native_window().hwnd);DWORD pid=0;
     if(!window||GetForegroundWindow()!=window)return false;
     GetWindowThreadProcessId(window,&pid);return pid==GetCurrentProcessId();
@@ -276,8 +277,7 @@ bool draw_binding_editor(){
         return true;
     }
     if(!can_edit){
-        dbce::panel::Status("Editing",!p.binding_shared?"Shared input setup is needed. Apply the setup in Wheelkit, then restart.":
-            !shim_input_binding_edit_allowed()?"Ordinary shared input is unavailable or this is a recording session. Check setup and restart.":
+        dbce::panel::Status("Editing",!binding_host_ready()?"Ordinary input is unavailable or this is a recording session. Check setup and restart.":
             "Bring the game into focus to continue editing.",dbce::panel::Tone::Warning);
         if(dbce::panel::Command("Cancel editing"))p.binding_editor->cancel();
         return true;
@@ -316,7 +316,7 @@ bool draw_binding_editor(){
     if(state.selection==dbce::controls::edit::SelectionMode::Unavailable){device=int(names.size());names.push_back("Selected device unavailable");}
     std::vector<const char*> devices;for(const auto& name:names)devices.push_back(name.c_str());
     if(dbce::panel::Choice("Capture device",devices.data(),int(devices.size()),&device,
-            "Only devices already used by shared input are listed. Add a first or different device in Wheelkit.")){
+            "Only devices the game already reads are listed. Add a first or different device in Wheelkit.")){
         if(device==0)p.binding_editor->select_device(std::nullopt,now,can_edit);
         else if(device<=int(state.devices.size()))p.binding_editor->select_device(state.devices[std::size_t(device-1)],now,can_edit);
     }
@@ -343,7 +343,7 @@ bool draw_binding_editor(){
 }
 void binding_setup(){
     dbce::panel::Heading("Bindings");
-    if(p.binding_shared&&p.binding_editor){
+    if((p.binding_shared||p.binding_native)&&p.binding_editor){
         if(dbce::panel::Command("Edit bindings")&&!p.binding_editor->open()){
             const auto failed=p.binding_editor->view(binding_now(),false);
             dbce::panel::NoteSaved(false,failed.message.c_str());
@@ -354,15 +354,7 @@ void binding_setup(){
     }
     const char* next=v.transmission_next==1?"H-pattern, gears 1-6":v.transmission_next==0?"Sequential":"Saved mode is kept";
     dbce::panel::Status("Shifter at next start",next);
-    if(!p.binding_shared&&!p.latched&&!p.playback){
-        static const char* const modes[]{"Sequential","H-pattern (gears 1-6)","Keep saved mode"};
-        const int before=v.transmission_next;
-        if(dbce::panel::Choice("Shifter input",modes,before==2?3:2,&v.transmission_next,
-                "Saves the shifter mode for the next start. Choose Manual separately in the game.")){
-            if(v.transmission_next<2)keep(&v.transmission_next,before,[&]{return save("Controls","Transmission",v.transmission_next==1?"H-pattern":"Sequential");});
-        }
-        dbce::panel::Text("Binding capture needs shared input. Apply setup in Wheelkit, then restart.");
-    }else dbce::panel::Text("Change the shifter mode in Edit bindings, then Save. Choose Manual separately in the game.");
+    dbce::panel::Text("Change the shifter mode in Edit bindings, then Save. Choose Manual separately in the game.");
     dbce::panel::Status("Shifter in this session",p.transmission_current.c_str());
 }
 void page_controls(bool advanced){
@@ -1056,6 +1048,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
      p.applied_strengths=selected.strengths;p.model_refusal=selected.refusal;}
     p.ini=settings.path();p.quality_backup=p.ini+".graphics-undo.ini";
     p.binding_shared=!latched&&!playback&&shim_backend_selected(settings);
+    p.binding_native=!latched&&!playback&&!p.binding_shared;
     p.binding_editor=std::make_unique<bindings::Editor>(p.ini,!latched&&!playback);
     {Ini undo;
      if(undo.load(p.quality_backup)&&quality::read_undo(undo,p.quality_undo,p.quality_expected))
@@ -1200,7 +1193,8 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     if(p.inner)p.inner(out,rt);
     if(p.binding_editor&&p.binding_editor->opened()){
         if(desktop_panel_open()&&binding_visible.load(std::memory_order_relaxed)){
-            try{p.binding_editor->observe(shim_input_binding_observations(),binding_now(),binding_can_edit());}
+            try{p.binding_editor->observe(p.binding_shared?shim_input_binding_observations():wheel_input_binding_observations(),
+                                          binding_now(),binding_can_edit());}
             catch(...){p.binding_editor->hide();}   // capture failure never changes active controls
         }else p.binding_editor->hide();
     }

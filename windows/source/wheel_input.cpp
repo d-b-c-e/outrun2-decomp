@@ -1,4 +1,5 @@
 #include "wheel_input.hpp"
+#include "desktop_bindings.hpp"
 #include "wheel_rescan.hpp"
 #include "outrun_adapter.hpp"
 #include "controls_store.hpp"
@@ -38,6 +39,7 @@ struct Device {
     IDirectInputDevice8W* device{};
     DIJOYSTATE2 state{},previous{};
     bool connected{},present{},was_present{};
+    std::uint64_t opens{},reads{};   // the F6 binding editor's epoch and read sequence
 };
 struct Bound { std::string action; ctl::Binding binding; Device* device{}; };
 
@@ -114,7 +116,7 @@ bool open(Device& d,HWND hwnd){
     DIPROPDWORD zone{};zone.diph.dwSize=sizeof zone;zone.diph.dwHeaderSize=sizeof zone.diph;zone.diph.dwHow=DIPH_DEVICE;
     zone.dwData=0;x->SetProperty(DIPROP_DEADZONE,&zone.diph);
     x->Acquire();
-    d.device=x;g.open.push_back(&d);
+    d.device=x;++d.opens;g.open.push_back(&d);
     std::printf("wheel input: opened %s %s\n",d.name.c_str(),d.dev.c_str());
     return true;
 }
@@ -125,6 +127,7 @@ void poll(Device& d){
     r=d.device->GetDeviceState(sizeof d.state,&d.state);
     if(r==DIERR_INPUTLOST||r==DIERR_NOTACQUIRED){d.device->Acquire();r=d.device->GetDeviceState(sizeof d.state,&d.state);}
     const bool now=SUCCEEDED(r);
+    if(now)++d.reads;
     std::vector<std::string> log;
     if(now)inject::deliver(d.dev,d.state,int(d.buttons),int(d.povs),log);   // before any binding reads the sample
     else inject::device_gone(d.dev,log);
@@ -480,6 +483,23 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
         }
         std::vector<std::string> log;inject::observe(o,log);print(log);
     }
+}
+
+bool wheel_input_binding_edit_allowed(){return g.configured&&g.started&&g.input&&!inject::armed();}
+std::vector<dbce::controls::edit::AcceptedObservation> wheel_input_binding_observations(){
+    if(!wheel_input_binding_edit_allowed())return {};
+    std::vector<bindings::NativeSample> samples;
+    for(const Device* d:g.open){
+        if(!d->device||!d->connected)continue;   // this tick's read failed: no sample
+        bindings::NativeSample s;
+        s.dev=d->dev;s.prod=d->prod;s.name=d->name;s.epoch=d->opens;s.sequence=d->reads;s.buttons=d->buttons;s.povs=d->povs;
+        for(int i=0;i<8;++i)s.axes[std::size_t(i)]=axis(d->state,i);
+        std::copy(std::begin(d->state.rgbButtons),std::end(d->state.rgbButtons),s.button_state.begin());
+        std::copy(std::begin(d->state.rgdwPOV),std::end(d->state.rgdwPOV),s.pov_state.begin());
+        samples.push_back(std::move(s));
+    }
+    try{return bindings::native_observations(samples,double(GetTickCount64())/1000.0);}
+    catch(...){return {};}   // capture unavailability must not change ordinary controls/gameplay
 }
 
 void wheel_input_devices_changed(){devices_changed.store(true);}

@@ -8,6 +8,17 @@ namespace outrun::desktop::bindings {
 namespace edit=dbce::controls::edit;
 std::vector<edit::AcceptedObservation> accepted_observations(const dbce::shim::Frame&,
     const std::vector<dbce::shim::DeviceReport>&,double local_now);
+// A device the Native reader (wheel_input) already opened, as it read it this tick: DIJOYSTATE2 axes X Y Z Rx Ry Rz and
+// the two sliders at the 0..65535 range that reader sets, raw buttons and POVs, and its DIDEVCAPS counts.
+struct NativeSample {
+    std::string dev,prod,name;
+    std::uint64_t epoch{},sequence{};   // epoch: the handle's open count; sequence: its successful reads
+    std::uint32_t buttons{},povs{};
+    std::array<std::int32_t,8> axes{};
+    std::array<std::uint8_t,128> button_state{};
+    std::array<std::uint32_t,4> pov_state{};
+};
+std::vector<edit::AcceptedObservation> native_observations(const std::vector<NativeSample>&,double local_now);
 bool action_kind(const std::string& action,dbce::controls::Kind kind);
 struct View {
     bool opened{},dirty{},pending_restart{},restart_required{},file_changed{},listening{};

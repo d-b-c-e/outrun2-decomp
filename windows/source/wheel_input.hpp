@@ -7,6 +7,8 @@
 // the 0..255 pedals directly; in the menus the bound buttons drive the
 // frontend. Development test injection and its observer: test_injection.hpp.
 #include <string>
+#include <vector>
+namespace dbce::controls::edit { struct AcceptedObservation; }
 namespace outrun::platform { struct NativeInputState; struct NativeRuntimeContext; }
 namespace outrun::desktop {
 class Ini;
@@ -27,4 +29,8 @@ std::string wheel_input_steer_device();
 std::string wheel_input_steer_product();
 // For the F6 panel's Controls page: the profile and revision, how many bindings apply, and the steering device's state.
 std::string wheel_input_status_text();
+// For the F6 binding editor, on the input thread after wheel_input_filter: whether this Native process can feed capture,
+// and this tick's reads of the devices it already opened. No new device, open or enumeration.
+bool wheel_input_binding_edit_allowed();
+std::vector<dbce::controls::edit::AcceptedObservation> wheel_input_binding_observations();
 }
