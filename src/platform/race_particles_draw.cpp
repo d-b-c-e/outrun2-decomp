@@ -114,6 +114,9 @@ std::uint32_t draw_418cf0(D& d,std::uint32_t buffer,std::uint32_t src){
         X s=(((p.x(edi+0x3c)*p.x(src+0x44))*p.x(0x740c8cu))*X(inv))*X(scale);
         if(g_pc_fix_particle_rendering){   // FixParticleRendering at 419009 (pc_screen.hpp): the Xbox half-resolution mapping
             sx=sx*0.5f;sy=sy*0.5f;s=X(st(s)*0.5f);
+            // On UIScalingMode's 2D rectangle, the camera's view again (pc_screen.hpp pc_world_2d_scale): the x about
+            // the centre and the size, so the quad stays square at the PC's pixel size. Unchanged at 4:3.
+            if(const float k=pc_world_2d_scale();k!=1.0f){sx=pc_world_2d_screen_x(sx);s=X(st(s)*k);}
         }
         if(!c0c3(s,p.x(0x74f7bcu)))s=(s-p.x(0x74f7bcu))*p.x(0x74f7c0u)+p.x(0x74f7bcu);
         const std::uint32_t colour=p.u(edi+0x38);
@@ -128,7 +131,10 @@ std::uint32_t draw_418cf0(D& d,std::uint32_t buffer,std::uint32_t src){
         esi+=0xa8u;
         if(esi==0x8d1378u)break;
     }
-    if(count)d.draw(4,count*2u,0x8bc2f8u,0x1c,count*6u);
+    if(count){   // world-anchored: not clipped to the 2D rectangle (pc_screen.hpp g_pc_world_2d), with the fix's mapping
+        g_pc_world_2d=g_pc_fix_particle_rendering;struct WorldEnd{~WorldEnd(){g_pc_world_2d=false;}} world_end;
+        d.draw(4,count*2u,0x8bc2f8u,0x1c,count*6u);
+    }
     p.pop();
     d.rs(0xa8,0xf);d.rs(0x0f,1);d.d.set_texture(0,0);
     return count;

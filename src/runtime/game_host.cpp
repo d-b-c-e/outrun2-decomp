@@ -550,6 +550,7 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
         // Set apart from the screen, so three views widen it even when the screen is already 16:9 (romi 30784). The
         // other cases write what the screen change wrote (the screen starts at 640, whose 320 is the default).
         pf::g_pc_view_half_width=three?1.0e6f:width*0.5f;
+        pf::g_pc_camera_aspect=width/480.f;   // world-anchored 2D (pc_screen.hpp pc_world_2d_scale)
     }
     if(s.pc_scene&&s.runtime&&!p.set_pc_scene([&s](pf::PcD3D9Device&){
            // 82E7D4/82E7D8: event 7 (init 4866D0, control 4874A0, goal 4871A0).

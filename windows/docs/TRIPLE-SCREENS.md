@@ -440,6 +440,38 @@ rendering test (`windows/source/render_test.hpp`) admits presentation only, thro
   - `shim_first_loop_timing`: the drive's batches and budget, and the request's bytes.
   - `write_audit`: the four new writers are classified `fence`.
 
+## World-anchored 2D (pani, miho 353469, 2026-10-23; source only, not yet built or seen in game)
+
+**Defect.** Some 2D sits at a position projected from the world, so it spans the camera's whole view:
+- 418CF0's screen-space particles, x 0..640;
+- the 449940 (Calc3D2D) markers and sprites, x +-320.
+
+The device draws all pretransformed 2D inside UIScalingMode's 2D rectangle. So with the rectangle on, those positions
+shrink toward the centre by the rectangle's aspect over the camera's:
+- 0.75 at 16:9;
+- 0.25 on a 48:9 planar span, where side-monitor spray and markers land on the centre monitor.
+
+In mode 2 the rectangle's clipping also cuts what lies outside the 4:3. Tweaks (stock pixels) has neither problem. It
+corrects Calc3D2D's x by screen_scale x / y, and 418CF0 uses the real width.
+
+**Correction** (`pc_screen.hpp`): `pc_world_2d_scale` = the camera's aspect / the rectangle's.
+- Values: 4/3 at 16:9, 4 on the span, 3 for mode 0 on a span, 4/3 with three views.
+- Exactly 1 at 4:3 and whenever the rectangle is off, so the PC's 4:3 is unchanged.
+- The renderer sets the rectangle's aspect each frame. The game host sets the camera's aspect with `set_screen`.
+
+P1, the particles:
+- With FixParticleRendering on, 418CF0's x is mapped about the centre and its size multiplied, so quads keep the PC's
+  pixel size and stay square.
+- Its draw sets `g_pc_world_2d`, so the device extends the mapping to the back buffer's edges at the rectangle's scale
+  (`ui_extension`) instead of clipping.
+- Other 2D, the HUD included, keeps the 4:3, mode 1's margin, or a span's centre panel.
+- 418590 / 418910 still map with the Xbox half-resolution scale (doubled coordinates) here and in Tweaks, which only
+  fixes 419009. They are left as they are.
+
+Checks:
+- `test_triple_screens`: the factor per mode and topology, and the pixel identity on the device mapping;
+- `test_d3d11_vertex_path`: WARP, with the world flag drawing outside the rectangle at its scale, the HUD unchanged.
+
 ## Readers of the screen size [740C8C] / [740C90] (for the step-4 pass split)
 
 In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (`native_race_effects.cpp:283`,
@@ -449,7 +481,7 @@ In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (
 | --- | --- | --- |
 | 483C10 `camera_fov_483c10` | FOV from `PcCameraScreen` (Hor+) | per pass (each view's width) |
 | 484EE0 / game_host +B8 | the camera aspect | per pass |
-| 418CF0 `race_particles_draw.cpp` (2 sites) and its size at 419009 | screen mapping of the screen-space particles from the current view-projection, with the constant 640/480 | per pass through the matrices. Its output is pretransformed (rhw), and the `ui_rect` that keeps the HUD in the centred 4:3 also applies to rhw batches: check where these land at 16:9 today and at the span |
+| 418CF0 `race_particles_draw.cpp` (2 sites) and its size at 419009 | screen mapping of the screen-space particles from the current view-projection, with the constant 640/480 | per pass through the matrices. Its output is pretransformed (rhw), and the `ui_rect` that keeps the HUD in the centred 4:3 also applies to rhw batches; they landed squeezed toward the centre (see "World-anchored 2D") |
 | 415630 (from 414F00, the glare in layer 6: `pc_frame_render.cpp:130`) | glare and flare, divides by [740C8C] | per pass |
 | 40E4D0 (from 418080) | **writes** both words | not on the native path while they are mapped constant. Verify before step 4 |
 | 2D flush 42D710 / pc_sprite_2d | its own 640x480 layout, no read of the words | centre only (`ui_rect`) |
@@ -466,7 +498,8 @@ In the native runtime, the memory words are a read-only constant 640.0 / 480.0 (
   that is exactly the centre one. Step 2 widens only the PC frame to the full window during gameplay.
 - The PC device already draws pretransformed (2D) batches into a centred 4:3 of its back buffer (`ui_rect`,
   `d3d11_d3d9.cpp:455`). Under a planar span the race HUD therefore stays inside the centre monitor with no change.
-  418CF0's screen-space particles go through the same path, and their placement at the span needs a check.
+  418CF0's screen-space particles went through the same path and were squeezed toward the centre (see "World-anchored
+  2D").
 - The width the camera sees is re-applied every frame from `game_host.cpp:427`, so it can follow gameplay versus
   menus. The back buffer size cannot follow cheaply: `resize_back_buffer` is not per-mode. In step 2, menus therefore
   keep the full-width 3D background until the gating is designed (STD-019 open item).

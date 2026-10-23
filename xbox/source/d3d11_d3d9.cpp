@@ -533,6 +533,16 @@ void set_anisotropic_filtering(unsigned level){g_anisotropy=level<=16u?level:0u;
 // discards below its reference, so nothing below it appears; above it, the texel's alpha becomes partial MSAA
 // coverage, which smooths the cut edge. Needs MSAA (options.ini antialiasing=msaa2/4); without it, no effect.
 void set_transparency_supersampling(bool on){g_transparency_supersampling=on;}
+float D3D11D3D9Device::ui_extension()const{
+    if(!ui_rect_||colour_target_!=BackBuffer||soft_viewport_.x!=0.f||soft_viewport_.y!=0.f||
+       soft_viewport_.w!=float(back_width_)||soft_viewport_.h!=float(back_height_))return 0.f;
+    if(platform::g_pc_world_2d){   // as far as the back buffer's edges at the rectangle's scale (apply_state's w)
+        const double w=ui_aspect_==4./3.?double(back_h_)*4/3:double(back_h_)*ui_aspect_;
+        const double full=(double(back_w_)*back_width_/w-back_width_)/2;
+        if(full>ui_spacing_)return float(full);
+    }
+    return float(ui_spacing_);
+}
 void D3D11D3D9Device::apply_state(){
     // The logical PC target stretched to the back buffer's pixels; with the UI
     // rectangle, pretransformed (2D) draws keep a centred area of its aspect (4:3, or

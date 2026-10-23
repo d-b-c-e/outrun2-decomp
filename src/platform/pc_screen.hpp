@@ -223,6 +223,24 @@ inline bool g_pc_allow_horn=true;
 // Tweaks' AddSpriteSpacing lands; display_fit.hpp ui_scaling_rect .hud), set by the renderer each frame; 0 in modes 0
 // and 2. layer_429350 moves a scoped footage layer by it (ui_spacing.hpp ui_spacing_shift), the put_scroll fixes too.
 inline float g_pc_ui_spacing=0.0f;
+// World-anchored 2D under UIScalingMode's 2D rectangle (TRIPLE-SCREENS.md "World-anchored 2D"): an x projected from
+// the world (Calc3D2D 449940's +-320, 418CF0's 0..640 particle x) spans the camera's whole view, but the device draws
+// pretransformed 2D inside the rectangle (the centred 4:3, or a span's centre panel in mode 0), so it would land squeezed
+// toward the centre. Tweaks multiplies Calc3D2D's x by screen_scale x / y; here the same factor is the camera's aspect
+// over the rectangle's. The renderer sets the rectangle's aspect each frame (0 while it is off), the game host the
+// camera's (game_host.cpp, with set_screen). The factor is exactly 1 at 4:3 and whenever the rectangle is off.
+inline float g_pc_ui_rect_aspect=0.0f;
+inline float g_pc_camera_aspect=4.0f/3.0f;
+inline float pc_world_2d_scale(){
+    return g_pc_ui_rect_aspect>0.0f&&g_pc_camera_aspect!=g_pc_ui_rect_aspect?g_pc_camera_aspect/g_pc_ui_rect_aspect:1.0f;}
+// A projected x about the centre (449940's +-320) on the rectangle: Tweaks' Calc3D2D.
+inline float pc_world_2d_x(float x){return x*pc_world_2d_scale();}
+// A 0..640 screen x (418CF0's particles) on the rectangle; unchanged when the factor is 1.
+inline float pc_world_2d_screen_x(float x){const float k=pc_world_2d_scale();return k==1.0f?x:320.0f+(x-320.0f)*k;}
+// While set, pretransformed back-buffer 2D may cover the whole back buffer at the rectangle's scale (d3d11_d3d9.cpp
+// ui_extension) instead of being clipped to the rectangle or mode 1's margin. Set around 418CF0's particle draw only:
+// the HUD keeps its clipping (the 4:3, or a span's centre panel).
+inline bool g_pc_world_2d=false;
 // [Graphics] CarBaseShadowOpacity (the Tweaks key, 1.0 by default there and here; 0 = the PC's own: no base shadow;
 // any finite value >= 0, as Tweaks reads it).
 // The PC build nulled CalcPeraShadow (O2SP / C2C Xbox): its call sites call the bare RET 49A650 instead. Tweaks'

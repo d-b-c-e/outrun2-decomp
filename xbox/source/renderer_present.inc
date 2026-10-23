@@ -25,6 +25,7 @@ bool present_frame(RendererImpl& r){
         const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect,
                                       double(FramebufferWidth)/double(FramebufferHeight));
         r.device->set_ui_rect(ui.on,ui.aspect,ui.spacing);platform::g_pc_ui_spacing=float(ui.hud);
+        platform::g_pc_ui_rect_aspect=ui.on?float(ui.aspect):0.0f;   // world-anchored 2D (pc_screen.hpp pc_world_2d_scale)
         r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
         r.device->begin_frame();
         if(!r.start_loading_visible&&r.scene){

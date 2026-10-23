@@ -289,6 +289,17 @@ int main(){
         check(at(partial,28,24,0)<50,"mode 1 under a full-width, partial-height viewport: no extension (quad left of the 4:3 clipped)");
         check(at(partial,36,24,1)>200,"mode 1 under a partial-height viewport: the in-range quad still draws");
         u.set_viewport(0,0,64,48,0.f,1.f);
+        // World-anchored 2D (pc_screen.hpp g_pc_world_2d, 418CF0's particles): the rectangle's mapping out to the back
+        // buffer's edges, so the quads at -8..0 and -24..-16 land at 24..32 and 8..16; the HUD's clipping returns after.
+        g_pc_world_2d=true;
+        const auto world=frame(0.);
+        g_pc_world_2d=false;
+        check(at(world,28,24,0)>200&&at(world,12,24,2)>200,"world-anchored 2D: quads left of the rectangle draw at its scale");
+        bool kept=true;
+        for(unsigned x=32;x<44;++x)for(unsigned ch=0;ch<3;++ch)kept=kept&&(at(plain,x,24,ch)==at(world,x,24,ch));
+        check(kept,"world-anchored 2D leaves the in-range quad's pixels as they were");
+        const auto after=frame(0.);
+        check(at(after,28,24,0)<50&&at(after,12,24,2)<50,"after the world-anchored draw the rectangle clips again");
     }
     // Texture CPU-copy lifetime (sana 44416): the D3D11 device uploads a file texture on its first draw and then releases
     // its RGBA copy (unless OR2_KEEP_TEXTURE_RGBA=1). The drawn texels are exact (point sampling, 2x magnification), and

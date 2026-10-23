@@ -88,6 +88,34 @@ int main(){
                 CHECK(ui_spacing_scope()==UiSpacing::detect);}
             CHECK(ui_spacing_scope()==UiSpacing::off);}
     }
+    // World-anchored 2D (pc_screen.hpp pc_world_2d_scale): the camera's aspect over the 2D rectangle's. The device maps a
+    // 640-wide x to ox + x * w / 640 (w = H * the rectangle's aspect, ox = (W - w) / 2); a projected x p (+-320 over the
+    // camera's whole view) belongs at W / 2 + p * W / 640 of a frame W wide.
+    {   using namespace outrun::platform;using outrun::xbox_runtime::ui_scaling_rect;
+        const float saved_rect=g_pc_ui_rect_aspect,saved_camera=g_pc_camera_aspect;
+        const auto k=[](unsigned mode,bool wide,float span,float camera_width){
+            const auto r=ui_scaling_rect(mode,wide,span);
+            g_pc_ui_rect_aspect=r.on?float(r.aspect):0.0f;g_pc_camera_aspect=camera_width/480.f;return pc_world_2d_scale();};
+        const float w169=480.f*16.f/9.f,w489=480.f*(48.f/9.f);
+        CHECK(k(2,false,0.f,640.f)==1.0f&&k(1,false,0.f,640.f)==1.0f&&k(0,false,0.f,640.f)==1.0f);   // 4:3: no rectangle
+        CHECK(k(2,true,0.f,640.f)==1.0f);                                         // a 4:3 camera under the 4:3 rectangle
+        CHECK(std::fabs(k(2,true,0.f,w169)-4.f/3.f)<1e-6f&&std::fabs(k(1,true,0.f,w169)-4.f/3.f)<1e-6f);   // 16:9
+        CHECK(k(0,true,0.f,w169)==1.0f);                                          // mode 0 at 16:9: stretched, no rectangle
+        CHECK(std::fabs(k(2,true,48.f/9.f,w489)-4.f)<1e-5f&&std::fabs(k(1,true,48.f/9.f,w489)-4.f)<1e-5f);   // planar span
+        CHECK(std::fabs(k(0,true,48.f/9.f,w489)-3.f)<1e-5f);                     // mode 0 on a span: the centre panel
+        CHECK(std::fabs(k(2,true,48.f/9.f,w169)-4.f/3.f)<1e-6f);                 // three views: the centre panel's camera
+        const std::array<float,4> cases[]{{7680.f,1440.f,48.f/9.f,w489},{2560.f,1440.f,0.f,w169},{1920.f,1080.f,0.f,w169}};
+        for(const auto& c:cases){
+            k(2,true,c[2],c[3]);const float W=c[0],H=c[1],w=H*4.f/3.f,ox=(W-w)/2;
+            for(const float p:{-320.f,-200.f,0.f,95.f,320.f}){
+                CHECK(std::fabs(ox+(320.f+pc_world_2d_x(p))*w/640.f-(W/2+p*W/640.f))<0.01f);
+                CHECK(std::fabs(ox+pc_world_2d_screen_x(320.f+p)*w/640.f-(W/2+p*W/640.f))<0.01f);}
+        }
+        k(2,false,0.f,640.f);                                                      // factor 1: bit for bit
+        for(const float x:{-319.75f,0.1f,123.456f}){CHECK(pc_world_2d_x(x)==x);CHECK(pc_world_2d_screen_x(x+320.f)==x+320.f);}
+        CHECK(!g_pc_world_2d);                                                     // set only around 418CF0's draw
+        g_pc_ui_rect_aspect=saved_rect;g_pc_camera_aspect=saved_camera;
+    }
     // Tweaks hooks in the five translated C2C GF/rank routines reach these external calls.
     // The return PC identifies the caller; the x slot is the argument at the callee, after
     // any pushes between the hook and call (4FD60C is the exceptional arg 1 site).
