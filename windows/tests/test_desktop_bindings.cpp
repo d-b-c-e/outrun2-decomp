@@ -243,12 +243,28 @@ void native_inverted_recapture(const fs::path& root){
     check(moved&&moved->index==1&&!moved->inverted,"a capture on another axis starts non-inverted");
 }
 }
+void first_time_setup(const fs::path& root){
+    const auto path=root/"first.ini";
+    auto refused=[&](const std::string& bytes,const char* why)->std::string{
+        write(path,bytes);b::Editor editor(path.u8string(),true);const bool opened=editor.open();
+        check(!opened&&read(path)==bytes,why);return editor.view(1,true).message;};
+    const std::string first="No saved controls to edit yet. Set up the wheel once in Wheelkit";
+    check(refused("[Misc]\r\nDefaultManualTransmission = 0\r\nUnknown = keep\r\n","no [Controls]: refused, file unchanged").rfind(first,0)==0,
+          "no [Controls] names the Wheelkit first-time setup");
+    check(refused("[Controls]\r\n; Schema = 2\r\nProfile = Hand\r\n","[Controls] without Schema: refused, file unchanged").rfind(first,0)==0,
+          "a commented Schema is no Schema: the first-time setup is named");
+    check(refused("\xEF\xBB\xBF[controls]\r\nSchema = 3\r\n","unsupported Schema: refused, file unchanged")==
+          "Cannot edit saved bindings: Unsupported Controls schema for this editor.","an unsupported Schema keeps the shared refusal");
+    auto valid=profile();valid.replace(valid.find("[Controls]"),10,"[controls]");valid="\xEF\xBB\xBF"+valid;write(path,valid);
+    b::Editor editor(path.u8string(),true);check(editor.open()&&read(path)==valid,"a BOM and a lower-case header still open as the shared draft reads them");
+    editor.cancel();
+}
 int main(){
     fs::path root;
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);first_time_setup(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}

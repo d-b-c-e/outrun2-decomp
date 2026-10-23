@@ -3,6 +3,7 @@
 #include "../vendor/controls/dbce_controls_store_win.hpp"
 #include <mutex>
 #include <cstdio>
+#include <cstring>
 
 namespace outrun::desktop::bindings {
 namespace ctl=dbce::controls;
@@ -99,6 +100,24 @@ struct Editor::Impl {
         selection.reconcile(host(),capture.devices(now),now);
     }
 };
+// Whether a [Controls] section holds a Schema key, read as the shared draft reads it (leading BOM, CR/LF, trimmed
+// lines, case-insensitive header, exact key). Without one there are no saved controls for the editor to open.
+static bool has_controls_schema(std::string text){
+    if(text.compare(0,3,"\xEF\xBB\xBF")==0)text.erase(0,3);
+    bool inside=false;
+    for(std::size_t at=0;;){
+        const std::size_t n=text.find('\n',at);
+        const auto line=ctl::trim(text.substr(at,n==std::string::npos?std::string::npos:n-at));
+        if(!line.empty()&&line.front()=='[')inside=_stricmp(line.c_str(),"[controls]")==0;
+        else if(inside&&line.find('=')!=std::string::npos&&ctl::trim(line.substr(0,line.find('=')))=="Schema")return true;
+        if(n==std::string::npos)return false;
+        at=n+1;
+    }
+}
+const char* const FirstTimeSetup=
+    "No saved controls to edit yet. Set up the wheel once in Wheelkit; after that, Edit bindings changes them here. "
+    "With Native input, a Tweaks [DirectInput] setup is imported at start while its wheel is connected.";
+
 Editor::Editor(const std::string& path,bool ordinary):impl_(std::make_unique<Impl>(path,ordinary)){}
 Editor::~Editor()=default;
 bool Editor::opened()const{auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);return s.opened;}
@@ -107,7 +126,9 @@ bool Editor::open(){
     if(!s.ordinary||s.restart_required){s.message="Binding editing is unavailable in tests/playback or until restart";return false;}
     if(s.opened)return true;
     try{
-        s.draft=std::make_unique<edit::ProfileDraft>(edit::store_detail::read_path(s.path),action_kind,false,ControlsReads);
+        auto text=edit::store_detail::read_path(s.path);
+        if(!has_controls_schema(text)){s.message=FirstTimeSetup;return false;}   // the draft would refuse it too
+        s.draft=std::make_unique<edit::ProfileDraft>(std::move(text),action_kind,false,ControlsReads);
         s.capture.cancel();s.selection.select_saved();s.opened=true;s.file_changed=false;s.message="Editing saved bindings; active controls are unchanged";
         return true;
     }catch(const std::exception& e){s.message=std::string("Cannot edit saved bindings: ")+e.what();return false;}
