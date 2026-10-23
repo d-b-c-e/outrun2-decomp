@@ -37,7 +37,7 @@ constexpr std::size_t CarPoseBytes=0xa0;   // the car record bytes car_pose read
 // with its init run (flags & 3 == 2: open, not pending; event_control_43fab0), the test 42D710 makes before 49F4D0.
 inline CarPose car_pose(std::uint32_t mode,std::uint32_t event8_work,std::uint8_t event8_flags,const std::uint8_t* car){
     CarPose p{};
-    if(!car||(mode!=16u&&mode!=18u)||event8_work!=0x7804b0u||(event8_flags&3u)!=2u)return p;
+    if(!car||!active_player_car(mode,event8_work,event8_flags))return p;
     const auto f=[&](std::size_t at){float v;std::memcpy(&v,car+at,4);return v;};
     const auto u=[&](std::size_t at){std::uint32_t v;std::memcpy(&v,car+at,4);return v;};
     for(std::size_t i=0;i<3;++i){p.position[i]=f(0x14+i*4);p.vec20[i]=f(0x20+i*4);}

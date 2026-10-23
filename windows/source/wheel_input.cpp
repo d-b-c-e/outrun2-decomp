@@ -332,8 +332,7 @@ std::uint32_t gear_pulses(const platform::NativeRuntimeContext* runtime){
     for(unsigned i=0;i<6;++i)gates[i]=value(GearActions[i])>=0.5;
     const std::uint32_t mode=runtime?runtime->mode_state.current:0u;
     // Event 8 must hold the open player car; a race-mode buffer can still contain an old gear.
-    const bool car=runtime&&(mode==16u||mode==18u)&&runtime->event_state.slots[8].work_token==0x7804b0u&&
-        (runtime->event_state.slots[8].flags&3u)==2u;
+    const bool car=runtime&&active_player_car(mode,runtime->event_state.slots[8].work_token,runtime->event_state.slots[8].flags);
     std::uint32_t gear=0;
     if(car)std::memcpy(&gear,runtime->event_function36.car_select.car_799d18.data()+0x208,4);
     const auto now=std::chrono::duration_cast<std::chrono::microseconds>(WheelClock::now()-g.start).count();

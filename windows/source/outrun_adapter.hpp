@@ -28,6 +28,11 @@ struct GameView {
     std::int32_t consumed_steer{},consumed_accel{},consumed_brake{};   // 7D6810 after 453860: the previous tick's
 };
 
+// Event 8 must hold the initialized, open player car before its gear record is usable.
+constexpr bool active_player_car(std::uint32_t mode,std::uint32_t work,std::uint32_t flags){
+    return (mode==16u||mode==18u)&&work==0x7804b0u&&(flags&3u)==2u;
+}
+
 // The H-pattern gearbox (R1-F10): exactly one held gate sets the target; one pulse, at least one released tick (whatever
 // changes in between: the gate, the direction, a reset), then the consumed gear must change before the deadline;
 // bounded retries. The observed gear must be a real gear (1-6); anything else is unavailable. Neutral and reverse are

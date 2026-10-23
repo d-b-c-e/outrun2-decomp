@@ -188,9 +188,9 @@ GameView view(const platform::NativeRuntimeContext* runtime){
     GameView v{};
     if(!runtime)return v;
     v.mode=runtime->mode_state.current;
-    const bool race=v.mode==16u||v.mode==18u;
-    v.car=race;
-    if(race){
+    const auto& event=runtime->event_state.slots[8];
+    v.car=active_player_car(v.mode,event.work_token,event.flags);
+    if(v.car){
         const auto* car=runtime->event_function36.car_select.car_799d18.data();
         std::memcpy(&v.gear,car+0x208,4);std::memcpy(&v.speed,car+0x1c4,4);
     }

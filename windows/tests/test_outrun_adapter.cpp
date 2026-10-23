@@ -23,6 +23,12 @@ namespace {
 int checks=0;
 void check(bool v,const std::string& what){++checks;if(!v)throw std::runtime_error(what);}
 
+void player_car_guard(){
+    check(active_player_car(16,0x7804b0u,2)&&active_player_car(18,0x7804b0u,0x0a),"initialized player car in race and pause");
+    check(!active_player_car(13,0x7804b0u,2)&&!active_player_car(16,0,2),"mode and work must match");
+    check(!active_player_car(16,0x7804b0u,1)&&!active_player_car(16,0x7804b0u,3),"pending car is unavailable");
+}
+
 const std::string W="{d71b8350-61b7-11f1-8001-444553540000}",WP="{0006346e-0000-0000-0000-504944564944}";
 const std::string S="{d9b1d890-6f3f-11f1-8002-444553540000}",SP="{0002f3a1-0000-0000-0000-504944564944}";
 const std::string Nonce="abcdefgh12345678";
@@ -599,7 +605,7 @@ void test_owned_pad_path(){
 }
 
 int main(){
-    try{test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_hpattern_modes();test_pad_exclusion();test_native_only();
+    try{player_car_guard();test_sink();test_pedals_without_steering();test_latched_suppression();test_release();test_hpattern();test_hpattern_modes();test_pad_exclusion();test_native_only();
         test_keyboard_ordinary();test_keyboard_hpattern_rest();test_keyboard_without_host();test_keyboard_latched();test_steering_shaping();
         test_action_table();test_hpattern_pause();test_owned_pad_path();test_horn();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
