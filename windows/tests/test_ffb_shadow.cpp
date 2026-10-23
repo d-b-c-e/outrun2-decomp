@@ -1,5 +1,6 @@
 #include "ffb_shadow.hpp"
 #include "platform/car_producer_observer.hpp"
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <stdexcept>
@@ -17,12 +18,16 @@ template<class T> void put(std::array<std::uint8_t,0xd52>& car,std::size_t at,T 
 bool contains(const std::vector<std::string>& rows,const char* needle){
     for(const auto& row:rows)if(row.find(needle)!=std::string::npos)return true;return false;
 }
+bool ends_with(const std::string& s,const std::string& tail){
+    return s.size()>=tail.size()&&s.compare(s.size()-tail.size(),tail.size(),tail)==0;
+}
+long commas(const std::string& s){return long(std::count(s.begin(),s.end(),','));}
 void throws(void*,const platform::NativeCarProducerObservation&){throw std::runtime_error("optional observer");}
 }
 int main(){
     try{
         require(Core::header().find("seam=just-completed-car-control")!=std::string::npos,"truthful seam");
-        require(Core::header().find("shadow-trace@3")!=std::string::npos&&
+        require(Core::header().find("shadow-trace@4")!=std::string::npos&&
                 Core::header().find("origin,frame_counter,update_index,gate,continuity_token,recovery_pending,state")!=std::string::npos,
                 "versioned recovery columns and native tick");
         require(Core::header({25,75}).find("steering_percent=25,shift_percent=75")!=std::string::npos,
@@ -132,18 +137,28 @@ int main(){
         // A rebound timer re-armed while paused is not reported as a rebound when play resumes.
         std::array<std::uint8_t,0xd52> wall{};
         put(wall,0x1f8,72.0f);put(wall,0x208,std::uint32_t(2));
-        producer::Row last{};
-        Core walls([](const std::string&){return true;},{},[&](const Gate&,const producer::Row& row){last=row;});
+        producer::Row last{};std::vector<std::string> wall_rows;
+        Core walls([&](const std::string& row){wall_rows.push_back(row);return true;},{},
+            [&](const Gate&,const producer::Row& row){last=row;});
         Gate w{};w.mode=16;w.generation=1;w.car_active=true;w.frame_counter=50;w.attempt=1;
         Sample ws{};ws.car=wall.data();ws.car_bytes=wall.size();ws.producer_fresh=true;
         auto wall_step=[&]{ws.gate=w;walls.before_frame(w);walls.observe(ws);};
         wall_step();require(last.state==producer::State::Primed,"wall stream primes");
-        w.frame_counter=51;w.attempt=2;put(wall,0x283,std::uint8_t(30));wall_step();
+        w.frame_counter=51;w.attempt=2;put(wall,0x283,std::uint8_t(30));put(wall,0x281,std::uint8_t(2));
+        put(wall,0x4,std::uint32_t(0x00020000u));wall_step();
         require(last.wall_event==producer::WallEvent::Rebound,"shadow reports a fresh rebound");
+        // Column provenance: the shadow prefix, the unchanged @2 row, then the raw wall bytes and event.
+        auto pure=producer::trace_csv(last);pure.pop_back();
+        require(wall_rows.back().find(","+pure+",30,2,1,rebound\n")!=std::string::npos,
+                "wall columns follow the unchanged @2 row");
+        require(last.request.impact==0.f&&last.request.texture==0.f,"the wall columns feed no force input");
+        put(wall,0x281,std::uint8_t(0));put(wall,0x4,std::uint32_t(0));
         w.frame_counter=52;w.attempt=3;put(wall,0x283,std::uint8_t(25));wall_step();
         require(last.state==producer::State::Computed&&last.wall_event==producer::WallEvent::None,"countdown is quiet");
         w.frame_counter=53;w.attempt=4;w.paused=true;walls.before_frame(w);
         require(last.state==producer::State::Neutral&&last.wall_event==producer::WallEvent::None,"pause neutralizes");
+        require(wall_rows.back().find(",pause,")!=std::string::npos&&ends_with(wall_rows.back(),",0,0,0,none\n"),
+                "a neutral row carries zero wall columns");
         put(wall,0x283,std::uint8_t(30));
         w.frame_counter=54;w.attempt=5;w.paused=false;wall_step();
         require(last.state==producer::State::Primed&&last.wall_event==producer::WallEvent::None,
@@ -151,6 +166,10 @@ int main(){
         w.frame_counter=55;w.attempt=6;put(wall,0x283,std::uint8_t(29));wall_step();
         require(last.state==producer::State::Computed&&last.wall_event==producer::WallEvent::None,
                 "the countdown after resume stays quiet");
+        const auto header=Core::header();const auto columns=header.substr(header.find('\n')+1);
+        require(ends_with(columns,",rebound_283,contact_side_281,wall_contact_4_20000,wall_event\n"),
+                "header names the wall columns last");
+        for(const auto& row:wall_rows)require(commas(row)==commas(columns),"every row matches the @4 header width");
         std::printf("ffb shadow %d checks passed\n",checks);return 0;
     }catch(const std::exception& ex){std::fprintf(stderr,"ffb shadow failed: %s\n",ex.what());return 1;}
 }
