@@ -61,6 +61,26 @@ void test_report(){
     check(!three.ok&&three.start_line.find("this mod reads 1 or 2")!=std::string::npos,"Schema 3 refused at reads 2");
 }
 
+void test_selected_hpattern_gates(){
+    std::vector<std::string> lines{"Schema = 1","Profile = Selected rig","Transmission = H-pattern",
+        "steer = axis 0 dev="+Wheel+" prod="+WheelProd+" range=0..65535 rest=32768 travel=+1"};
+    for(int gear=1;gear<=6;++gear)
+        lines.push_back("gear"+std::to_string(gear)+" = button "+std::to_string(gear-1)+" dev="+Shifter+" prod="+ShifterProd);
+    lines.push_back("reverse = button 6 dev="+Shifter+" prod="+ShifterProd);
+    lines.push_back("neutral = button 7 dev="+Shifter+" prod="+ShifterProd);
+    const auto section=ctl::parseSection(lines,ControlsReads);
+    const auto report=report_controls(section);
+    check(section.error.empty()&&section.invalid.empty()&&section.transmission=="H-pattern","inert selected profile parses as H-pattern");
+    check(report.applied.size()==7&&report.unsupported.size()==2,"Native reports six direct gates, reverse and neutral unsupported");
+    for(int gear=1;gear<=6;++gear){
+        const auto action="gear"+std::to_string(gear);
+        const auto* binding=ctl::find(section,action);
+        check(binding&&binding->kind==ctl::Kind::Button&&binding->dev==Shifter&&binding->index==gear-1&&
+              ctl::normalize(action,*binding,1)>=0.5,"Native reader accepts selected gate "+action);
+    }
+    check(unavailable_reason("neutral")&&unavailable_reason("reverse"),"no invented neutral or reverse delivery");
+}
+
 // The owner's (Redux) Tweaks settings: steering 0, throttle 2, brake 5, Moza buttons, DS-8X H-pattern.
 void test_import(){
     LegacyControls c;
@@ -381,7 +401,7 @@ void test_wheel_steering(){
 }
 
 int main(){
-    try{test_report();test_import();test_import_steering_calibration();test_import_pedal_calibration();test_write_section();test_write_key();test_graphical_presets();test_injection();test_wheel_steering();}
+    try{test_report();test_selected_hpattern_gates();test_import();test_import_steering_calibration();test_import_pedal_calibration();test_write_section();test_write_key();test_graphical_presets();test_injection();test_wheel_steering();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::cout<<"desktop controls: "<<checks<<" checks passed\n";
     return 0;
