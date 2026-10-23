@@ -1,5 +1,6 @@
 #include "wheel_input.hpp"
 #include "desktop_bindings.hpp"
+#include "wheel_axes.hpp"
 #include "wheel_rescan.hpp"
 #include "outrun_adapter.hpp"
 #include "controls_store.hpp"
@@ -40,6 +41,7 @@ struct Device {
     DIJOYSTATE2 state{},previous{};
     bool connected{},present{},was_present{};
     std::uint64_t opens{},reads{};   // the F6 binding editor's epoch and read sequence
+    AxisInventory axes_found{};      // read once per open (wheel_axes.hpp): the axes it has, and which read 0..65535
 };
 struct Bound { std::string action; ctl::Binding binding; Device* device{}; };
 
@@ -116,6 +118,7 @@ bool open(Device& d,HWND hwnd){
     DIPROPDWORD zone{};zone.diph.dwSize=sizeof zone;zone.diph.dwHeaderSize=sizeof zone.diph;zone.diph.dwHow=DIPH_DEVICE;
     zone.dwData=0;x->SetProperty(DIPROP_DEADZONE,&zone.diph);
     x->Acquire();
+    d.axes_found=axis_inventory(x);   // after the range request; an axis-less device (a shifter) still opens
     d.device=x;++d.opens;g.open.push_back(&d);
     std::printf("wheel input: opened %s %s\n",d.name.c_str(),d.dev.c_str());
     return true;
@@ -493,6 +496,7 @@ std::vector<dbce::controls::edit::AcceptedObservation> wheel_input_binding_obser
         if(!d->device||!d->connected)continue;   // this tick's read failed: no sample
         bindings::NativeSample s;
         s.dev=d->dev;s.prod=d->prod;s.name=d->name;s.epoch=d->opens;s.sequence=d->reads;s.buttons=d->buttons;s.povs=d->povs;
+        s.axis_mask=d->axes_found.present;s.range_mask=d->axes_found.ranged;
         for(int i=0;i<8;++i)s.axes[std::size_t(i)]=axis(d->state,i);
         std::copy(std::begin(d->state.rgbButtons),std::end(d->state.rgbButtons),s.button_state.begin());
         std::copy(std::begin(d->state.rgdwPOV),std::end(d->state.rgdwPOV),s.pov_state.begin());

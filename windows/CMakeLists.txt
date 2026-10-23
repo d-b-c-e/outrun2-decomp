@@ -39,6 +39,7 @@ target_include_directories(test_desktop_bindings PRIVATE source shim vendor/cont
 target_compile_features(test_desktop_bindings PRIVATE cxx_std_17)
 target_compile_definitions(test_desktop_bindings PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_options(test_desktop_bindings PRIVATE /W4 /WX)
+target_link_libraries(test_desktop_bindings PRIVATE dinput8 dxguid)   # the fake DirectInput device (wheel_axes.hpp)
 add_test(NAME desktop_bindings COMMAND test_desktop_bindings)
 
 # Exact shared production preference persistence, disposable INIs only; no renderer/window/input.

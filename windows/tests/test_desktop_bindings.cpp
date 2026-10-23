@@ -1,8 +1,10 @@
-// Production editor + accepted Core envelope, synthetic samples and fresh disposable files only.
-// No provider, reader, enumeration, input injection, game, window or physical force.
+// Production editor + accepted Core envelope, synthetic samples, the provider tests' fake DirectInput device and fresh
+// disposable files only. No real provider, reader, enumeration, input injection, game, window or physical force.
 #include "desktop_bindings.hpp"
 #include "controls_store.hpp"
 #include "desktop_settings.hpp"
+#include "wheel_axes.hpp"
+#include "shim_fake_com.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -167,7 +169,7 @@ void transmission_and_stop(const fs::path& root){
 // as in the owner's 2026-10-18 F6-saved OutRunDesktop.ini, with the shared fixture GUIDs.
 b::NativeSample native_sample(){
     b::NativeSample s;s.dev=Wheel;s.prod=Product;s.name="MOZA R12 Base";s.epoch=1;s.sequence=1;s.buttons=64;s.povs=1;
-    s.axes[0]=33265;s.pov_state[0]=0xffffffffu;return s;
+    s.axis_mask=s.range_mask=0xffu;s.axes[0]=33265;s.pov_state[0]=0xffffffffu;return s;
 }
 const std::string NativeSteer="steer = axis 0 dev="+Wheel+" prod="+Product+" range=0..65535 rest=33265 travel=-1 name=\"MOZA R12 Base\"";
 std::string native_profile(){
@@ -191,6 +193,50 @@ void native_envelope(){
     check(refused(native_sample(),std::nan("")),"a non-finite clock refuses");
     {auto s=native_sample();s.buttons=200;s.button_state[127]=0x80;const auto big=b::native_observations({s},1);
      check(big.size()==1&&big[0].button_mask.count()==128&&big[0].sample.buttons[127],"button counts above DIJOYSTATE2 are clamped");}
+    {auto s=native_sample();s.axis_mask=0x25u;s.range_mask=0x21u;s.axes[1]=-1;s.axes[2]=-5;const auto r=b::native_observations({s},1);
+     check(r.size()==1&&r[0].axis_mask==0x25u&&r[0].range_mask==0x21u&&r[0].maximum[2]==0&&r[0].maximum[5]==65535,
+           "only the axes the device has are offered; an absent or unranged axis's reading is never range-checked or capturable");}
+    {auto s=native_sample();s.axis_mask=0x1u;s.range_mask=0x3u;const auto r=b::native_observations({s},1);
+     check(r.size()==1&&r[0].range_mask==0x1u,"a range bit without its axis is dropped");}
+}
+// The Native inventory (wheel_axes.hpp) over the fake DirectInput device the provider's tests use: presence by
+// DIJOYSTATE2 offset, and a range qualified only when it reads back as the requested 0..65535.
+void axis_inventory_fake(){
+    fakecom::Counters counters;std::mutex lock;
+    auto inventory=[&](fakecom::DeviceScript script){
+        fakecom::Device device(script,counters,lock);
+        DIPROPRANGE range{};range.diph.dwSize=sizeof range;range.diph.dwHeaderSize=sizeof range.diph;range.diph.dwHow=DIPH_DEVICE;
+        range.lMin=0;range.lMax=65535;(void)device.SetProperty(DIPROP_RANGE,&range.diph);   // as wheel_input's open() requests it
+        return outrun::desktop::axis_inventory(&device);
+    };
+    fakecom::DeviceScript wheel;   // the fake's default object table: X, Z, Rz
+    auto found=inventory(wheel);
+    check(found.present==0x25u&&found.ranged==0x25u,"present axes are read by offset and an honored range qualifies them");
+    auto refused=wheel;refused.accept_range=false;for(int a=0;a<8;++a){refused.native_min[a]=-32768;refused.native_max[a]=32767;}
+    found=inventory(refused);
+    check(found.present==0x25u&&found.ranged==0u,"a refused range request keeps the axes but qualifies none");
+    auto unreadable=wheel;unreadable.range_unreadable[5]=true;
+    found=inventory(unreadable);
+    check(found.present==0x25u&&found.ranged==0x05u,"an axis whose range cannot be read back is not range-qualified");
+    fakecom::DeviceScript shifter;for(auto& a:shifter.axis)a=false;
+    found=inventory(shifter);
+    check(found.present==0u&&found.ranged==0u,"an axis-less device (a shifter) offers no axes");
+}
+// A movement on an axis the device lacks never captures; the next movement on a present axis does.
+void native_absent_axis(const fs::path& root){
+    const auto path=root/"native-absent.ini";write(path,native_profile());
+    b::Editor editor(path.u8string(),true);check(editor.open(),"open the Native profile");
+    auto sample=native_sample();sample.axis_mask=sample.range_mask=0x25u;   // X, Z, Rz only
+    auto rows=[&](double now){return b::native_observations({sample},now);};
+    editor.observe(rows(1),1,true);check(editor.begin_capture(1,true),"capture on the saved Native steering device");
+    ++sample.sequence;editor.observe(rows(2.01),2.01,true);
+    ++sample.sequence;sample.axes[1]=50000;editor.observe(rows(2.02),2.02,true);   // Y: not on this device
+    const auto waiting=editor.view(2.02,true);
+    check(waiting.listening&&!waiting.dirty,"a movement on an axis the device lacks never captures");
+    ++sample.sequence;sample.axes[2]=50000;editor.observe(rows(2.03),2.03,true);   // Z: present
+    const auto state=editor.view(2.03,true);
+    check(state.binding&&state.binding->index==2&&state.dirty&&!state.listening,"the next movement on a present axis captures");
+    editor.cancel();
 }
 void native_draft(const fs::path& root){
     const auto path=root/"native.ini";const auto original=native_profile();write(path,original);
@@ -311,7 +357,7 @@ int main(){
     try{
         root=fs::temp_directory_path()/("or2_bindings_"+std::to_string(GetCurrentProcessId())+"_"+std::to_string(GetTickCount64()));
         if(!fs::create_directory(root))throw std::runtime_error("Fixture directory must be fresh");
-        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);first_time_setup(root);native_calibration_recapture(root);
+        envelope();draft_save(root);capture_and_conflict(root);transmission_and_stop(root);native_envelope();native_draft(root);native_inverted_recapture(root);first_time_setup(root);native_calibration_recapture(root);axis_inventory_fake();native_absent_axis(root);
         fs::remove_all(root);
         std::cout<<"desktop bindings: "<<checks<<" checks passed; fake samples/disposable files only\n";return 0;
     }catch(const std::exception& error){std::cerr<<"desktop bindings: FAIL: "<<error.what()<<"; retained fixture "<<root.u8string()<<"\n";return 1;}
