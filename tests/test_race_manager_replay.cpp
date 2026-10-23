@@ -6,6 +6,7 @@
 // Usage: test_race_manager_replay <dump>
 #include "platform/race_manager.hpp"
 #include "driving/pc_x87.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -17,7 +18,8 @@ std::uint32_t u(float x){std::uint32_t v;std::memcpy(&v,&x,4);return v;}
 // Replay services: only the values the replayed paths read are scripted.
 // Any other callee reaching here means the replay setup is wrong.
 struct Replay final:RaceManagerServices{
-    std::uint32_t o3{},o4{};std::uint16_t end{};bool bad=false,countdown=false;
+    std::uint32_t o3{},o4{};std::uint16_t end{};bool bad=false,countdown=false,ta=false,early=false;
+    unsigned ghost_restarts{},ta_goals{};
     void no(){bad=true;}
     void pc_46fab0()override{no();}
     void pc_47dac0()override{no();}
@@ -34,9 +36,9 @@ struct Replay final:RaceManagerServices{
     void pc_4f2ac0()override{no();}
     void pc_4f2df0()override{no();}
     void pc_4f2b20(std::int32_t)override{no();}
-    std::uint8_t pc_45a2b0(std::uint8_t)override{no();return 0;}
+    std::uint8_t pc_45a2b0(std::uint8_t)override{if(!ta)no();return 0;}
     std::uint32_t pc_55a930()override{no();return 0;}
-    std::uint8_t pc_48b350()override{no();return 0;}
+    std::uint8_t pc_48b350()override{if(!ta)no();return early?1:0;}
     std::uint32_t pc_46c500()override{no();return 0;}
     std::uint32_t pc_44bec0()override{no();return 0;}
     void pc_409f90(std::uint32_t)override{no();}
@@ -46,19 +48,19 @@ struct Replay final:RaceManagerServices{
     void pc_44b900(std::uint32_t)override{no();}
     void pc_46c410(std::uint32_t)override{no();}
     void pc_46c400(std::uint32_t)override{no();}
-    std::uint8_t pc_44b7b0(std::uint32_t)override{no();return 0;}
-    std::uint8_t pc_4957f0()override{no();return 0;}
-    std::uint8_t pc_48b310()override{no();return 0;}
-    std::uint8_t pc_495490()override{no();return 0;}
-    std::uint32_t pc_44bdd0()override{no();return 0;}
+    std::uint8_t pc_44b7b0(std::uint32_t)override{if(!ta)no();return ta?1:0;}
+    std::uint8_t pc_4957f0()override{if(!ta)no();return 0;}
+    std::uint8_t pc_48b310()override{if(!ta)no();return ta?1:0;}
+    std::uint8_t pc_495490()override{if(!ta)no();return 0;}
+    std::uint32_t pc_44bdd0()override{if(!ta)no();return 9;}
     void pc_495b60()override{no();}
     std::uint32_t pc_495b10()override{no();return 0;}
     std::uint32_t pc_495b70()override{no();return 0;}
     std::uint32_t pc_495b30()override{no();return 0;}
-    std::uint8_t pc_4b00d0()override{no();return 0;}
+    std::uint8_t pc_4b00d0()override{if(!ta)no();return 0;}
     std::uint32_t pc_4b0190()override{no();return 0;}
     void pc_4b0110(std::uint32_t,std::uint32_t)override{no();}
-    void pc_48b3a0()override{no();}
+    void pc_48b3a0()override{if(!ta)no();else ++ta_goals;}
     void pc_495610()override{no();}
     void pc_45a0a0()override{no();}
     std::uint32_t pc_456d10()override{no();return 0;}
@@ -77,12 +79,12 @@ struct Replay final:RaceManagerServices{
     void pc_453080(std::uint32_t)override{no();}
     std::uint32_t pc_4ef710()override{no();return 0;}
     void pc_465f20()override{no();}
-    std::int32_t pc_44dc50(std::uint32_t)override{no();return 0;}
+    std::int32_t pc_44dc50(std::uint32_t)override{if(!ta)no();return 0x3c;}
     std::uint32_t pc_48b330()override{no();return 0;}
     void pc_48b340()override{no();}
     std::pair<float,float> pc_4a4440(std::uint32_t,const std::uint8_t*,const std::uint8_t*)override{return {f(o3),f(o4)};}
     void pc_48b3d0()override{no();}
-    void pc_467e00()override{no();}
+    void pc_467e00()override{if(!ta)no();else ++ghost_restarts;}
 };
 
 // Exercise the production timer with the Tweaks flag in both places that read it.
@@ -117,9 +119,44 @@ int countdown_test(){
         sizeof(cases)/sizeof(cases[0]),failures);
     return failures?1:0;
 }
+
+// Exercise the manager's actual clear and sector functions in control order.
+// The next input sample is the first one that can see their completed writes:
+// production 417C7B calls 453BB0 (telemetry) before 43FAB0 (manager).
+int ta_transition_test(){
+    unsigned failures=0;
+    for(const bool early:{true,false}){
+        RaceManagerState st{};RaceManagerWorld w{};Replay s;
+        std::vector<std::uint8_t> car(0x1000,0);
+        const auto put32=[&](std::size_t off,std::uint32_t v){std::memcpy(car.data()+off,&v,4);};
+        const auto put16=[&](std::size_t off,std::uint16_t v){std::memcpy(car.data()+off,&v,2);};
+        w.event_work_799b38[8]=car.data();w.stage_cache_key_635f2c=9;w.stage_cache_value_635f30=0;
+        w.variant_780258=7;w.mode_78026c=16;
+        s.ta=true;s.early=early;s.o3=u(1.0f);s.o4=u(0.0f);
+        st.branch_state_7d38e8=2;st.stage_frames_7d3930=120;st.total_frames_7d39dc=240;
+        std::fill(std::begin(st.sector_ms_7d3650),std::end(st.sector_ms_7d3650),-1);
+        put32(0x68,9);put32(0x5c,2);put16(0x25c,0x10);
+        const auto before=st.stage_split_7d3954[0]; // 453BB0's telemetry sample
+        const bool cleared=race_check_stage_clear_44ff20(st,w,s,car.data());
+        race_check_sector_time_450e10(st,w,s,car.data());
+        const auto next=st.stage_split_7d3954[0]; // next 453BB0 input sample
+        const auto expected=early?0:race_frames_to_time_449b30(240,0).seconds*1000u+
+            race_frames_to_time_449b30(240,0).ms;
+        if(!cleared||before!=0||st.stage_clear_count_7d3950!=1||
+           st.last_stage_frames_7d3948!=120||st.stage_frames_7d3930!=0||
+           st.sector_new_7d3994!=1||next!=expected||s.bad){
+            std::fprintf(stderr,"TA code %s: clear=%d before=%d last=%u stage=%u split=%d expected=%u unexpected=%d\n",
+                early?"<0x3c":">=0x3c",int(cleared),before,st.last_stage_frames_7d3948,
+                st.stage_frames_7d3930,next,expected,int(s.bad));++failures;
+        }
+    }
+    std::printf("{\"routine\":\"ta_transition\",\"paths\":2,\"failures\":%u}\n",failures);
+    return failures?1:0;
+}
 }
 int main(int argc,char** argv){
     if(argc==2&&std::strcmp(argv[1],"--countdown")==0)return countdown_test();
+    if(argc==2&&std::strcmp(argv[1],"--ta-transition")==0)return ta_transition_test();
     if(argc<2){std::fprintf(stderr,"usage: %s <replay dump>\n",argv[0]);return 2;}
     std::ifstream in(argv[1],std::ios::binary);std::uint32_t head[5]{};
     if(!in.read(reinterpret_cast<char*>(head),20)||head[0]!=0x50524d52u){std::fprintf(stderr,"bad replay dump\n");return 2;}
