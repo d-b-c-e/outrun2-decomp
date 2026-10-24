@@ -94,6 +94,8 @@ struct NativeRaceAreaRuntime {
     std::vector<std::uint8_t> road_secondary=std::vector<std::uint8_t>(12u*driving::PcRoadSecondaryBlock);
     driving::PcRoadTableLoaderState road_loader{};
     std::uint32_t road_requests{},road_bytes{};
+    struct PendingRoad { driving::PcRoadTableRequest request; bool finished{}; std::string error; };
+    std::map<std::uint32_t,PendingRoad> pending_roads;
     driving::PcRoadTableArena road_arena(){return {driving::Bytes(road_primary.data(),road_primary.size()),
         driving::Bytes(road_preload.data(),road_preload.size()),driving::Bytes(road_secondary.data(),road_secondary.size())};}
     // 4103A0 renderer words 89EDBC/89EDC0/89EDC4 (consumer 4103F0/40FD70 not wired).
@@ -149,6 +151,8 @@ struct NativeRaceAreaRuntime {
     bool initialized{},sky_initialized{},init_failed{},sky_init_failed{},colour_hooked{};
 };
 NativeRaceAreaRuntime& native_race_area(NativeRuntimeContext&);
+// One game-thread file-service step after Present. Returns whether work was pending.
+bool native_race_road_file_service(NativeRuntimeContext&);
 bool native_race_area_bind_records(NativeRuntimeContext&);   // 7D33BC table + START words
 // Event callbacks 44CB00 / 44F7C0 / 44B7F0 / 451A30 / 451B40. False when the
 // callback is not one of them. `renderer` may be null (renderer-side

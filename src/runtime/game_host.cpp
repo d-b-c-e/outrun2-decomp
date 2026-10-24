@@ -511,6 +511,7 @@ std::uint32_t frame_call(void* user,std::uint32_t pc,const std::uint32_t*,std::s
         }
         return 0u;
     }
+    if(pc==0x44fba0u)return s.runtime&&pf::native_race_road_file_service(*s.runtime)?1u:0u;
     if(pc!=0x449050u||!s.presenter)return 0u;
     auto& p=*s.presenter;
     auto& mixer=audio_thread();

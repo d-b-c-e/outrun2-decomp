@@ -19,6 +19,7 @@
 #include "platform/race_manager_runtime.hpp"   // event-359 owner (race_manager hook)
 #include "driving/pc_crash.hpp"
 #include "driving/pc_wall_rebound.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -833,29 +834,53 @@ struct RoadIo {
     NativeRuntimeContext* c;NativeRaceAreaRuntime* o;std::string error;
     static std::uint32_t submit(void* u,const driving::PcRoadTableRequest& rq){
         auto& io=*static_cast<RoadIo*>(u);auto& o=*io.o;
-        auto* store=io.c->event_function36.retail_assets;
-        if(!store)throw std::runtime_error("road table "+rq.path+": no retail store");
+        if(!io.c->event_function36.retail_assets)throw std::runtime_error("road table "+rq.path+": no retail store");
+        const auto handle=1u+(++o.road_requests);
+        o.pending_roads.emplace(handle,NativeRaceAreaRuntime::PendingRoad{rq});
+        return handle;
+    }
+    static std::uint32_t finished(void* u,std::uint32_t handle){
+        auto& pending=static_cast<RoadIo*>(u)->o->pending_roads;
+        const auto it=pending.find(handle);
+        if(it==pending.end())throw std::runtime_error("road table: unknown request handle");
+        if(!it->second.error.empty())throw std::runtime_error(it->second.error);
+        return it->second.finished?1u:0u;
+    }
+    static void release(void* u,std::uint32_t handle){static_cast<RoadIo*>(u)->o->pending_roads.erase(handle);}
+};
+}
+bool native_race_road_file_service(NativeRuntimeContext& c){
+    if(!c.race_area||c.race_area->pending_roads.empty())return false;
+    auto& o=*c.race_area;
+    const auto it=std::find_if(o.pending_roads.begin(),o.pending_roads.end(),
+                               [](const auto& value){return !value.second.finished&&value.second.error.empty();});
+    if(it==o.pending_roads.end())return false;
+    auto& pending=it->second;const auto& rq=pending.request;
+    try{
+        auto* store=c.event_function36.retail_assets;
+        if(!store)throw std::runtime_error("no retail store");
         std::string error;
         const bool sz=rq.path.size()>3&&rq.path.compare(rq.path.size()-3,3,".sz")==0;
         const auto* bytes=retail_asset_guest_path(*store,rq.path,sz,&error);
-        if(!bytes)throw std::runtime_error("road table "+rq.path+": "+error);
+        if(!bytes)throw std::runtime_error(error);
         std::vector<std::uint8_t> image;
-        if(!race_area_loader_image(*bytes,sz,0u,rq.flags,image,error))throw std::runtime_error("road table "+rq.path+": "+error);
+        if(!race_area_loader_image(*bytes,sz,0u,rq.flags,image,error))throw std::runtime_error(error);
         const std::size_t n=image.size()-8u;
         auto& region=rq.region==driving::PcRoadTableRegion::Primary?o.road_primary:rq.region==driving::PcRoadTableRegion::Preload?o.road_preload:o.road_secondary;
-        // 44F990 with a destination reads the file's size (not the request
-        // size) there; a larger file would overrun the PC table.
-        if(std::size_t(rq.offset)+n>region.size())throw std::runtime_error("road table "+rq.path+" ("+std::to_string(n)+" bytes) overruns its region");
+        // 44F990 reads the file's size, not the request size, into the destination.
+        if(std::size_t(rq.offset)+n>region.size())throw std::runtime_error(std::to_string(n)+" bytes overrun its region");
         std::memcpy(region.data()+rq.offset,image.data(),n);
-        ++o.road_requests;o.road_bytes+=std::uint32_t(n);
-        return 1u+o.road_requests;
-    }
-    static std::uint32_t finished(void*,std::uint32_t){return 1u;}   // synchronous transfer: state 4
-    static void release(void*,std::uint32_t){}
-};
+        o.road_bytes+=std::uint32_t(n);pending.finished=true;
+    }catch(const std::exception& e){pending.error="road table "+rq.path+": "+e.what();}
+    return true;
 }
 std::uint32_t native_race_road_tables_46fc30(NativeRuntimeContext& c,std::uint32_t which){
     auto& o=native_race_area(c);
+    if(which>1u)throw std::out_of_range("46FAC0 family");
+    for(auto it=o.pending_roads.begin();it!=o.pending_roads.end();){
+        const bool family=it->second.request.region==driving::PcRoadTableRegion::Secondary;
+        if(family==(which==1u))it=o.pending_roads.erase(it);else ++it;
+    }
     driving::pc_road_table_reset_46fac0(o.road_loader,o.road_arena(),which);
     return 0u;
 }
