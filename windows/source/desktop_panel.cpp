@@ -154,6 +154,7 @@ struct Values {
     int anisotropic{},reflection{1},draw_ahead{},draw_behind{};   // reflection: index of 64..4096, default 128
     bool transparency{},full_vehicle_detail{},no_stage_cull{},depth_precision{};   // existing default-off Graphics flags
     bool auto_resolution{true},auto_resolution_start{true};   // [Window] AutoDetectResolution
+    bool hide_mouse_cursor{true};   // [Window] WindowedHideMouseCursor
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
@@ -675,6 +676,10 @@ void page_cameras(bool advanced){
          "always wins."))
          keep(&v.auto_resolution,before,[&]{return save("Window","AutoDetectResolution",v.auto_resolution?"true":"false");});}
     if(v.auto_resolution!=v.auto_resolution_start)dbce::panel::Text("The choice applies at the next game start.");
+    {const bool before=v.hide_mouse_cursor;
+     if(dbce::panel::OffOn("Hide mouse cursor while playing",&v.hide_mouse_cursor,
+         "On (default): hide the pointer over the game window. Off: leave it visible. Applies at the next game start."))
+         keep(&v.hide_mouse_cursor,before,[&]{return save("Window","WindowedHideMouseCursor",v.hide_mouse_cursor?"true":"false");});}
     dbce::panel::Heading("Graphics detail");
     graphics_slider("Anisotropic filtering",&v.anisotropic,16,"AnisotropicFiltering","%d",
         "0 (default) and 1 keep the game's filtering. 2-16 sharpen textures viewed at an angle; point-filtered textures stay unchanged.");
@@ -1190,6 +1195,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.wav_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Wav);
     p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
+    v.hide_mouse_cursor=settings.flag("Window","WindowedHideMouseCursor",true);
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;
      v.engine_rpm=t.game_rpm?1:0;}
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
