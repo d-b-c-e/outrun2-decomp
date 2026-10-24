@@ -12,7 +12,7 @@ namespace {
 unsigned checks{};
 void check(bool ok,const char* why){++checks;if(!ok){std::fprintf(stderr,"road_file_service: %s\n",why);std::exit(1);}}
 }
-int main(){
+int main(int argc,char** argv){
     auto state=std::make_unique<NativeRuntimeContext>();
     RetailAssetStore store{};state->event_function36.retail_assets=&store;
     check(!native_race_road_file_service(*state),"idle without a request");
@@ -44,5 +44,17 @@ int main(){
     bool reported=false;
     try{(void)native_race_road_tables_46fe50(*failed,0u,0u);}catch(const std::runtime_error&){reported=true;}
     check(reported,"loader reports the failed read on its next step");
+    if(argc==2){
+        auto retail=std::make_unique<NativeRuntimeContext>();
+        RetailAssetStore actual{};std::string error;
+        check(retail_asset_store_open(actual,argv[1],&error),"retail root opens read-only");
+        retail->event_function36.retail_assets=&actual;
+        check(native_race_road_tables_46fe50(*retail,0u,0u)==1u,"retail road request is pending");
+        auto& road=native_race_area(*retail);
+        check(road.road_bytes==0u&&native_race_road_file_service(*retail)&&road.road_bytes>0u,
+              "game-thread service reads an actual retail road table");
+        check(native_race_road_tables_46fe50(*retail,0u,0u)==1u&&road.pending_roads.empty(),
+              "actual retail road request completes and releases");
+    }
     std::printf("road_file_service: %u checks passed\n",checks);
 }

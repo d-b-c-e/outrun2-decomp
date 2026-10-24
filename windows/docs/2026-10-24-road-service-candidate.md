@@ -8,6 +8,9 @@ are not implemented.
 The ClangCL Release desktop and focused `road_file_service` CTest passed.
 The test checks pending submission, one successful read, idle, reset
 cancellation, and a failed read. The existing package-tool suite passed 8/8.
+An optional read-only run against `E:/Games/OutRunDecompSmoke` then passed
+15 checks, including one actual retail `.sz` road file copied by the
+game-thread service and released by the loader. This does not launch the game.
 
 Private package:
 `E:/outrun2-research/private-candidate-6dd3a55-20261024/candidate.zip`
