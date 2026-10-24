@@ -96,8 +96,8 @@ go upstream as small pull requests (first: `tweaks-exe`).
      byte-identical, the digital path untouched) passes. Grant OUTRUN-FINE-STEERING-BUILD-01 (kobe 233347): the cached
      ClangCL Release build of `c4b4cc3` and CTest fine_steering, pedal_volume, consumed_replay and ffb_producer2
      passed, 4/4 (exe `5DF1B607`; hub artifacts/outrun-fine-steering-20261017/build-01). A muted run and the physical
-     feel at the rig are open; the owner-attended recorded session is the selected runtime route. Wheelkit has no row
-     yet.
+     feel at the rig are open; the owner-attended recorded session is the selected runtime route. Wheelkit now has a
+     next-start Fine steering row; settings read/write tests do not qualify its physical feel.
      - Where the steps come from: race_input.cpp:91 stores cvttss2si(steer*127) after the dead zone and the filter.
        OperationInput 49fad0 (pc_common_control.cpp:2189) then writes the car's +0x202 as volume0 << 8.
      - The physics readers of +0x202 are continuous in that i16, with 0x7f00 as full lock: pc_steering.cpp:57 and
