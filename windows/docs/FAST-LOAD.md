@@ -22,7 +22,7 @@ This follows the loading-only intent of pinned OutRun2006Tweaks `51acc201`: bypa
 - That final loading tick completes once, including its existing mode/event ordering. Its interpolation replay history is cleared before ordinary drawing resumes. After restored Present and the original small PC guard, the existing clock is sampled and its accumulator rebased once. Loading time does not become a backlog of gameplay updates; subsequent 60/120 Hz timing uses the existing policy.
 - A scoped binding releases the native context pointers and override when its loop exits, including an early exit. Setup screens and later teardown presentation remain paced normally.
 
-The original logical `44FBA0` file-service call stays in its original once-per-frame location. Tweaks mode 3's in-game streaming behavior is outside this feature.
+The original logical `44FBA0` file-service call stays in its original once-per-frame location. Tweaks mode 3's in-game streaming behavior is outside this feature; the [mode-3 source boundary](FAST-LOAD-MODE3.md) records the additional loader and frame-wait work it requires.
 
 ## Mode 1 behavior (source only, October 17)
 
