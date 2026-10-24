@@ -20,6 +20,22 @@ The native host now services one queued road-table request when the ordinary
 the robot-script and other native resource routes still read synchronously.
 The translated `F_44fba0` exists but is not connected to the host call.
 
+The translated call chain is more specific than a single pending-road check:
+`0x423F30` is an external call, `F_44FB20` services the road-table family but
+returns zero, then `F_4488A0`, `F_42DEF0`, `F_429960`, and `F_4F2130` each
+return early while their request family has work. The final ADV branch calls
+external `0x45AE40` but overwrites its result with `eax=1` at `0x45AED7`.
+Consequently the current host's road-only boolean is neither the original
+aggregate result nor a safe mode-3 idle signal. The missing external routes
+also prevent simply connecting `F_44FBA0` to the host callback.
+
+Tweaks runs this pump in the frame limiter, before its simulation update, on
+every mode-3 frame; its no-limit case still calls the loader once. The native
+port currently paces in Present after the update/render path and calls the
+road-only host service afterward. A mode-3 implementation must move the
+aggregate service to the game-thread wait without serving it again after
+Present, while preserving the existing call placement for modes 0–2.
+
 Tweaks' remaining integration differences need to be addressed together:
 
 - `runtime_frame_step_417c7b` requests `0x44FBA0` once after Present
