@@ -171,7 +171,7 @@ struct Values {
     bool disable_countdown{};   // [Misc] DisableCountdownTimer
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
-    bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
+    bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{},allow_flac_loop_points{};   // [Audio], default off
     bool cd_switcher{},cd_shuffle{},cd_title{};   // existing [CDSwitcher] startup flags, all default off
     int cd_font{2},cd_scale_x{30},cd_scale_y{50},cd_x{375},cd_y{450};
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
@@ -465,6 +465,11 @@ void page_controls(bool advanced){
              "Requires FLAC decoding in this build. A selected replacement that cannot be read does not fall back to WAV or Ogg. "
              "Applies at the next game start."))
              keep(&v.allow_flac,before,[&]{return save("Audio","AllowFLAC",v.allow_flac?"true":"false");});}
+        {const bool before=v.allow_flac_loop_points;
+         if(dbce::panel::OffOn("FLAC loop points",&v.allow_flac_loop_points,
+             "For a looping FLAC replacement, honor valid LOOPSTART and LOOPEND or LOOPLENGTH tags. "
+             "Off keeps whole-file looping. Requires FLAC music replacements. Applies at the next game start."))
+             keep(&v.allow_flac_loop_points,before,[&]{return save("Audio","AllowFLACLoopPoints",v.allow_flac_loop_points?"true":"false");});}
         if(v.allow_wav!=v.allow_wav_start||v.allow_flac!=v.allow_flac_start)
             dbce::panel::Text("The music replacement choices apply at the next game start.");
         dbce::panel::Heading("CD track switching");
@@ -1198,6 +1203,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
     v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
     v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);
+    v.allow_flac_loop_points=settings.flag("Audio","AllowFLACLoopPoints",false);
     v.cd_switcher=settings.flag("CDSwitcher","SwitcherEnable",false);
     v.cd_shuffle=settings.flag("CDSwitcher","SwitcherShuffleTracks",false);
     v.cd_title=settings.flag("CDSwitcher","SwitcherDisplayTitle",false);
