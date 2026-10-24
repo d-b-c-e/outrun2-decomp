@@ -2,6 +2,10 @@
 
 Target: Tweaks parity for `[Graphics] UIScalingMode` and `UILetterboxing` (ROADMAP: to do).
 
+The current F6 Cameras page and Wheelkit Cameras page expose all three saved
+`UIScalingMode` choices for the next start. Centered 4:3 remains the native
+default; mode 1 is labeled partial until time attack and C2C are seen in game.
+
 ## What Tweaks does (dbce-mods-outrun-2006 `hooks_uiscaling.cpp`, `OutRun2006Tweaks.ini`)
 
 `UIScalingMode` (Tweaks default 1):

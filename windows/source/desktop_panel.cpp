@@ -144,7 +144,7 @@ struct Values {
     std::string saved_presentation_limit{"0"};
     int presentation_mode{},presentation_vsync{};
     int triple{},projection{},latency{2};   // projection: [Triple] Views, 0 Planar, 1 Angled
-    int ui_scaling{2},letterbox{1},letterbox_start{1};   // [Graphics] UIScalingMode (read only) / UILetterboxing
+    int ui_scaling{2},ui_scaling_start{2},letterbox{1},letterbox_start{1};
     bool lens_flare_fix{true},shading_fix{true},particle_fix{true},bunki_fix{true};
     bool scene_textures{},ui_textures{},scene_extract{},ui_extract{},texture_cache{};   // default-off Graphics startup flags
     std::string texture_folder{"textures"};   // saved base folder, shown only; the native loader validates it
@@ -627,14 +627,20 @@ void page_cameras(bool advanced){
          "this does not change refresh, enable tearing or implement VRR. Ignored in tests, recording and playback."))
          keep(&v.presentation_vsync,before,[&]{return save("Performance","VSync",values[v.presentation_vsync]);});}
     // [Graphics] UILetterboxing (the Tweaks key; the index is the value written), read at start, so it applies at the
-    // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp); UIScalingMode itself has
-    // no row here yet.
+    // next start as the rows above. It acts only with UIScalingMode 1 or 2 (pc_screen.hpp).
+    {static const char* const modes[]{"Stretch 2D","Wide HUD (partial)","Centered 4:3 (default)"};
+     const int before=v.ui_scaling;
+     if(dbce::panel::Choice("UI scaling",modes,3,&v.ui_scaling,
+         "Tweaks UIScalingMode, applied at the next start. Wide HUD spaces the race HUD; time attack and C2C still need visual checks. "
+         "Centered 4:3 keeps the current default. Stretch 2D fills the game view."))
+         keep(&v.ui_scaling,before,[&]{return save("Graphics","UIScalingMode",std::to_string(v.ui_scaling));});}
+    if(v.ui_scaling!=v.ui_scaling_start)dbce::panel::Text("UI scaling applies at the next game start.");
     {static const char* const boxing[]{"Off","Outside the race (default)","Always"};
      const int before=v.letterbox;
      if(dbce::panel::Choice("Letterboxing",boxing,3,&v.letterbox,"Black bars beside the centered 4:3 at the next start, as Tweaks' "
          "UILetterboxing: outside the race (menus, loading), or always."))
          keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});}
-    if(v.letterbox>0&&v.ui_scaling==0)dbce::panel::Status("Letterboxing now","inactive: [Graphics] UIScalingMode is 0 (stretched)");
+    if(v.letterbox>0&&v.ui_scaling_start==0)dbce::panel::Status("Letterboxing now","inactive: [Graphics] UIScalingMode is 0 (stretched)");
     if(v.letterbox!=v.letterbox_start)dbce::panel::Text("The choice applies at the next game start.");
     {const bool before=v.screen_edge_cull;
      if(dbce::panel::OffOn("Widescreen object visibility",&v.screen_edge_cull,
@@ -1091,7 +1097,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.triple=int(parse_triple_screens(settings.text("Triple","Screens")).value_or(TripleScreens::off));
     v.projection=v.projection_start=int(parse_triple_projection(settings.text("Triple","Views")).value_or(TripleProjection::planar));
     {const auto t=settings.text("Window","FrameLatency");if(t.size()==1&&t[0]>='0'&&t[0]<='3')v.latency=t[0]-'0';}
-    {std::string note;v.ui_scaling=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
+    {std::string note;v.ui_scaling=v.ui_scaling_start=int(xbox_runtime::parse_ui_scaling_mode(settings.text("Graphics","UIScalingMode"),note));}
     {const int b=settings.integer("Graphics","UILetterboxing",1);v.letterbox=v.letterbox_start=b<0?0:b>2?2:b;}   // as window_desktop.cpp
     v.screen_edge_cull=v.screen_edge_cull_start=settings.flag("Graphics","ScreenEdgeCullFix",true);   // as window_desktop.cpp
     // Match the startup consumers' accepted ranges and defaults without changing the active renderer.
