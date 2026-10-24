@@ -15,23 +15,34 @@ loader call and changes the last request server's always-true return to its
 actual result; otherwise the pump could spin through the entire wait when no
 files remain.
 
-The native port has two distinct differences to address together:
+The native port has a more basic difference: its production `GameHost::frame_call`
+does not handle `0x44FBA0` (`src/runtime/game_host.cpp`). The translated
+`F_44fba0` exists but is not connected to that call. Several native resource
+routes complete their reads at request time, for example
+`RoadIo::finished` in `src/platform/race_area_runtime.cpp` and the robot
+script service in `src/platform/race_robots_runtime.cpp`. Repeating the current
+per-frame call during a wait would therefore do no file work.
 
-- `runtime_frame_step_417c7b` calls `0x44FBA0` once after Present
+If a pending native file-service queue is implemented, Tweaks' remaining
+integration differences would need to be addressed together:
+
+- `runtime_frame_step_417c7b` requests `0x44FBA0` once after Present
   (`src/driving/pc_common_control.cpp`). The CPU deadline currently runs
   inside D3D11 Present, before that call (`xbox/source/d3d11_display.cpp`).
   Pumping in the deadline therefore needs the current frame's loader service
   without racing or repeating an uncontrolled original call.
-- The translated `F_44fba0` (`src/platform/bulk_tr.cpp`) ends its ADV request
+- The currently unconnected translated `F_44fba0` (`src/platform/bulk_tr.cpp`) ends its ADV request
   path with the unconditional `eax=1` at `0x45AED7`. Its result is not a
   truthful idle signal for a repeated pump. A native mode-3 path must retain
   all five request servers and return the actual final result, as Tweaks does;
   changing only the frame limiter would keep busy-looping on an idle loader.
 
-An implementation needs to keep loader calls on the game thread, preserve the
+An implementation first needs a real pending queue. It then needs to keep
+loader calls on the game thread, preserve the
 existing order of game updates and Present, stop at the frame deadline, and
 restore the ordinary one-call path for modes `0`–`2`. The no-CPU-cap case still
 needs one call per frame. Focused checks should cover busy-to-idle, always-idle,
 the deadline and bounded sleep, the no-cap case, and unchanged `0`–`2` call
 counts before the new setting is exposed in F6 and Wheelkit. A build and
-in-game loading/streaming comparison are separate gates.
+in-game loading/streaming comparison are separate gates. Until then Mode 3
+is not a meaningful setting for the native port.
