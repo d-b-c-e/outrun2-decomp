@@ -42,9 +42,10 @@ key and do not enumerate displays. Playback retains the existing owner-Window
 presentation merge and disabled panel; recording uses ordinary presentation.
 
 This implements the planned monitor-choice adaptation of WindowPositionX/Y,
-not arbitrary corner placement. Wheelkit currently lacks a dynamic trusted
-monitor picker; native F6 is the available source route. A fixed Display1/2 row
-would not preserve this identity contract and is excluded.
+not arbitrary corner placement. Wheelkit now offers a dynamic picker for the
+same saved target identity; its 17 focused Core checks passed at main 9fbd3dc.
+Rendered saving and actual window placement remain unqualified. A fixed
+Display1/2 row would not preserve this identity contract and is excluded.
 
 The affected ClangCL x64 Release desktop and new startup_monitor fixture build
 at `bf37a264`; the single CTest passes all32 checks with zero skipped. Original
