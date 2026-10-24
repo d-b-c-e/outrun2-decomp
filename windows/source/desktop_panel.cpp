@@ -155,6 +155,7 @@ struct Values {
     bool transparency{},full_vehicle_detail{},no_stage_cull{},depth_precision{};   // existing default-off Graphics flags
     bool auto_resolution{true},auto_resolution_start{true};   // [Window] AutoDetectResolution
     bool hide_mouse_cursor{true};   // [Window] WindowedHideMouseCursor
+    bool show_frame_rate{};   // [Panel] ShowFrameRate, live overlay preference
     int projection_start{};   // [Triple] Views as read at start: the pending note compares with it, not with the status's
                               // request, which also counts the OR2_TRIPLE_VIEWS developer switch (nene LOW 2)
     bool telemetry{true};int layout{};
@@ -952,7 +953,14 @@ void draw_page(dbce::panel::Page page,bool advanced){
     switch(page){
     case dbce::panel::PAGE_CONTROLS:if(p.developer_options)page_controls(advanced);else player_controls(advanced);break;
     case dbce::panel::PAGE_FFB:player_ffb(advanced);break;
-    case dbce::panel::PAGE_CAMERAS:if(p.developer_options)page_cameras(advanced);else player_cameras(advanced);break;
+    case dbce::panel::PAGE_CAMERAS:
+        if(p.developer_options)page_cameras(advanced);else player_cameras(advanced);
+        dbce::panel::Heading("Frame rate");
+        {const bool before=v.show_frame_rate;
+         if(dbce::panel::OffOn("On-screen counter",&v.show_frame_rate,
+             "Show FPS at the top right of the center game view while F6 is closed. Applies now."))
+             keep(&v.show_frame_rate,before,[&]{return save("Panel","ShowFrameRate",v.show_frame_rate?"true":"false");});}
+        break;
     case dbce::panel::PAGE_TELEMETRY:page_telemetry(advanced);break;
     case dbce::panel::PAGE_HELP:
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
@@ -995,6 +1003,17 @@ void draw_badge(const std::string& text,int w,int h){
     list->AddRectFilled(ImVec2(at.x-pad,at.y-pad*0.5f),ImVec2(at.x+dot+size.x+pad,at.y+size.y+pad*0.5f),IM_COL32(0,0,0,170),4.0f*s);
     if(recording)list->AddCircleFilled(ImVec2(at.x+dot*0.4f,at.y+size.y*0.5f),dot*0.35f,tone);
     list->AddText(ImVec2(at.x+dot,at.y),tone,text.c_str());
+}
+void draw_frame_rate(int w,int h,bool badge){
+    const float s=dbce::panel::Scale(),pad=8.0f*s;
+    const float wide=float(h)*16.0f/9.0f,view=std::min(float(w),wide),right=(float(w)+view)*0.5f;
+    const float fps=ImGui::GetIO().Framerate;
+    char label[32];if(fps>0.0f)std::snprintf(label,sizeof label,"%.0f FPS",double(fps));
+    else std::snprintf(label,sizeof label,"-- FPS");
+    const ImVec2 size=ImGui::CalcTextSize(label),at(right-size.x-pad*3.0f,pad*(badge?8.0f:2.0f));
+    auto* list=ImGui::GetForegroundDrawList();
+    list->AddRectFilled(ImVec2(at.x-pad,at.y-pad*0.5f),ImVec2(at.x+size.x+pad,at.y+size.y+pad*0.5f),IM_COL32(0,0,0,170),4.0f*s);
+    list->AddText(at,IM_COL32(245,245,245,255),label);
 }
 // UILetterboxing (pc_screen.hpp): black outside the centred 4:3, on the back buffer before the badge and the panel.
 // ClearView takes no pipeline state, so the renderer's bindings are untouched. Without ID3D11DeviceContext1 no bars
@@ -1040,7 +1059,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
     const bool open=!p.playback&&dbce::panel::IsOpen();
     const auto badge=shim_input_recording_badge();
-    if((!open&&badge.empty())||!device||!context||!view||!width||!height)return;
+    if((!open&&badge.empty()&&!v.show_frame_rate)||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
         release_backend();
@@ -1070,6 +1089,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     ImGui::NewFrame();
     if(open)dbce::panel::Draw(w,h);
     if(!badge.empty())draw_badge(badge,w,h);
+    if(v.show_frame_rate&&!open)draw_frame_rate(w,h,!badge.empty());
     ImGui::Render();
     // On the back buffer, then the renderer's targets back (the DX11 backend restores the rest of its state itself).
     ID3D11RenderTargetView* saved[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};ID3D11DepthStencilView* depth=nullptr;
@@ -1202,6 +1222,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     p.flac_decoder=platform::music_replacement_decoder_available(platform::MusicFileFormat::Flac);
     v.auto_resolution=v.auto_resolution_start=settings.flag("Window","AutoDetectResolution",true);    // as window_desktop.cpp
     v.hide_mouse_cursor=settings.flag("Window","WindowedHideMouseCursor",true);
+    v.show_frame_rate=settings.flag("Panel","ShowFrameRate",false);
     {std::string notes;const auto t=telemetry_settings(settings,nullptr,nullptr);v.telemetry=t.enabled;v.layout=t.layout==dbce::forza::FORZA_FM7_DASH_311?1:0;
      v.engine_rpm=t.game_rpm?1:0;}
     {const auto w=wheel_steering(settings);v.sensitivity=pct(w.sensitivity);v.dead_zone=pct(w.dead_zone);}
