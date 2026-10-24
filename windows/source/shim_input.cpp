@@ -4,6 +4,7 @@
 #include "controls_store.hpp"
 #include "control_journal.hpp"
 #include "desktop_keyboard.hpp"
+#include "desktop_panel.hpp"
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "outrun_adapter.hpp"
@@ -499,6 +500,9 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     if(o.host)resolved_report(*o.host,o.reports);
     const sh::Frame& frame=o.host?o.host->tick():no_shim;
     o.frame=o.host?&frame:nullptr;
+    const auto pressed=[&](const char* id){const auto& a=frame.action[std::size_t(sh::action_index(id))];
+        return a.status==sh::Status::Live&&a.value>=0.5f;};
+    desktop_panel_wheel_actions(pressed("modMenu"),pressed("muteFfb"));
     const auto v=view(runtime);
     o.adapter->apply(frame,v,out,&kb);
     if(o.rec.armed()&&o.host){

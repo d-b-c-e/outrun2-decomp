@@ -5,6 +5,7 @@
 //   Stop FFB offered: F8 stops it, open or closed.
 #include "dbce_panel.h"
 #include "dbce_panel_input.h"
+#include "wheel_shortcuts.hpp"
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,19 @@ bool passes(WPARAM vk,bool alt=false){
 bool taken(WPARAM vk){return deliver(WM_KEYDOWN,vk)==WM_NULL&&deliver(WM_KEYUP,vk)==WM_NULL;}
 }
 int main(){
+    outrun::desktop::WheelShortcuts shortcuts;
+    auto edge=shortcuts.step(true,true,false);
+    check(!edge.menu&&!edge.mute,"buttons pressed outside the game do nothing");
+    edge=shortcuts.step(true,true,true);
+    check(!edge.menu&&!edge.mute,"focus return does not act on held buttons");
+    shortcuts.step(false,false,true);
+    edge=shortcuts.step(true,true,true);
+    check(edge.menu&&edge.mute,"a fresh focused press can open settings and stop force");
+    edge=shortcuts.step(true,true,true);
+    check(!edge.menu&&!edge.mute,"held buttons do not repeat");
+    shortcuts.step(false,false,true);
+    edge=shortcuts.step(true,false,true);
+    check(edge.menu&&!edge.mute,"the two shortcuts can be bound independently");
     WNDCLASSW wc{};wc.lpfnWndProc=DefWindowProcW;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"or2_panel_input_test";
     RegisterClassW(&wc);
     window=CreateWindowExW(0,wc.lpszClassName,L"panel input test",WS_OVERLAPPEDWINDOW,0,0,320,240,nullptr,nullptr,wc.hInstance,nullptr);

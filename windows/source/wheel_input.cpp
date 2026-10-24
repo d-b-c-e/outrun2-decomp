@@ -5,6 +5,7 @@
 #include "desktop_settings.hpp"
 #include "test_injection.hpp"
 #include "native_window.hpp"
+#include "desktop_panel.hpp"
 #include "desktop_keyboard.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
@@ -399,6 +400,7 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
         if(desktop_key(0xcb))keys|=1u<<NavLeft;if(desktop_key(0xcd))keys|=1u<<NavRight;
     }
     if(!g.open.empty()){inject::poll();for(Device* d:g.open)poll(*d);log_activity();}
+    desktop_panel_wheel_actions(value("modMenu")>=0.5,value("muteFfb")>=0.5);
     std::uint32_t held=keys;
     if(!g.open.empty())for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
     held|=gear_pulses(runtime);

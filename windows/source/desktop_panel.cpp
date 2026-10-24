@@ -16,6 +16,7 @@
 #include "triple_screens.hpp"
 #include "startup_monitor.hpp"
 #include "wheel_input.hpp"
+#include "wheel_shortcuts.hpp"
 #include "display_fit.hpp"
 #include "renderer.hpp"
 #include "platform/native_runtime.hpp"
@@ -102,6 +103,7 @@ struct FrontendRouteTrace {
 FrontendRouteTrace route_trace;
 struct Panel {
     bool configured{},latched{},input{},backend{},was_open{},playback{},developer_options{};
+    WheelShortcuts wheel_shortcuts;
     bool force_library{},force_muted{};   // WheelFfb.dll beside the game; DBCE_FFB_MUTE in this process
     ffb::player::Model player_model{ffb::player::Model::Legacy};
     ffb::producer2::Strengths applied_strengths{};
@@ -1188,6 +1190,13 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
 }
 
 bool desktop_panel_open(){return p.configured&&!p.playback&&dbce::panel::IsOpen();}
+
+void desktop_panel_wheel_actions(bool menu_held,bool mute_held){
+    if(!p.configured||p.latched||p.playback)return;
+    const auto edges=p.wheel_shortcuts.step(menu_held,mute_held,ffb_front_check()(xbox_runtime::native_window().hwnd));
+    if(edges.mute)stop_ffb();
+    if(edges.menu)dbce::panel::Toggle();
+}
 
 void desktop_panel_neutral_input(platform::NativeInputState& out){
     const bool connected=out.connected,layer=out.pc_input_layer;
