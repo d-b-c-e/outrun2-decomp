@@ -98,15 +98,21 @@ The native toolkit panel is integrated with OutRun's own D3D11 present path. Hel
 
 ## Source follow-up: small repository links (October 16)
 
-The separate native Help candidate vendors only the shared panel header and
-implementation from toolkit e8fca59. The desktop adapter supplies the OutRun
-and Wheelkit repository URLs; Help uses the shared secondary font and text-link
-widget, with no large GitHub buttons. URLs open only on an explicit click. The
-existing Help callback and any issue-report action stay separate; this change
-does not implement the still-pending native issue/report flow.
+The Help page uses the shared secondary font and text-link widget for small
+OutRun and Wheelkit repository links. It now also offers **Submit issue** in
+ordinary play. The player enters a title and description, may include only
+the known `runtime.log`, reviews the complete redacted snapshot, and explicitly
+opens a prefilled GitHub draft. A long report requires a new `.txt` file saved
+through a picker for manual attachment; existing files are never overwritten.
+Nothing is submitted automatically. Test and playback processes cannot open
+the report flow. The shared native report helper is copied unchanged from the
+toolkit; `windows/vendor/native/support/PROVENANCE.md` records its source and
+hashes. The game has no built-in version identifier, so the report names itself
+as an unversioned native source build; the optional runtime log can add context.
 
-This is uncompiled source on an isolated branch based on 8203db2. The frozen
-D374 course/loading runtime05 candidate stays unchanged and does not contain
-these links. Native compilation, offline Help-frame review and later game
-presentation remain pending. No input, force, INI, recording or device behavior
-changes, owner install, browser opening or runtime test occurred here.
+The OutRunDesktop Release target compiles with this adapter. The inherited
+shared-helper fixtures passed at their toolkit source pin, but this game's
+rendered form, save picker and browser handoff still need an attended check.
+
+The earlier source-only link candidate was based on 8203db2; its historical
+build and rendered status remains separate from this report addition.

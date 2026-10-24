@@ -7,6 +7,7 @@
 #include "desktop_settings.hpp"
 #include "desktop_quality.hpp"
 #include "desktop_bindings.hpp"
+#include "desktop_report.hpp"
 #include "hud_toggle.hpp"
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
@@ -970,6 +971,11 @@ void draw_page(dbce::panel::Page page,bool advanced){
     case dbce::panel::PAGE_HELP:
         dbce::panel::Status("Settings file",p.latched?"none in a test run (nothing is saved)":p.ini.c_str());
         dbce::panel::Text("Edit saved controls in Controls > Edit bindings. Use Wheelkit to add devices and apply shared input setup.");
+        if(!p.latched&&!p.playback){
+            const auto slash=p.ini.find_last_of("\\/");
+            const auto log=(slash==std::string::npos?std::string("."):p.ini.substr(0,slash))+"/runtime.log";
+            draw_support_report(log.c_str());
+        }
         break;
     default:break;
     }

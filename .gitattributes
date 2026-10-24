@@ -7,6 +7,7 @@ windows/vendor/wheelffb/wheelffb.h -text
 windows/vendor/wheelffb/external_ffb.h -text
 windows/vendor/wheelffb/read_slot_caps.h -text
 windows/vendor/native/panel/** -text
+windows/vendor/native/support/** -text
 windows/vendor/native/third_party/** -text
 windows/vendor/display/** -text
 # The Play with Recording companion is pinned by hash (install record, Wheelkit): byte-exact, never converted.
