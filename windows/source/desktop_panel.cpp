@@ -167,6 +167,7 @@ struct Values {
     bool fine_steering{},fine_steering_start{};   // [Misc] FineSteering, default off, next start only
     bool manual_default{},manual_default_start{};   // [Misc] DefaultManualTransmission
     bool level_select{};   // [Misc] EnableLevelSelect, ordinary next-start menu choice
+    bool disable_countdown{};   // [Misc] DisableCountdownTimer
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
@@ -502,6 +503,9 @@ void page_controls(bool advanced){
             "Hold Shift, or use the game's X/left-stick action, for alternate courses where supported. "
             "Shift must be held in the game's window; opening this panel blocks it. "
             "Does not change the return-from-race menu history or license progress.","Misc");
+        graphics_flag("Pause race countdown",&v.disable_countdown,"DisableCountdownTimer",
+            "Off by default: races use the normal countdown. On: the race timer does not count down. "
+            "Applies at the next game start.","Misc");
         {const bool before=v.license_character;
          if(dbce::panel::OffOn("License character selection",&v.license_character,
              "Off by default. Allows the character entry in the license editor. Applies at the next game start."))
@@ -677,8 +681,9 @@ void page_cameras(bool advanced){
          keep(&v.auto_resolution,before,[&]{return save("Window","AutoDetectResolution",v.auto_resolution?"true":"false");});}
     if(v.auto_resolution!=v.auto_resolution_start)dbce::panel::Text("The choice applies at the next game start.");
     {const bool before=v.hide_mouse_cursor;
-     if(dbce::panel::OffOn("Hide mouse cursor while playing",&v.hide_mouse_cursor,
-         "On (default): hide the pointer over the game window. Off: leave it visible. Applies at the next game start."))
+     if(dbce::panel::OffOn("Hide cursor in borderless window",&v.hide_mouse_cursor,
+         "On (default): hide the pointer over the borderless game's client area. Off: leave it visible. "
+         "Bordered windows keep their usual cursor behavior. Applies at the next game start."))
          keep(&v.hide_mouse_cursor,before,[&]{return save("Window","WindowedHideMouseCursor",v.hide_mouse_cursor?"true":"false");});}
     dbce::panel::Heading("Graphics detail");
     graphics_slider("Anisotropic filtering",&v.anisotropic,16,"AnisotropicFiltering","%d",
@@ -1163,6 +1168,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.texture_folder=settings.text("Graphics","TextureBaseFolder","textures");
     v.manual_default=v.manual_default_start=settings.flag("Misc","DefaultManualTransmission",false);   // as window_desktop.cpp
     v.level_select=settings.flag("Misc","EnableLevelSelect",false);
+    v.disable_countdown=settings.flag("Misc","DisableCountdownTimer",false);
     v.allow_horn=v.allow_horn_start=settings.flag("Audio","AllowHorn",true);   // as window_desktop.cpp
     {const auto rumble=enhancements::pad_vibration_settings(settings.text("Controls","VibrationMode","0"),settings.text("Controls","VibrationStrength","7"),
         settings.text("Controls","ImpulseVibrationMode","0"),settings.text("Controls","ImpulseVibrationLeftMultiplier","0.25"),
