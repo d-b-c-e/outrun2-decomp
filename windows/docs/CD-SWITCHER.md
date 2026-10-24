@@ -19,6 +19,14 @@ SwitcherDisplayTitle = false
 C:\Music\My song.flac = My displayed title
 ```
 
+F6 → Controls → Advanced and Wheelkit now expose the existing title font
+(0–9), width/height scale (0.05–2.00), and X/Y position (0–639 / 0–479).
+The defaults are font 2, scale 0.30 / 0.50, position 375 / 450. An edit saves
+only its own `[CDSwitcher]` key for the next start, leaving custom track lists,
+shortcuts, and unrelated settings untouched. A font missing from the game's
+font pack will not draw a title; the consumer's existing bounds remain in force.
+The F6 controls have compiled but their rendered interaction is not yet checked.
+
 The path is left of the first `=`; the title is the remaining text. Unquoted
 paths, original order, case and duplicate entries are retained. Comments begin
 with `#` or `;` after whitespace. Empty titles are allowed. An invalid section

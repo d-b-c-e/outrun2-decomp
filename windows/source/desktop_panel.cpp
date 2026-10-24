@@ -24,6 +24,7 @@
 #include "platform/frontend_keyboard.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/runtime_input.hpp"
+#include "platform/cd_title.hpp"
 #include <atomic>
 #include <algorithm>
 #include <cmath>
@@ -169,6 +170,7 @@ struct Values {
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
     bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{};   // [Audio], both default off
     bool cd_switcher{},cd_shuffle{},cd_title{};   // existing [CDSwitcher] startup flags, all default off
+    int cd_font{2},cd_scale_x{30},cd_scale_y{50},cd_x{375},cd_y{450};
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
     bool protect_login{}; // opt-in, next ordinary start only
     bool full_pedal_fix{true},pegasus_sound_fix{true};   // existing default-on Bugfixes, next start only
@@ -471,6 +473,23 @@ void page_controls(bool advanced){
         graphics_flag("Show CD track title",&v.cd_title,"SwitcherDisplayTitle",
             "Shows the current track title briefly after a successful manual change. Requires CD track switching. "
             "Applies at the next game start.","CDSwitcher");
+        if(advanced){
+            dbce::panel::Heading("CD track title style");
+            dbce::panel::Text("These settings apply at the next start when CD switching and track titles are on. Some game fonts may be unavailable.");
+            {const int before=v.cd_font;
+             if(dbce::panel::Slider("Title font",&v.cd_font,0,9,2,"%d"))
+                 keep(&v.cd_font,before,[&]{return save("CDSwitcher","SwitcherTitleFont",std::to_string(v.cd_font));});}
+            for(const bool horizontal:{true,false}){
+                int* value=horizontal?&v.cd_scale_x:&v.cd_scale_y;const int before=*value;
+                if(dbce::panel::Percent(horizontal?"Title width":"Title height",value,5,200,horizontal?30:50))
+                    keep(value,before,[&]{return save("CDSwitcher",horizontal?"SwitcherTitleFontSizeX":"SwitcherTitleFontSizeY",fraction(*value));});
+            }
+            for(const bool horizontal:{true,false}){
+                int* value=horizontal?&v.cd_x:&v.cd_y;const int before=*value;
+                if(dbce::panel::Slider(horizontal?"Title X position":"Title Y position",value,0,horizontal?639:479,horizontal?375:450,"%d"))
+                    keep(value,before,[&]{return save("CDSwitcher",horizontal?"SwitcherTitlePositionX":"SwitcherTitlePositionY",std::to_string(*value));});
+            }
+        }
         dbce::panel::Heading("Menus and license");
         graphics_flag("Protect saved online login",&v.protect_login,"ProtectLoginData",
             "Off by default. At the next ordinary start, encrypts the login block into SaveGame/OnlineLoginData.dat "
@@ -1151,6 +1170,11 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
     v.cd_switcher=settings.flag("CDSwitcher","SwitcherEnable",false);
     v.cd_shuffle=settings.flag("CDSwitcher","SwitcherShuffleTracks",false);
     v.cd_title=settings.flag("CDSwitcher","SwitcherDisplayTitle",false);
+    {const auto title=platform::cd_title_options(v.cd_title,settings.integer("CDSwitcher","SwitcherTitleFont",2),
+         settings.number("CDSwitcher","SwitcherTitleFontSizeX",0.3f),settings.number("CDSwitcher","SwitcherTitleFontSizeY",0.5f),
+         settings.integer("CDSwitcher","SwitcherTitlePositionX",375),settings.integer("CDSwitcher","SwitcherTitlePositionY",450));
+     v.cd_font=int(title.font);v.cd_scale_x=int(std::lround(title.scale_x*100));v.cd_scale_y=int(std::lround(title.scale_y*100));
+     v.cd_x=title.x;v.cd_y=title.y;}
     v.license_character=settings.flag("Misc","AllowCharacterSelection",false);
     v.menu_miles=settings.flag("Misc","ShowOutRunMilesOnMenu",true);
     v.hide_signin=settings.flag("Bugfixes","HideOnlineSigninText",false);
