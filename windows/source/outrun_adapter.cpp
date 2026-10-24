@@ -47,6 +47,7 @@ shim::Capability outrun_capability(){
     no("select","no game action");
     no("lookBack","not mapped yet");
     no("reset","not mapped yet");
+    no("horn","not mapped yet");
     no("modMenu","no F6 panel yet");
     no("muteFfb","no force feedback yet");
     return c;
@@ -148,8 +149,6 @@ void Adapter::apply(const shim::Frame& f,const GameView& g,platform::NativeInput
     if(held(f,"start"))d.buttons_04|=0x1u;
     if(held(f,"shiftUp"))d.buttons_04|=0x2u;
     if(held(f,"back"))d.buttons_04|=0x4u;
-    // The game's B button is horn in a race; preserve Back's existing B mapping for imported Tweaks profiles.
-    if(race&&held(f,"horn"))d.buttons_04|=0x4u;
     if(held(f,"shiftDown"))d.buttons_04|=0x8u;
     if(held(f,"camera"))d.buttons_04|=0x10u;
     d.buttons_04|=pulse;

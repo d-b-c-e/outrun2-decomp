@@ -75,7 +75,7 @@ struct Rig {
 
 // P22: the sink, as the game consumes it.
 void test_sink(){
-    Rig r(false,profile({Steer,Throttle,Brake,wb("shiftUp",13),wb("confirm",0),wb("navLeft",7),wb("start",36),wb("horn",37)}));
+    Rig r(false,profile({Steer,Throttle,Brake,wb("shiftUp",13),wb("confirm",0),wb("navLeft",7),wb("start",36)}));
     r.view.mode=16;   // racing
     auto& d=r.dev(r.w);
     d.state.axes[0]=49151;   // steer +0.5
@@ -103,16 +103,8 @@ void test_sink(){
     out=r.tick();
     check(!(out.pc_device.buttons_04&0x2u),"confirm sets no race bit (0x2 is shift up while racing)");
     d.state.buttons[0]=0;r.tick();
-    d.state.buttons[37]=0x80;
-    out=r.tick();
-    check((out.pc_device.buttons_04&0x4u)!=0,"horn uses the game's B button while racing");
-    d.state.buttons[37]=0;r.tick();
     // Menus: D-pad bits, menu edges, frontend features.
     r.view.mode=3;
-    d.state.buttons[37]=0x80;
-    out=r.tick();
-    check((out.pc_device.buttons_04&0x4u)==0&&!out.menu_cancel,"horn does not cancel a menu");
-    d.state.buttons[37]=0;r.tick();
     d.state.buttons[7]=0x80;
     out=r.tick();
     check((out.pc_device.buttons_04&0x100u)&&out.menu_left&&(out.frontend.feature_mask&0x1000u),"navLeft in a menu");

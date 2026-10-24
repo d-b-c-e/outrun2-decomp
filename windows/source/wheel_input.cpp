@@ -23,8 +23,8 @@
 namespace outrun::desktop {
 namespace {
 // The game's buttons, by the controls-contract action that drives each.
-enum Button : unsigned { Confirm, Back, Start, ShiftUp, ShiftDown, Camera, NavUp, NavDown, NavLeft, NavRight, Horn, ButtonCount };
-constexpr const char* ButtonActions[ButtonCount]{"confirm","back","start","shiftUp","shiftDown","camera","navUp","navDown","navLeft","navRight","horn"};
+enum Button : unsigned { Confirm, Back, Start, ShiftUp, ShiftDown, Camera, NavUp, NavDown, NavLeft, NavRight, ButtonCount };
+constexpr const char* ButtonActions[ButtonCount]{"confirm","back","start","shiftUp","shiftDown","camera","navUp","navDown","navLeft","navRight"};
 constexpr const char* GearActions[6]{"gear1","gear2","gear3","gear4","gear5","gear6"};
 
 struct Device {
@@ -382,7 +382,6 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     if(on(held,Start))d.buttons_04|=0x1u;
     if(on(held,ShiftUp))d.buttons_04|=0x2u;
     if(on(held,Back))d.buttons_04|=0x4u;
-    if(race&&on(held,Horn))d.buttons_04|=0x4u;
     if(on(held,ShiftDown))d.buttons_04|=0x8u;
     if(on(held,Camera))d.buttons_04|=0x10u;
     // Outside the race: confirm answers the result prompts (0x2); left / right are the D-pad bits (0x80 / 0x100,
