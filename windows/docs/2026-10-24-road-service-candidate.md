@@ -24,3 +24,10 @@ Build logs are beside the earlier `e4e0ed5` package in
 This is ready for a private road-loading smoke test. It has not been
 launched or installed in the owner's game. The earlier `e4e0ed5` private
 candidate and installed owner version remain unchanged.
+
+A fresh private data copy is staged at
+`E:/outrun2-research/private-road-smoke-6dd3a55-20261024/game` with the
+candidate executable, a minimal windowed configuration, triple screens off,
+telemetry off and force output off. The 26 copied retail items include a
+private SaveGame; the installed source was read only. The preparation record
+is beside the copy. The game has not been launched from this copy yet.
