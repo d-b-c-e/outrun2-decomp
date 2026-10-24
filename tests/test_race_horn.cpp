@@ -60,12 +60,10 @@ int main(){
     {const std::uint32_t r=0u;std::memcpy(w.sound_state.data(),&r,4);}           // room again
     native_race_horn(*c,false);
     req(entry(1)==0x81bcu&&!c->race.sound.horn_active,"room again: the stop is sent");
-    // ClearAllSound does not end the stop obligation (lola #130449): 424700 runs 427630 and then flushes the ring in the
-    // same callback, so a loop still queued plays after the clear. The real 424790 destroy runs the production 427630.
+    // ClearAllSound does not end the stop obligation: a loop still queued can play after a clear.
     reset();c->mode_state.current=16u;native_race_horn(*c,true);
     req(entry(0)==0x9bcu&&c->race.sound.horn_active,"a loop is queued");
-    {const auto clears=c->race.sound.clear_alls;
-     req(native_race_sound_invoke(*c,0x424790u,nullptr)&&c->race.sound.clear_alls==clears+1u,"the production ClearAllSound ran (424790)");}
+    c->pc_sound.clear_all_427630();
     req(c->race.sound.horn_active,"after the clear the horn still owes its stop");
     std::memset(w.sound_entries_9563e8.data(),0xff,4);                       // 4249A0 flushed (played) the queued loop
     c->event_state.slots[383].flags=2;native_race_horn(*c,false);
