@@ -30,7 +30,7 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-021 | art of rally is the FFB reference | pending | |
 | STD-022 | One triple-screen selector | partial | F6 Cameras shows Off / Surround / Separate monitors, plus a separate experimental projection choice. Rendered muted; saving through the panel and projected views remain unqualified (`docs/F6-PANEL.md`). |
 | STD-023 | Frame-rate readout in settings and log | adopted | Toolkit `NoteFrame` is called from `desktop_panel.cpp`; the Help/Cameras readout and runtime log were seen in the muted panel checks (`docs/F6-PANEL.md`). This is a display readout, not a frame-pacing acceptance claim. |
-| STD-024 | Optional on-screen frame-rate counter | unchecked | |
+| STD-024 | Optional on-screen frame-rate counter | partial | `[Panel] ShowFrameRate` is Off by default. F6 Cameras and Wheelkit can save it; when On, the D3D11 overlay draws FPS at the top right of the center game view while F6 is closed. Release desktop build and Wheelkit's focused setting write pass; rendered placement and measured accuracy remain unverified. |
 | STD-025 | One shared force model | pending | |
 | STD-026 | One force model for players | pending | |
 | STD-027 | Independent steering and effect strengths | pending | |
