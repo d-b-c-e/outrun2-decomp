@@ -45,7 +45,7 @@ steer = axis 0 dev={d71b8350-...} prod={0006346e-...} range=0..65535 rest=33265 
 Wheelkit writes it when it applies a rig profile. Devices are matched by their
 instance GUID only. Mapped actions: `steer`, `throttle`, `brake`, `shiftUp`,
 `shiftDown`, `gear1`..`gear6` (with `Transmission = H-pattern`), `confirm`,
-`back`, `start`, `navUp/Down/Left/Right`, `camera`. Others are reported as
+`back`, `start`, `navUp/Down/Left/Right`, `camera`, `horn` (in a race). Others are reported as
 unavailable with the reason (no clutch, handbrake, neutral or reverse in the game;
 no F6 panel or force feedback yet). At start `runtime.log` gets the standard line
 `controls: profile "<name>" revision <rev> via ini-controls-1: applied n (...); unsupported m (...); invalid k (...)`.

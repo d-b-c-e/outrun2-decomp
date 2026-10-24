@@ -23,7 +23,7 @@ bool digital(const DeviceIdentity& d,int number,ctl::Binding& b){
 
 const char* unavailable_reason(const std::string& a){
     if(a=="steer"||a=="throttle"||a=="brake"||a=="shiftUp"||a=="shiftDown"||a=="confirm"||a=="back"||a=="start"||
-       a=="navUp"||a=="navDown"||a=="navLeft"||a=="navRight"||a=="camera")return nullptr;
+       a=="navUp"||a=="navDown"||a=="navLeft"||a=="navRight"||a=="camera"||a=="horn")return nullptr;
     if(a.size()==5&&a.compare(0,4,"gear")==0&&a[4]>='1'&&a[4]<='6')return nullptr;
     if(a=="clutch")return "OutRun 2006 has no clutch";
     if(a=="handbrake")return "OutRun 2006 has no handbrake";
@@ -31,7 +31,6 @@ const char* unavailable_reason(const std::string& a){
     if(a=="gear7"||a=="gear8")return "the H-pattern mapping covers gears 1-6";
     if(a=="select")return "no game action";
     if(a=="lookBack"||a=="reset")return "no game action mapped yet";
-    if(a=="horn")return "horn not implemented yet";
     if(a=="modMenu")return "no F6 panel yet";
     if(a=="muteFfb")return "no force feedback yet";
     return "unknown action";

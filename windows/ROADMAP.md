@@ -58,6 +58,7 @@ needed in a native build.
 | | DefaultManualTransmission, HudToggleKey | ⬜ | |
 | | Vibration\*, ImpulseVibration\* | ⬜ | gamepad rumble / trigger motors |
 | DirectInput | device, axes, inverts, sensitivity, buttons, POV bindings | ✅ | canonical `[Controls]` (`ini-controls-1`); the Tweaks keys are imported once with Tweaks' scaling |
+| | Wheelkit horn action | 🟡 | native B-button input mapped in source and offline fixture; game sound and physical button not yet checked |
 | | ThrottleDeviceGuid, BrakeDeviceGuid | ✅ | each binding names its own device instance |
 | DirectInput.Calibration | Steering/Throttle/Brake Min/Center/Max | ⬜ | contract `range` / `rest` / `travel` cover pedal endpoints; steering calibration open |
 | DirectInput.Shifter | sequential | ✅ | |

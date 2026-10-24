@@ -30,10 +30,10 @@ void test_report(){
         "gear3 = button 2 dev="+Shifter+" prod="+ShifterProd,
         "navUp = hat 0 0 dev="+Wheel+" prod="+WheelProd,
         "brake = button 1",
-        "horn ="});
+        "horn = button 37 dev="+Wheel+" prod="+WheelProd});
     const auto r=report_controls(s);
     check(r.ok,"Schema 1 applies");
-    check(r.start_line=="controls: profile \"Rig\" revision abc via ini-controls-1: applied 3 (steer,gear3,navUp); unsupported 1 (clutch); invalid 1 (brake)",
+    check(r.start_line=="controls: profile \"Rig\" revision abc via ini-controls-1: applied 4 (steer,gear3,navUp,horn); unsupported 1 (clutch); invalid 1 (brake)",
           "start line: "+r.start_line);
     check(r.notes.size()==2,"one note per unsupported / invalid action");
     check(unavailable_reason("gear6")==nullptr&&unavailable_reason("gear7")!=nullptr&&unavailable_reason("reverse")!=nullptr,"gear coverage");

@@ -786,7 +786,7 @@ that resolves anywhere else refuses admission.
 - clutch, handbrake, neutral and reverse: not in the game;
 - gear7 and gear8;
 - select;
-- lookBack, reset and horn: not mapped yet;
+- lookBack and reset: not mapped yet;
 - modMenu: until the F6 panel;
 - muteFfb: until force feedback.
 
