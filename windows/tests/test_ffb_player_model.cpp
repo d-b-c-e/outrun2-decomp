@@ -51,7 +51,7 @@ struct Run {
 };
 void test_selection(){
     auto s=player::select(ini("[FFB]\nFFBGlobalStrength = 0.10\nFFBGearShift = 1.90\n"));
-    check(s.model==player::Model::Legacy&&s.refusal.empty(),"absent model is explicit legacy default");
+    check(s.model==player::Model::Producer2&&s.refusal.empty(),"absent model is producer@2 (FFB ships on)");
     s=player::select(ini("[FFB]\nModel = outrun-legacy@1\n[FFBProducer2]\nSteeringStrengthPercent = bogus\n"));
     check(s.model==player::Model::Legacy,"legacy selection ignores separate producer values");
     s=player::select(ini("[FFB]\nModel = outrun-producer@2\nFFBGlobalStrength = 0.10\nFFBGearShift = 1.90\n"));
@@ -110,8 +110,8 @@ void test_model_output_save_roundtrip(){
     std::string error;outrun::desktop::Ini saved;
     // The same one-key writer as the F6 controls: enabling output must never choose a model.
     check(outrun::desktop::write_key(path,"FFB","Output","wheel",error),"save output independently: "+error);
-    check(saved.load(path)&&!saved.has_value("FFB","Model")&&player::select(saved).model==player::Model::Legacy,
-          "Output On preserves the absent model and software-only legacy default");
+    check(saved.load(path)&&!saved.has_value("FFB","Model")&&player::select(saved).model==player::Model::Producer2,
+          "Output On preserves the absent model (producer@2 by default)");
     check(read()=="[FFB]\r\nOutput = wheel\r\n"+preserved,"output edit preserves every other byte");
     for(const auto* id:{producer::ModelId,player::LegacyId}){
         check(outrun::desktop::write_key(path,"FFB","Model",id,error),"save explicit model: "+error);
@@ -172,11 +172,11 @@ void test_fake_sink(){
     baseline.gate.mode=18;baseline.step(9);
     check(baseline.rows.back().state==producer::State::Neutral&&baseline.rows.back().shaped_force==0.f,
           "pause invalidation reaches fake sink as zero");
-    const auto legacy=player::select(ini(""));
+    const auto legacy=player::select(ini("[FFB]\nModel = outrun-legacy@1\n"));
     player::SelectedRequests legacy_requests(legacy,[&](const shadow::Gate&,const producer::Row&){
         throw std::runtime_error("legacy must not enter producer sink");
     });
-    check(!legacy_requests.active(),"default legacy never selects producer request path");
+    check(!legacy_requests.active(),"explicit legacy never selects producer request path");
     auto forged=choose(50,50);forged.strengths.shift_percent=101;
     player::SelectedRequests refused(forged,[&](const shadow::Gate&,const producer::Row&){
         throw std::runtime_error("forged strengths must not enter producer sink");

@@ -14,7 +14,7 @@ struct Selection {
     producer2::Strengths strengths{};
     std::string refusal;
 };
-// [FFB] Model is absent or explicitly LegacyId by default. Producer gains live only in
+// [FFB] Model absent is outrun-producer@2 (FFB ships on); explicit LegacyId stays software-only. Producer gains live only in
 // [FFBProducer2], each an independent strict 0..100 integer with reference 50.
 Selection select(const Ini& settings);
 

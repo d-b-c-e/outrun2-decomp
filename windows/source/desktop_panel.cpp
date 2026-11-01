@@ -1150,7 +1150,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
         v.monitor_labels.push_back("Saved display (unavailable or ambiguous)");v.monitor_paths.push_back(saved_monitor);
         v.monitor_choice=int(v.monitor_paths.size()-1u);
     }
-    const auto model_id=settings.text("FFB","Model",ffb::player::LegacyId);
+    const auto model_id=settings.text("FFB","Model",ffb::producer2::ModelId);   // absent: producer@2 (FFB ships on)
     v.model_next=model_id==ffb::player::LegacyId?0:model_id==ffb::producer2::ModelId?1:2;
     v.selected_steering_invalid=!producer_percent(settings,"SteeringStrengthPercent",v.selected_steering);
     v.selected_shift_invalid=!producer_percent(settings,"ShiftStrengthPercent",v.selected_shift);

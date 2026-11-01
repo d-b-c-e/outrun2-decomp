@@ -236,7 +236,7 @@ void test_output_config(){
         "steer = axis 0 dev="+wheel+" prod="+prod+" range=0..65535 rest=33265 travel=-1 name=\"MOZA R12 Base\"\r\n";
     std::string notes;
     auto c=outrun::desktop::ffb_output_config(load(controls),false,nullptr,notes);
-    check(!c.output&&c.steer_dev==wheel&&notes.empty()&&!outrun::desktop::ffbdev::load_refusal(c).empty(),"no Output key: no wheel output (the default)");
+    check(c.output&&c.steer_dev==wheel&&notes.empty()&&outrun::desktop::ffbdev::load_refusal(c).empty(),"no Output key: wheel output (FFB ships on)");
     c=outrun::desktop::ffb_output_config(load(controls+"[FFB]\r\nOutput = Wheel\r\n"),false,nullptr,notes);
     check(c.output&&!c.muted&&!c.latched&&c.steer_dev==wheel&&outrun::desktop::ffbdev::load_refusal(c).empty(),"Output = wheel (any case), the steer device");
     {   // STD-037: a schema-2 section (calibrated steer) keeps the force target, read as the input readers read it.

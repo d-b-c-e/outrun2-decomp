@@ -94,7 +94,8 @@ int main(){
     check(GetModuleHandleW(L"WheelFfb.dll")==nullptr,"asking whether the add-on is present does not load it");
 
     auto r=run(Controls,false,nullptr);
-    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"no [FFB] Output key: WheelFfb.dll never attached");
+    check(r.attached==1&&r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;"&&!r.loaded_after,
+          "no [FFB] Output or Model key: FFB ships on (producer@2 gated delivery, no device outside the race)");
     r=run(Controls+"[FFB]\r\nOutput = none\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = none: never attached");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,"1");
@@ -104,7 +105,8 @@ int main(){
     r=run("[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"Output = wheel without a steer device: never attached");
     r=run(Controls+"[FFB]\r\nOutput = wheel\r\nFFBSpringStrength = 99\r\n",false,nullptr);
-    check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"refused [FFB] settings: never attached");
+    check(r.attached==1&&r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;"&&!r.loaded_after,
+          "an invalid legacy [FFB] gain does not block the producer@2 default (no old gain is reinterpreted)");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n",false,nullptr);
     check(r.attached==1&&r.calls==L"GetWheelFfbVersion;GetWheelFfbVersion;"&&!r.loaded_after,
           "producer selection starts gated delivery but never opens a device outside the race");
@@ -116,8 +118,8 @@ int main(){
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"unknown model refuses before loading the DLL");
     r=run(Controls+"[FFB]\r\nModel = outrun-producer@2\r\nOutput = wheel\r\n[FFBProducer2]\r\nSteeringStrengthPercent = 101\r\n",false,nullptr);
     check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"invalid producer gains refuse before loading the DLL");
-    // Absent and explicit Legacy are software-only even with otherwise eligible native or shim output.
-    for(const auto& model:{std::string(),std::string("Model = outrun-legacy@1\r\n")}){
+    // Explicit Legacy is software-only even with otherwise eligible native or shim output.
+    for(const auto& model:{std::string("Model = outrun-legacy@1\r\n")}){
         for(const auto& backend:{std::string(),std::string("[Input]\r\nBackend = Shim\r\n")}){
             r=run(Controls+backend+"[FFB]\r\n"+model+"Output = wheel\r\n",false,nullptr);
             check(r.attached==0&&r.calls.empty()&&!r.loaded_after,"legacy wheel request refuses before DLL attach or call");
@@ -417,9 +419,10 @@ int main(){
         check(count==3,"legacy trace retains one row per race tick");
         file.close();DeleteFileA(trace_name.c_str());return rows;
     };
-    const auto reference=legacy_trace("","none",false);
-    for(const bool latched:{false,true})for(const auto& model:{std::string(),std::string("Model = outrun-legacy@1\r\n")})
-        check(legacy_trace(model,"wheel",latched)==reference,"implicit/explicit legacy wheel refusal preserves ordinary/latched software rows");
+    const std::string legacy_model="Model = outrun-legacy@1\r\n";   // absent Model is producer@2 since FFB ships on
+    const auto reference=legacy_trace(legacy_model,"none",false);
+    for(const bool latched:{false,true})
+        check(legacy_trace(legacy_model,"wheel",latched)==reference,"explicit legacy wheel refusal preserves ordinary/latched software rows");
     _putenv_s("OR2_FFB_TRACE","");
 
     // The shim's owner may still have a call inside the library (a worker preparing the read slot, romi 32222): the

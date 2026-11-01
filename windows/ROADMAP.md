@@ -57,7 +57,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
      are road-edge distances. Absent or explicit Legacy refuses saved `Output = wheel` before DLL loading/start.
    - Explicit `outrun-producer@2` uses consumed steer `+0x202`, HUD speed `+0x1F8` and gear `+0x208` for provisional
      centering and shift cues, with independent `[FFBProducer2]` gains. Unsupported tire/load terms stay unavailable.
-     It uses the existing gated delivery and shim bridge; Output remains off by default and force-muted/latched
+     It uses the existing gated delivery and shim bridge; since 2026-11-01 an absent Output and Model mean wheel output with producer@2 (owner: FFB ships on; explicit Output = none and F8 Stop stay off), and force-muted/latched
      processes cannot load the force library. See `docs/FFB-PRODUCER2-PLAYER-BOUNDARY.md`.
    - F6 provides an explicit next-start model selector and independent Output switch. Model edits write only Model;
      Output On never silently selects a model. Legacy controls are labeled trace-only and no old gain is migrated.

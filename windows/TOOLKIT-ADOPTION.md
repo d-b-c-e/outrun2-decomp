@@ -35,7 +35,7 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-026 | One force model for players | pending | |
 | STD-027 | Independent steering and effect strengths | pending | |
 | STD-028 | Complete raw registry preservation for game tests | n/a | The build keeps no registry state (settings, cache, saves and log are in its folder). |
-| STD-029 | New functionality ships installed and turned on | partial | Wheel input and Horizon telemetry default on in source; F6 pages are built and rendered in disposable copies. Force output and projected views remain default-off; the current `6777eb3` telemetry correction has no owner install or live field check. |
+| STD-029 | New functionality ships installed and turned on | partial | Wheel input and Horizon telemetry default on in source; F6 pages are built and rendered in disposable copies. Force output defaults on in source since 2026-11-01 (absent Output and Model: wheel, producer@2; not yet built into an install or felt at the wheel); projected views remain default-off; the current `6777eb3` telemetry correction has no owner install or live field check. |
 | STD-030 | The F6 panel comes first | partial | Native toolkit panel is integrated with the owned D3D11 renderer and all five pages rendered muted; controls/save interaction and a three-screen-span check remain (`docs/F6-PANEL.md`). |
 | STD-031 | art of rally's reference level | pending | |
 | STD-032 | Wheelkit reads the portfolio's own records | partial | `product.json` and the `controls:` start line in `runtime.log`; Wheelkit catalog entry pending (Astra). |

@@ -1,5 +1,5 @@
 // OutRun force feedback, F2 + F4 (ffb_live.hpp): the software force stream computed in the game, and its delivery to
-// the wheel only for outrun-producer@2 with [FFB] Output = wheel (off by default). Legacy is software-only.
+// the wheel only for outrun-producer@2 with [FFB] Output = wheel (absent Output and Model: on, owner 2026-10-31). Legacy is software-only.
 #include "ffb_live.hpp"
 #include "ffb_player_model.hpp"
 #include "ffb_capability.hpp"

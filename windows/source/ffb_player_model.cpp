@@ -19,8 +19,8 @@ bool percent(const Ini& ini,const char* key,int& value){
 }
 Selection select(const Ini& settings){
     Selection s;
-    if(!settings.has_value("FFB","Model"))return s;
-    const auto id=settings.text("FFB","Model");
+    // FFB ships on (owner, 2026-10-31): an absent Model is the wheel model, producer@2.
+    const auto id=settings.has_value("FFB","Model")?settings.text("FFB","Model"):std::string(producer2::ModelId);
     if(id==LegacyId)return s;
     if(id!=producer2::ModelId){
         s.model=Model::Refused;

@@ -32,7 +32,7 @@ struct RaceEpochs {
     bool step(std::uint32_t mode);
 };
 
-// The wheel output's configuration (pure): [FFB] Output = wheel | none (default none; anything else is noted and is
+// The wheel output's configuration (pure): [FFB] Output = wheel | none (absent: wheel, FFB ships on; anything else is noted and is
 // none), the mute (`mute_env`, DBCE_FFB_MUTE: any value but empty or 0 mutes), the process kind, the input backend
 // ([Input] Backend = Shim: the shim hands the wheel over, ffbdev::Owner) and the device instance [Controls] steer reads
 // (the force goes to the wheel the player steers with, never one chosen by name or index).

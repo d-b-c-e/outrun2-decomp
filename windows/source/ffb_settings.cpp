@@ -43,7 +43,7 @@ ffb::LegacySettings ffb_settings(const Ini& settings,std::string& notes,std::str
 
 ffbdev::Config ffb_output_config(const Ini& settings,bool latched,const char* mute_env,std::string& notes){
     ffbdev::Config c;
-    std::string v=settings.text("FFB","Output");
+    std::string v=settings.has_value("FFB","Output")?settings.text("FFB","Output"):"wheel";   // FFB ships on (owner, 2026-10-31)
     for(auto& ch:v)ch=char(std::tolower(static_cast<unsigned char>(ch)));
     if(v=="wheel")c.output=true;
     else if(!v.empty()&&v!="none")notes+="[FFB] Output = "+v.substr(0,24)+" is neither wheel nor none; no force output. ";
