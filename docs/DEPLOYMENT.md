@@ -5,6 +5,39 @@ carries every completed Wheelkit-integration and Tweaks-parity change, installed
 the rig with a recoverable backup. This is a private rig deployment, not a public
 release or tag. Test evidence is in [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
 
+## Current state (2026-11-01): read this first
+
+**The 2026-10-18/19 install below is gone.** `E:\Games\OutRunDecompSmoke` (exe `4D5BE954`, the owner's F6-saved INI
+`F1CB0F84`, the HD UI texture folder and its backups) no longer exists anywhere on disk, and it is not in the Recycle
+Bin. When or how it was removed is unknown. The LaunchBox entry "OutRun 2006: Coast 2 Coast (Decomp)" (ID
+`cab44f53-...`) still points at `..\..\..\..\Games\OutRunDecompSmoke\OutRunDesktop.exe`, so it cannot launch. Everything
+from "What is installed" downward is history.
+
+**Installed 2026-11-01 18:08Z** (file-only, game closed, not launched since) in the second, older copy under LaunchBox:
+`<LaunchBox-Racing>\Games\Windows\Outrun 2006 Coast to Coast\OutRun2006 Coast 2 Coast (Decomp)`:
+
+| File | SHA-256 (first 8) | Source |
+| --- | --- | --- |
+| `OutRunDesktop.exe` | `62E5531E` (was `7C996CEE`, 2026-10-10) | `main` `2dd9886`: force feedback ships on (absent `[FFB] Output` = wheel, absent `Model` = `outrun-producer@2`) |
+| `WheelFfb.dll` | `23061AD6` (none before) | toolkit `d4683f9` (native 0.11.0, x64), the commit `windows/vendor/wheelffb` is vendored from |
+
+- `OutRunDesktop.ini` and `options.ini` are byte-unchanged. That INI has no `[FFB]` section, so force is on with
+  producer@2 at the next start. It is not the owner's F6-saved file from 2026-10-18 (that one was lost with the folder):
+  bindings, Triple and HD UI settings there are whatever this older copy had.
+- Checked: Release build of `2dd9886`; Windows CTest 45/46 at build time (`outrun_adapter` fails on its horn action
+  count, unrelated); the three FFB tests 3/3 on the installed build; installed hashes equal the package.
+- Rollback: `E:\Source\temp\outrun2-decomp\rollback-20261101-120803` holds the old exe (`7C996CEE`) and both INIs. Close
+  the game, copy the exe back, delete `WheelFfb.dll`. Package: `E:\Source\temp\outrun2-decomp\package-2dd9886`.
+- Unverified: any launch of this build, F6, wheel input, and producer@2 force at a physical wheel (never felt).
+
+**Next steps.**
+1. Owner: launch `OutRunDesktop.exe` from the "(Decomp)" folder above (from its own folder), not the LaunchBox entry.
+   First drive is the first physical force check: hands on the wheel; F8 stops force, F6 Force turns it off.
+2. Repoint the LaunchBox entry (LaunchBox closed) to the "(Decomp)" folder, or restore a maintained install, and
+   re-apply the Wheelkit profile so `[Controls]` and `[Triple]` match the rig.
+3. A packaged installer (receipt, backup, uninstall) so installs stop being hand copies (grid `clean_install`).
+4. `outrun_adapter` test: reconcile the horn action count (20 delivered / 11 unavailable) with the current contract.
+
 ## What is installed (consolidated 2026-10-18 21:57:30Z; force correction 2026-10-19 02:17:54Z; candidate 54eca08 2026-10-19 05:17Z)
 
 | Item | Value |

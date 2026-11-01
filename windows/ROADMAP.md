@@ -69,6 +69,9 @@ go upstream as small pull requests (first: `tweaks-exe`).
    - The force add-on was installed with output off, first on 2026-10-12 and re-pinned on 2026-10-13. The current
      `A92CDCB6` install predates this Legacy refusal. Source readiness does not imply deployment; native semantics
      must ship with their hash-bound capability marker. Physical polarity, onset, recovery, stop and feel are open.
+   - 2026-11-01: `2dd9886` (force on by default) installed with `WheelFfb.dll` 0.11.0 x64 in the LaunchBox "(Decomp)"
+     folder; the earlier `E:\Games\OutRunDecompSmoke` install is gone. Hashes, rollback and next steps:
+     `docs/DEPLOYMENT.md` "Current state".
 5. 🟡 **Telemetry**: Forza Horizon layout, on by default, HUD-matched (STD-009/016,
    toolkit `native/forza`), plus the Tweaks fork's shared memory for its SimHub plugin; see `README.md` Telemetry.
    - 2026-10-12: SimHub logged valid OutRun data on port 8000 during a shim run.
