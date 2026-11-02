@@ -56,5 +56,46 @@ int main(int argc,char** argv){
             CHECK(a[0]>=-1e-9&&a[0]<=1.+1e-9&&a[1]>=-1e-9&&a[1]<=1.+1e-9);
         }
     }
+    const auto transform=[](RigVec p,const Mat4& matrix){std::array<double,4> out{};for(unsigned j=0;j<4;++j)out[j]=p.x*matrix[j]+p.y*matrix[4+j]+p.z*matrix[8+j]+matrix[12+j];return out;};
+    PanelBounds center;CHECK(panel_bounds(virtual_panels[1],{},center)==RigError::none);
+    const auto original=perspective_off_center_rh(center.left*.1,center.right*.1,center.bottom*.1,center.top*.1,.1,10000);
+    TripleViews source_views{};std::array<CurvedPanelWarp,3> plans;bool behind_center=false;
+    for(const double radius:{0.,1500.})for(const double shift:{0.,.17}){
+        auto projection=original;projection[8]=shift;projection[9]=-shift;
+        for(unsigned p=0;p<3;++p)CHECK(curved_panel_warp(panels[p],{},radius,virtual_panels[p],plans[p])==CurveWarpError::none);
+        CHECK(curved_source_views(projection,{},plans,source_views));
+        if(radius==0.&&shift==0.){
+            TripleViews legacy;CHECK(triple_views(projection,{708.417,398.484,660,70,70,0,0},legacy));
+            for(unsigned p=0;p<3;++p)for(unsigned k=0;k<16;++k)CHECK(std::abs(legacy.correction[p][k]-source_views.correction[p][k])<1e-10);
+        }
+        for(unsigned p=0;p<3;++p){
+            const auto& source=plans[p].source;const RigVec corners[]{source.lower_left,source.lower_right,source.upper_left,source.lower_right+source.upper_left-source.lower_left};
+            const auto direct=mat_mul(source_views.rotation[p],source_views.projection[p]);
+            Frustum depth;CHECK(perspective_frustum(source_views.projection[p],depth)&&std::abs(depth.n-.1)<1e-12&&std::abs(depth.f-10000)<1e-4);
+            for(unsigned i=0;i<4;++i){
+                const auto clip=transform(corners[i],projection),expected=transform(corners[i],direct);
+                behind_center=behind_center||clip[3]<0.;
+                CHECK(expected[3]>0&&std::abs(expected[0]/expected[3]-(i%2?1.:-1.))<1e-10&&std::abs(expected[1]/expected[3]-(i>=2?1.:-1.))<1e-10);
+                for(const double fix:{0.,1./1280.}){
+                    auto fixed=clip;fixed[0]+=fix*fixed[3];fixed[1]-=fix*fixed[3];
+                    const auto actual=triple_apply(source_views.correction[p],fix,fix,fixed);
+                    auto wanted=expected;wanted[0]+=fix*wanted[3];wanted[1]-=fix*wanted[3];
+                    for(unsigned k=0;k<4;++k)CHECK(std::abs(actual[k]-wanted[k])<1e-8);
+                }
+            }
+        }
+    }
+    CHECK(behind_center); // the homogeneous correction recovers side-source corners behind the original eye plane
+    const RigVec render_eye{12,-7,20};CHECK(curved_source_views(original,render_eye,plans,source_views));
+    for(unsigned p=0;p<3;++p){
+        const auto& source=plans[p].source;const RigVec corners[]{source.lower_left,source.lower_right,source.upper_left};
+        const auto direct=mat_mul(source_views.rotation[p],source_views.projection[p]);
+        for(unsigned i=0;i<3;++i){const auto clip=transform(corners[i]-render_eye,direct);
+            CHECK(clip[3]>0.&&std::abs(clip[0]/clip[3]-(i==1?1.:-1.))<1e-10&&std::abs(clip[1]/clip[3]-(i==2?1.:-1.))<1e-10);}
+    }
+    const auto saved_views=source_views;auto invalid_projection=original;invalid_projection[0]=std::numeric_limits<double>::infinity();
+    CHECK(!curved_source_views(invalid_projection,{},plans,source_views)&&source_views.correction[0]==saved_views.correction[0]);
+    CHECK(!curved_source_views(mat_identity(),{},plans,source_views)&&source_views.correction[1]==saved_views.correction[1]);
+    plans[2].valid=false;CHECK(!curved_source_views(original,{},plans,source_views)&&source_views.correction[2]==saved_views.correction[2]);
     std::printf("curved panel warp: %u checks, %u canonical managed rows; no renderer enabled\n",checks,rows);
 }

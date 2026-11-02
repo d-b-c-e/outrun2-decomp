@@ -84,4 +84,25 @@ inline CurveWarpError curved_source_uv(const CurvedPanelWarp& warp,double u,doub
     if(!std::isfinite(candidate[0])||!std::isfinite(candidate[1]))return CurveWarpError::projection;
     out=candidate;return CurveWarpError::none;
 }
+// Source frusta for the existing row-vector geometry-shader correction. Physical
+// panel coordinates are relative to render_eye; game view-space vertices remain
+// relative to their own camera. Depth follows the original native RH projection.
+// Unlike legacy flat triple_views, a widened center source need not be identity.
+inline bool curved_source_views(const Mat4& original,RigVec render_eye,const std::array<CurvedPanelWarp,3>& warps,TripleViews& out){
+    if(!curve_detail::finite(render_eye))return false;
+    for(const auto value:original)if(!std::isfinite(value))return false;
+    Frustum fr;if(!perspective_frustum(original,fr))return false;
+    Mat4 inverse;if(!mat_inverse(original,inverse))return false;
+    TripleViews candidate{};
+    for(unsigned i=0;i<3;++i){
+        curve_detail::Basis basis;PanelBounds bounds;
+        if(!warps[i].valid||!curve_detail::basis(warps[i].source,basis)||panel_bounds(warps[i].source,render_eye,bounds)!=RigError::none)return false;
+        candidate.rotation[i]=panel_rotation(warps[i].source);
+        candidate.projection[i]=perspective_off_center_rh(bounds.left*fr.n,bounds.right*fr.n,bounds.bottom*fr.n,bounds.top*fr.n,fr.n,fr.f);
+        candidate.correction[i]=mat_mul(mat_mul(inverse,candidate.rotation[i]),candidate.projection[i]);
+        for(const auto* matrix:{&candidate.rotation[i],&candidate.projection[i],&candidate.correction[i]})
+            for(const auto value:*matrix)if(!std::isfinite(value))return false;
+    }
+    out=candidate;return true;
+}
 }
