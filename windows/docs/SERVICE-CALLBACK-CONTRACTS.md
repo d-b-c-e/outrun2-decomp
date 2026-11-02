@@ -1,0 +1,16 @@
+# Service audit callback contracts
+
+The shadow coverage check exposed four open keys in `no_silent_service_holes`. The exact same keys existed at569584e before that rendering change. This separate increment qualifies their contracts and adds four specific allowlist entries; it does not change production control, rendering, networking or diagnostics.
+
+| Audit site | Actual behavior and evidence |
+|---|---|
+| `camera_project_484bd0: framing.adjust` | Optional desktop framing override. Absent callback uses `framing.fov_y`; absent/zero or invalid FOV retains the authored projection recomputed by483C10. Existing `camera_render_binding` checks context FOV, native restoration, authored +AC preservation, per-view callback and invalid-result refusal:114 assertions. |
+| `notify_car_producer: observer.observe` | Optional read-only diagnostic. Absent callback returns; a throwing callback detaches the observer and does not propagate into car control. New fixture checks absent, called, throwing and already-detached cases. It constructs no FFB writer or physical device. |
+| `PcNetworkSockets::platform_error: platform.last_error` | Optional exact supplier error. Absent or zero returns the explicit operation-specific failure code, not success. New fixture drives actual `resolve_server` and guest `WsaGetLastError` with absent/zero/exact callbacks, checks zero-capacity no-call and unchanged output. Existing `network_sockets` runs67 checks including the actual translated resolver, fake DNS/UDP, receive/send/bind errors and legacy no-data behavior; no OS supplier/socket. |
+| `native_race_requests_display_481a40: display.map` | A missing mapper is **not freely optional**. Required input can be absent: `PcRaceUnmapped` is caught into false/missing/fault/error; production `request_hud_run` reports that failure and exact address. The new inert actual-consumer fixture proves no mapper returns481A40/78026C, then maps mode20 and reaches the authored empty display. Invalid mode16 list input returns481A40/0DFE300C; a mapper exception returns its error. Matrix stack and independent traffic latch survive each failure. The allowance means the failure is already explicit, not that missing input is accepted. |
+
+`test_optional_callbacks` passes **28 assertions** with the existing verified OR2_EXE cache read-only. Without that cache the request-display portion returns skip77, not a pass. Initial fixture assumptions about an unmapped inert runtime were corrected after observing the exact78026C and7D33C4 errors; their logs remain. This is no natural gameplay/HUD/physical proof.
+
+Named optional/network/camera targets built jobs2 under CPU-only GO493230; lease mevu05:50:41->05:53:46 local, token removal verified, no custody held. Focused optional/network/camera/service-audit CTest **4/4 passed**. The audit has38 accepted hits, including its existing explicitly reported event36 teardown known hole; no broad classifier rule, wildcard or scanner logic changed. Logs `work/validation-20261102/optional-*` retain build/setup/final/skip/fixture/custody evidence. No game/GPU/audio/input/physical device, display change or owner install occurred.
+
+The private executable remains the frozen8b451ab/4C5CD269 candidate: this increment only adds fixture, exact audit reasons and documentation, so no replacement binary or release-readiness claim is produced.
