@@ -96,6 +96,25 @@ void test_profile(){
     }
 }
 
+void test_profile_plan(){
+    const auto good=read_profile(profile({"steer = "+axis(0,32768),wheel("confirm = button 0")}));
+    const auto p=plan_profile(good);
+    check(p.usable&&p.invalid_keys.empty()&&p.devices.size()==1&&p.bound.size()==2&&
+          p.base[A("steer")]==Status::Opening&&p.base[A("brake")]==Status::Unbound,"pure profile plan preserves bound and unbound actions");
+    check(p.devices[0].dev==W&&p.devices[0].prod==WP&&p.bound[p.bound_of[A("steer")]].binding.index==0,"pure plan exposes configured identity/object");
+    auto conflict=read_profile(profile({"steer = "+axis(0,32768),"confirm = button 0 dev="+W+" prod="+SP}));
+    const auto bad=plan_profile(conflict);
+    check(bad.usable&&bad.invalid_keys==std::vector<std::string>{"confirm"}&&bad.base[A("steer")]==Status::Opening&&
+          bad.base[A("confirm")]==Status::Invalid&&bad.bound.size()==1,"full profile catches later conflicting product without changing earlier Core behavior");
+    Capability caps;caps.unsupported[A("confirm")]="unavailable";
+    const auto limited=plan_profile(conflict,caps);
+    check(limited.invalid_keys.empty()&&limited.base[A("confirm")]==Status::Unsupported&&limited.in_profile[A("confirm")],"Core capability handling remains before binding admission");
+    const auto malformed=plan_profile(read_profile(profile({"steer = "+axis(0,32768),"brake = nonsense"})));
+    check(malformed.invalid_keys==std::vector<std::string>{"brake"}&&malformed.base[A("brake")]==Status::Invalid,"invalid non-steering action is retained by full profile plan");
+    const auto schema=plan_profile(read_profile("[Controls]\nSchema = 2\nsteer = "+axis(0,32768)+"\n"));
+    check(!schema.usable&&schema.bound.empty()&&schema.devices.empty(),"invalid schema plans no target");
+}
+
 void test_session(){
     Session s;std::string why;
     check(parse_session("nonce="+Nonce+"\nexpires=2000\n",1000,s,why)&&s.nonce==Nonce&&s.expires_unix==2000,"valid session: "+why);
@@ -708,7 +727,7 @@ void test_status_identity(){
 
 int main(){
     try{
-        test_sha256();test_profile();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
+        test_sha256();test_profile();test_profile_plan();test_session();test_identity();test_objects_and_ranges();test_reads_and_rearm();
         test_worker_never_blocks_tick();test_start_line();test_status_queue();test_latch();test_admission();test_batches();
         test_frame_boundary();test_running_neutral();test_terminal();test_provenance();test_generations();
         test_decision_time();test_admission_deadline();test_admission_usable();test_control_flood();test_pending_from_clock_zero();test_device_reports();test_missing_rescan();test_status_identity();

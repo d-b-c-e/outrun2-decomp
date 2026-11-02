@@ -30,6 +30,7 @@ struct State {
     std::uint32_t clears{},mode{};
     CameraKeys keys;std::array<HudToggleKey,11> bindings{};std::array<CameraKeyRepeat,11> edges{};
     HudToggleEdge set_edge;
+    std::array<CameraKeyRepeat,11> resolved_edges{};std::uint32_t resolved_clears{};
     std::array<float,3> steps{{.02f,1.f,2.f}};
     bool configured{},shift_set{},bonnet{},fit_available{};
     ULONGLONG notice_until{},comparison_until{};
@@ -228,9 +229,20 @@ void camera_controls_activate(unsigned i){
     else if(i<10)camera_controls_zoom(i==8?fov:-fov);
     else camera_controls_reset();
 }
+void camera_controls_resolved_actions(const std::array<CameraResolvedAction,11>& input,bool blocked,std::uint64_t milliseconds){
+    std::array<bool,11> actions{};
+    {
+        const std::lock_guard<std::mutex> lock(camera_mutex);
+        blocked=blocked||!h.configured||!CameraFraming::tunable(h.view)||desktop_panel_open()||h.resolved_clears!=desktop_key_clears();
+        h.resolved_clears=desktop_key_clears();
+        for(unsigned i=0;i<11;++i)actions[i]=h.resolved_edges[i].step(input[i].held,blocked||!input[i].live,milliseconds,i!=10);
+    }
+    for(unsigned i=0;i<11;++i)if(actions[i])camera_controls_activate(i);
+}
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save
     end_comparison();
+    for(auto& edge:h.resolved_edges){edge={};edge.edge.wait=true;}h.resolved_clears=desktop_key_clears();
     h.path=ini.path();h.physical=physical;h.clears=desktop_key_clears();h.configured=true;
     h.last_camera=-1;h.bonnet=false;h.cycle_save_failed=false;h.rotation={};h.rotation_car=nullptr;
     const auto last=hud_toggle_setting_name(ini.text("Camera","LastCamera"));

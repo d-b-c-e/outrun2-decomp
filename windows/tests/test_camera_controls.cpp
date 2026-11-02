@@ -221,6 +221,26 @@ int main(int argc,char** argv){
         const unsigned axes[]{1,1,2,2,0,0,3,3};const float signs[]{1,-1,1,-1,-1,1,1,-1};
         for(unsigned axis=0;axis<4;++axis)CHECK(std::fabs(pose[axis]-(axis==axes[action]?signs[action]*camera_controls_step(action<6?0:1):0.f))<1e-6f);
     }
+    std::array<CameraResolvedAction,11> resolved{};for(auto& action:resolved)action.live=true;
+    std::uint64_t resolved_ms=1000;
+    const auto resolve=[&](bool blocked=false){camera_controls_resolved_actions(resolved,blocked,resolved_ms);resolved_ms+=10;};
+    for(unsigned action=0;action<11;++action){
+        camera_controls_reset();if(action==10){camera_controls_move(0,.02f);camera_controls_zoom(2.f);}resolve();const auto released_bytes=read();
+        resolved[action].held=true;resolve();CHECK(read()==released_bytes); // taps act on own release
+        resolved[action].held=false;resolve();
+        if(action<8){const unsigned axes[]{1,1,2,2,0,0,3,3};const float signs[]{1,-1,1,-1,-1,1,1,-1};CHECK(std::fabs(camera_controls_pose()[axes[action]]-signs[action]*camera_controls_step(action<6?0:1))<1e-6f);}
+        else if(action<10)CHECK(camera_controls_fov().offset==(action==8?2.f:-2.f));
+        else CHECK((camera_controls_pose()==std::array<float,4>{}&&camera_controls_fov().offset==0));
+    }
+    camera_controls_reset();resolved[0].held=true;resolve();resolved_ms+=350;resolve();CHECK(camera_controls_pose()[1]==.02f);
+    resolved_ms+=100;resolve();CHECK(camera_controls_pose()[1]==.04f);resolved[0].held=false;resolve();CHECK(camera_controls_pose()[1]==.04f); // no trailing release increment
+    const auto held_pose=camera_controls_pose();resolved[0].held=true;resolve();resolved[0].live=false;resolved[0].held=false;resolve();CHECK(camera_controls_pose()==held_pose); // device loss is not a release
+    resolved[0].held=true;resolved[0].live=true;resolve();resolved[0].held=false;resolve();CHECK(camera_controls_pose()==held_pose); // own key must rearm
+    resolved[0].held=true;resolve(true);resolved[0].held=false;resolve();CHECK(camera_controls_pose()==held_pose);
+    resolved[0].held=true;resolve();desktop_keys_clear();resolved[0].held=false;resolve();CHECK(camera_controls_pose()==held_pose);resolve();
+    resolved[1].held=true;resolve();resolved[1].held=false;resolve();CHECK(camera_controls_pose()[1]<held_pose[1]); // another released action remains usable
+    camera_controls_reset();
+    poll();poll(); // the keyboard reader independently observes the focus clear and its following released tick
     const auto before_invalid=camera_controls_pose();camera_controls_activate(11);camera_controls_activate(~0u);CHECK(camera_controls_pose()==before_invalid);
     camera_controls_activate(10);for(const auto value:camera_controls_pose())CHECK(value==0.f);
     CHECK(fov(3)==1.1f&&driving::camera_fov_context().near_z==0.f); // native cinematic 3 is not logical Bonnet

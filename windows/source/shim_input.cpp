@@ -1,5 +1,6 @@
 // The input shim in a latched (test) process (shim_input.hpp).
 #include "shim_input.hpp"
+#include "camera_frame_input.hpp"
 #include "desktop_bindings.hpp"
 #include "controls_store.hpp"
 #include "control_journal.hpp"
@@ -509,6 +510,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     desktop_panel_wheel_navigation(navigation);
     const auto v=view(runtime);
     o.adapter->apply(frame,v,out,&kb);
+    camera_controls_shim_frame(frame,v.mode!=16u||o.rec.armed());
     if(o.rec.armed()&&o.host){
         ++o.ticks;
         // The stops before this tick's row: F11 (its press), the request-bound stop file (every 30 ticks).

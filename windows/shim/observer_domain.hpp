@@ -6,7 +6,7 @@
 #include <cstring>
 
 namespace dbce::shim::observe {
-constexpr std::uint32_t DomainMagic=0x4442534f, DomainVersion=2;
+constexpr std::uint32_t DomainMagic=0x4442534f, DomainVersion=3;
 constexpr std::size_t MaxSamples=8, MaxSignals=16;
 struct Identity {
     std::uint32_t process{};
@@ -99,13 +99,13 @@ template<class C,std::size_t N> void bytes(C& c,std::array<std::uint8_t,N>& a) {
     static_assert(N%4==0);for(std::size_t i=0;i<N;i+=4) {std::uint32_t u=0;for(int b=0;b<4;++b)u|=std::uint32_t(a[i+b])<<(b*8);c.word(u);for(int b=0;b<4;++b)a[i+b]=std::uint8_t(u>>(b*8));}
 }
 template<class C> void raw(C& c,RawState& r) {for(auto& a:r.axes)value(c,a);bytes(c,r.buttons);for(auto& p:r.povs)value(c,p);}
-template<class C> void fields(C& c,Document& d) {
+template<class C> void fields(C& c,Document& d,int action_count=ActionCount) {
     auto& id=d.identity;value(c,id.process);value(c,id.profile_devices);value(c,id.process_start);bytes(c,id.nonce);bytes(c,id.executable);bytes(c,id.build);bytes(c,id.profile);
     value(c,d.frame);value(c,d.tick_us);value(c,d.boundary_us);value(c,d.event_seq);value(c,d.down);value(c,d.up);enumeration(c,d.run);
     value(c,d.latched);value(c,d.suppress_native);value(c,d.fences_verified);value(c,d.force_absent);value(c,d.status_dropped);value(c,d.events_dropped);
     value(c,d.sample_count);value(c,d.signal_count);value(c,d.event_count);
     if(d.sample_count>MaxSamples || d.signal_count>MaxSignals || d.event_count>EventRingSize) {c.ok=false;return;}
-    for(auto& a:d.actions) {value(c,a.value);enumeration(c,a.status);std::int32_t sample=a.sample;value(c,sample);if(sample < -1 || sample>=int(MaxSamples))c.ok=false;a.sample=std::int16_t(sample);value(c,a.injected);}
+    for(int i=0;i<action_count;++i) {auto& a=d.actions[std::size_t(i)];value(c,a.value);enumeration(c,a.status);std::int32_t sample=a.sample;value(c,sample);if(sample < -1 || sample>=int(MaxSamples))c.ok=false;a.sample=std::int16_t(sample);value(c,a.injected);}
     for(std::size_t i=0;i<d.sample_count;++i) {
         auto& s=d.samples[i];value(c,s.device);value(c,s.epoch);value(c,s.seq);value(c,s.read_start_us);value(c,s.read_end_us);enumeration(c,s.poll);enumeration(c,s.state);
         value(c,s.valid);value(c,s.stale);raw(c,s.physical);raw(c,s.delivered);value(c,s.injected.batch);bytes(c,s.injected.hash);
@@ -124,8 +124,10 @@ inline bool encode(const Document& source,Payload& out) {
     next[2]=std::uint32_t(c.at);out=next;return true;
 }
 inline bool decode(const Payload& in,Document& out) {
-    if(in[0]!=DomainMagic || in[1]!=DomainVersion || in[2]>in.size() || in[2]<3)return false;
-    Document next;domain_detail::Decode c{in,3};domain_detail::fields(c,next);
+    if(in[0]!=DomainMagic || (in[1]!=2&&in[1]!=DomainVersion) || in[2]>in.size() || in[2]<3)return false;
+    const int actions=in[1]==2?LegacyActionCount:ActionCount;
+    Document next;domain_detail::Decode c{in,3};domain_detail::fields(c,next,actions);
+    if(in[1]==2&&(next.identity.profile_devices>LegacyActionCount||(next.down>>LegacyActionCount)||(next.up>>LegacyActionCount)))return false;
     if(!c.ok || c.at!=in[2] || !domain_detail::valid(next))return false;
     for(std::size_t i=c.at;i<in.size();++i)if(in[i])return false;
     out=next;return true;

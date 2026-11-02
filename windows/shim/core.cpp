@@ -1,6 +1,8 @@
 // Input shim core (INPUT-SHIM.md r3.1 sections 6, 7, 9 and 12): device epochs and rearm, the resolver, the test run.
 #include "shim.hpp"
+#include "json_text.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 namespace dbce::shim {
 namespace {
@@ -22,43 +24,41 @@ Core::Core(Provider& p,CoreConfig cfg):p_(p),cfg_(std::move(cfg)){
     frame_.run=run_;
 }
 
-void Core::set_profile(const Profile& profile){
+void Core::set_profile(const Profile& profile){set_profile_impl(profile,nullptr,nullptr,1);}
+void Core::set_profile(const Profile& profile,const Declaration& extras,const std::string& profile_bytes,int reads){
+    set_profile_impl(profile,&extras,&profile_bytes,reads);
+}
+void Core::set_profile_impl(const Profile& profile,const Declaration* extras,const std::string* profile_bytes,int reads){
     profile_=profile;
     const auto& s=profile_.section;
-    for(int i=0;i<ActionCount;++i){
-        const char* why=cfg_.capability.unsupported[std::size_t(i)];
-        base_[std::size_t(i)]=why?Status::Unsupported:Status::Unbound;
-        base_reason_[std::size_t(i)]=why?why:"";
-    }
-    usable_=profile_.ok&&s.error.empty();
-    if(usable_){
-        for(const auto& [key,why]:s.invalid){
-            invalid_keys_.push_back(key);
-            const int i=action_index(key);
-            if(i>=0&&!cfg_.capability.unsupported[std::size_t(i)]){base_[std::size_t(i)]=Status::Invalid;base_reason_[std::size_t(i)]=why;}
-        }
-        for(const auto& e:s.bound){
-            const int i=action_index(e.action);
-            if(i<0)continue;
-            in_profile_[std::size_t(i)]=true;
-            if(cfg_.capability.unsupported[std::size_t(i)])continue;
-            // One device per instance. Bindings that disagree on the instance's product are invalid, never merged.
-            int d=-1;
-            for(std::size_t k=0;k<devs_.size();++k)if(devs_[k].id.dev==e.binding.dev)d=int(k);
-            if(d>=0&&devs_[std::size_t(d)].id.prod!=e.binding.prod){
-                base_[std::size_t(i)]=Status::Invalid;
-                base_reason_[std::size_t(i)]="prod "+e.binding.prod+" differs from the other bindings of "+e.binding.dev;
-                invalid_keys_.push_back(e.action);
-                continue;
+    auto plan=plan_profile(profile_,cfg_.capability);
+    usable_=plan.usable;bound_=std::move(plan.bound);bound_of_=plan.bound_of;in_profile_=plan.in_profile;
+    base_=plan.base;base_reason_=std::move(plan.reasons);invalid_keys_=std::move(plan.invalid_keys);
+    // The extras plan reads the common table before it moves into devs_; its own devices then go after it, so the
+    // common table, its order and every sample slot stay what they are without extras.
+    ExtrasPlan xp;
+    if(extras)xp=plan_extras(*profile_bytes,*extras,plan.devices,reads);
+    for(auto& id:plan.devices){Device dev;dev.id=std::move(id);devs_.push_back(std::move(dev));}
+    if(extras){
+        extras_=true;xreads_=reads>=2?2:1;xdecl_=*extras;xrevision_=xp.revision;xignored_=xp.ignored;
+        for(auto& id:xp.devices){Device dev;dev.id=std::move(id);devs_.push_back(std::move(dev));}
+        for(std::size_t e=0;e<xp.extras.size();++e){
+            XState x;x.base=xp.extras[e].base;x.reason=xp.extras[e].reason;
+            if(x.base==Status::Unbound&&!xp.error.empty())x.reason=xp.error;
+            for(int c=0;c<2;++c){
+                const auto& pc=xp.extras[e].component[c];
+                auto& xc=x.component[c];xc.form=pc.form;
+                auto add=[&](const ExtraInput& in)->int{
+                    if(!in.configured)return -1;
+                    XInput i;i.binding=in.binding;i.shape=in.shape;i.device=in.device;
+                    xin_.push_back(i);return int(xin_.size())-1;
+                };
+                if(pc.form==ExtraComponent::Form::Single)xc.a=add(pc.a);
+                else if(pc.form==ExtraComponent::Form::Pair){xc.a=add(pc.a);xc.b=add(pc.b);}
             }
-            if(d<0){
-                Device dev;dev.id={e.binding.dev,e.binding.prod,e.binding.name};
-                devs_.push_back(dev);d=int(devs_.size())-1;
-            }
-            bound_of_[std::size_t(i)]=int(bound_.size());
-            bound_.push_back({i,e.binding,d});
-            base_[std::size_t(i)]=Status::Opening;
+            xs_.push_back(std::move(x));
         }
+        xframe_.slot.assign(std::size_t(xdecl_.slots),ActionValue{});
     }
     worker_epochs_.assign(devs_.size(),0);
     worker_caps_.assign(devs_.size(),ObjectCaps{});
@@ -242,7 +242,9 @@ std::uint64_t Core::events_dropped()const{std::lock_guard<std::mutex> l(m_);retu
 std::uint64_t Core::control_events_dropped()const{std::lock_guard<std::mutex> l(m_);return control_events_dropped_;}
 
 // ---------------------------------------------------------------- input thread
-const Frame& Core::tick(){
+const Frame& Core::tick(){return tick_impl(nullptr);}
+const Frame& Core::tick(std::uint32_t active_contexts){return tick_impl(&active_contexts);}
+const Frame& Core::tick_impl(const std::uint32_t* active_contexts){
     const auto start=p_.now_us();
     frame_.seq++;
     frame_.tick_us=start;
@@ -276,6 +278,8 @@ const Frame& Core::tick(){
     std::uint64_t digital=0;
     for(int i=0;i<ActionCount;++i)if(is_digital(i)&&frame_.action[std::size_t(i)].value>=0.5f)digital|=1ull<<i;
     frame_.down=digital&~prev_digital_;frame_.up=prev_digital_&~digital;prev_digital_=digital;
+    // The extras of this same tick: the same samples, decision time and seq (one sample/sequence relationship).
+    if(extras_&&active_contexts)resolve_extras(now,*active_contexts);
     track_status(now);
     frame_.run=run_;
     frame_.event_seq=event_seq_;
@@ -309,6 +313,7 @@ void Core::adopt_worker_changes(std::int64_t now){
             r.need_release=is_digital(b.action);
             r.need_rest=pedal_waits_for_rest(b.action);
         }
+        for(auto& x:xin_)if(x.device==o.device)arm_input(x,false);
     }
 }
 
@@ -324,6 +329,13 @@ void Core::read_devices(std::int64_t now){
         s.poll=p_.poll(d.handle);
         if(s.poll==Call::Ok)s.state=p_.state(d.handle,st);   // Poll fills nothing; only a complete state read counts
         s.read_end_us=p_.now_us();
+        SourceRead source;
+        if(p_.source_read(d.handle,source)){
+            if(source.generation && source.sequence && source.start_us>=0 && source.end_us>=source.start_us && source.end_us<=s.read_end_us){
+                s.source_generation=source.generation;s.source_sequence=source.sequence;
+                s.read_start_us=source.start_us;s.read_end_us=source.end_us;
+            }else{s.poll=Call::Gone;s.state=Call::NotCalled;}
+        }
         s.valid=s.poll==Call::Ok&&s.state==Call::Ok;
         const bool pending=s.poll==Call::Pending||s.state==Call::Pending;
         if(s.valid){
@@ -340,6 +352,7 @@ void Core::read_devices(std::int64_t now){
                     r.need_release=is_digital(b.action);
                     r.need_rest=pedal_waits_for_rest(b.action);
                 }
+                for(auto& x:xin_)if(x.device==int(i))arm_input(x,false);
             }
         }else{
             // A lost or gone device, or pending for longer than pending_limit_us (then: reacquire the same handle).
@@ -492,56 +505,195 @@ void Core::resolve(std::int64_t now){
     const bool test=cfg_.latched;
     for(int i=0;i<ActionCount;++i){
         auto& a=frame_.action[std::size_t(i)];
-        a=ActionValue{};
         const int bi=bound_of_[std::size_t(i)];
-        if(bi<0){a.status=base_[std::size_t(i)];continue;}
+        if(bi<0){a=ActionValue{};a.status=base_[std::size_t(i)];continue;}
         const auto& b=bound_[std::size_t(bi)];
-        const auto& d=devs_[std::size_t(b.device)];
-        a.sample=std::int16_t(d.sample);
-        switch(d.state){
-        case DevState::Missing:a.status=Status::DeviceMissing;continue;
-        case DevState::ProductMismatch:a.status=Status::ProductMismatch;continue;
-        case DevState::Opening:a.status=Status::Opening;continue;
-        case DevState::ReadFailed:a.status=Status::ReadFailed;continue;
-        case DevState::Open:break;
-        }
-        if(!d.fresh_seen||d.sample<0||!frame_.samples[std::size_t(d.sample)].valid){a.status=Status::ReadPending;continue;}
-        if(frame_.samples[std::size_t(d.sample)].stale||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::Stale;continue;}
-        const auto& k=b.binding;const auto idx=std::size_t(k.index);
-        if(k.kind==ctl::Kind::Axis){
-            if(!d.caps.axis[idx]){a.status=Status::ObjectMissing;continue;}
-            if(!d.caps.range_ok[idx]||d.caps.max[idx]<=d.caps.min[idx]){a.status=Status::RangeUnqualified;continue;}
-        }else if(k.kind==ctl::Kind::Button){if(!d.caps.button.test(idx)){a.status=Status::ObjectMissing;continue;}}
-        else if(k.kind==ctl::Kind::Hat){if(!d.caps.pov[idx]){a.status=Status::ObjectMissing;continue;}}
-        const auto& s=frame_.samples[std::size_t(d.sample)];
-        const bool marked=k.kind==ctl::Kind::Axis?(s.injected.axes>>idx)&1u:k.kind==ctl::Kind::Button?s.injected.buttons.test(idx):(s.injected.povs>>idx)&1u;
-        auto raw_of=[&](const RawState& st)->long{
-            switch(k.kind){
-            case ctl::Kind::Axis:return ctl::rescale(st.axes[idx],d.caps.min[idx],d.caps.max[idx],k.min,k.max);
-            case ctl::Kind::Button:return ctl::diButtonDown(st.buttons[idx])?1L:0L;
-            case ctl::Kind::Hat:return pov_raw(st.povs[idx]);
-            default:return 0L;
-            }};
-        const char* name=action_name(i);
-        if(test){
-            // A latched process: only a delivered injected value reaches an action; physical values are observed in the
-            // sample but feed nothing, not even rearm (section 6, "which source the rules read").
-            if(run_==Run::Running&&marked){a.status=Status::Live;a.injected=true;a.value=float(ctl::normalize(name,k,raw_of(s.delivered)));}
-            else a.status=Status::TestNeutral;
-            continue;
-        }
-        const double n=ctl::normalize(name,k,raw_of(s.physical));
-        auto& r=rearm_[std::size_t(i)];
-        if(r.need_release){
-            if(n>=0.5){a.status=Status::Rearming;continue;}
-            r.need_release=false;
-        }
-        if(r.need_rest){
-            if(n>cfg_.rest_threshold){a.status=Status::Rearming;continue;}
-            r.need_rest=false;
-        }
-        a.status=Status::Live;a.value=float(n);
+        a=resolve_binding(b.binding,b.device,ctl::shapeOf(action_name(i)),rearm_[std::size_t(i)],test,now);
     }
+}
+
+// One binding through its device's state, the shape's normalization and its rearm: the 31's rules, unchanged, and the
+// same for each input of a game's extras.
+ActionValue Core::resolve_binding(const ctl::Binding& k,int device,ctl::Shape shape,Rearm& r,bool test,std::int64_t now){
+    ActionValue a;
+    const auto& d=devs_[std::size_t(device)];
+    a.sample=std::int16_t(d.sample);
+    switch(d.state){
+    case DevState::Missing:a.status=Status::DeviceMissing;return a;
+    case DevState::ProductMismatch:a.status=Status::ProductMismatch;return a;
+    case DevState::Opening:a.status=Status::Opening;return a;
+    case DevState::ReadFailed:a.status=Status::ReadFailed;return a;
+    case DevState::Open:break;
+    }
+    if(!d.fresh_seen||d.sample<0||!frame_.samples[std::size_t(d.sample)].valid){a.status=Status::ReadPending;return a;}
+    if(frame_.samples[std::size_t(d.sample)].stale||now-d.last_valid_us>cfg_.fresh_us){a.status=Status::Stale;return a;}
+    const auto idx=std::size_t(k.index);
+    if(k.kind==ctl::Kind::Axis){
+        if(!d.caps.axis[idx]){a.status=Status::ObjectMissing;return a;}
+        if(!d.caps.range_ok[idx]||d.caps.max[idx]<=d.caps.min[idx]){a.status=Status::RangeUnqualified;return a;}
+    }else if(k.kind==ctl::Kind::Button){if(!d.caps.button.test(idx)){a.status=Status::ObjectMissing;return a;}}
+    else if(k.kind==ctl::Kind::Hat){if(!d.caps.pov[idx]){a.status=Status::ObjectMissing;return a;}}
+    const auto& s=frame_.samples[std::size_t(d.sample)];
+    const bool marked=k.kind==ctl::Kind::Axis?(s.injected.axes>>idx)&1u:k.kind==ctl::Kind::Button?s.injected.buttons.test(idx):(s.injected.povs>>idx)&1u;
+    auto raw_of=[&](const RawState& st)->long{
+        switch(k.kind){
+        case ctl::Kind::Axis:return ctl::rescale(st.axes[idx],d.caps.min[idx],d.caps.max[idx],k.min,k.max);
+        case ctl::Kind::Button:return ctl::diButtonDown(st.buttons[idx])?1L:0L;
+        case ctl::Kind::Hat:return pov_raw(st.povs[idx]);
+        default:return 0L;
+        }};
+    if(test){
+        // A latched process: only a delivered injected value reaches an action; physical values are observed in the
+        // sample but feed nothing, not even rearm (section 6, "which source the rules read").
+        if(run_==Run::Running&&marked){a.status=Status::Live;a.injected=true;a.value=float(ctl::normalize(shape,k,raw_of(s.delivered)));}
+        else a.status=Status::TestNeutral;
+        return a;
+    }
+    const double n=ctl::normalize(shape,k,raw_of(s.physical));
+    if(r.need_release){
+        if(n>=0.5){a.status=Status::Rearming;return a;}
+        r.need_release=false;
+    }
+    if(r.need_rest){
+        if(n>cfg_.rest_threshold){a.status=Status::Rearming;return a;}
+        r.need_rest=false;
+    }
+    if(r.need_centre){   // extras only: a centred input back in its context waits for centre
+        if(std::fabs(n)>cfg_.rest_threshold){a.status=Status::Rearming;return a;}
+        r.need_centre=false;
+    }
+    a.status=Status::Live;a.value=float(n);
+    return a;
+}
+
+// ---------------------------------------------------------------- extras (input thread)
+namespace {
+// The worse of two statuses for a destination read from several inputs: the most unavailable reason wins.
+int severity(Status s){
+    switch(s){
+    case Status::Live:case Status::Unbound:return 0;
+    case Status::Rearming:case Status::TestNeutral:return 1;
+    case Status::Stale:return 2;case Status::ReadPending:return 3;case Status::Opening:return 4;case Status::ReadFailed:return 5;
+    case Status::RangeUnqualified:return 6;case Status::ObjectMissing:return 7;case Status::DeviceMissing:return 8;
+    case Status::ProductMismatch:return 9;
+    default:return 10;
+    }
+}
+Status worse(Status a,Status b){return severity(b)>severity(a)?b:a;}
+}
+
+// Rearm for an extra's input: digital waits for release and a pedal for rest, as the 31 do when an epoch begins.
+// Returning to an observed context also makes a centred axis wait for centre, so nothing held across it acts.
+void Core::arm_input(XInput& x,bool context_return){
+    if(x.shape==ctl::Shape::Digital)x.rearm.need_release=true;
+    else if(x.shape==ctl::Shape::Pedal)x.rearm.need_rest=true;
+    else if(context_return)x.rearm.need_centre=true;
+}
+
+// A component: unbound, one input, or a digital pair (pos - neg; an unconfigured half reads 0). Any configured input that
+// is not Live leaves the component neutral with the worst status.
+ActionValue Core::resolve_component(const XComponent& c,bool test,std::int64_t now){
+    ActionValue out;
+    if(c.form==ExtraComponent::Form::Unbound){out.status=Status::Unbound;return out;}
+    auto one=[&](int i){auto& x=xin_[std::size_t(i)];return resolve_binding(x.binding,x.device,x.shape,x.rearm,test,now);};
+    if(c.form==ExtraComponent::Form::Single)return one(c.a);
+    ActionValue neg,pos;neg.status=pos.status=Status::Live;
+    if(c.a>=0)neg=one(c.a);
+    if(c.b>=0)pos=one(c.b);
+    const Status worst=worse(c.a>=0?neg.status:Status::Live,c.b>=0?pos.status:Status::Live);
+    out.sample=c.a>=0?neg.sample:pos.sample;
+    if(worst!=Status::Live){out.status=worst;return out;}
+    out.status=Status::Live;out.value=pos.value-neg.value;out.injected=neg.injected||pos.injected;
+    return out;
+}
+
+void Core::resolve_extras(std::int64_t now,std::uint32_t active_contexts){
+    const bool test=cfg_.latched;
+    xframe_.seq=frame_.seq;xframe_.contexts=active_contexts;
+    xframe_.slot.assign(std::size_t(xdecl_.slots),ActionValue{});
+    for(std::size_t e=0;e<xs_.size();++e){
+        auto& x=xs_[e];
+        const auto& d=xdecl_.extras[e];
+        auto put=[&](Status st){for(int c=0;c<d.components;++c){auto& v=xframe_.slot[std::size_t(d.first_slot+c)];v=ActionValue{};v.status=st;}};
+        if(x.base!=Status::Opening){put(x.base);continue;}
+        if(xdecl_.mode==ContextMode::Observed&&d.contexts&&!(active_contexts&d.contexts)){
+            put(Status::ContextInactive);x.was_inactive=true;continue;
+        }
+        if(x.was_inactive){   // back in context: every input rearms by its shape before it can be Live
+            x.was_inactive=false;
+            for(auto& c:x.component){if(c.a>=0)arm_input(xin_[std::size_t(c.a)],true);if(c.b>=0)arm_input(xin_[std::size_t(c.b)],true);}
+        }
+        ActionValue v[2];Status worst=Status::Live;
+        for(int c=0;c<d.components;++c){
+            v[c]=resolve_component(x.component[c],test,now);
+            if(x.component[c].form!=ExtraComponent::Form::Unbound)worst=worse(worst,v[c].status);
+        }
+        if(worst!=Status::Live){put(worst);continue;}   // a configured part not Live: the destination is neutral as a unit
+        if(d.stick&&d.circle){
+            const double len=std::sqrt(double(v[0].value)*double(v[0].value)+double(v[1].value)*double(v[1].value));
+            if(len>1.0){v[0].value=float(double(v[0].value)/len);v[1].value=float(double(v[1].value)/len);}
+        }
+        for(int c=0;c<d.components;++c)xframe_.slot[std::size_t(d.first_slot+c)]=v[c];
+    }
+    std::uint64_t digital=0;
+    for(std::size_t e=0;e<xs_.size();++e){
+        const auto& d=xdecl_.extras[e];
+        if(d.shape!=ctl::Shape::Digital)continue;
+        const auto& v=xframe_.slot[std::size_t(d.first_slot)];
+        if(v.status==Status::Live&&v.value>=0.5f)digital|=1ull<<d.first_slot;
+    }
+    xframe_.down=digital&~prev_xdigital_;xframe_.up=prev_xdigital_&~digital;prev_xdigital_=digital;
+}
+
+std::string Core::extras_report()const{
+    using dbce::shim::json_string;
+    auto str=[](std::string& j,const std::string& s){if(!json_string(j,s,1560))j+="null";};
+    // acceptedSchema: the highest [Extras] Schema this open reads (the DLL ABI: 1), so a writer never guesses Schema 2.
+    std::string j="{\"abi\":1,\"acceptedSchema\":"+std::to_string(xreads_)+",\"game\":";str(j,xdecl_.game);
+    j+=",\"declaration\":";str(j,hex(xdecl_.hash));
+    j+=",\"contextMode\":\"";j+=xdecl_.mode==ContextMode::Observed?"observed":xdecl_.mode==ContextMode::Advisory?"advisory":"none";
+    j+="\",\"contexts\":[";
+    for(std::size_t i=0;i<xdecl_.contexts.size();++i){if(i)j+=",";str(j,xdecl_.contexts[i]);}
+    j+="],\"revision\":";str(j,xrevision_);
+    j+=",\"ignored\":[";
+    for(std::size_t i=0;i<xignored_.size();++i){if(i)j+=",";str(j,xignored_[i]);}
+    j+="],\"extras\":[";
+    for(std::size_t e=0;e<xs_.size();++e){
+        const auto& d=xdecl_.extras[e];const auto& x=xs_[e];
+        if(e)j+=",";
+        j+="{\"id\":";str(j,d.id);
+        j+=",\"shape\":\"";j+=d.stick?"stick":d.shape==ctl::Shape::Digital?"digital":d.shape==ctl::Shape::Pedal?"pedal":"centred";j+="\"";
+        if(d.stick){j+=",\"range\":\"";j+=d.circle?"circle":"square";j+="\"";}
+        j+=",\"firstSlot\":"+std::to_string(d.first_slot)+",\"components\":"+std::to_string(d.components);
+        j+=",\"contexts\":[";
+        bool first=true;
+        for(std::size_t i=0;i<xdecl_.contexts.size();++i)if(d.contexts&(1u<<i)){if(!first)j+=",";first=false;str(j,xdecl_.contexts[i]);}
+        j+="],\"plan\":\"";j+=x.base==Status::Opening?"bound":status_name(x.base);j+="\",\"reason\":";str(j,x.reason);
+        j+=",\"slots\":[";
+        for(int c=0;c<d.components;++c){
+            if(c)j+=",";
+            const auto i=std::size_t(d.first_slot+c);
+            j+="\"";j+=i<xframe_.slot.size()?status_name(xframe_.slot[i].status):"unbound";j+="\"";
+        }
+        j+="],\"inputs\":[";
+        bool any=false;
+        for(int c=0;c<d.components;++c){
+            const auto& xc=x.component[c];
+            for(int h=0;h<2;++h){
+                const int i=h?xc.b:xc.a;
+                if(i<0)continue;
+                const auto& in=xin_[std::size_t(i)];
+                if(any)j+=",";any=true;
+                j+="{\"component\":\"";j+=d.stick?(c?"y":"x"):"";
+                j+="\",\"half\":\"";j+=xc.form==ExtraComponent::Form::Pair?(h?"pos":"neg"):"";
+                j+="\",\"kind\":\"";j+=ctl::kindName(in.binding.kind);
+                j+="\",\"index\":"+std::to_string(in.binding.index)+",\"instance\":";str(j,in.binding.dev);
+                j+=",\"product\":";str(j,in.binding.prod);j+="}";
+            }
+        }
+        j+="]}";
+    }
+    return j+"]}";
 }
 
 void Core::set_run(Run r,const std::string& why,std::int64_t now){

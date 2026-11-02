@@ -32,6 +32,7 @@ struct FrameCaptureSettings {
     std::vector<std::pair<std::string, std::string>> properties;   // further metadata properties
     double hz = 60, seconds = 300;             // the worst-case preflight: 60 Hz for 300 s
     dbce::session::Limits limits{512ull * 1024 * 1024, 256 * 1024, 300};
+    int action_count = ActionCount;           // ABI2 facade explicitly retains the legacy31 capture schema
     std::size_t slots = 510;                   // 510 fixed slots of 8216 bytes stay under 4 MiB
     std::function<void()> before_write;        // test seam (QueuedSink's): empty in a game
 };
@@ -76,7 +77,7 @@ class FrameRecorder {
         write_new(cfg_.folder / "devices.json", devices_json());
     }
     Channels row(const Frame& f, const Channels& game) const {
-        auto c = encode(f, slots_);
+        auto c = encode(f, slots_, cfg_.action_count);
         const auto frame_channels = c.size();
         c.insert(game.begin(), game.end());
         if (c.size() != frame_channels + game.size()) throw std::invalid_argument("a game channel name collides with a frame channel");

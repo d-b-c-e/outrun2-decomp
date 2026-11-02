@@ -3,9 +3,13 @@
 // consumer's Schema 2 profile at reads 1 while the consumer's own readers applied it; a parser-only test cannot see
 // that, so these checks read the Core-applied values. Ordinary (the physical wheel) and latched (injected raw values
 // through the control worker and inject.txt, as the 9a runtime proof) both take the calibration law at reads 2; the
-// default refuses the section. No device, game or force.
+// default refuses the section. No device, game or force. Built for x86 (DBCE_SHIM_ORDINARY_ONLY) it runs the ordinary
+// cases only: the journal and its observer are x64-only.
 #include "provider_host.hpp"
+#include "ordinary_only.hpp"
+#if !DBCE_SHIM_ORDINARY_ONLY
 #include "journal_identity.hpp"
+#endif
 #include "shim_fake_com.hpp"
 #include <chrono>
 #include <cmath>
@@ -19,7 +23,9 @@
 namespace {
 namespace h = dbce::shim::hosting;
 namespace sh = dbce::shim;
+#if !DBCE_SHIM_ORDINARY_ONLY
 namespace c = dbce::shim::control;
+#endif
 int checks = 0;
 void check(bool v, const std::string& what) { ++checks; if (!v) throw std::runtime_error(what); }
 const std::string W = "{d71b8350-61b7-11f1-8001-444553540000}", WP = "{0006346e-0000-0000-0000-504944564944}";
@@ -59,12 +65,14 @@ std::unique_ptr<Host> open(const std::filesystem::path& dir, fakecom::Input* in,
 }
 const sh::ActionValue& steer(const sh::Frame& f) { return f.action[std::size_t(sh::action_index("steer"))]; }
 void set_steer(fakecom::Input* in, std::size_t slot, long raw) { std::lock_guard<std::mutex> l(in->m); in->scripts[slot].state.lX = raw; }
+#if !DBCE_SHIM_ORDINARY_ONLY
 // Temp file, then a replacing rename: the control worker never reads a half-written batch.
 void publish(const std::filesystem::path& to, const std::string& text) {
     const auto tmp = to.wstring() + L".tmp";
     { std::ofstream f(tmp, std::ios::binary); f << text; }
     check(MoveFileExW(tmp.c_str(), to.wstring().c_str(), MOVEFILE_REPLACE_EXISTING) != 0, "publish " + to.string());
 }
+#endif
 
 void test_fixture() {
     for (const auto& p : Points)
@@ -87,9 +95,11 @@ void test_ordinary_reads2() {
         check(a.status == sh::Status::Live && !a.injected && std::fabs(a.value - p.cal) < 1e-4,
               "physical raw " + std::to_string(p.raw) + " reads " + std::to_string(a.value) + ", the calibration law's " + std::to_string(p.cal));
     }
+#if !DBCE_SHIM_ORDINARY_ONLY
     const auto id = h::journal_identity(*host, Nonce, Profile, "test core", "test adapter", 2);
     check(id->profile_revision == "r2" && id->id.profile == sh::read_profile(Profile, 2).file_hash &&
           id->start_line.find("applied 2 (steer,throttle)") != std::string::npos, "the journal identity reads the profile as the Core does");
+#endif
     const auto r = host->stop();
     check(r.resolved, "the ordinary stop resolves");
     check(in->counters.force_calls == 0 && in->refs == 0, "no force call; DirectInput released");
@@ -107,6 +117,7 @@ void test_default_refuses() {
     check(host->stop().resolved && in->counters.force_calls == 0, "the refused host stops resolved, no force call");
 }
 
+#if !DBCE_SHIM_ORDINARY_ONLY
 // Latched, reads 2, the 9a path: inject.on admits the session, each batch holds one raw value on the wheel's axis 0
 // (physical full right must not drive), and the Core-applied steer follows the calibration law.
 void test_latched_reads2() {
@@ -145,10 +156,16 @@ void test_latched_reads2() {
     check(r.resolved, "the latched stop resolves:" + why);
     check(std::filesystem::exists(dir / "controls-journal.jsonl") && in->counters.force_calls == 0, "the journal is in the run folder; no force call");
 }
+#endif
 }
 
 int main() {
-    try { test_fixture(); test_ordinary_reads2(); test_default_refuses(); test_latched_reads2(); }
+    try {
+        test_fixture(); test_ordinary_reads2(); test_default_refuses();
+#if !DBCE_SHIM_ORDINARY_ONLY
+        test_latched_reads2();
+#endif
+    }
     catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << "\n"; return 1; }
     std::error_code ec; std::filesystem::remove_all(scratch(), ec);
     std::cout << "provider host: " << checks << " checks passed\n";

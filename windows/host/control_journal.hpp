@@ -9,6 +9,7 @@
 // own review. The cap is finite and can be exhausted; the proof keeps a cap-exhaustion case.
 #include <windows.h>
 #include "control_snapshot.hpp"
+#include "json_text.hpp"
 #include "observer_domain.hpp"
 #include "sha256.hpp"
 #include <array>
@@ -25,6 +26,7 @@ struct JournalIdentity {
     bool latched{};
     std::string nonce_text;                     // the fence nonce, latched only
     std::string profile_revision, core_version, adapter_version;
+    std::string input_source;                  // optional versioned external provider identity; not a sample capture
     std::vector<DeviceInfo> devices;            // the immutable profile device table, in index order
     std::string start_line;                     // the human start line (also in runtime.log), split into rows
     // False until the shared identity builder hashes them; the journal then writes null, never an invented value.
@@ -45,20 +47,7 @@ struct JournalLimits {
 };
 
 namespace journal_detail {
-// Strict JSON string: valid UTF-8 only; quote, backslash and controls escaped; refused above `max` escaped bytes.
-inline bool json_string(std::string& out,const std::string& s,std::size_t max){
-    if(!strict_utf8(s))return false;
-    static constexpr char hexdigits[]="0123456789abcdef";
-    std::string e;e.reserve(s.size()+2);e+='"';
-    for(const unsigned char c:s){
-        if(c=='"')e+="\\\"";
-        else if(c=='\\')e+="\\\\";
-        else if(c<0x20||c==0x7f){e+="\\u00";e+=hexdigits[c>>4];e+=hexdigits[c&15];}
-        else e+=char(c);
-        if(e.size()>max+1)return false;
-    }
-    e+='"';out+=e;return true;
-}
+using dbce::shim::json_string;   // shim/json_text.hpp: shared with the ordinary DLL path
 inline std::string num(std::uint64_t v){return std::to_string(v);}
 inline std::string snum(std::int64_t v){return std::to_string(v);}
 inline std::uint64_t filetime_now(){FILETIME f;GetSystemTimeAsFileTime(&f);return (std::uint64_t(f.dwHighDateTime)<<32)|f.dwLowDateTime;}
@@ -131,6 +120,10 @@ class JournalFile {
         using journal_detail::json_string;using journal_detail::num;
         const auto& i=*id_;
         prefix_="\"v\":1,\"pid\":"+num(i.id.process)+",\"created\":"+num(i.id.process_start);
+        if(!i.input_source.empty()){
+            prefix_+=",\"inputSource\":";
+            if(!json_string(prefix_,i.input_source,lim_.small_bytes))return false;
+        }
         if(i.latched)prefix_+=",\"nonce\":\""+hex(i.id.nonce.data(),i.id.nonce.size())+"\"";
         prefix_+=",\"profileSha256\":\""+hex(i.id.profile)+"\",\"build\":{\"core\":";
         if(!json_string(prefix_,i.core_version,lim_.small_bytes))return false;

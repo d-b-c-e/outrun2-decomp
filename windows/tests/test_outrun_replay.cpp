@@ -91,6 +91,18 @@ void test_selection_and_playback(){
     if(!keep.empty()){std::filesystem::create_directories(keep);write_export(keep/"first.tsv",one.rows);write_export(keep/"replay.tsv",second);}
 }
 
+void test_legacy_camera_tail_absent(){
+    const auto one=first_run();auto old=one.rows;
+    for(auto& row:old)for(int i=LegacyActionCount;i<ActionCount;++i)for(const char* field:{"value","status","sample","injected"})row.erase("action."+std::string(action_name(i))+"."+field);
+    const auto path=scratch()/"legacy31.tsv";write_export(path,old);Tape tape(path);Adapter adapter("Sequential");
+    check(tape.size()==one.race.size(),"legacy31 tape keeps the same race rows");
+    std::int64_t row=-1;
+    for(std::size_t k=0;k<tape.size();++k){const auto live=latched(2000+k,Run::Running);const auto& frame=tape.play(live,true,row);NativeInputState sink{};adapter.apply(frame,view(16),sink);
+        const auto& got=adapter.signals();const auto& want=one.race[k];
+        check(got.record_steer==want.record_steer&&got.record_accel==want.record_accel&&got.record_brake==want.record_brake&&got.record_buttons==want.record_buttons,"legacy31 playback gives unchanged native adapter words");
+        for(int i=LegacyActionCount;i<ActionCount;++i)check(frame.action[i].value==0&&frame.action[i].status==Status::Unbound,"legacy tape camera extension neutral");
+    }
+}
 void test_live_run_ends_playback(){
     const auto path=scratch()/"first-2.tsv";write_export(path,first_run().rows);
     Tape tape(path);std::int64_t row=0;std::uint64_t seq=900;
@@ -133,7 +145,7 @@ void test_refusals(){
 
 int main(int argc,char** argv){
     if(argc==2)keep=argv[1];
-    try{test_selection_and_playback();test_live_run_ends_playback();test_leaving_the_race_ends_playback();test_refusals();}
+    try{test_selection_and_playback();test_legacy_camera_tail_absent();test_live_run_ends_playback();test_leaving_the_race_ends_playback();test_refusals();}
     catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
     std::error_code ec;std::filesystem::remove_all(scratch(),ec);
     std::cout<<"outrun replay tape: "<<checks<<" checks passed\n";

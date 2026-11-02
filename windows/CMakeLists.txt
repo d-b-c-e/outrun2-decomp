@@ -186,6 +186,13 @@ target_include_directories(test_shim PRIVATE shim tests vendor/controls)
 target_compile_features(test_shim PRIVATE cxx_std_17)
 target_compile_options(test_shim PRIVATE /W4)
 add_test(NAME shim COMMAND test_shim)
+# The toolkit's exact old-recording/observer/ABI2 fixtures at the vendored pin.
+add_executable(test_camera_contract_compat tests/camera_actions/main.cpp shim/core.cpp shim/parse.cpp)
+target_include_directories(test_camera_contract_compat PRIVATE shim shim_dll host/recorder tests vendor/controls vendor/session)
+target_compile_features(test_camera_contract_compat PRIVATE cxx_std_17)
+target_compile_definitions(test_camera_contract_compat PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_camera_contract_compat PRIVATE /W4 /WX)
+add_test(NAME camera_contract_compat COMMAND test_camera_contract_compat ${CMAKE_CURRENT_SOURCE_DIR}/tests/camera_actions/fixtures)
 # The shim's steering wheel for force feedback (source/shim_steer.hpp): the steer binding joined to the real Core's
 # device reports over the scripted provider.
 add_executable(test_shim_steer tests/test_shim_steer.cpp shim/parse.cpp shim/core.cpp)
@@ -356,13 +363,13 @@ target_link_libraries(session_game_fixture PRIVATE bcrypt)
 
 # The shared input shim as a DLL for managed game adapters (shim_dll/dbce_shim.h, experimental ABI 1; Astra 16982/17050):
 # the reviewed Core, DInputProvider and ProviderHost, unchanged, behind a C ABI.
-add_library(dbce_shim SHARED shim_dll/dbce_shim.cpp shim/core.cpp shim/parse.cpp shim/dinput_provider.cpp)
+add_library(dbce_shim SHARED shim_dll/dbce_shim.cpp shim/core.cpp shim/parse.cpp shim/dinput_provider.cpp shim/bridge_provider.cpp)
 target_include_directories(dbce_shim PRIVATE shim_dll shim host host/recorder vendor/session vendor/controls)
 target_compile_features(dbce_shim PRIVATE cxx_std_17)
 target_compile_definitions(dbce_shim PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 target_compile_options(dbce_shim PRIVATE /W4 /WX)
 target_link_libraries(dbce_shim PRIVATE dinput8 dxguid bcrypt)
-add_executable(test_shim_abi tests/test_shim_abi.cpp shim_dll/dbce_shim.cpp shim/core.cpp shim/parse.cpp shim/dinput_provider.cpp)
+add_executable(test_shim_abi tests/test_shim_abi.cpp shim_dll/dbce_shim.cpp shim/core.cpp shim/parse.cpp shim/dinput_provider.cpp shim/bridge_provider.cpp)
 target_include_directories(test_shim_abi PRIVATE shim_dll shim host host/recorder vendor/session tests vendor/controls)
 target_compile_features(test_shim_abi PRIVATE cxx_std_17)
 target_compile_definitions(test_shim_abi PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS DBCE_SHIM_BUILD)

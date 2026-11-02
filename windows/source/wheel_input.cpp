@@ -1,4 +1,5 @@
 #include "wheel_input.hpp"
+#include "camera_controls.hpp"
 #include "wheel_rescan.hpp"
 #include "outrun_adapter.hpp"
 #include "controls_store.hpp"
@@ -404,6 +405,10 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     unsigned navigation=0;unsigned bit=0;
     for(const char* id:{"navUp","navDown","navLeft","navRight","confirm","back"}){if(value(id)>=0.5)navigation|=1u<<bit;++bit;}
     desktop_panel_wheel_navigation(navigation);
+    std::array<CameraResolvedAction,11> cameras{};
+    for(unsigned i=0;i<cameras.size();++i){const auto* b=find(CameraControlActions[i]);
+        cameras[i]={b&&ctl::normalize(CameraControlActions[i],b->binding,raw(*b))>=.5,b!=nullptr};}
+    camera_controls_resolved_actions(cameras,mode!=16u,GetTickCount64());
     std::uint32_t held=keys;
     if(!g.open.empty())for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
     held|=gear_pulses(runtime);

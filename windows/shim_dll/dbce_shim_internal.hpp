@@ -10,3 +10,7 @@
 int32_t dbce_shim_open_with_input(IDirectInput8W* input, const wchar_t* folder, const char* nonce, const char* profile,
                                   int32_t profile_len, const char* unsupported, void* hwnd, void** out, char* why, int32_t why_len);
 int32_t dbce_shim_open2_with_input(IDirectInput8W* input, const dbce_shim_open_args* args, void** out, char* why, int32_t why_len);
+// dbce_shim_open_extras on a given DirectInput object (extension 2), which it takes over or releases on a refusal.
+int32_t dbce_shim_open_extras_with_input(IDirectInput8W* input, const wchar_t* folder, const char* nonce, const char* profile,
+                                         int32_t profile_len, const char* unsupported, void* hwnd, const char* declaration,
+                                         int32_t declaration_len, void** out, char* why, int32_t why_len);

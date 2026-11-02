@@ -42,11 +42,12 @@ check(bound["reverse"]["delivered"] is False and "reverse" in bound["reverse"]["
 check("FixtureUnknown" not in bound, "an unknown key is not a binding")
 cap = a["capability"]
 want = {"steer", "throttle", "brake", "shiftUp", "shiftDown", "confirm", "back", "start", "navUp", "navDown", "navLeft", "navRight", "camera",
-        "gear1", "gear2", "gear3", "gear4", "gear5", "gear6", "horn", "modMenu", "muteFfb"}
+        "gear1", "gear2", "gear3", "gear4", "gear5", "gear6", "horn", "modMenu", "muteFfb",
+        "cameraForward", "cameraBack", "cameraUp", "cameraDown", "cameraLeft", "cameraRight", "cameraTiltDown", "cameraTiltUp", "cameraZoomIn", "cameraZoomOut", "cameraReset"}
 check(set(cap["delivered"]) == want, "the delivered set (%s)" % sorted(set(cap["delivered"]) ^ want))
 check(set(cap["unsupported"]) == {"clutch", "handbrake", "neutral", "reverse", "gear7", "gear8", "select", "lookBack", "reset"},
       "the unsupported set (%s)" % sorted(cap["unsupported"]))
-check(len(cap["delivered"]) + len(cap["unsupported"]) == 31, "every contract action is either delivered or unsupported")
+check(len(cap["delivered"]) + len(cap["unsupported"]) == 42, "every contract action is either delivered or unsupported")
 check(set(a["wheel"]) == {"sensitivity", "deadZone"} and abs(a["wheel"]["sensitivity"] - 1.25) < 1e-6 and abs(a["wheel"]["deadZone"] - 0.05) < 1e-6,
       "[Wheel] as the game reads it (floats: %s)" % a["wheel"])
 

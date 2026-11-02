@@ -13,7 +13,11 @@
    - The shim reads devices non-exclusively and never creates force effects. dbce_shim_open is ordinary (no control
      worker, no capture). dbce_shim_open2 adds a latched test session (the reviewed control worker and journal, admitted
      only on the caller's verified fences and process-latched force mute) and a capture (the shared frame recorder: the
-     Core frame plus the game's own channels, sealed out of process under P21). */
+     Core frame plus the game's own channels, sealed out of process under P21).
+   - The x86 build (32-bit games) is ordinary only: the same exports, but dbce_shim_open2 and dbce_shim_bridge_open
+     always return DBCE_SHIM_REFUSED with the reason, and dbce_shim_record returns DBCE_SHIM_REFUSED for every live
+     handle. dbce_shim_open_args is x64's (128 bytes); on x86 it is 80 bytes and dbce_shim_open_args_size() says so.
+     Every export is __cdecl (the default for these declarations); an x86 caller must declare it so. */
 #include <stdint.h>
 #ifdef DBCE_SHIM_BUILD
 #define DBCE_SHIM_API __declspec(dllexport)
@@ -62,8 +66,8 @@ typedef struct dbce_shim_frame {
     dbce_shim_action action[DBCE_SHIM_ACTIONS];
 } dbce_shim_frame;
 
-/* dbce_shim_open2's arguments. Fixed layout, naturally aligned, 128 bytes (asserted). Strings are UTF-8 (paths
-   UTF-16); fields a flag does not use must be zero/null. */
+/* dbce_shim_open2's arguments. Fixed layout, naturally aligned: 128 bytes on x64, 80 on x86 (asserted per
+   architecture; x86's open2 refuses). Strings are UTF-8 (paths UTF-16); fields a flag does not use must be zero/null. */
 typedef struct dbce_shim_open_args {
     uint32_t struct_size;          /* sizeof(dbce_shim_open_args); must equal dbce_shim_open_args_size() */
     uint32_t flags;                /* DBCE_SHIM_LATCHED | DBCE_SHIM_CAPTURE */
@@ -110,6 +114,14 @@ DBCE_SHIM_API int32_t dbce_shim_device_reports(void* handle, char* text, int32_t
 /* The profile as Core's own parser read it, "key=value" lines: ok (1/0), error, profile, revision, transmission and
    the SHA-256 of the exact bytes. A game adapter takes its gearbox from transmission, never from its own parse. */
 DBCE_SHIM_API int32_t dbce_shim_profile_info(void* handle, char* text, int32_t len, int32_t* needed);
+/* OPTIONAL extension; ABI 2 alone does not promise this export. Pure inspection of the exact profile bytes (at most
+   64 KiB), using Core's parser and binding admission. No host, worker, provider, files, device or force calls.
+   action is a dbce_shim_action_name index. JSON schema 1: action, status (bound/unbound/invalid), reason, sha256,
+   kind, instance, product and name. Identity fields are empty unless the entire profile has no invalid/conflicting
+   actions and the requested action is bound. This is configured identity, NOT evidence of connected hardware.
+   The usual text/needed contract applies; callers must reject truncation. May be called from any thread. */
+DBCE_SHIM_API int32_t dbce_shim_profile_action_info(const char* profile, int32_t profile_len, int32_t action,
+                                                 char* text, int32_t len, int32_t* needed);
 /* CAPTURE: the game's channel values (in game_channels order) for the frame just ticked, frame_seq its seq. Exactly
    once per frame: another frame's seq, a second call or no pending frame gives DBCE_SHIM_STALE and changes nothing.
    A wrong count or a non-finite value gives DBCE_SHIM_BAD_ARGUMENT and the row is recorded with game.valid=0. A frame

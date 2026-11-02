@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <array>
+#include <cstdint>
 namespace outrun::desktop {
 class Ini;
 void camera_controls_configure(const Ini&,bool disabled,float physical_fov);
@@ -19,6 +20,10 @@ CameraFovValues camera_controls_fov();
 void camera_controls_set_fov(float degrees); // absolute current vertical FOV, stored as an offset on its calculation
 void camera_controls_reset();
 void camera_controls_activate(unsigned action); // same eleven actions as CameraKeyLabels
+inline constexpr std::array<const char*,11> CameraControlActions{{"cameraUp","cameraDown","cameraForward","cameraBack","cameraLeft","cameraRight","cameraTiltDown","cameraTiltUp","cameraZoomOut","cameraZoomIn","cameraReset"}};
+struct CameraResolvedAction {bool held{},live{};};
+// Resolved-frame input, same action order as activate(); no polling or keyboard injection.
+void camera_controls_resolved_actions(const std::array<CameraResolvedAction,11>&,bool blocked,std::uint64_t milliseconds);
 void camera_controls_move(unsigned axis,float amount); // side / up / forward / pitch
 bool camera_controls_pose_available();
 std::array<float,4> camera_controls_pose();

@@ -7,7 +7,8 @@
 namespace outrun::desktop {
 struct UnavailableAction { const char* id; const char* why; };
 inline constexpr const char* DeliveredActions[]{"steer","throttle","brake","shiftUp","shiftDown","confirm","back","start",
-    "navUp","navDown","navLeft","navRight","camera","gear1","gear2","gear3","gear4","gear5","gear6","horn","modMenu","muteFfb"};
+    "navUp","navDown","navLeft","navRight","camera","gear1","gear2","gear3","gear4","gear5","gear6","horn","modMenu","muteFfb",
+    "cameraForward","cameraBack","cameraUp","cameraDown","cameraLeft","cameraRight","cameraTiltDown","cameraTiltUp","cameraZoomIn","cameraZoomOut","cameraReset"};
 inline constexpr UnavailableAction UnavailableActions[]{
     {"clutch","OutRun 2006 has no clutch"},{"handbrake","OutRun 2006 has no handbrake"},
     {"neutral","OutRun 2006 has no neutral gear"},{"reverse","OutRun 2006 has no reverse gear"},

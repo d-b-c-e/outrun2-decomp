@@ -504,7 +504,7 @@ void test_action_table(){
         check((why==nullptr)==(cap==nullptr)&&(why==nullptr||std::string(why)==cap),"the capability's reason for "+name);
         delivered+=why==nullptr;
     }
-    check(delivered==22&&std::size(DeliveredActions)==22&&std::size(UnavailableActions)==9,"22 delivered (horn, modMenu, muteFfb), 9 unavailable");
+    check(delivered==33&&std::size(DeliveredActions)==33&&std::size(UnavailableActions)==9,"33 delivered including direct camera actions, 9 unavailable");
     check(std::string(outrun_unavailable_reason("reverse"))=="OutRun 2006 has no reverse gear","reverse has one reason");
     check(std::string(outrun_unavailable_reason("gear9"))=="unknown action","an action outside the contract is unknown");
 }

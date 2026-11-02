@@ -42,6 +42,11 @@ def read(path):
     head = rows[0]
     latched = head.get("mode") == "latched"
     ident = {k: head.get(k) for k in IDENTITY}
+    if "inputSource" in head:
+        if head["inputSource"] != "external-physical-input@1":
+            err("unsupported physical input source")
+            return v
+        ident["inputSource"] = head["inputSource"]
     if any(ident[k] is None for k in IDENTITY) or (latched and not head.get("nonce")):
         err("identity fields missing from the header")
         return v
@@ -52,7 +57,7 @@ def read(path):
         if r.get("seq") != n:
             err("seq gap or reorder at line %d" % n)
             return v
-        if any(r.get(k) != ident[k] for k in IDENTITY) or (latched and r.get("nonce") != head.get("nonce")):
+        if any(r.get(k) != ident[k] for k in ident) or (latched and r.get("nonce") != head.get("nonce")):
             err("identity differs at line %d" % n)
             return v
     devices = head.get("devices")

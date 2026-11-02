@@ -59,7 +59,14 @@ inline std::bitset<128> bits(const Channels& c,const std::string& key){
 }
 // `slots`: a fixed sample slot count, one per profile device (Astra 16741), so device discovery, loss and reopen never
 // change a capture's channel set; slots past sampleCount carry a default sample. 0: exactly the frame's samples.
-inline Channels encode(const Frame& f,std::size_t slots=0){
+inline Channels encode(const Frame& f,std::size_t slots=0,int action_count=ActionCount){
+    if(action_count!=LegacyActionCount&&action_count!=ActionCount)throw std::invalid_argument("unknown action channel count");
+    if(action_count==LegacyActionCount){
+        if((f.down>>LegacyActionCount)||(f.up>>LegacyActionCount))throw std::invalid_argument("legacy capture has extended edges");
+        for(int i=LegacyActionCount;i<ActionCount;++i){const auto& a=f.action[std::size_t(i)];
+            if(a.value!=0.f||a.sample!=-1||a.injected||(a.status!=Status::Unbound&&a.status!=Status::Unsupported))
+                throw std::invalid_argument("legacy capture has extended actions");}
+    }
     if(slots&&f.samples.size()>slots)throw std::invalid_argument("more samples than sample slots");
     Channels c;
     u64(c,"frame",f.seq);u64(c,"tickUs",std::uint64_t(f.tick_us));
@@ -67,7 +74,7 @@ inline Channels encode(const Frame& f,std::size_t slots=0){
     u64(c,"down",f.down);u64(c,"up",f.up);
     c["run"]=int(f.run);c["latched"]=f.latched;c["suppressNative"]=f.suppress_native;
     c["sampleCount"]=double(f.samples.size());
-    for(int k=0;k<ActionCount;++k){
+    for(int k=0;k<action_count;++k){
         const auto p="action."+std::string(action_name(k))+".";const auto& a=f.action[k];
         c[p+"value"]=a.value;c[p+"status"]=int(a.status);c[p+"sample"]=a.sample;c[p+"injected"]=a.injected;
     }
@@ -87,16 +94,20 @@ inline Channels encode(const Frame& f,std::size_t slots=0){
     return c;
 }
 inline Frame decode(const Channels& c){
-    std::size_t slots=0;while(slots<32&&c.count("sample."+std::to_string(slots)+".device"))++slots;
+    unsigned extension=0;
+    for(int i=LegacyActionCount;i<ActionCount;++i)if(c.count("action."+std::string(action_name(i))+".value"))++extension;
+    if(extension&&extension!=unsigned(ActionCount-LegacyActionCount))throw std::runtime_error("partial camera action extension");
+    const int action_count=extension?ActionCount:LegacyActionCount;
+    std::size_t slots=0;while(slots<=std::size_t(action_count)&&c.count("sample."+std::to_string(slots)+".device"))++slots;
     Frame f;
     f.seq=u64(c,"frame");f.tick_us=std::int64_t(u64(c,"tickUs"));f.boundary_us=std::int64_t(u64(c,"boundaryUs"));
     if(f.tick_us<0||f.boundary_us<f.tick_us)throw std::runtime_error("invalid frame times");
     f.event_seq=u64(c,"eventSeq");f.down=u64(c,"down");f.up=u64(c,"up");
-    if((f.down>>ActionCount)||(f.up>>ActionCount))throw std::runtime_error("unknown action edge bits");
+    if((f.down>>action_count)||(f.up>>action_count))throw std::runtime_error("unknown action edge bits");
     f.run=Run(number(c,"run",0,int(Run::Inert)));f.latched=number(c,"latched",0,1)!=0;
     f.suppress_native=number(c,"suppressNative",0,1)!=0;
-    f.samples.resize(std::size_t(number(c,"sampleCount",0,31)));
-    for(int k=0;k<ActionCount;++k){
+    f.samples.resize(std::size_t(number(c,"sampleCount",0,action_count)));
+    for(int k=0;k<action_count;++k){
         const auto p="action."+std::string(action_name(k))+".";auto& a=f.action[k];
         const double v=c.at(p+"value");
         if(!std::isfinite(v)||v < (k==action_index("steer")?-1:0)||v>1)throw std::runtime_error("invalid action value");
@@ -106,7 +117,7 @@ inline Frame decode(const Channels& c){
     }
     for(std::size_t k=0;k<f.samples.size();++k){
         const auto p="sample."+std::to_string(k)+".";auto& s=f.samples[k];
-        s.device=std::uint32_t(number(c,p+"device",0,30));s.epoch=std::uint32_t(number(c,p+"epoch",0,UINT32_MAX));
+        s.device=std::uint32_t(number(c,p+"device",0,action_count-1));s.epoch=std::uint32_t(number(c,p+"epoch",0,UINT32_MAX));
         s.seq=u64(c,p+"seq");s.read_start_us=std::int64_t(u64(c,p+"readStartUs"));s.read_end_us=std::int64_t(u64(c,p+"readEndUs"));
         if(s.read_start_us<f.tick_us||s.read_end_us<s.read_start_us||s.read_end_us>f.boundary_us)
             throw std::runtime_error("sample time outside its frame");
@@ -120,7 +131,7 @@ inline Frame decode(const Channels& c){
     }
     // Reject extensions or missing fields rather than silently omitting provenance.
     // Padding slots must be exactly the default sample (the re-encode compares them too).
-    if(slots<f.samples.size()||encode(f,slots)!=c)throw std::runtime_error("noncanonical/missing/unknown frame channels");
+    if(slots<f.samples.size()||encode(f,slots,action_count)!=c)throw std::runtime_error("noncanonical/missing/unknown frame channels");
     return f;
 }
 }

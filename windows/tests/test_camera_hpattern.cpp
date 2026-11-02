@@ -1,6 +1,7 @@
 // Scripted shim provider -> real adapter -> camera filter -> native 453BB0
 // arbitration/switch records -> actual manual transmission. No device/window/game.
 #include "camera_controls.hpp"
+#include "camera_frame_input.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_settings.hpp"
 #include "outrun_adapter.hpp"
@@ -41,6 +42,7 @@ int main(){try{
     fk::Device s;s.listed={shift,product,"Scripted shifter"};s.caps=fk::wheel_caps();const auto si=provider.add(s);
     std::string profile="[Controls]\nSchema=1\nProfile=Fixture\nRevision=1\nTransmission=H-pattern\nsteer = axis 0 dev="+wheel+" prod="+product+" range=0..65535 rest=32768 travel=+1\nthrottle = axis 2 dev="+wheel+" prod="+product+" range=0..65535 rest=0 travel=+1\n";
     for(unsigned i=1;i<=6;++i)profile+="gear"+std::to_string(i)+" = button "+std::to_string(i-1)+" dev="+shift+" prod="+product+"\n";
+    profile+="cameraZoomIn=button 12 dev="+wheel+" prod="+product+"\ncameraZoomOut=button 13 dev="+wheel+" prod="+product+"\n";
     sh::CoreConfig config;config.capability=outrun_capability();sh::Core core(provider,config);core.set_profile(sh::read_profile(profile));Adapter adapter("H-pattern");
     std::array<std::uint8_t,0x1000> car_bytes{},work_bytes{};std::array<std::uint8_t,0x1700> param_bytes{};
     driving::Bytes car(car_bytes.data(),car_bytes.size()),work(work_bytes.data(),work_bytes.size()),params(param_bytes.data(),param_bytes.size());
@@ -48,6 +50,7 @@ int main(){try{
     const auto tick=[&]{
         core.service_devices();provider.advance(16667);const auto& frame=core.tick();GameView view;view.mode=rt->mode_state.current;view.car=true;view.gear=car.u32(0x208);
         Keyboard kb;kb.any=desktop_any_driving_key();platform::NativeInputState out;adapter.apply(frame,view,out,&kb);
+        camera_controls_shim_frame(frame,view.mode!=16u);
         xbox_runtime::input_filter()(out,rt.get());rt->input_state=out;platform::native_input_step_453bb0(*rt);
         const auto& buttons=rt->race.car_world.switch_7d6770;
         if(rt->mode_state.current==16)driving::manual_transmission(car,work,params,false,(buttons.pressed&0x80u)!=0,(buttons.pressed&0x40u)!=0);
@@ -68,6 +71,10 @@ int main(){try{
         camera_controls_end_comparison();
         desktop_keys()[shift_key]=0x80;CHECK(!desktop_any_driving_key()&&desktop_key(shift_key));desktop_keys()[shift_key]=0;
     }
+    const auto button_fov=platform::camera_fov_adjust()(0,1.1f);
+    provider.at(wi).state.buttons[12]=0x80;tick();CHECK(platform::camera_fov_adjust()(0,1.1f)==button_fov);
+    provider.at(wi).state.buttons[12]=0;tick();CHECK(platform::camera_fov_adjust()(0,1.1f)<button_fov&&!rt->input_state.pc_overlay_yield&&car.u32(0x208)==3&&rt->race.car_world.analog_7d6810.current[0]==steering);
+    provider.at(wi).state.buttons[13]=0x80;tick();provider.at(wi).state.buttons[13]=0;tick();CHECK(platform::camera_fov_adjust()(0,1.1f)==button_fov&&car.u32(0x208)==3);
     const auto base=platform::camera_fov_adjust()(0,1.1f);desktop_keys()[0x4e]=0x80;tick();desktop_keys()[0x4e]=0;tick();
     CHECK(platform::camera_fov_adjust()(0,1.1f)<base&&car.u32(0x208)==3&&!rt->input_state.pc_overlay_yield);
     // A held gate still changes gear through the actual pressed bits and transmission.
