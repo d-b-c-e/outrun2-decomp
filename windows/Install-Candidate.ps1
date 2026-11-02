@@ -93,7 +93,11 @@ if($Action -eq 'Restore') {
         if(!$alreadyPrevious) { throw 'Current executable differs from the restored state; retained.' }
         [pscustomobject]@{Status='AlreadyRestored';ReceiptId=$ReceiptId;Receipt=$receiptPath};return
     }
-    if($receipt.state -eq 'Prepared' -and $alreadyPrevious) {
+    # Publication and receipt update are separate durable steps. Prepared can
+    # mean install never published; Installed can mean restore already published
+    # but its final receipt write was interrupted. Both exact prior states need
+    # only the receipt completed, never another executable replacement/removal.
+    if($alreadyPrevious) {
         $receipt.state='Restored';Write-Receipt $receiptPath $receipt
         [pscustomobject]@{Status='Restored';ReceiptId=$ReceiptId;Receipt=$receiptPath};return
     }

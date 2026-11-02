@@ -46,6 +46,14 @@ try {
     Check ($restored.Status -eq 'Restored' -and (Hash $exe) -eq $oldSha) 'exact restore'
     Check ((& $installer -Action Restore -GameDir $game -ReceiptId $installed.ReceiptId).Status -eq 'AlreadyRestored') 'idempotent restore'
     foreach($name in $kept.Keys) { Check ((Hash (Join-Path $game $name)) -eq $kept[$name]) "restore preserves $name" }
+    # Simulate interruption after restore publication, before Installed ->
+    # Restored receipt publication. A retry must recognize exact prior bytes.
+    $receipt=Get-Content -LiteralPath $installed.Receipt -Raw|ConvertFrom-Json;$receipt.state='Installed'
+    [IO.File]::WriteAllText($installed.Receipt,($receipt|ConvertTo-Json))
+    $interruptedRestore=& $installer -Action Restore -GameDir $game -ReceiptId $installed.ReceiptId
+    Check ($interruptedRestore.Status -eq 'Restored' -and (Hash $exe) -eq $oldSha) 'interrupted replacement restore can finish receipt'
+    Check ((Get-Content -LiteralPath $installed.Receipt -Raw|ConvertFrom-Json).state -eq 'Restored') 'replacement recovery receipt is durable'
+    Check ((& $installer -Action Restore -GameDir $game -ReceiptId $installed.ReceiptId).Status -eq 'AlreadyRestored') 'replacement recovery is idempotent'
     $installed=& $installer -GameDir $game -PackageDir $package
     Store $exe (Fake-Exe 3);$newerSha=Hash $exe
     Refuses { & $installer -Action Restore -GameDir $game -ReceiptId $installed.ReceiptId } 'newer/different'
@@ -64,6 +72,11 @@ try {
     Check ([IO.File]::Exists((Join-Path $cold 'OutRunDesktop.exe'))) 'new native executable created'
     $null=& $installer -Action Restore -GameDir $cold -ReceiptId $first.ReceiptId
     Check (![IO.File]::Exists((Join-Path $cold 'OutRunDesktop.exe')) -and [IO.File]::Exists((Join-Path $cold 'OR2006C2C.exe'))) 'new-file rollback removes only owned executable'
+    $receipt=Get-Content -LiteralPath $first.Receipt -Raw|ConvertFrom-Json;$receipt.state='Installed'
+    [IO.File]::WriteAllText($first.Receipt,($receipt|ConvertTo-Json))
+    Check ((& $installer -Action Restore -GameDir $cold -ReceiptId $first.ReceiptId).Status -eq 'Restored') 'interrupted new-file restore can finish receipt'
+    Check (![IO.File]::Exists((Join-Path $cold 'OutRunDesktop.exe')) -and (Get-Content -LiteralPath $first.Receipt -Raw|ConvertFrom-Json).state -eq 'Restored') 'new-file recovery preserves absence and receipt'
+    Check ((& $installer -Action Restore -GameDir $cold -ReceiptId $first.ReceiptId).Status -eq 'AlreadyRestored') 'new-file recovery is idempotent'
     $empty=Join-Path $root 'not a game';[IO.Directory]::CreateDirectory($empty)|Out-Null
     Refuses { & $installer -GameDir $empty -PackageDir $package } 'existing OR2006C2C'
     Check ((Get-ChildItem -LiteralPath $empty -Force).Count -eq 0) 'refused target stays empty'
