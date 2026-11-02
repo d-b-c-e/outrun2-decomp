@@ -22,7 +22,7 @@ struct State {
     CameraFraming framing;
     std::array<std::array<std::array<CameraPoseOffset,2>,4>,30> poses{};
     std::string path,notice;
-    float physical{};
+    float physical{},game_fov{};
     unsigned view{255},model{255};
     int last_camera{-1};bool cycle_save_failed{};
     MountedCameraRotation rotation;const void* rotation_car{};
@@ -48,6 +48,7 @@ std::string label(){
 void notify(const std::string& text){h.notice=text;h.notice_until=GetTickCount64()+3000;}
 float adjust(std::uint8_t view,float game){
     const std::lock_guard<std::mutex> lock(camera_mutex);
+    h.game_fov=game; // unmodified authored/dynamic FOV, not the previous adjusted result
     if(view==1||view==2)h.bonnet=false;
     const unsigned logical=view==0&&h.bonnet?3u:view<=2?view:unsigned(view)+4u;
     if(h.view!=logical){h.view=logical;h.rotation={};notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
@@ -233,6 +234,21 @@ void camera_controls_zoom(float degrees){
     const float next=offset+degrees;if(!std::isfinite(next))return;
     char value[48];std::snprintf(value,sizeof value,"%.9g",double(next));
     if(save(CameraFraming::offset_key(h.view,seat),value)){offset=next;notify(label());}
+}
+CameraFovValues camera_controls_fov(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    if(!h.configured||!CameraFraming::tunable(h.view))return {};
+    const bool seat=h.framing.seat(h.view,triples());const float base=seat?h.physical:h.game_fov;
+    if(!std::isfinite(base)||!(base>0.f&&base<3.14159265f))return {};
+    return {base*57.295779513f,h.framing.fov(h.view,h.game_fov,h.physical,triples())*57.295779513f,h.framing.offsets[h.view][seat?1:0],true};
+}
+void camera_controls_set_fov(float degrees){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    if(!h.configured||!CameraFraming::tunable(h.view)||!std::isfinite(degrees)||!(degrees>0.f&&degrees<180.f))return;
+    const bool seat=h.framing.seat(h.view,triples());const float base=seat?h.physical:h.game_fov;
+    if(!std::isfinite(base)||!(base>0.f&&base<3.14159265f))return;
+    const float offset=degrees-base*57.295779513f;char value[48];std::snprintf(value,sizeof value,"%.9g",double(offset));
+    if(save(CameraFraming::offset_key(h.view,seat),value)){h.framing.offsets[h.view][seat?1:0]=offset;notify(label());}
 }
 void camera_controls_reset(){
     const std::lock_guard<std::mutex> lock(camera_mutex);

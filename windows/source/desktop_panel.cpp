@@ -578,6 +578,13 @@ void camera_adjustments(bool advanced){
     if(!camera_controls_available()){dbce::panel::Text("Camera adjustments are disabled in test, recording and playback sessions.");return;}
     if(camera_controls_tunable()){
         if(camera_controls_triples()&&dbce::panel::Command("Switch Game / Realistic (F7)"))camera_controls_toggle_set();
+        const auto fov=camera_controls_fov();
+        if(fov.valid){
+            float degrees=fov.current;
+            if(ImGui::SliderFloat("Vertical FOV (degrees)",&degrees,.1f,179.9f,"%.1f",ImGuiSliderFlags_AlwaysClamp))camera_controls_set_fov(degrees);
+            char calculation[128];std::snprintf(calculation,sizeof calculation,"Calculated %.1f degrees; saved adjustment %+.1f degrees",double(fov.calculated),double(fov.offset));
+            dbce::panel::Text(calculation);
+        }
         if(dbce::panel::Command("Zoom in"))camera_controls_zoom(-camera_controls_step(2));
         if(dbce::panel::Command("Zoom out"))camera_controls_zoom(camera_controls_step(2));
         if(dbce::panel::Command("Reset calculated view"))camera_controls_reset();

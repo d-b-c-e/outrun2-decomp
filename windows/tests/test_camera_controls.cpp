@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <limits>
 namespace {bool panel_open;unsigned checks;}
 namespace outrun::desktop {bool desktop_panel_open(){return panel_open;}}
 namespace outrun::xbox_runtime {InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}}
@@ -98,6 +99,12 @@ int main(int argc,char** argv){
     (void)fov(1);release(0x4a);CHECK(fov(1)>1.1f);
     release(0x41);CHECK(fov(1)==narrowed);release(0x4c);CHECK(fov(1)==0.586f);
     CHECK(camera_controls_label().find("(Custom)")==std::string::npos&&camera_controls_notice().find("calculated FOV restored")!=std::string::npos);
+    const auto calculated=camera_controls_fov();CHECK(calculated.valid&&std::fabs(calculated.calculated-.586f*57.295779513f)<1e-4f&&calculated.offset==0.f);
+    camera_controls_set_fov(40.f);CHECK(std::fabs(fov(1)-40.f*.017453292519943295f)<1e-5f&&std::fabs(camera_controls_fov().current-40.f)<1e-4f);
+    CHECK(ini.load(path)&&std::fabs(ini.number("Camera","CockpitRealisticFovOffset",0.f)-(40.f-calculated.calculated))<1e-4f);
+    const auto valid_fov_bytes=read();for(const float invalid:{0.f,-1.f,180.f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()})camera_controls_set_fov(invalid);
+    CHECK(read()==valid_fov_bytes&&std::fabs(camera_controls_fov().current-40.f)<1e-4f);
+    camera_controls_reset();(void)fov(1);
     const auto before=read();desktop_keys()[0x2a]=0x80;release(0x41);desktop_keys()[0x2a]=0;
     CHECK(read()==before); // Shift+F7 must never persist the ordinary set toggle
     desktop_keys()[0x4e]=0x80;poll();desktop_keys_clear();poll();CHECK(read()==before); // focus clear is not a release
@@ -105,6 +112,8 @@ int main(int argc,char** argv){
     const auto real=settings_publish();settings_publish()=[](const std::string&,const std::string&){return false;};
     camera_controls_zoom(1.f);settings_publish()=real;
     CHECK(read()==before&&fov(1)==0.586f&&camera_controls_notice().find("not saved")!=std::string::npos);
+    settings_publish()=[](const std::string&,const std::string&){return false;};camera_controls_set_fov(60.f);settings_publish()=real;
+    CHECK(read()==before&&fov(1)==.586f&&camera_controls_notice().find("not saved")!=std::string::npos);
     platform::g_pc_triple_corrections=nullptr;
     CHECK(fov(1)>1.1f); // single-screen uses this camera's Game offset, never the Realistic base
     const auto single=read();release(0x41);CHECK(read()==single);
@@ -195,6 +204,10 @@ int main(int argc,char** argv){
     camera_controls_default_steps();CHECK(camera_controls_step(0)==.02f&&camera_controls_step(1)==1.f&&camera_controls_step(2)==2.f);
     const auto pose_before_defaults=camera_controls_pose();camera_controls_default_keys();poll();
     CHECK(camera_controls_key_names()==CameraKeys{}.names&&camera_controls_pose()==pose_before_defaults);
+    const auto active_fov=camera_controls_fov();camera_controls_set_fov(70.f);
+    CHECK(camera_controls_pose()==pose_before_defaults&&std::fabs(camera_controls_fov().current-70.f)<1e-4f);
+    (void)platform::camera_fov_adjust()(0,1.2f);CHECK(std::fabs(camera_controls_fov().offset-(70.f-active_fov.calculated))<1e-4f&&std::fabs(camera_controls_fov().current-(70.f+.1f*57.295779513f))<1e-4f);
+    (void)fov(0);CHECK(std::fabs(camera_controls_fov().current-70.f)<1e-4f); // dynamic game base moves, saved offset never compounds
     camera_controls_reset();
     // Migrate only complete untouched historical sets; an explicit edit saves the
     // migrated set atomically, so a reload cannot produce a mixture of old/new defaults.

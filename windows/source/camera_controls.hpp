@@ -12,6 +12,9 @@ std::string camera_controls_label();
 std::string camera_controls_notice();
 void camera_controls_toggle_set();
 void camera_controls_zoom(float degrees); // positive = wider, negative = narrower
+struct CameraFovValues {float calculated{},current{},offset{};bool valid{};}; // vertical degrees
+CameraFovValues camera_controls_fov();
+void camera_controls_set_fov(float degrees); // absolute current vertical FOV, stored as an offset on its calculation
 void camera_controls_reset();
 void camera_controls_move(unsigned axis,float amount); // side / up / forward / pitch
 bool camera_controls_pose_available();
