@@ -4,6 +4,7 @@
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_soft_d3d9.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/retail_asset_store.hpp"
 #include "platform/race_course_passes.hpp"
 #include "system/exe_image.hpp"
 #include "triple_rig.hpp"
@@ -17,8 +18,14 @@ static unsigned checks,correction_calls;
 static bool corrections(const float*,float*){++correction_calls;return false;}
 struct Device:PcSoftD3D9Device {
     Device():PcSoftD3D9Device(32,32){}
-    unsigned draws{},queries{};
-    unsigned create_occlusion_query()override{++queries;return 0;}
+    unsigned draws{},queries{},query_reads{},query_begin{},query_end{};bool query_ready{};
+    std::vector<unsigned> primitive_counts;std::vector<PcDrawPhase> phases;
+    unsigned create_occlusion_query()override{++queries;return 42;} // synthetic query identity only
+    unsigned query_get_data(unsigned q,unsigned& samples)override{CHECK(q==42);++query_reads;samples=11500;return query_ready?0:1;}
+    void query_issue(unsigned q,unsigned flags)override{CHECK(q==42);if(flags&2)++query_begin;if(flags&1)++query_end;}
+    unsigned draw_indexed_primitive(unsigned,std::int32_t,unsigned,unsigned,unsigned,unsigned count)override{
+        ++draws;primitive_counts.push_back(count);phases.push_back(draw_phase());return 0;
+    }
     void draw_primitive_up(unsigned,unsigned,const void*,unsigned)override{++draws;}
     void draw_indexed_primitive_up(unsigned,unsigned,unsigned,unsigned,const void*,unsigned,const void*,unsigned)override{++draws;}
 };
@@ -26,7 +33,7 @@ static std::array<double,4> transform(const math::Mat4& m,const math::RigVec& v)
     return {v.x*m[0]+v.y*m[4]+v.z*m[8]+m[12],v.x*m[1]+v.y*m[5]+v.z*m[9]+m[13],v.x*m[2]+v.y*m[6]+v.z*m[10]+m[14],v.x*m[3]+v.y*m[7]+v.z*m[11]+m[15]};
 }
 static bool inside(const std::array<double,4>& p){return p[3]>0&&p[0]>=-p[3]&&p[0]<=p[3]&&p[1]>=-p[3]&&p[1]<=p[3]&&p[2]>=0&&p[2]<=p[3];}
-int main(){try{
+int main(int argc,char** argv){try{
     if(!exe_image_autoload()){std::puts("SKIP: OR2_EXE verified cache required for actual course/manager constants");return 77;}
     auto context=std::make_unique<NativeRuntimeContext>();auto& c=*context;
     c.event_state.slots[8].work_token=0x7804b0;
@@ -68,5 +75,30 @@ int main(){try{
         CHECK(r.matrices().depth==before_depth&&r.matrices().current_offset==before_stack&&std::memcmp(matrix.data(),r.matrices().current().data(),64)==0);
     }
     CHECK(d.queries==1&&d.errors.empty());g_pc_triple_corrections=nullptr;
+    if(argc==2){
+        RetailAssetStore store;std::string error;CHECK(retail_asset_store_open(store,argv[1],&error));
+        std::vector<std::uint8_t> bytes;CHECK(retail_asset_read_relative_inflated(store,"Common/obj_course_obj_common_pmt.sz",bytes,128u<<20,&error));
+        CHECK(r.load_bank(0x57,std::move(bytes),error));CHECK(d.errors.empty());
+        for(unsigned i=0;i<16;++i)cam.putf(0x1c0+i*4,i%5==0?1.f:0.f);
+        cam.putf(0xf8,0);cam.putf(0xfc,0);cam.putf(0x100,0);cam.putf(0x104,0);cam.putf(0x108,0);cam.putf(0x10c,-1);
+        for(unsigned k=0;k<3;++k){const float f=k==2?-10.f:0.f;cam.putf(0xd4+k*4,f);cam.putf(0x3a8+k*4,f);}
+        d.query_ready=true;
+        for(const bool paused:{false,true}){
+            work.putf(0x90+0xc,1);work.put16(0x90+0x10,0);work.put16(0x90+0x12,3);r.pause_780248=paused;
+            const auto camera_before=camera;const auto car_before=car;
+            const auto depth=r.matrices().depth;const auto offset=r.matrices().current_offset;
+            std::array<unsigned char,64> matrix{};std::memcpy(matrix.data(),r.matrices().current().data(),64);
+            d.set_render_state(7,1);const auto old_draws=d.draws,old_begin=d.query_begin,old_end=d.query_end;
+            CHECK(native_course_pass_leaf(c,r,0x40cbc0,Object));++runs;
+            CHECK(native_course_pass_stats().runs==runs&&native_course_pass_stats().failures==0);
+            CHECK(d.draws>old_draws&&d.query_begin==old_begin+1&&d.query_end==old_end+1);
+            CHECK(work.i16(0x90+0x12)==(paused?3:2)&&work.i16(0x90+0x10)==0);
+            CHECK(camera==camera_before&&car==car_before&&d.get_render_state(7)==1);
+            CHECK(r.matrices().depth==depth&&r.matrices().current_offset==offset&&std::memcmp(matrix.data(),r.matrices().current().data(),64)==0);
+        }
+        CHECK(d.errors.empty()&&!d.primitive_counts.empty());
+        for(unsigned i=0;i<d.phases.size();++i)CHECK(d.phases[i]==PcDrawPhase::World&&d.primitive_counts[i]>0);
+        std::printf("sun center: %u indexed packets, query reads%u begin%u/end%u; real bank, synthetic visibility, no rasterization\n",d.draws,d.query_reads,d.query_begin,d.query_end);
+    }
     std::printf("sun gate: %u assertions;8 actual caller rejections, side-visible loss remains; no rendering\n",checks);return 0;
 }catch(const std::exception& e){g_pc_triple_corrections=nullptr;std::fprintf(stderr,"%s\n",e.what());std::fprintf(stderr,"course: %s\n",native_course_pass_stats().last_error.c_str());return 1;}}
