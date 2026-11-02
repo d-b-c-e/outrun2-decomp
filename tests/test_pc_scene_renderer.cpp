@@ -3,6 +3,7 @@
 // reporting of unported displays/leaves and of unanswered 44A890 gates.
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_soft_d3d9.hpp"
+#include "platform/pc_world_coverage.hpp"
 #include "platform/retail_asset_store.hpp"
 #include "platform/vehicle_preview_init.hpp"
 #include "system/exe_image.hpp"
@@ -60,13 +61,18 @@ int main(int argc,char** argv){
             if(std::strcmp(kind,"leaf")!=0)return;
             if(pc==0x414340u){order.push_back(phase_device.draw_phase());
                 require(phase_device.draw_domain(true)==platform::PcDrawDomain::WorldScreenEffect&&phase_device.draw_domain(false)==platform::PcDrawDomain::WorldGeometry,"world RHW and world XYZ remain distinct from HUD");
-                require(phase_device.draw_domain(true,false)==platform::PcDrawDomain::Offscreen,"reflection/offscreen target excluded from world source");}
-            if(pc==0x42d710u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(true)==platform::PcDrawDomain::Hud&&phase_device.draw_domain(false)==platform::PcDrawDomain::Hud,"HUD identity does not depend on RHW format");}
-            if(pc==0x49f4d0u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(false)==platform::PcDrawDomain::FrontendOverlay,"late frontend 3D is outside world source");}
+                require(phase_device.draw_domain(true,false)==platform::PcDrawDomain::Offscreen,"reflection/offscreen target excluded from world source");
+                require(platform::pc_world_three_views(phase_device.draw_phase(),false,true)&&!platform::pc_world_three_views(phase_device.draw_phase(),true,true),"actual world XYZ admitted, ordinary world RHW remains UI compatibility fallback");
+                require(!platform::pc_world_three_views(phase_device.draw_phase(),false,false),"actual world offscreen excluded from three views");}
+            if(pc==0x42d710u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(true)==platform::PcDrawDomain::Hud&&phase_device.draw_domain(false)==platform::PcDrawDomain::Hud,"HUD identity does not depend on RHW format");
+                require(!platform::pc_world_three_views(phase_device.draw_phase(),true,true)&&!platform::pc_world_three_views(phase_device.draw_phase(),false,true),"actual HUD phase excludes RHW and XYZ from world correction");}
+            if(pc==0x49f4d0u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(false)==platform::PcDrawDomain::FrontendOverlay,"late frontend 3D is outside world source");
+                require(!platform::pc_world_three_views(phase_device.draw_phase(),false,true),"actual late frontend XYZ excluded from world correction");}
         };
         phase_scene.render_frame(e,0x20);
         require(order==std::vector<platform::PcDrawPhase>{platform::PcDrawPhase::World,platform::PcDrawPhase::Hud,platform::PcDrawPhase::FrontendOverlay},"world/HUD/frontend order from actual 449050");
         require(phase_device.draw_phase()==platform::PcDrawPhase::Unclassified&&phase_device.draw_domain(true)==platform::PcDrawDomain::Unclassified,"ordinary frame restores caller phase; unknown ownership remains explicit");
+        require(!platform::pc_world_three_views(phase_device.draw_phase(),false,true),"unclassified XYZ cannot request world correction");
         {const platform::PcDrawPhaseScope outer(phase_device,platform::PcDrawPhase::FrontendOverlay);phase_scene.render_frame(e,0x20);
             require(phase_device.draw_phase()==platform::PcDrawPhase::FrontendOverlay,"nested frame restores its actual caller phase");}
         phase_scene.leaf_hook=[](std::uint32_t pc,std::uint32_t){if(pc==0x42d710u)throw std::runtime_error("phase-fixture failure");return false;};

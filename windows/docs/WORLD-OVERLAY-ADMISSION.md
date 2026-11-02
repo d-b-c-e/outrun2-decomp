@@ -1,0 +1,15 @@
+# World correction excludes HUD and late frontend XYZ
+
+The existing frame ownership tags were diagnostic groundwork: D3D11 triple_bind still attempted projection matching/correction on any non-RHW backbuffer draw. Thus a Hud or late FrontendOverlay mesh could reach world correction despite being correctly tagged. This is a source-path finding; no faulty rendered frame was collected.
+
+The shared admission rule now allows World XYZ and explicitly scoped WorldCoverage RHW only on the logical backbuffer. D3D11 enforces it before matrix lookup/upload and shader binding. Hud, FrontendOverlay, Unclassified and stray WorldCoverage XYZ use the existing single-center viewport/scissor fallback with the three-view GS unbound. Viewport/scissor caches are invalidated for the next draw. Native projection/vertex/pixel data and draw ordering are retained.
+
+Ordinary RHW keeps its existing UI rectangle and fallback count; offscreen/reflection targets keep their prior exclusion before ownership admission. Known shadow darkening retains its explicit three-view WorldCoverage path. World geometry and admitted point sprites retain their corrections and existing mode-cache behavior. Off/Planar is unchanged because no three-view callback is installed. A World phase is semantic ownership, not a new gameplay-mode or curved-compositor admission decision.
+
+A separate non-world XYZ counter is printed at exit; per-frame OR2_TRIPLE_TRACE rows append nonworld= after the existing fields. Existing keys/order remain. Domain counters still describe ownership independently of correction/fallback decisions. The counter records route decisions, not image correctness.
+
+Actual frame-render fixture now passes **46 checks**, extending the World -> explicit42D710 Hud -> late49F4D0 FrontendOverlay sequence with admission controls, offscreen/ordinary-RHW exclusion and unknown ownership. The actual shadow draw fixture passes **4,204 checks**, including WorldCoverage admission only from a World backbuffer draw and excluded caller/target controls. These exercise the native ownership consumers and the same rule called by D3D11; they do not instantiate a GPU or assert real viewport pixels.
+
+Named Desktop/scene/shadow/point Release targets built jobs2; focused scene/shadow/point/particle/depth/write-audit/selftest **7/7 passed**. CPU-only GO493553 lease mevu06:53:36->06:57:31 local, deadline07:05:36; release/token removal verified. Build/frame/shadow/focused/custody logs are under `work/validation-20261102/hud-*`. No game/GPU/device/input/audio/init/install/display action occurred.
+
+Later attended qualification must compare native HUD/menu/late car-select placement and aspect at the configured UI scaling modes, world-to-overlay-to-world transitions, point/shadow mode constants, domain/nonworld/fallback counters and cost. Center-viewport source routing does not prove rendered layout, full HUD compatibility, curved presentation or owner acceptance. Physical world-source allocation/resolve/composite/restoration and other projected effects remain separate work.

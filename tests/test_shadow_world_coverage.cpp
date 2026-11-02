@@ -52,6 +52,7 @@ int main(){try{
             CHECK(d.phase==(caller==PcDrawPhase::World?PcDrawPhase::WorldCoverage:caller));
             CHECK(d.draw_phase()==caller&&object==authored&&matrices.depth==0&&matrices.current_offset==0);
             CHECK(d.admitted==(back&&caller==PcDrawPhase::World));
+            CHECK(pc_world_three_views(d.phase,true,back)==d.admitted);
             CHECK(d.domain==pc_draw_domain(caller,true,back));
             CHECK(d.releases==std::vector<unsigned>({200,201,202,203}));
             CHECK(d.restored.size()>=4&&std::equal(d.restored.begin(),d.restored.begin()+4,std::array<unsigned,4>{200,201,202,203}.begin()));

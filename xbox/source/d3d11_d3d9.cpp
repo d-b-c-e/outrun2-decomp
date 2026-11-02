@@ -185,6 +185,7 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
     if(platform::g_pc_triple_corrections){
         std::printf("triple views: %llu explicit world-coverage draws into three viewports\n",(unsigned long long)triple_draws_world_coverage);
+        std::printf("triple views: %llu non-world XYZ draws kept single on the centre\n",(unsigned long long)triple_single_nonworld);
         std::printf("triple draw domains: world geometry %llu, world screen effects %llu, HUD %llu, frontend overlay %llu, offscreen %llu, unclassified %llu\n",
             (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldGeometry)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldScreenEffect)],
             (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::Hud)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::FrontendOverlay)],
@@ -283,13 +284,13 @@ void D3D11D3D9Device::end_frame(){
     // counts can hide different object sets).
     static const bool trace=[]{const char* v=std::getenv("OR2_TRIPLE_TRACE");return v&&std::string(v)=="1";}();   // =1 only (nene 36096)
     if(trace&&platform::g_pc_triple_corrections){
-        static std::uint64_t frame=0,last[6]{};static const auto t0=std::chrono::steady_clock::now();
-        const std::uint64_t now[6]{triple_draws,triple_single_rhw,triple_single_unmatched,triple_single_refused,triple_single_topology,triple_single_target};
-        std::printf("triple frame %llu t=%.1f rep=%llu rhw=%llu unm=%llu ref=%llu top=%llu tgt=%llu\n",(unsigned long long)frame,
+        static std::uint64_t frame=0,last[7]{};static const auto t0=std::chrono::steady_clock::now();
+        const std::uint64_t now[7]{triple_draws,triple_single_rhw,triple_single_unmatched,triple_single_refused,triple_single_topology,triple_single_target,triple_single_nonworld};
+        std::printf("triple frame %llu t=%.1f rep=%llu rhw=%llu unm=%llu ref=%llu top=%llu tgt=%llu nonworld=%llu\n",(unsigned long long)frame,
                     std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count(),
                     (unsigned long long)(now[0]-last[0]),(unsigned long long)(now[1]-last[1]),(unsigned long long)(now[2]-last[2]),
-                    (unsigned long long)(now[3]-last[3]),(unsigned long long)(now[4]-last[4]),(unsigned long long)(now[5]-last[5]));
-        for(int k=0;k<6;++k)last[k]=now[k];++frame;}
+                    (unsigned long long)(now[3]-last[3]),(unsigned long long)(now[4]-last[4]),(unsigned long long)(now[5]-last[5]),(unsigned long long)(now[6]-last[6]));
+        for(int k=0;k<7;++k)last[k]=now[k];++frame;}
     if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
@@ -669,6 +670,17 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
     const bool coverage=platform::pc_world_coverage_draw(draw_phase(),rhw,true);
     if(rhw&&!coverage){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
+    const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
+    const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
+        float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
+    const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
+        LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
+    bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
+    if(!platform::pc_world_three_views(draw_phase(),rhw,true)){
+        ++triple_single_nonworld;triple_unbind();
+        const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+        return false; // XYZ overlay/unknown projection stays native on the centre
+    }
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
     const auto& proj=transform_proj;
     if(coverage){
@@ -696,12 +708,6 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
             std::memcpy(m.pData,e->c,sizeof e->c);static_cast<float*>(m.pData)[50]=batch_point_sprites_?1.f:0.f;context_->Unmap(triple_cb_.Get(),0);}
     }
-    const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
-    const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
-        float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
-    const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
-        LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
-    bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
     // The geometry shader takes triangles (nene 30802): a list or a strip, which is every draw that reaches here today
     // (draw_native takes only those, flush draws a list). Anything else would not be drawn with it bound.
     const bool triangles=bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST||bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;

@@ -33,6 +33,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
 - [Explicit shadow world coverage](docs/SHADOW-WORLD-COVERAGE.md): actual422740/4220F0 scopes WorldCoverage; Angled backbuffer repeats the native stencil-darkening strip across three world viewports with identity corrections and invalidates scene-constant binding.4,196 CPU checks; GPU shadow alignment, subsequent XYZ constants, UI/MSAA/reflections and cost remain pending.
 - [World GPU depth-clip handoff](docs/WORLD-DEPTH-CLIP.md): actual XYZ decode/triangle/raster57 checks reproduce/fix center depth rejection before the panel shader. Only Angled World/backbuffer GPU path defers clipping; software/HUD/offscreen/ordinary controls retain it. Active point-sprite early rejection, GPU images/depth/cost and compositor remain open.
 - [World point-sprite expansion](docs/POINT-SPRITE-WORLD.md): active type6/type5 defers center clipping and expands squares per panel after correction, using existing GS/CB with explicit point-mode cache key.968 actual consumer/panel/state assertions; actual GS compiles SDKfxc gs_4_1. Desktop build/focused10/10 pass; GPU visibility/size/depth/UV/cost and mode-transition checks remain.
+- [HUD/frontend world-admission guard](docs/WORLD-OVERLAY-ADMISSION.md): D3D11 rejects non-world XYZ before correction, uses existing center fallback/GS unbind; RHW/UI and offscreen paths preserved. Actual-frame46/shadow4204 checks, Desktop build/focused7/7; actual overlay placement/aspect/counters remain unqualified.
 
 ## Order of work
 
