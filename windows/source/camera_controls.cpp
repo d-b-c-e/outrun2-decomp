@@ -1,6 +1,7 @@
 #include "camera_controls.hpp"
 #include "camera_framing.hpp"
 #include "camera_keys.hpp"
+#include "mounted_camera_rotation.hpp"
 #include "desktop_settings.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_panel.hpp"
@@ -10,6 +11,7 @@
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_screen.hpp"
 #include "driving/pc_d3dx.hpp"
+#include "enhancements/frame_rate.hpp"
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +25,7 @@ struct State {
     float physical{};
     unsigned view{255},model{255};
     int last_camera{-1};bool cycle_save_failed{};
+    MountedCameraRotation rotation;const void* rotation_car{};
     std::uint32_t clears{},mode{};
     CameraKeys keys;std::array<HudToggleKey,11> bindings{};std::array<CameraKeyRepeat,11> edges{};
     HudToggleEdge set_edge;
@@ -47,7 +50,7 @@ float adjust(std::uint8_t view,float game){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     if(view==1||view==2)h.bonnet=false;
     const unsigned logical=view==0&&h.bonnet?3u:view<=2?view:unsigned(view)+4u;
-    if(h.view!=logical){h.view=logical;notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
+    if(h.view!=logical){h.view=logical;h.rotation={};notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
     driving::camera_fov_context().near_z=logical==0||logical==3?0.05f:0.f;
     return h.framing.fov(logical,game,h.physical,triples());
 }
@@ -66,12 +69,14 @@ std::uint8_t cycle(std::uint8_t previous){
 std::uint8_t restore_view(std::uint8_t native_default){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     h.bonnet=h.last_camera==3;
+    h.rotation={};
     return h.last_camera<0?native_default:std::uint8_t(h.bonnet?0:h.last_camera);
 }
 void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::CameraMountFit* fit,driving::PcMatrixStack& s){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     const auto old_model=h.model;const bool old_fit=h.fit_available;
     const int model=car.i8(0x11);h.model=model>=0&&model<30?unsigned(model):255;h.fit_available=fit&&fit->valid;
+    if(old_model!=h.model||h.rotation_car!=car.data()){h.rotation={};h.rotation_car=car.data();}
     if((old_model!=h.model||old_fit!=h.fit_available)&&(h.view==0||h.view==3)&&h.notice.find("not saved")==std::string::npos)notify(label());
     if(!CameraFraming::tunable(h.view)||h.model>=30)return;
     const bool mounted=h.view==0||h.view==3;
@@ -94,6 +99,17 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
         driving::pc_matrix_translate_vector(s,{-p.side,-p.up,p.forward});
         driving::pc_matrix_multiply_current(s,driving::Bytes(base.data(),base.size()));
     }
+    if(h.view==0||h.view==1||h.view==3){
+        driving::PcMatrix16 view{},world{};std::memcpy(view.data(),s.current().data(),64);
+        if(driving::pc_d3dx_matrix_inverse(world,view)){
+            const auto& context=driving::camera_fov_context();const auto target=camera_rotation_from_world(world);
+            if(!context.display_replay){
+                if(!h.rotation.started||!context.paused)h.rotation.step(target,1.f/60.f);
+            }
+            const auto rotation=context.display_replay&&!context.paused&&h.rotation.started?h.rotation.display(enhancements::display_blend()):h.rotation.current;
+            if(h.rotation.started&&driving::pc_d3dx_matrix_inverse(view,camera_rotation_world(rotation,world)))std::memcpy(s.current().data(),view.data(),64);
+        }else h.rotation={};
+    }else h.rotation={};
     if(h.view==0)car.put32(4,car.u32(4)&~0xc000u); // stock visibility bits: hide own body/wheels in bumper
     else if(h.view==3)car.put32(4,(car.u32(4)&~0xc000u)|0x4000u); // bonnet retains the exterior
     (void)camera;
@@ -157,7 +173,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save
     h.path=ini.path();h.physical=physical;h.clears=desktop_key_clears();h.configured=true;
-    h.last_camera=-1;h.bonnet=false;h.cycle_save_failed=false;
+    h.last_camera=-1;h.bonnet=false;h.cycle_save_failed=false;h.rotation={};h.rotation_car=nullptr;
     const auto last=hud_toggle_setting_name(ini.text("Camera","LastCamera"));
     for(unsigned view=0;view<4;++view)if(last==hud_toggle_setting_name(CameraFraming::prefix(view)))h.last_camera=int(view);
     if(!last.empty()&&last!="DEFAULT"&&h.last_camera<0)std::printf("camera: LastCamera = %.32s refused; native stage-start preference retained\n",last.c_str());

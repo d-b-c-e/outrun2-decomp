@@ -239,6 +239,7 @@ void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uin
     enhancements::display_note(this,[this,camera,before,after,framing]{
         struct Restore {driving::CameraFovContext saved;~Restore(){driving::camera_fov_context()=saved;}} restore{driving::camera_fov_context()};
         driving::camera_fov_context()=framing;
+        driving::camera_fov_context().display_replay=true; // reuse tick smoothing; replays must never advance its state
         const std::uint8_t autoscene=std::uint8_t(events_?events_->slots[6].flags:0u);
         float t=(autoscene&3u)==2u?1.f:driving::camera_blend_4493e0({interpolation_override_82e7d8,autoscene,0,enhancements::display_blend()});
         const Bytes prev(const_cast<std::uint8_t*>(before.data()),before.size()),cur(after->data(),after->size());
@@ -331,7 +332,8 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
                            driving::camera_fov_context().cycle=race?camera_view_cycle():nullptr;
                            driving::camera_fov_context().restore=race?camera_view_restore():nullptr;
                            driving::camera_fov_context().view_adjust=race&&camera_mount_adjust()?adjust_camera_view:nullptr;
-                           driving::camera_fov_context().view_user=renderer;}
+                           driving::camera_fov_context().view_user=renderer;
+                           driving::camera_fov_context().paused=renderer->pause_780248!=0;}
                        ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context()={};}}
                 arm(this,mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1,
                     driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view);

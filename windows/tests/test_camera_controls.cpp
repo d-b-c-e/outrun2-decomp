@@ -2,6 +2,7 @@
 // The window input-chain boundary and panel-open flag are stand-ins; no window/device/game is created.
 #include "camera_controls.hpp"
 #include "camera_keys.hpp"
+#include "mounted_camera_rotation.hpp"
 #include "desktop_settings.hpp"
 #include "desktop_keyboard.hpp"
 #include "native_window.hpp"
@@ -35,6 +36,21 @@ namespace outrun::xbox_runtime {InputFilter& input_filter(){static InputFilter f
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"camera controls line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 int main(int argc,char** argv){
     using namespace outrun;using namespace desktop;
+    {
+        const auto yaw=[](float degrees){const float half=degrees*.008726646259971648f;return CameraQuaternion{0,std::sin(half),0,std::cos(half)};};
+        MountedCameraRotation a,b;a.step(yaw(0),0);b.step(yaw(0),0);a.step(yaw(10),.06f);b.step(yaw(10),.03f);b.step(yaw(10),.03f);
+        CHECK(std::abs(camera_rotation_dot(a.current,b.current))>.999999f);
+        CHECK(std::abs(2.f*std::atan2(a.current[1],a.current[3])*57.295779513f-10.f*(1.f-std::exp(-1.f)))<.0001f);
+        const auto saved=a.current;a.step(yaw(10),0);CHECK(a.current==saved);a.step(yaw(50),1.f/60.f);CHECK(std::abs(camera_rotation_dot(a.current,yaw(50)))>.999999f&&a.previous==a.current);
+        // Shortest arc across quaternion sign/180 degrees, round-trip yaw/pitch/roll, rigid translation.
+        for(unsigned axis=0;axis<3;++axis)for(const float angle:{10.f,179.f,-179.f,180.f}){
+            CameraQuaternion q{0,0,0,std::cos(angle*.008726646259971648f)};q[axis]=std::sin(angle*.008726646259971648f);
+            driving::PcMatrix16 position{};position[12]=12;position[13]=34;position[14]=56;const auto world=camera_rotation_world(q,position);
+            CHECK(std::abs(camera_rotation_dot(q,camera_rotation_from_world(world)))>.999999f&&world[12]==12&&world[13]==34&&world[14]==56);
+        }
+        a={};a.step(yaw(179),0);a.step(yaw(-179),1.f/60.f);CHECK(std::abs(camera_rotation_dot(a.current,yaw(179)))>.9999f);
+        const auto tick=a.current;for(unsigned i=0;i<8;++i)(void)a.display(float(i)/8.f);CHECK(a.current==tick);
+    }
     {
         std::map<std::string,std::string> saved;
         const auto load=[&]{return camera_keys_load([&](const char* key){return saved[key];},[&](const char* key){return saved.count(key)!=0;});};
@@ -116,6 +132,31 @@ int main(int argc,char** argv){
     CHECK(platform::camera_view_cycle()(0)==1&&fov(1)==1.1f);
     CHECK(platform::camera_view_cycle()(1)==2&&platform::camera_view_cycle()(2)==0);
     (void)fov(0);const auto bumper_eye=mount();CHECK(std::fabs(bumper_eye[2]+2.2f)<1e-5f&&car.u32(4)==0u);
+    // The actual consumer damps rotation only. Translation follows the displayed
+    // car immediately; pause/replay cannot integrate an extra filter step.
+    const auto set_car=[&](float degrees,float x){const float half=degrees*.008726646259971648f;
+        driving::PcMatrix16 p{};p[12]=x;const auto m=camera_rotation_world({0,std::sin(half),0,std::cos(half)},p);for(unsigned i=0;i<16;++i)car.putf(0xb0+i*4,m[i]);return m;};
+    const auto target_car=set_car(10,10);const auto rigid=driving::pc_d3dx_vec3_transform_coord({0,.4f,-2.2f},target_car);const auto lagged_eye=mount();
+    CHECK(std::fabs(lagged_eye[0]-rigid[0])<1e-5f&&std::fabs(lagged_eye[2]-rigid[2])<1e-5f);
+    driving::PcMatrix16 damped_view{},damped_world{};std::memcpy(damped_view.data(),stack.current().data(),64);CHECK(driving::pc_d3dx_matrix_inverse(damped_world,damped_view));
+    const auto damped=camera_rotation_from_world(damped_world);CHECK(damped[1]>0.f&&damped[1]<std::sin(5.f*.017453292519943295f));
+    driving::camera_fov_context().paused=true;const auto paused_car=set_car(15,20);const auto paused_eye=mount();const auto paused_rigid=driving::pc_d3dx_vec3_transform_coord({0,.4f,-2.2f},paused_car);
+    driving::PcMatrix16 frozen_view{},frozen_world{};std::memcpy(frozen_view.data(),stack.current().data(),64);CHECK(driving::pc_d3dx_matrix_inverse(frozen_world,frozen_view));
+    CHECK(std::abs(camera_rotation_dot(damped,camera_rotation_from_world(frozen_world)))>.999999f&&std::fabs(paused_eye[0]-paused_rigid[0])<1e-5f&&std::fabs(paused_eye[2]-paused_rigid[2])<1e-5f);
+    driving::camera_fov_context().display_replay=true;for(unsigned i=0;i<5;++i)(void)mount();
+    std::memcpy(frozen_view.data(),stack.current().data(),64);CHECK(driving::pc_d3dx_matrix_inverse(frozen_world,frozen_view)&&std::abs(camera_rotation_dot(damped,camera_rotation_from_world(frozen_world)))>.999999f);
+    driving::camera_fov_context()={};const auto cut=set_car(60,0);(void)mount();std::memcpy(frozen_view.data(),stack.current().data(),64);
+    CHECK(driving::pc_d3dx_matrix_inverse(frozen_world,frozen_view)&&std::abs(camera_rotation_dot(camera_rotation_from_world(cut),camera_rotation_from_world(frozen_world)))>.999999f);
+    (void)set_car(0,0);(void)mount();
+    // Cockpit uses its native eye and target rotation; chase is entirely unfiltered.
+    (void)fov(1);(void)mount();
+    const auto native_view=[&](float degrees){driving::PcMatrix16 p{};p[12]=3;p[13]=4;p[14]=5;
+        const float half=degrees*.008726646259971648f;driving::PcMatrix16 view{};CHECK(driving::pc_d3dx_matrix_inverse(view,camera_rotation_world({0,std::sin(half),0,std::cos(half)},p)));
+        std::memcpy(stack.current().data(),view.data(),64);return view;};
+    (void)native_view(10);platform::camera_mount_adjust()(camera,car,&fit,stack);std::memcpy(frozen_view.data(),stack.current().data(),64);
+    CHECK(driving::pc_d3dx_matrix_inverse(frozen_world,frozen_view)&&frozen_world[12]>2.9999f&&frozen_world[12]<3.0001f&&camera_rotation_from_world(frozen_world)[1]>.0f&&camera_rotation_from_world(frozen_world)[1]<.087f);
+    (void)fov(2);const auto chase_view=native_view(10);platform::camera_mount_adjust()(camera,car,&fit,stack);
+    CHECK(std::memcmp(chase_view.data(),stack.current().data(),64)==0);
     Ini posed;posed.load_text("[Camera]\nBonnetRealistic=false\nCar0.BonnetGameSideOffset=0.2\nCar0.BonnetGameUpOffset=0.1\n",path);
     camera_controls_configure(posed,false,.586f);(void)platform::camera_view_cycle()(0);(void)fov(0);
     const auto tuned=mount();CHECK(std::fabs(tuned[0]-.2f)<1e-5f&&std::fabs(tuned[1]-1.f)<1e-5f);
