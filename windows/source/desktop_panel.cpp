@@ -1,3 +1,4 @@
+#include "platform/pc_curve_scene.hpp"
 #include "panel_navigation_imgui.hpp"
 // The F6 panel (desktop_panel.hpp): the toolkit panel's frame sequence on our own D3D11 device, as the toolkit's
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
@@ -640,6 +641,12 @@ void page_cameras(bool advanced){
     else if(st.aspect>0.f)std::snprintf(now,sizeof now,"%s, %s, one wide view %.2f:1",triple_screens_name(st.mode),st.where.c_str(),double(st.aspect));
     else std::snprintf(now,sizeof now,"%s, %s, one 16:9 view",triple_screens_name(st.mode),st.where.c_str());
     dbce::panel::Status("Now",now);
+    if(outrun::platform::g_pc_curve_mesh_provider){
+        const auto mode=outrun::platform::g_pc_curve_mode.load(std::memory_order_acquire);
+        dbce::panel::Status("Curve prototype",mode==outrun::platform::PcCurveMode::active?"Active (developer opt-in)":
+            mode==outrun::platform::PcCurveMode::flat?"Off; legacy projected views after refusal":"Off; waiting for render resources");
+    }
+
     // [Triple] Views, below the selector and only when it is not Off (STD-022 options sit there; sana 35626 wording).
     if(v.triple!=int(TripleScreens::off)){
         static const char* const projections[]{"One wide view","Three projected views (experimental)"};

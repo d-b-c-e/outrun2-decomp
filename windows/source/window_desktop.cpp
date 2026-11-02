@@ -41,6 +41,8 @@
 #include "startup_monitor.hpp"
 #include "startup_diagnostics.hpp"
 #include "triple_rig.hpp"
+#include "curve_scene_profile.hpp"
+#include <memory>
 #include "wheel_input.hpp"
 #include "shim_input.hpp"
 #include "startup_state.hpp"
@@ -69,10 +71,17 @@ outrun::desktop::TripleStatus triple_status;                                    
 // The [Triple] rig keys (triple_screens.hpp parse_triple_rig), read when Angled is asked for in a normal process; the
 // toolkit's fixture rig (32-inch 16:9, eye 660 mm, sides 70 degrees, 8 mm gap) and MatchGameFov = true otherwise.
 outrun::desktop::TripleRigSettings triple_rig;
+std::unique_ptr<const outrun::desktop::CurveSceneProfile> curve_profile;
+bool curve_mesh_view(unsigned width,unsigned height,outrun::platform::PcCurveMeshView& out){return curve_profile&&outrun::desktop::curve_scene_mesh_view(*curve_profile,width,height,out);}
+
 // The three-view corrections (pc_screen.hpp g_pc_triple_corrections): that rig (the owner's 1500R curve approximated
 // flat) matched to the projection the game used each time it changes (triple_rig.hpp triple_views). With MatchGameFov =
 // false the race camera's projection is already the physical eye's, so the match is that eye.
 bool triple_fixture_corrections(const float* projection,float* out){
+    if(curve_profile&&outrun::platform::pc_curve_active()){
+        if(outrun::desktop::curve_scene_corrections(*curve_profile,projection,out))return true;
+        return false; // only an actual World draw may latch flat; frontend/culling projections can differ
+    }
     outrun::desktop::Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
     outrun::desktop::TripleViews v{};
     if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),v))return false;
@@ -164,6 +173,7 @@ NativeWindow& native_window(){
         if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
         if(triple_status.applied==td::TripleProjection::angled){
             outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;
+            if(curve_profile)outrun::platform::g_pc_curve_mesh_provider=curve_mesh_view;
             // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
             // 44DE10) draw nothing behind the car and add objects beside it only a few sections on. Where [Graphics]
             // leaves a key at 0, the views union 64 sections ahead and 64 behind (td::triple_default_union). Tweaks'
@@ -396,6 +406,20 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         std::vector<std::string> notes;
         outrun::xbox_runtime::triple_rig=outrun::desktop::parse_triple_rig([&](const char* key){return settings.text("Triple",key);},notes);
         for(const auto& n:notes)std::printf("settings: [Triple] %s\n",n.c_str());
+        const char* opt=std::getenv("OR2_CURVE_COMPOSITOR");
+        if(opt&&std::string(opt)=="1"&&!playback&&intake.kind!=session::Intake::Kind::Record&&!render_test.requested){
+            const auto raw=settings.text("Triple","CurveRadiusMm");char* end=nullptr;
+            const double radius=raw.empty()?0.:std::strtod(raw.c_str(),&end);
+            auto rig=outrun::desktop::triple_rig_from(outrun::xbox_runtime::triple_rig);
+            // This first prototype preserves the admitted equal16:9 native layout.
+            rig.panel_height_mm=rig.panel_width_mm*9./16.;
+            auto profile=std::make_unique<outrun::desktop::CurveSceneProfile>();
+            if((raw.empty()||(end!=raw.c_str()&&*end=='\0'))&&outrun::desktop::curve_scene_profile(rig,radius,*profile)){
+                outrun::xbox_runtime::curve_profile=std::move(profile);
+                std::printf("curve prototype: requested radius %.9g mm; equal16:9 source, resources pending; developer only\n",radius);
+            }else std::printf("curve prototype: refused CurveRadiusMm/geometry; legacy Angled retained\n");
+        }
+
     }
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain

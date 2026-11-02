@@ -1,4 +1,5 @@
 #include "platform/pc_screen.hpp"
+#include "platform/pc_curve_scene.hpp"
 #pragma once
 #include "platform/pc_soft_d3d9.hpp"
 #include <d3d11.h>
@@ -153,6 +154,13 @@ private:
     D3D11_DEPTH_STENCIL_DESC last_depth_{};ID3D11DepthStencilState* last_depth_state_{};
     D3D11_BLEND_DESC last_blend_{};ID3D11BlendState* last_blend_state_{};
     D3D11_SAMPLER_DESC last_sampler_[6]{};ID3D11SamplerState* last_sampler_state_[6]{};
+    void prepare_curve();void prepare_curve_source();void composite_curve();void curve_before_draw();
+    bool curve_source_world()const{return curve_frame_&&!scene_finished_&&colour_target_==BackBuffer&&
+        (draw_phase()==platform::PcDrawPhase::World||draw_phase()==platform::PcDrawPhase::WorldCoverage);}
+    platform::PcCurveMeshView curve_mesh_{};
+    ComPtr<ID3D11Buffer> curve_vb_,curve_ib_,curve_cb_,curve_scale_cb_;
+    ComPtr<ID3D11VertexShader> curve_vs_;ComPtr<ID3D11PixelShader> curve_ps_;ComPtr<ID3D11InputLayout> curve_layout_;
+    bool curve_prepared_{},curve_frame_{},curve_world_{};std::uint64_t curve_frames_{};
     void allocate_back(unsigned width,unsigned height);
     void ensure_msaa();
     unsigned back_w_{},back_h_{},msaa_{1},msaa_samples_{};
@@ -165,7 +173,7 @@ private:
     // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport, all four
     // edges (sana 39535); any game sub-viewport, a full-width partial-height one included, keeps its own clipping.
     float ui_extension()const{
-        return ui_rect_&&ui_spacing_>0.&&colour_target_==BackBuffer&&soft_viewport_.x==0.f&&soft_viewport_.y==0.f&&
+        return !curve_source_world()&&ui_rect_&&ui_spacing_>0.&&colour_target_==BackBuffer&&soft_viewport_.x==0.f&&soft_viewport_.y==0.f&&
                soft_viewport_.w==float(back_width_)&&soft_viewport_.h==float(back_height_)?float(ui_spacing_):0.f;}
 };
 }

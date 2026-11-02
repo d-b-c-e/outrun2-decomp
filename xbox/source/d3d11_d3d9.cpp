@@ -33,15 +33,17 @@ constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of th
 constexpr const char* TripleGsMain=R"HLSL(
 struct Panel{Varying v;uint vp:SV_ViewportArrayIndex;};
 cbuffer Triple:register(b0){row_major float4x4 C[3];float4 fix;};
+cbuffer CurveSourceScale:register(b1){float4 sourceScale[3];};
 [maxvertexcount(9)]
 void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
  [unroll] for(uint i=0;i<3;++i){
   [unroll] for(uint k=0;k<3;++k){
-   float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*q.w;q.y-=fix.y*q.w;
+   float2 scale=fix.w>0.5?sourceScale[i].xy:float2(1,1);
+   float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*scale.x*q.w;q.y-=fix.y*scale.y*q.w;
    Panel o;o.v=v[k];
    if(fix.z>0.5){
     float4 meta=v[k].t7;float4 uv=float4(meta.xy,0,1);
-    q.xy+=float2(meta.x*2-1,1-meta.y*2)*meta.z*fix.xy*q.w;
+    q.xy+=float2(meta.x*2-1,1-meta.y*2)*meta.z*fix.xy*q.w*scale;
     o.v.t0=uv;o.v.t1=uv;o.v.t2=uv;o.v.t3=uv;o.v.t4=uv;o.v.t5=uv;o.v.t6=uv;o.v.t7=uv;}
    o.v.p=q;o.vp=i;s.Append(o);}
   s.RestartStrip();}
@@ -164,6 +166,7 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
+    if(curve_prepared_&&platform::pc_curve_active())platform::pc_curve_publish(platform::PcCurveMode::unavailable);
     if(query_live_){context_->End(queries_[query_index_].Get());query_pending_[query_index_]=true;}
     collect_queries(false);   // what the GPU has finished; the rest of the diagnostic count is not waited for
     std::printf("shader programs: %u compiled, %u from the cache, %.0f ms in total, slowest %.0f ms\n",
@@ -214,6 +217,10 @@ void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     check(device_->CreateTexture2D(&t,nullptr,&back_depth_tex_),"CreateTexture2D(depth)");
     check(device_->CreateDepthStencilView(back_depth_tex_.Get(),nullptr,&back_dsv_),"CreateDepthStencilView(back)");
     back_w_=w;back_h_=h;
+    if(curve_prepared_&&platform::pc_curve_active())try{prepare_curve_source();}catch(const std::exception& e){
+        platform::pc_curve_request_flat(platform::PcCurveRefusal::resize);platform::pc_curve_publish(platform::PcCurveMode::flat);
+        std::printf("curve prototype: flat session latch after resize refusal: %s\n",e.what());}
+
 }
 void D3D11D3D9Device::resize_back_buffer(unsigned w,unsigned h){if(w!=back_w_||h!=back_h_)allocate_back(w,h);}
 void D3D11D3D9Device::ensure_msaa(){
@@ -230,15 +237,91 @@ void D3D11D3D9Device::ensure_msaa(){
     check(device_->CreateDepthStencilView(msaa_depth_tex_.Get(),nullptr,&msaa_dsv_),"CreateDepthStencilView(MSAA)");
     msaa_samples_=msaa_;
 }
+void D3D11D3D9Device::prepare_curve_source(){
+    platform::PcCurveMeshView v;
+    if(!platform::g_pc_curve_mesh_provider||!platform::g_pc_curve_mesh_provider(back_w_,back_h_,v)||!platform::pc_curve_mesh_valid(v)||
+       v.vertices!=curve_mesh_.vertices||v.indices!=curve_mesh_.indices||v.shader_source!=curve_mesh_.shader_source||v.inner!=curve_mesh_.inner)
+        throw std::runtime_error("curve source layout/size changed or refused");
+    curve_mesh_.sample_rects=v.sample_rects;curve_mesh_.inner=v.inner;
+    if(!fxaa_copy_tex_||!fxaa_copy_srv_){
+        D3D11_TEXTURE2D_DESC d{};back_colour_tex_->GetDesc(&d);d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> view;
+        check(device_->CreateTexture2D(&d,nullptr,&texture),"CreateTexture2D(curve source)");
+        check(device_->CreateShaderResourceView(texture.Get(),nullptr,&view),"CreateShaderResourceView(curve source)");
+        fxaa_copy_tex_=std::move(texture);fxaa_copy_srv_=std::move(view);
+    }
+}
+void D3D11D3D9Device::prepare_curve(){
+    const auto provider=platform::g_pc_curve_mesh_provider;if(!provider||platform::g_pc_curve_mode.load()==platform::PcCurveMode::flat)return;
+    try{
+        if(!provider(back_w_,back_h_,curve_mesh_)||!platform::pc_curve_mesh_valid(curve_mesh_))throw std::runtime_error("invalid curve mesh/source contract");
+        const auto vs=compile(curve_mesh_.shader_source,"vs_main","vs_4_1"),ps=compile(curve_mesh_.shader_source,"ps_main","ps_4_1");
+        check(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&curve_vs_),"CreateVertexShader(curve)");
+        check(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&curve_ps_),"CreatePixelShader(curve)");
+        const D3D11_INPUT_ELEMENT_DESC elements[]{
+            {"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,8,D3D11_INPUT_PER_VERTEX_DATA,0}};
+        check(device_->CreateInputLayout(elements,2,vs->GetBufferPointer(),vs->GetBufferSize(),&curve_layout_),"CreateInputLayout(curve)");
+        D3D11_BUFFER_DESC b{};b.ByteWidth=UINT(curve_mesh_.vertex_bytes);b.Usage=D3D11_USAGE_IMMUTABLE;b.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+        D3D11_SUBRESOURCE_DATA data{curve_mesh_.vertices,0,0};check(device_->CreateBuffer(&b,&data,&curve_vb_),"CreateBuffer(curve vertices)");
+        b.ByteWidth=curve_mesh_.index_count*2;b.BindFlags=D3D11_BIND_INDEX_BUFFER;data.pSysMem=curve_mesh_.indices;
+        check(device_->CreateBuffer(&b,&data,&curve_ib_),"CreateBuffer(curve indices)");
+        b.ByteWidth=32;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        check(device_->CreateBuffer(&b,nullptr,&curve_cb_),"CreateBuffer(curve rect)");
+        float source_scale[3][4]{};for(unsigned i=0;i<3;++i){source_scale[i][0]=curve_mesh_.inner[i][2];source_scale[i][1]=curve_mesh_.inner[i][3];}
+        b.ByteWidth=sizeof source_scale;b.Usage=D3D11_USAGE_IMMUTABLE;b.CPUAccessFlags=0;data.pSysMem=source_scale;
+        check(device_->CreateBuffer(&b,&data,&curve_scale_cb_),"CreateBuffer(curve source scale)");
+        prepare_curve_source();curve_prepared_=true;
+        platform::pc_curve_publish(platform::PcCurveMode::active);
+        std::printf("curve prototype: resources ready %ux%u; developer opt-in, runtime qualification pending\n",back_w_,back_h_);
+    }catch(const std::exception& e){
+        curve_vb_.Reset();curve_ib_.Reset();curve_cb_.Reset();curve_scale_cb_.Reset();curve_vs_.Reset();curve_ps_.Reset();curve_layout_.Reset();
+        platform::pc_curve_request_flat(platform::PcCurveRefusal::resources);platform::pc_curve_publish(platform::PcCurveMode::flat);
+        std::printf("curve prototype: flat session latch before first source draw: %s\n",e.what());
+    }
+}
+void D3D11D3D9Device::curve_before_draw(){
+    if(!curve_frame_||colour_target_!=BackBuffer)return;
+    const bool world=draw_phase()==platform::PcDrawPhase::World||draw_phase()==platform::PcDrawPhase::WorldCoverage;
+    if(!world&&curve_world_&&!scene_finished_)finish_scene(); // before binding the next native pipeline
+    if(world&&!scene_finished_)curve_world_=true;
+}
+void D3D11D3D9Device::composite_curve(){
+    if(!curve_frame_||!curve_world_)return;
+    triple_unbind();ID3D11ShaderResourceView* none[12]{};context_->PSSetShaderResources(0,12,none);
+    context_->OMSetRenderTargets(0,nullptr,nullptr);context_->CopyResource(fxaa_copy_tex_.Get(),back_colour_tex_.Get());
+    ComPtr<ID3D11Buffer> saved_cb;context_->PSGetConstantBuffers(0,1,&saved_cb);
+    ID3D11RenderTargetView* target=back_rtv_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
+    context_->RSSetState(fxaa_rasterizer_.Get());context_->OMSetDepthStencilState(fxaa_depth_.Get(),0);context_->OMSetBlendState(fxaa_blend_.Get(),nullptr,0xffffffffu);
+    context_->IASetInputLayout(curve_layout_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    const UINT stride=platform::PcCurveStride,offset=0;ID3D11Buffer* vb=curve_vb_.Get();context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+    context_->IASetIndexBuffer(curve_ib_.Get(),DXGI_FORMAT_R16_UINT,0);context_->VSSetShader(curve_vs_.Get(),nullptr,0);context_->PSSetShader(curve_ps_.Get(),nullptr,0);
+    ID3D11ShaderResourceView* source=fxaa_copy_srv_.Get();context_->PSSetShaderResources(0,1,&source);
+    ID3D11SamplerState* sampler=fxaa_sampler_.Get();context_->PSSetSamplers(0,1,&sampler);ID3D11Buffer* cb=curve_cb_.Get();context_->PSSetConstantBuffers(0,1,&cb);
+    const auto restore_state=[&]{context_->PSSetShaderResources(0,12,none);ID3D11Buffer* restore=saved_cb.Get();context_->PSSetConstantBuffers(0,1,&restore);bound_=Bound{};};
+    try{for(unsigned panel=0;panel<3;++panel){
+        D3D11_MAPPED_SUBRESOURCE map{};check(context_->Map(curve_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&map),"Map(curve rect)");
+        std::memcpy(map.pData,curve_mesh_.sample_rects[panel].data(),32);context_->Unmap(curve_cb_.Get(),0);
+        const D3D11_VIEWPORT viewport{float(panel*(back_w_/3)),0,float(back_w_/3),float(back_h_),0,1};context_->RSSetViewports(1,&viewport);
+        context_->DrawIndexed(curve_mesh_.index_count,0,INT(panel*curve_mesh_.vertices_per_panel));
+    }
+    }catch(...){restore_state();platform::pc_curve_request_flat(platform::PcCurveRefusal::resources);throw;}
+    // Source depth/stencil is not aligned with the final warped color image.
+    // The next layer gets the same empty-depth contract as the existing MSAA path.
+    context_->ClearDepthStencilView(back_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1.f,0);
+    restore_state();
+    if(++curve_frames_==1)std::printf("curve prototype: first world composite submitted, 3mesh draws; no rendered acceptance\n");
+}
 void D3D11D3D9Device::finish_scene(){
     if(scene_finished_||count_only||colour_target_!=BackBuffer)return;
+    const bool resolved=msaa_live_;
     if(msaa_live_){   // resolve into the back buffer, whose depth/stencil is cleared for the 2D layer
         msaa_live_=false;scene_finished_=true;
         context_->ResolveSubresource(back_colour_tex_.Get(),0,msaa_colour_tex_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
         context_->ClearDepthStencilView(back_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1.f,0);
-        ++msaa_resolves;return;
+        ++msaa_resolves;
     }
-    if(!fxaa_)return;
+    if(resolved||!fxaa_){if(curve_frame_&&curve_world_){scene_finished_=true;composite_curve();}return;}
     scene_finished_=true;
     if(!fxaa_copy_tex_){
         D3D11_TEXTURE2D_DESC t{};back_colour_tex_->GetDesc(&t);t.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -257,10 +340,15 @@ void D3D11D3D9Device::finish_scene(){
     ID3D11SamplerState* sampler=fxaa_sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
     context_->Draw(3,0);bound_=Bound{};
     ++fxaa_passes;
+    composite_curve();
 }
 void D3D11D3D9Device::begin_frame(){
     scene_finished_=false;msaa_live_=msaa_>1&&!count_only;
     if(msaa_live_)ensure_msaa();
+    // The device begins at640x480; the spanning video size arrives between
+    // frames. Publish only after requested AA and curve resources are ready.
+    if(!count_only&&!curve_prepared_&&back_w_>=6&&back_w_%3==0&&back_h_>=2)prepare_curve();
+    curve_frame_=curve_prepared_&&platform::pc_curve_active()&&!count_only;curve_world_=false;
     bound_=Bound{};
     if(platform::g_pc_triple_corrections){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
     if(!count_only){
@@ -291,7 +379,12 @@ void D3D11D3D9Device::end_frame(){
                     (unsigned long long)(now[0]-last[0]),(unsigned long long)(now[1]-last[1]),(unsigned long long)(now[2]-last[2]),
                     (unsigned long long)(now[3]-last[3]),(unsigned long long)(now[4]-last[4]),(unsigned long long)(now[5]-last[5]),(unsigned long long)(now[6]-last[6]));
         for(int k=0;k<7;++k)last[k]=now[k];++frame;}
-    if(msaa_live_){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
+    if(msaa_live_||(curve_frame_&&curve_world_&&!scene_finished_)){const auto target=colour_target_;colour_target_=BackBuffer;finish_scene();colour_target_=target;}   // no 2D layer this frame
+    if(curve_frame_&&platform::g_pc_curve_refusal.load(std::memory_order_acquire)!=platform::PcCurveRefusal::none){
+        const auto reason=platform::g_pc_curve_refusal.load(std::memory_order_acquire);
+        platform::pc_curve_publish(platform::PcCurveMode::flat);curve_frame_=false;
+        std::printf("curve prototype: flat session latch from next frame, refusal %u; first-frame transition remains experimental\n",unsigned(reason));
+    }
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;
     // Development: OR2_XBOX_DRAW_STATS=1 logs the draws of every 60th frame (and waits for each frame's count).
@@ -669,16 +762,29 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     ++triple_draw_domains[unsigned(draw_domain(rhw,colour_target_==BackBuffer))]; // metadata only: no target/viewport/shader change
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
     const bool coverage=platform::pc_world_coverage_draw(draw_phase(),rhw,true);
-    if(rhw&&!coverage){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
+    if(rhw&&!coverage&&!curve_source_world()){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
     const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
     const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
         float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
     const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
         LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
+    const auto single=[&]{
+        auto v=viewport(1);
+        if(curve_source_world()){
+            const auto& r=curve_mesh_.inner[1];
+            v.TopLeftX=float(third*(1.+r[0])+soft_viewport_.x*sx*r[2]);v.TopLeftY=float(back_h_*r[1]+soft_viewport_.y*sy*r[3]);
+            v.Width*=r[2];v.Height*=r[3];
+        }
+        const auto r=curve_source_world()?D3D11_RECT{
+            std::max(LONG(back_w_/3),LONG(std::floor(v.TopLeftX))),std::max(0L,LONG(std::floor(v.TopLeftY))),
+            std::min(LONG(2*(back_w_/3)),LONG(std::ceil(v.TopLeftX+v.Width))),std::min(LONG(back_h_),LONG(std::ceil(v.TopLeftY+v.Height)))}:scissor(v);
+        context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+    };
     bound_.viewport_set=bound_.scissor_set=false;   // apply_state sets its single viewport again for the next draw
+    if(rhw&&!coverage){++triple_single_rhw;triple_unbind();single();return false;}
     if(!platform::pc_world_three_views(draw_phase(),rhw,true)){
         ++triple_single_nonworld;triple_unbind();
-        const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+        single();
         return false; // XYZ overlay/unknown projection stays native on the centre
     }
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
@@ -712,24 +818,28 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
             if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof e->c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
-            std::memcpy(m.pData,e->c,sizeof e->c);static_cast<float*>(m.pData)[50]=batch_point_sprites_?1.f:0.f;context_->Unmap(triple_cb_.Get(),0);}
+            std::memcpy(m.pData,e->c,sizeof e->c);static_cast<float*>(m.pData)[50]=batch_point_sprites_?1.f:0.f;static_cast<float*>(m.pData)[51]=curve_source_world()?1.f:0.f;context_->Unmap(triple_cb_.Get(),0);}
     }
     // The geometry shader takes triangles (nene 30802): a list or a strip, which is every draw that reaches here today
     // (draw_native takes only those, flush draws a list). Anything else would not be drawn with it bound.
     const bool triangles=bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST||bound_.topology==D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
     if(!triangles||!standard||!triple_ok_){   // a custom projection (or not triangles): the centre third only
         ++(!triangles?triple_single_topology:!standard?triple_single_unmatched:triple_single_refused);triple_unbind();
+        if(curve_source_world()&&triangles&&standard&&!triple_ok_)platform::pc_curve_request_flat(platform::PcCurveRefusal::projection);
         if(triangles&&standard&&triple_refused_logged_.size()<4&&std::none_of(triple_refused_logged_.begin(),triple_refused_logged_.end(),
                [&](const std::array<float,16>& p){return std::memcmp(p.data(),proj.data(),64)==0;})){
             triple_refused_logged_.push_back(proj);std::string row;
             for(unsigned k=0;k<16;++k){char t[24];std::snprintf(t,sizeof t,k%4==3&&k<15?"%g / ":"%g ",double(proj[k]));row+=t;}
             std::printf("triple views: projection refused (single on the centre): %s\n",row.c_str());}
-        const auto v=viewport(1);const auto r=scissor(v);context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);
+        single();
         return false;
     }
     if(!triple_gs_){const auto code=compile(triple_gs_source(),"gs_main","gs_4_1");
         check(device_->CreateGeometryShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&triple_gs_),"CreateGeometryShader(three views)");}
     if(!triple_gs_bound_){context_->GSSetShader(triple_gs_.Get(),nullptr,0);ID3D11Buffer* b=triple_cb_.Get();context_->GSSetConstantBuffers(0,1,&b);
+        // b1 is ignored unless fix.w advertises a widened source; binding b0
+        // as the ordinary fallback keeps the shader interface fully bound.
+        ID3D11Buffer* scale=curve_source_world()?curve_scale_cb_.Get():triple_cb_.Get();context_->GSSetConstantBuffers(1,1,&scale);
         triple_gs_bound_=true;}
     const D3D11_VIEWPORT v[3]{viewport(0),viewport(1),viewport(2)};const D3D11_RECT r[3]{scissor(v[0]),scissor(v[1]),scissor(v[2])};
     context_->RSSetViewports(3,v);context_->RSSetScissorRects(3,r);
@@ -827,6 +937,7 @@ void D3D11D3D9Device::flush(){
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.
 void D3D11D3D9Device::pixel_pipeline(){
+    curve_before_draw();
     bind_target();apply_state();bind_textures();
     auto* ps=object(pixel_shader);const unsigned kind=ps&&ps->kind==4?(ps->program.version==0xffff0101u?1:2):0;
     ID3D11PixelShader* pixel=kind?pixel_program(kind,&ps->program):ffp_.Get();
