@@ -90,6 +90,7 @@ void course_post_40be70(PcFlushContext& c,const PcFrameInputs& in,std::uint8_t c
 }
 }
 void frame_render_449050(PcFlushContext& c,PcFrameState& s,const PcFrameInputs& in,PcFrameServices& sv){
+    const PcDrawPhaseScope world(c.device,PcDrawPhase::World);
     auto& g=c.g;
     if(!s.device_ready_7d2614&&enhancements::display_ticks())++g.w(0x89edb8);   // 40ED60 (port: not on display-only frames)
     frame_begin_448db0(c,s,in);
@@ -132,9 +133,10 @@ void frame_render_449050(PcFlushContext& c,PcFrameState& s,const PcFrameInputs& 
     }
     if(in.game_mode_78026c==0x18u)c.device.set_viewport(saved_viewport);
     frame_end_448e40(c,s);
+    c.device.set_draw_phase(PcDrawPhase::Hud); // explicit world-complete/compositor boundary, before any 42D710 draw
     sv.leaf(0x42d710,0x15);
     const auto& player=sv.events.slots[8];
     const std::uint32_t mode_84a318=sv.mode_84a318?sv.mode_84a318():in.mode_84a318;
-    if(mode_84a318==2u&&(player.flags&3u)==2u)sv.leaf(0x49f4d0,player.work_token);
+    if(mode_84a318==2u&&(player.flags&3u)==2u){const PcDrawPhaseScope overlay(c.device,PcDrawPhase::FrontendOverlay);sv.leaf(0x49f4d0,player.work_token);}
 }
 }

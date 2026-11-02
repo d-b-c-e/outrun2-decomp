@@ -48,6 +48,29 @@ int main(int argc,char** argv){
     // 40EC70 cleared the back buffer with 89BD5C (0 here): opaque black.
     const auto& rgba=device.rgba();
     require(rgba[0]==0&&rgba[3]==0,"448DB0 clear through the D3D9 form");
+    {   // The real frame consumer supplies ownership, never a first-RHW guess.
+        platform::PcSoftD3D9Device phase_device(64,64);platform::PcSceneRenderer phase_scene(phase_device);
+        driving::PcEventControlState e{};e.slots[8].flags=2;
+        phase_scene.mode_84a318=[](){return 2u;}; // authored frontend car overlay after the HUD
+        require(phase_scene.invoke(0x449fc0u,0,386,0x20,0),"phase fixture environment init");
+        std::vector<platform::PcDrawPhase> order;
+        phase_scene.trace=[&](const char* kind,std::uint32_t pc){
+            if(std::strcmp(kind,"leaf")!=0)return;
+            if(pc==0x414340u){order.push_back(phase_device.draw_phase());
+                require(phase_device.draw_domain(true)==platform::PcDrawDomain::WorldScreenEffect&&phase_device.draw_domain(false)==platform::PcDrawDomain::WorldGeometry,"world RHW and world XYZ remain distinct from HUD");
+                require(phase_device.draw_domain(true,false)==platform::PcDrawDomain::Offscreen,"reflection/offscreen target excluded from world source");}
+            if(pc==0x42d710u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(true)==platform::PcDrawDomain::Hud&&phase_device.draw_domain(false)==platform::PcDrawDomain::Hud,"HUD identity does not depend on RHW format");}
+            if(pc==0x49f4d0u){order.push_back(phase_device.draw_phase());require(phase_device.draw_domain(false)==platform::PcDrawDomain::FrontendOverlay,"late frontend 3D is outside world source");}
+        };
+        phase_scene.render_frame(e,0x20);
+        require(order==std::vector<platform::PcDrawPhase>{platform::PcDrawPhase::World,platform::PcDrawPhase::Hud,platform::PcDrawPhase::FrontendOverlay},"world/HUD/frontend order from actual 449050");
+        require(phase_device.draw_phase()==platform::PcDrawPhase::Unclassified&&phase_device.draw_domain(true)==platform::PcDrawDomain::Unclassified,"ordinary frame restores caller phase; unknown ownership remains explicit");
+        {const platform::PcDrawPhaseScope outer(phase_device,platform::PcDrawPhase::FrontendOverlay);phase_scene.render_frame(e,0x20);
+            require(phase_device.draw_phase()==platform::PcDrawPhase::FrontendOverlay,"nested frame restores its actual caller phase");}
+        phase_scene.leaf_hook=[](std::uint32_t pc,std::uint32_t){if(pc==0x42d710u)throw std::runtime_error("phase-fixture failure");return false;};
+        bool failed=false;try{phase_scene.render_frame(e,0x20);}catch(const std::runtime_error& ex){failed=std::string(ex.what()).find("phase-fixture failure")!=std::string::npos;}
+        require(failed&&phase_device.draw_phase()==platform::PcDrawPhase::Unclassified,"failed HUD flush restores phase without a next-frame leak");
+    }
     {   // A START (mode 13) camera control that faults inside 484810, after its push: reported,
         // and the shared matrix stack returns to its entry depth and pointer for the next callbacks.
         driving::Bytes cb(car.data(),car.size());

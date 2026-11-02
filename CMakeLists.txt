@@ -298,6 +298,7 @@ target_link_libraries(test_pc_sprite_replacement PRIVATE outrun_native_runtime $
 add_executable(texture_pack_coverage tools/texture_pack_coverage.cpp)
 target_link_libraries(texture_pack_coverage PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
 add_test(NAME pc_sprite_replacement COMMAND test_pc_sprite_replacement)
+set_tests_properties(pc_sprite_replacement PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(test_pc_shader_programs tests/test_pc_shader_programs.cpp)
 target_link_libraries(test_pc_shader_programs PRIVATE outrun_native_runtime)
 add_test(NAME pc_shader_programs COMMAND test_pc_shader_programs)

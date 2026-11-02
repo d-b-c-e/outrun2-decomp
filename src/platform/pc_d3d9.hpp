@@ -12,6 +12,17 @@
 #include <array>
 #include <cstdint>
 namespace outrun::platform {
+// Semantic ownership is independent of XYZ/XYZRHW storage. Screen-space smoke
+// and stencil darkening belong to the world; frontend 3D may follow the HUD.
+enum class PcDrawPhase:std::uint8_t {Unclassified,World,Hud,FrontendOverlay};
+enum class PcDrawDomain:std::uint8_t {Unclassified,WorldGeometry,WorldScreenEffect,Hud,FrontendOverlay,Offscreen,Count};
+inline PcDrawDomain pc_draw_domain(PcDrawPhase phase,bool rhw,bool logical_backbuffer){
+    if(!logical_backbuffer)return PcDrawDomain::Offscreen;
+    if(phase==PcDrawPhase::World)return rhw?PcDrawDomain::WorldScreenEffect:PcDrawDomain::WorldGeometry;
+    if(phase==PcDrawPhase::Hud)return PcDrawDomain::Hud;
+    if(phase==PcDrawPhase::FrontendOverlay)return PcDrawDomain::FrontendOverlay;
+    return PcDrawDomain::Unclassified;
+}
 struct PcVertexElement { // D3DVERTEXELEMENT9
     std::uint16_t stream{},offset{};
     std::uint8_t type{},method{},usage{},usage_index{};
@@ -42,6 +53,9 @@ public:
 class PcD3D9Device {
 public:
     virtual ~PcD3D9Device()=default;
+    PcDrawPhase draw_phase()const noexcept{return draw_phase_;}
+    void set_draw_phase(PcDrawPhase phase)noexcept{draw_phase_=phase;}
+    PcDrawDomain draw_domain(bool rhw,bool logical_backbuffer=true)const noexcept{return pc_draw_domain(draw_phase_,rhw,logical_backbuffer);}
     // CreateVertexBuffer / CreateIndexBuffer (vtable 0x68 / 0x6C).
     virtual std::uint32_t create_vertex_buffer(std::uint32_t length,std::uint32_t usage,std::uint32_t fvf,std::uint32_t pool)=0;
     virtual std::uint32_t create_index_buffer(std::uint32_t length,std::uint32_t usage,std::uint32_t format,std::uint32_t pool)=0;
@@ -155,7 +169,15 @@ public:
     virtual void query_issue(std::uint32_t query,std::uint32_t flags){(void)query;(void)flags;}
     virtual std::uint32_t query_get_data(std::uint32_t query,std::uint32_t& samples){(void)query;samples=0;return 1;}
 protected:
+    PcDrawPhase draw_phase_{PcDrawPhase::Unclassified};
     std::uint32_t viewport_[6]{0,0,640,480,0,0x3f800000u};
+};
+class PcDrawPhaseScope {
+    PcD3D9Device& device_;PcDrawPhase saved_;
+public:
+    PcDrawPhaseScope(PcD3D9Device& device,PcDrawPhase phase)noexcept:device_(device),saved_(device.draw_phase()){device_.set_draw_phase(phase);}
+    ~PcDrawPhaseScope(){device_.set_draw_phase(saved_);}
+    PcDrawPhaseScope(const PcDrawPhaseScope&)=delete;PcDrawPhaseScope& operator=(const PcDrawPhaseScope&)=delete;
 };
 // D3DX9 ID3DXSprite::Begin without D3DXSPRITE_DONOTMODIFY_RENDERSTATE (2) sets the sprite
 // states on the device for the whole Begin..End (42D710 draws its DrawPrimitiveUP records

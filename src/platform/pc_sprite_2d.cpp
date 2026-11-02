@@ -896,6 +896,7 @@ void pc_image_group_42d5f0(PcSprite2dState& s,std::uint32_t token,std::int32_t x
     }catch(const Fault& f){latch(s,f.pc,f.address);}
 }
 void pc_2d_flush_42d710(PcSprite2dState& s,PcFlushContext& f,PcD3DXSprite* sprite,std::uint32_t first,std::uint32_t last,std::uint32_t layer_7d25f0){
+    const PcDrawPhaseScope hud(f.device,PcDrawPhase::Hud); // also correct for direct/control-time flushes outside 449050
     Ctx c{s,&f.device,nullptr,0x42d710u};
     if(first>=last)return;
     if(!s.sprite_95b218)sprite=nullptr;

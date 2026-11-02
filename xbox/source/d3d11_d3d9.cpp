@@ -176,7 +176,12 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                     "%llu other targets (not the back buffer)\n",(unsigned long long)triple_draws,(unsigned long long)triple_frames,
                     (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
-    if(platform::g_pc_triple_corrections){std::size_t unmatched=0;std::uint64_t changes=0;
+    if(platform::g_pc_triple_corrections){
+        std::printf("triple draw domains: world geometry %llu, world screen effects %llu, HUD %llu, frontend overlay %llu, offscreen %llu, unclassified %llu\n",
+            (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldGeometry)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldScreenEffect)],
+            (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::Hud)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::FrontendOverlay)],
+            (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::Offscreen)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::Unclassified)]);
+        std::size_t unmatched=0;std::uint64_t changes=0;
         for(const auto& p:triple_programs_){unmatched+=p.second.base<0?1u:0u;changes+=p.second.changes;}
         std::printf("triple views: %zu vertex programs classified, %zu without a match at their last draw, %llu changes of outcome\n",
                     triple_programs_.size(),unmatched,(unsigned long long)changes);}
@@ -643,6 +648,7 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
 bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     const auto corrections=platform::g_pc_triple_corrections;
     if(!corrections)return false;
+    ++triple_draw_domains[unsigned(draw_domain(rhw,colour_target_==BackBuffer))]; // metadata only: no target/viewport/shader change
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
     if(rhw){++triple_single_rhw;triple_unbind();return false;}   // apply_state's ui_rect already keeps it in the centre
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;

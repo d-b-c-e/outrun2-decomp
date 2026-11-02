@@ -9,6 +9,7 @@
 #include "platform/pc_render_flush.hpp"
 #include "platform/retail_asset_store.hpp"
 #include "platform/sprite_2d_runtime.hpp"
+#include "system/exe_image.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -96,7 +97,7 @@ struct Device final:PcD3D9Device{
         Device* d{};
         void set_transform(const float m[16])override{std::array<float,16> a{};std::memcpy(a.data(),m,64);d->transforms.push_back(a);}
         void begin(std::uint32_t)override{}
-        void draw(std::uint32_t,const std::int32_t* r,const float*,const float*,std::uint32_t)override{d->rects.push_back({r[0],r[1],r[2],r[3]});}
+        void draw(std::uint32_t,const std::int32_t* r,const float*,const float*,std::uint32_t)override{CHECK(d->draw_domain(true)==PcDrawDomain::Hud);d->rects.push_back({r[0],r[1],r[2],r[3]});}
         void end()override{}
     } sprite_obj;
     Device(){sprite_obj.d=this;}
@@ -107,6 +108,7 @@ struct Device final:PcD3D9Device{
         if(!t||t>textures.size())return false;w=textures[t-1].w;h=textures[t-1].h;return true;}
     PcD3DXSprite* sprite()override{return &sprite_obj;}
     void draw_primitive_up(std::uint32_t,std::uint32_t count,const void* data,std::uint32_t stride)override{
+        CHECK(draw_domain(true)==PcDrawDomain::Hud);
         const auto* p=static_cast<const std::uint8_t*>(data);strips.emplace_back(p,p+std::size_t(count+2)*stride);}
     std::uint32_t create_vertex_buffer(std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override{return 0;}
     std::uint32_t create_index_buffer(std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override{return 0;}
@@ -174,7 +176,9 @@ void draw_bank(Drawn& r,const std::vector<std::uint8_t>& xst){
     pc_sprani_render_429460(r.s,r.dev,st,PcSpraniAnimationBase(Bank),1.0f,1.0f,3);
     PcRenderGlobals rg;
     PcFlushContext fc{r.dev,rg,[](std::uint32_t)->PcPmtResources*{return nullptr;},pc_colour_list_alt_408c80,1};
+    const auto caller_phase=r.dev.draw_phase();r.dev.set_draw_phase(PcDrawPhase::FrontendOverlay);
     pc_2d_flush_42d710(r.s,fc,r.dev.sprite(),0,Pc2dLayerCount,0);
+    CHECK(r.dev.draw_phase()==PcDrawPhase::FrontendOverlay);r.dev.set_draw_phase(caller_phase);
     CHECK(r.s.missing==0);
 }
 bool near(float a,float b){return std::fabs(a-b)<=1e-6f*std::max(1.0f,std::fabs(b));}
@@ -216,6 +220,8 @@ int retail(const char* root,const char* pack){
 }
 }
 int main(int argc,char** argv){
+    try{
+    if(!exe_image_autoload()){std::printf("SKIP: set OR2_EXE to the game's OR2006C2C.cache (renderer constants come from it)\n");return 77;}
     if(argc>2)return retail(argv[1],argv[2]);
     namespace fs=std::filesystem;
     CHECK(pc_sprite_xst_pack_name("sprite/spr_etc_xst.sz")=="spr_etc_xst"&&pc_sprite_xst_pack_name("SPRITE\\spr_sprani_sumo_loading_Exst.sz")=="spr_sprani_sumo_loading_Exst");
@@ -422,4 +428,5 @@ int main(int argc,char** argv){
     texture_replacement_configure(false,false,{});fs::remove_all(dir);
     std::printf("pc sprite replacement: %u checks\n",checks);
     return 0;
+    }catch(const std::exception& error){std::fprintf(stderr,"sprite replacement fixture: %s\n",error.what());return 1;}
 }
