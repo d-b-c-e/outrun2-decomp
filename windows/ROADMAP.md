@@ -35,6 +35,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
 - [World point-sprite expansion](docs/POINT-SPRITE-WORLD.md): active type6/type5 defers center clipping and expands squares per panel after correction, using existing GS/CB with explicit point-mode cache key.968 actual consumer/panel/state assertions; actual GS compiles SDKfxc gs_4_1. Desktop build/focused10/10 pass; GPU visibility/size/depth/UV/cost and mode-transition checks remain.
 - [HUD/frontend world-admission guard](docs/WORLD-OVERLAY-ADMISSION.md): D3D11 rejects non-world XYZ before correction, uses existing center fallback/GS unbind; RHW/UI and offscreen paths preserved. Actual-frame46/shadow4204 checks, Desktop build/focused7/7; actual overlay placement/aspect/counters remain unqualified.
 - [Native curve compositor mesh](docs/CURVE-COMPOSITOR-MESH.md): fixed64x36 per-panel packed XY/UV, D3D V orientation and shared16-bit indices, atomic output/refusal.308,668 standalone assertions, focused3/3; no runtime/Desktop rebuild or presentation connection. Source allocation/resolve/composite/restoration and all GPU gates remain.
+- [Curve compositor shader/sampling](docs/CURVE-COMPOSITOR-SAMPLING.md): matching16-byte mesh input,32-byte atlas/clamp constants and actual VS/PS4_1 source;228,664 CPU pixel-reference/layout checks,4/4, SDKfxc compile/reflection. Unconnected/no runtime rebuild or GPU execution; source readiness/resolve/preHUD/state ownership remains.
 
 ## Order of work
 
