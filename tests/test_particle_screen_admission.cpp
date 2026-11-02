@@ -73,6 +73,26 @@ int main(){try{
     run(false);CHECK(device.draws.size()==1&&device.draws[0].bytes==original.bytes);
     memory.put32(Buffer,0);run(false);CHECK(device.draws.empty()&&memory.u32(0x8a8cec)==0); // behind + eye-plane remain rejected
     memory.putf(Buffer+0x50+12,-10);run(false);CHECK(device.draws.size()==1&&memory.u32(0x8a8cec)==1);
+    // Type3 is a different layout and route: smoke/water/backfire are world XYZ
+    // billboards already, including behind-center particles. Do not substitute
+    // it blindly for the 0x50-byte screen-particle records above.
+    std::array<std::uint8_t,0x200> camera{};constexpr unsigned Camera=0x10030000;
+    memory.map(Camera,camera.data(),camera.size());unsigned camera_pointer=Camera;
+    memory.map(0x79f574,reinterpret_cast<std::uint8_t*>(&camera_pointer),4);identity(Camera+0x140);
+    memory.put32(Source,0x80000003);memory.put32(Source+4,2);memory.put32(Source+0x7c,1);
+    memory.put32(0x74e99c+3*4,0x419210);memory.put32(0x74f7c4,3);
+    particles.fill(0);
+    for(unsigned i=0;i<2;++i){const auto p=Buffer+i*0x5c;memory.put32(p,0x80000000);memory.putf(p+12,i?10.f:-10.f);memory.putf(p+0x20,2);
+        for(unsigned j=0;j<4;++j)memory.put32(p+0x24+j*4,0xff112200+j);
+        memory.putf(p+0x34,0);memory.putf(p+0x38,0);memory.putf(p+0x3c,1);memory.putf(p+0x40,1);
+    }
+    run(false);CHECK(device.draws.size()==1&&memory.u32(0x8a8cec)==2);const auto billboard=device.draws[0];
+    CHECK(billboard.type==4&&billboard.count==4&&billboard.stride==0x18&&billboard.fvf==0x142&&billboard.bytes.size()==12*0x18);
+    driving::Bytes bill(const_cast<std::uint8_t*>(billboard.bytes.data()),billboard.bytes.size());
+    CHECK(bill.f32(0)==-2&&bill.f32(4)==-2&&bill.f32(8)==-10&&bill.f32(6*0x18+8)==10);
+    CHECK(bill.u32(12)==0xff112200&&bill.u32(0x18+12)==0xff112201&&bill.u32(2*0x18+12)==0xff112202&&bill.u32(5*0x18+12)==0xff112203);
+    CHECK(bill.f32(16)==0&&bill.f32(20)==0&&bill.f32(0x18+16)==0&&bill.f32(0x18+20)==1&&bill.f32(2*0x18+16)==1&&bill.f32(2*0x18+20)==0);
+    run(true);CHECK(device.draws.size()==1&&device.draws[0].bytes==billboard.bytes); // RHW half-resolution fix does not resize XYZ billboards
     g_pc_triple_corrections=nullptr;g_pc_fix_particle_rendering=true;
-    std::printf("screen particle admission: %u checks; actual RHW/front/behind/restoration contract, no corrected-render claim\n",checks);return 0;
+    std::printf("particle admission: %u checks; actual RHW rejection and XYZ billboard/restoration contracts, no corrected-render claim\n",checks);return 0;
 }catch(const std::exception& e){std::fprintf(stderr,"%s\n",e.what());return 1;}}

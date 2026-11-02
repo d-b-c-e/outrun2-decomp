@@ -11,7 +11,7 @@ This increment identifies draw ownership; it does not enable curved output or ch
 | `49F4D0` after `42D710`, when `84A318 == 2` | Car-selection 3D overlay over the frontend's 2D layer. It must retain its authored ordering and must not be mistaken for a restarted race world or sent through a curved race source. |
 | Desktop F6 / camera notice | Drawn by the desktop panel after the game scene. Keep outside the curved world. |
 
-RHW is a storage format, not a semantic boundary. `race_particles_draw.cpp` emits projected smoke/effect quads, while `pc_shadow_volume.cpp::shadow_darken_422740` emits pretransformed stencil darkening. Both precede the HUD. Conversely, a late frontend mesh uses ordinary XYZ geometry after the HUD. No first-RHW or Present heuristic can separate these correctly.
+RHW is a storage format, not a semantic boundary. `race_particles_draw.cpp::418CF0` emits projected spark/gravel/grass effect quads, while `pc_shadow_volume.cpp::shadow_darken_422740` emits pretransformed stencil darkening. Both precede the HUD. Tire smoke/water/misc/backfire use a separate XYZ billboard route `419DC0`; a226-check actual-display fixture now distinguishes these CPU packets (see `TRIPLES-NEXT-2026-11-02.md`). Conversely, a late frontend mesh uses ordinary XYZ geometry after the HUD. No first-RHW or Present heuristic can separate these correctly.
 
 ## Implemented ownership metadata
 
