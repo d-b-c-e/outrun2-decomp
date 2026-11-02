@@ -239,6 +239,9 @@ void mission_manager_construct_ui_465160(MissionManagerState& m,FrontendUiResour
     std::uint32_t r{};
     for(auto* e:{&m.ui_836590,&m.ui_836450,&m.ui_8364f0,&m.ui_8363b0})ui.call(0x465160,Bytes(e->data(),e->size()),nullptr,0,r);
 }
+bool mission_rivals_477b60(MissionManagerState& m,const MissionManagerServices& s,MissionRaceServices& r){
+    Race q{m,s,r};return q.rivals_477b60();
+}
 bool mission_project_495d90(MissionRaceServices& r,bool flag,float& x,float& y){
     if(r.camera.i8(0x34a)<=1){x=234.0f;y=108.0f;return true;}
     if(!r.matrices){r.missing=0x495df7;return false;}
@@ -417,7 +420,7 @@ bool mission_manager_control_496a30(MissionManagerState& m,MissionManagerService
         m.v83638c=std::uint32_t(v);
     }
     car.putf(0xdbc,float(std::int32_t(m.v83638c))*0.0016666667070239782f*0.17000000178813934f+1.0f);
-    if(!q.rivals_477b60()||!mission_rank_495c20(m,s,r)||!mission_marker_495e90(m,s,r))return false;
+    if(!mission_rivals_477b60(m,s,r)||!mission_rank_495c20(m,s,r)||!mission_marker_495e90(m,s,r))return false;
     return finish();
 }
 }

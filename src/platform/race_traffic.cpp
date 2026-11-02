@@ -6157,6 +6157,7 @@ std::uint32_t traffic_control_part(PcRaceContext& c,std::uint32_t pc,std::uint32
     case 0x479580u:t.gap_479580();return 0;
     case 0x47ca40u:t.appear_47ca40();return 0;
     case 0x477e00u:t.leader_477e00();return 0;
+    case 0x477090u:t.follow_477090(a0);return 0; // original racer/car-state bridge, exposed to the offline oracle
     case 0x478b90u:return t.fixed_478b90(a0);
     case 0x4787e0u:t.spawn_4787e0(a0,a1);return 0;
     case 0x47e6c0u:t.ai_47e6c0(a0);return 0;

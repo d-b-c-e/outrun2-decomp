@@ -238,6 +238,10 @@ if(MSVC)
 endif()
 add_test(NAME level_select COMMAND test_level_select)
 set_tests_properties(c2c_goal_sequence PROPERTIES SKIP_RETURN_CODE 77)
+add_executable(test_rival_drift_score tests/test_rival_drift_score.cpp)
+target_link_libraries(test_rival_drift_score PRIVATE outrun_native_runtime)
+add_test(NAME rival_drift_score COMMAND test_rival_drift_score)
+set_tests_properties(rival_drift_score PROPERTIES SKIP_RETURN_CODE 77)
 # [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
 # compiled-in globals only, no game files.
 add_executable(test_hud_toggle_navi tests/test_hud_toggle_navi.cpp)

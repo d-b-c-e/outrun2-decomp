@@ -95,6 +95,8 @@ struct MissionRaceServices {
 // mission-type scoring switch (types 1..6), the rival timers (variant != 4),
 // 477B60, 495C20, 495E90 and the 45BCD0 voice pump. Variant 4 is not ported.
 bool mission_manager_control_496a30(MissionManagerState&,MissionManagerServices&,MissionRaceServices&);
+// Original 477B60 rival score/timer consumer, also callable by the offline oracle.
+bool mission_rivals_477b60(MissionManagerState&,const MissionManagerServices&,MissionRaceServices&);
 // Pieces (exposed for the oracle): 495C20 rank, 495E90 marker, 495D90 projection.
 bool mission_rank_495c20(const MissionManagerState&,const MissionManagerServices&,MissionRaceServices&);
 bool mission_marker_495e90(MissionManagerState&,const MissionManagerServices&,MissionRaceServices&);
