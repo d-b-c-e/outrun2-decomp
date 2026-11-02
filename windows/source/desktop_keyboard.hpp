@@ -7,6 +7,14 @@ namespace outrun::desktop {
 inline std::array<std::uint8_t,256>& desktop_keys(){static std::array<std::uint8_t,256> keys{};return keys;}
 inline bool desktop_key(unsigned dik){return (desktop_keys()[dik&0xffu]&0x80u)!=0;}
 inline bool desktop_any_key(){for(auto k:desktop_keys())if(k&0x80u)return true;return false;}
+// Dedicated desktop controls may act while coasting without handing the wheel's
+// driving record to the keyboard. The keys themselves remain untouched, so they
+// still reach native input when the keyboard already owns driving.
+inline std::array<bool,256>& desktop_camera_shortcut_keys(){static std::array<bool,256> keys{};return keys;}
+inline bool desktop_any_driving_key(){
+    for(unsigned scan=0;scan<256;++scan)if(desktop_key(scan)&&scan!=0x40u&&scan!=0x42u&&scan!=0x57u&&!desktop_camera_shortcut_keys()[scan])return true; // F6/F8/F11 are dedicated desktop controls
+    return false;
+}
 // How many times every key was released at once (desktop_keys_clear). A reader that compares it can tell such a clear
 // from a key's own release (hud_toggle.hpp).
 inline std::uint32_t& desktop_key_clears(){static std::uint32_t clears{};return clears;}

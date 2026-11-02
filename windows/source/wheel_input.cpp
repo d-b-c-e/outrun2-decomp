@@ -424,7 +424,7 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
         // the wheel turns 3% from where it was then, a pedal is pressed or a wheel button is held. Without force
         // feedback nothing centres the wheel, so its resting position is not a test of idleness.
         const bool wheel_pressed=accel>=3u||brake>=3u||(held&~keys)!=0u;
-        if(!g.keyboard_drives&&outrun::desktop::desktop_any_key()&&!wheel_pressed){g.keyboard_drives=true;g.keyboard_anchor=steer;}
+        if(!g.keyboard_drives&&outrun::desktop::desktop_any_driving_key()&&!wheel_pressed){g.keyboard_drives=true;g.keyboard_anchor=steer;}
         else if(g.keyboard_drives&&(wheel_pressed||std::abs(steer-g.keyboard_anchor)>983))g.keyboard_drives=false;
         out.pc_overlay=true;
         out.pc_overlay_yield=g.keyboard_drives;

@@ -490,7 +490,8 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         std::fflush(stdout);
     }
     using outrun::desktop::desktop_key;
-    Keyboard kb;kb.any=outrun::desktop::desktop_any_key();
+    const bool raw_any_key=outrun::desktop::desktop_any_key();
+    Keyboard kb;kb.any=outrun::desktop::desktop_any_driving_key();
     kb.enter=desktop_key(0x1c);kb.esc=desktop_key(0x01);kb.up=desktop_key(0xc8);kb.down=desktop_key(0xd0);kb.left=desktop_key(0xcb);kb.right=desktop_key(0xcd);
     // No host (DirectInput or the host refused): the keyboard keeps its path anyway. An empty frame (every action
     // unbound) through the same adapter: the PC layer on, the menu keys, and the race on the PC layer's record.
@@ -514,7 +515,7 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
         if(o.ticks%30==0&&o.rec.recording()&&stop_requested())stop_recording("stop-request");
         if(o.rec.recording()){
             Snapshot s{frame,o.adapter->signals(),out,v,NotReplay};s.pose=car_pose(runtime);
-            s.keyboard={kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right,kb.any,out.pc_overlay_yield};
+            s.keyboard={kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right,raw_any_key,out.pc_overlay_yield}; // preserve the recorder's raw-any-key meaning
             o.pending=std::move(s);
             // The edges this tick sampled, at the row it becomes (the rows pushed so far); a failed write is logged once.
             if(o.echo.is_open()&&!o.echo.tick(o.rec.pushed(),{kb.enter,kb.esc,kb.up,kb.down,kb.left,kb.right})){

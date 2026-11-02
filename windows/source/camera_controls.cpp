@@ -137,6 +137,8 @@ std::array<HudToggleKey,11> parse_keys(const CameraKeys& keys){
 }
 void install_keys(const CameraKeys& keys){
     h.keys=keys;h.bindings=parse_keys(keys);
+    auto& shortcuts=desktop_camera_shortcut_keys();shortcuts.fill(false);shortcuts[0x41]=true; // F7
+    for(const auto& binding:h.bindings)for(const auto scan:binding.keys)shortcuts[scan]=true;
     for(auto& edge:h.edges){edge={};edge.edge.wait=true;}
 }
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){

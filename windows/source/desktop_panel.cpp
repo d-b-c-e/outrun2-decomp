@@ -601,7 +601,7 @@ void camera_adjustments(bool advanced){
             if(!errors[i].empty())dbce::panel::Status("Binding",errors[i].c_str(),dbce::panel::Tone::Warning);
         }
         if(dbce::panel::Command("Restore numpad defaults"))camera_controls_default_keys();
-        dbce::panel::Text("Keyboard shortcuts still reach the game. F6, F7, F8, F11 and Escape are reserved; duplicate adjustment keys are refused.");
+        dbce::panel::Text("Camera shortcuts keep the wheel in control. Shared game keys still respond when driving with the keyboard. F6, F7, F8, F11 and Escape are reserved; duplicate adjustment keys are refused.");
     }
     if(advanced){
         const char* labels[]{"Move step (mm)","Tilt step (tenths degree)","FOV step (tenths degree)"};
