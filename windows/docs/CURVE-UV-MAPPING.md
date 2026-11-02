@@ -26,3 +26,5 @@ dotnet work/validation-20261102/curve-oracle/bin/net8.0/Oracle.dll
 ```
 
 The second command writes270 rows to stdout; preserve the TSV's provenance comment when replacing its numeric rows. The oracle has no NuGet dependencies/sources and keeps outputs under ignored project work. It built with0 warnings/errors after correcting the initial intermediate-output/nullable project settings. Private logs `curve-oracle-build{,-final}.log`, `curve-warp-{build,build-final,conformance,ctest}.log` are under `work/validation-20261102/`. Only the standalone math target was built (jobs1); no native-runtime rebuild, renderer/device creation, game launch, rig lease or owner install occurred.
+
+[CURVE-COMPOSITOR-MESH.md](CURVE-COMPOSITOR-MESH.md) adds the fixed64x36 renderer input: local panel clip XY plus explicit D3D top-left source UV, three vertex sets/shared16-bit indices and atomic refusal.308,668 standalone topology/UV assertions, focused3/3. It remains unconnected; no source allocation/presenter/default changes follow.
