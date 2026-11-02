@@ -1,5 +1,6 @@
 #include "camera_controls.hpp"
 #include "camera_framing.hpp"
+#include "camera_keys.hpp"
 #include "desktop_settings.hpp"
 #include "desktop_keyboard.hpp"
 #include "desktop_panel.hpp"
@@ -22,7 +23,9 @@ struct State {
     float physical{};
     unsigned view{255},model{255};
     std::uint32_t clears{},mode{};
-    std::array<HudToggleEdge,4> edges{};
+    CameraKeys keys;std::array<HudToggleKey,11> bindings{};std::array<CameraKeyRepeat,11> edges{};
+    HudToggleEdge set_edge;
+    std::array<float,3> steps{{.02f,1.f,2.f}};
     bool configured{},shift_set{},bonnet{},fit_available{};
     ULONGLONG notice_until{};
     xbox_runtime::InputFilter inner{};
@@ -73,7 +76,7 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
     const auto& p=h.poses[h.model][h.view][h.framing.seat(h.view,triples())?1:0];
     if(p.side!=0.f||p.up!=0.f||p.forward!=0.f||p.pitch!=0.f){
         std::array<std::uint8_t,64> base{};std::memcpy(base.data(),s.current().data(),64);
-        driving::pc_matrix_identity(s);driving::pc_matrix_rotate_x(s,-p.pitch*0.017453292519943295f);
+        driving::pc_matrix_identity(s);driving::pc_matrix_rotate_x(s,std::remainder(p.pitch,360.f)*0.017453292519943295f); // positive offset looks down
         driving::pc_matrix_translate_vector(s,{-p.side,-p.up,p.forward});
         driving::pc_matrix_multiply_current(s,driving::Bytes(base.data(),base.size()));
     }
@@ -81,11 +84,28 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
     else if(h.view==3)car.put32(4,(car.u32(4)&~0xc000u)|0x4000u); // bonnet retains the exterior
     (void)camera;
 }
-bool save(const std::string& key,const std::string& value){
+bool save_edits(const SettingsEdits& edits){
     std::string error;
-    if(write_key(h.path,"Camera",key,value,error))return true;
+    if(write_keys(h.path,"Camera",edits,error))return true;
     notify("Camera setting not saved: "+error);
     std::printf("camera: setting not saved: %s\n",error.c_str());return false;
+}
+bool save(const std::string& key,const std::string& value){return save_edits({{key,value}});}
+std::array<HudToggleKey,11> parse_keys(const CameraKeys& keys){
+    std::array<HudToggleKey,11> out;
+    for(unsigned i=0;i<11;++i){
+        out[i]=parse_hud_toggle_key(keys.names[i],[](char c){return MapVirtualKeyW(unsigned(static_cast<unsigned char>(c)),MAPVK_VK_TO_VSC)&0xffu;});
+        for(const auto scan:out[i].keys)if(scan==0x41u||scan==0x01u){out[i].why="F7 and Escape are reserved";break;}
+    }
+    for(unsigned i=0;i<11;++i)for(unsigned j=i+1;j<11;++j)
+        for(const auto scan:out[i].keys)if(std::find(out[j].keys.begin(),out[j].keys.end(),scan)!=out[j].keys.end()){
+            out[i].why=std::string("Conflicts with ")+CameraKeyLabels[j];out[j].why=std::string("Conflicts with ")+CameraKeyLabels[i];
+        }
+    for(auto& binding:out)if(!binding.why.empty())binding.keys.clear();return out;
+}
+void install_keys(const CameraKeys& keys){
+    h.keys=keys;h.bindings=parse_keys(keys);
+    for(auto& edge:h.edges){edge={};edge.edge.wait=true;}
 }
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(h.inner)h.inner(out,rt);
@@ -98,17 +118,24 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
         const std::lock_guard<std::mutex> lock(camera_mutex);
         if(race&&CameraFraming::tunable(h.view))notify(label());
     }
-    // Release waits inspect only this action's key. A held shifter or driving key cannot block it.
-    const unsigned keys[]{0x41,0x4e,0x4a,0x4c}; // F7, numpad +, -, 5
-    for(unsigned k=0;k<4;++k){
-        const bool down=desktop_key(keys[k]);
-        if(k==0&&down)h.shift_set=h.shift_set||desktop_key(0x2a)||desktop_key(0x36);
-        const bool released=h.edges[k].step(down,blocked);
-        if(k==0&&blocked)h.shift_set=false;
-        if(!released)continue;
-        if(k==0){if(!h.shift_set)camera_controls_toggle_set();h.shift_set=false;}
-        else if(k==1)camera_controls_zoom(-1.f);
-        else if(k==2)camera_controls_zoom(1.f);
+    // Release waits inspect only this action's bindings. A held shifter cannot block camera keys.
+    const bool set_down=desktop_key(0x41);
+    if(set_down)h.shift_set=h.shift_set||desktop_key(0x2a)||desktop_key(0x36);
+    if(h.set_edge.step(set_down,blocked)){if(!h.shift_set)camera_controls_toggle_set();h.shift_set=false;}
+    if(blocked)h.shift_set=false;
+    std::array<bool,11> actions{};
+    {
+        const std::lock_guard<std::mutex> lock(camera_mutex);
+        for(unsigned i=0;i<11;++i){bool down=false;for(const auto key:h.bindings[i].keys)down=down||desktop_key(key);
+            actions[i]=h.edges[i].step(down,blocked,GetTickCount64(),i!=10);}
+    }
+    for(unsigned i=0;i<11;++i)if(actions[i]){
+        const float move=camera_controls_step(0),tilt=camera_controls_step(1),fov=camera_controls_step(2);
+        if(i<2)camera_controls_move(1,i==0?move:-move);
+        else if(i<4)camera_controls_move(2,i==2?move:-move);
+        else if(i<6)camera_controls_move(0,i==4?-move:move);
+        else if(i<8)camera_controls_move(3,i==6?tilt:-tilt);
+        else if(i<10)camera_controls_zoom(i==8?fov:-fov);
         else camera_controls_reset();
     }
 }
@@ -116,6 +143,11 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save
     h.path=ini.path();h.physical=physical;h.clears=desktop_key_clears();h.configured=true;
+    install_keys(camera_keys_load([&](const char* key){return ini.text("Camera",key);},[&](const char* key){return ini.has_value("Camera",key);}));
+    if(h.keys.migrated)std::printf("camera: untouched earlier shortcut defaults migrated for this session; custom sets and file bytes retained\n");
+    const char* step_keys[]{"MoveStepMetres","TiltStepDegrees","FovStepDegrees"};
+    const float defaults[]{.02f,1.f,2.f},minimum[]{.005f,.1f,.5f},maximum[]{.25f,10.f,10.f};
+    for(unsigned i=0;i<3;++i){const float value=ini.number("Camera",step_keys[i],defaults[i]);h.steps[i]=std::isfinite(value)?std::clamp(value,minimum[i],maximum[i]):defaults[i];}
     for(unsigned view=0;view<4;++view){
         // Explicit old global tuning seeds absent per-camera choices; loading never rewrites owner settings.
         const bool fallback=view<3&&ini.has_value("Triple","MatchGameFov")?!ini.flag("Triple","MatchGameFov",true):h.framing.realistic[view];
@@ -142,12 +174,14 @@ void camera_controls_wrap_input_filter(){
     h.inner=filter;filter=input_filter;
 }
 bool camera_controls_tunable(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.configured&&CameraFraming::tunable(h.view);}
+bool camera_controls_available(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.configured;}
 bool camera_controls_triples(){return triples();}
 std::string camera_controls_label(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.configured&&h.view!=255?label():"Camera available during a race";}
 std::string camera_controls_notice(){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     if(!h.configured||GetTickCount64()>=h.notice_until)return {};
-    return h.notice+"\nNumpad + / - zoom; 5 reset"+(triples()?"; F7 Game / Realistic":"");
+    return h.notice+"\n"+camera_key_display(h.keys.names[9])+" / "+camera_key_display(h.keys.names[8])+": zoom; "+
+        camera_key_display(h.keys.names[10])+": reset"+(triples()?"; F7 Game / Realistic":"");
 }
 void camera_controls_toggle_set(){
     const std::lock_guard<std::mutex> lock(camera_mutex);
@@ -169,11 +203,51 @@ void camera_controls_reset(){
     const bool seat=h.framing.seat(h.view,triples());
     SettingsEdits edits{{CameraFraming::offset_key(h.view,seat),"0"}};
     if(h.model<30)for(const char* axis:{"Side","Up","Forward","Pitch"})edits.push_back({camera_pose_key(h.model,h.view,seat,axis),"0"});
-    std::string error;
-    if(write_keys(h.path,"Camera",edits,error)){
+    if(save_edits(edits)){
         h.framing.offsets[h.view][seat?1:0]=0.f;if(h.model<30)h.poses[h.model][h.view][seat?1:0]={};
         notify(label()+" - calculated FOV restored; placement reset");
-    }else{notify("Camera setting not saved: "+error);std::printf("camera: setting not saved: %s\n",error.c_str());
     }
+}
+void camera_controls_move(unsigned axis,float amount){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    if(!h.configured||h.model>=30||!CameraFraming::tunable(h.view)||axis>=4||!std::isfinite(amount))return;
+    const bool seat=h.framing.seat(h.view,triples());auto& pose=h.poses[h.model][h.view][seat?1:0];
+    float* fields[]{&pose.side,&pose.up,&pose.forward,&pose.pitch};const char* names[]{"Side","Up","Forward","Pitch"};
+    const float next=*fields[axis]+amount;if(!std::isfinite(next))return;
+    char value[48];std::snprintf(value,sizeof value,"%.9g",double(next));
+    if(save(camera_pose_key(h.model,h.view,seat,names[axis]),value)){*fields[axis]=next;notify(label()+" - "+names[axis]+" offset "+value);}
+}
+bool camera_controls_pose_available(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.configured&&h.model<30&&CameraFraming::tunable(h.view);}
+std::array<float,4> camera_controls_pose(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);if(h.model>=30||!CameraFraming::tunable(h.view))return {};
+    const auto& pose=h.poses[h.model][h.view][h.framing.seat(h.view,triples())?1:0];return {pose.side,pose.up,pose.forward,pose.pitch};
+}
+std::array<std::string,11> camera_controls_key_names(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.keys.names;}
+std::array<std::string,11> camera_controls_key_errors(){const std::lock_guard<std::mutex> lock(camera_mutex);std::array<std::string,11> out;
+    for(unsigned i=0;i<11;++i)out[i]=h.bindings[i].why;return out;}
+bool camera_controls_keys_migrated(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.keys.migrated;}
+void camera_controls_set_key(unsigned index,const std::string& name){
+    const std::lock_guard<std::mutex> lock(camera_mutex);if(!h.configured||index>=11)return;
+    auto next=h.keys;next.names[index]=camera_key_name(name);const auto bindings=parse_keys(next);
+    if(!bindings[index].why.empty()){notify("Camera binding not saved: "+bindings[index].why);return;}
+    SettingsEdits edits;
+    for(unsigned i=0;i<11;++i)if(h.keys.migrated||i==index)edits.push_back({CameraKeyFields[i],next.names[i]});
+    if(save_edits(edits)){next.migrated=false;install_keys(next);notify("Camera binding saved");}
+}
+void camera_controls_default_keys(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);if(!h.configured)return;
+    CameraKeys next;SettingsEdits edits;for(unsigned i=0;i<11;++i)edits.push_back({CameraKeyFields[i],next.names[i]});
+    if(save_edits(edits)){install_keys(next);notify("Camera numpad defaults restored");}
+}
+float camera_controls_step(unsigned index){const std::lock_guard<std::mutex> lock(camera_mutex);return h.steps[index<3?index:0];}
+void camera_controls_set_step(unsigned index,float value){
+    const std::lock_guard<std::mutex> lock(camera_mutex);if(!h.configured||index>=3||!std::isfinite(value))return;
+    const char* keys[]{"MoveStepMetres","TiltStepDegrees","FovStepDegrees"};
+    const float minimum[]{.005f,.1f,.5f},maximum[]{.25f,10.f,10.f};value=std::clamp(value,minimum[index],maximum[index]);
+    char text[48];std::snprintf(text,sizeof text,"%.9g",double(value));if(save(keys[index],text)){h.steps[index]=value;notify("Camera adjustment step saved");}
+}
+void camera_controls_default_steps(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);if(!h.configured)return;
+    if(save_edits({{"MoveStepMetres","0.02"},{"TiltStepDegrees","1"},{"FovStepDegrees","2"}})){h.steps={.02f,1.f,2.f};notify("Camera adjustment steps restored");}
 }
 }

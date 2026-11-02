@@ -2,6 +2,7 @@
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
 #include "desktop_panel.hpp"
 #include "camera_controls.hpp"
+#include "camera_keys.hpp"
 #include "enhancements/gamepad_vibration.hpp"
 #include "gamepad_vibration_live.hpp"
 #include "desktop_keyboard.hpp"
@@ -571,14 +572,41 @@ void page_controls(bool advanced){
         dbce::panel::Text("Character appearance choices apply at the next game start.");
     }
 }
-void camera_adjustments(){
+void camera_adjustments(bool advanced){
     dbce::panel::Heading("Current camera");
     dbce::panel::Status("View",camera_controls_label().c_str());
+    if(!camera_controls_available()){dbce::panel::Text("Camera adjustments are disabled in test, recording and playback sessions.");return;}
     if(camera_controls_tunable()){
         if(camera_controls_triples()&&dbce::panel::Command("Switch Game / Realistic (F7)"))camera_controls_toggle_set();
-        if(dbce::panel::Command("Zoom in (Numpad +)"))camera_controls_zoom(-1.f);
-        if(dbce::panel::Command("Zoom out (Numpad -)"))camera_controls_zoom(1.f);
-        if(dbce::panel::Command("Reset calculated FOV (Numpad 5)"))camera_controls_reset();
+        if(dbce::panel::Command("Zoom in"))camera_controls_zoom(-camera_controls_step(2));
+        if(dbce::panel::Command("Zoom out"))camera_controls_zoom(camera_controls_step(2));
+        if(dbce::panel::Command("Reset calculated view"))camera_controls_reset();
+    }
+    if(camera_controls_keys_migrated())dbce::panel::Text("Untouched earlier shortcuts use the current numpad layout this session. Custom bindings were kept; loading changed no file bytes.");
+    if(ImGui::CollapsingHeader("Adjustment bindings")){
+        const auto names=camera_controls_key_names(),errors=camera_controls_key_errors();
+        std::vector<std::string> values;for(const auto& value:hud_toggle_setting_choices())if(value!="F7"&&value!="ESCAPE")values.push_back(value);
+        std::vector<std::string> labels;for(const auto& value:values)labels.push_back(camera_key_display(value));
+        std::vector<const char*> options;for(const auto& label:labels)options.push_back(label.c_str());
+        for(unsigned i=0;i<11;++i){
+            int selected=-1;for(unsigned k=0;k<values.size();++k)if(values[k]==names[i])selected=int(k);
+            if(dbce::panel::Choice(CameraKeyLabels[i],options.data(),int(options.size()),&selected))camera_controls_set_key(i,values[unsigned(selected)]);
+            if(!errors[i].empty())dbce::panel::Status("Binding",errors[i].c_str(),dbce::panel::Tone::Warning);
+        }
+        if(dbce::panel::Command("Restore numpad defaults"))camera_controls_default_keys();
+        dbce::panel::Text("Keyboard shortcuts still reach the game. F6, F7, F8, F11 and Escape are reserved; duplicate adjustment keys are refused.");
+    }
+    if(advanced){
+        const char* labels[]{"Move step (mm)","Tilt step (tenths degree)","FOV step (tenths degree)"};
+        const int minimum[]{5,1,5},maximum[]{250,100,100},defaults[]{20,10,20};const float scale[]{1000,10,10};
+        for(unsigned i=0;i<3;++i){int value=int(std::lround(camera_controls_step(i)*scale[i]));
+            if(dbce::panel::Slider(labels[i],&value,minimum[i],maximum[i],defaults[i],"%d"))camera_controls_set_step(i,float(value)/scale[i]);}
+        if(dbce::panel::Command("Restore camera step sizes"))camera_controls_default_steps();
+        if(camera_controls_pose_available()){
+            const auto pose=camera_controls_pose();const char* axes[]{"Side offset (m)","Up offset (m)","Forward offset (m)","Pitch offset (degrees)"};
+            for(unsigned i=0;i<4;++i){float value=pose[i];
+                if(ImGui::InputFloat(axes[i],&value,0.f,0.f,"%.3f",ImGuiInputTextFlags_EnterReturnsTrue))camera_controls_move(i,value-pose[i]);}
+        }
     }
     dbce::panel::Text("FOV changes apply now and are remembered per camera and set. Wider than seat-true stretches the side screens.");
     dbce::panel::Text("Triples use one borderless window. Measure eye distance to the plane through the center panel edges, with no curve sagitta subtraction.");
@@ -586,7 +614,7 @@ void camera_adjustments(){
     if(note.find("not saved")!=std::string::npos)dbce::panel::Status("Camera save",note.c_str(),dbce::panel::Tone::Warning);
 }
 void page_cameras(bool advanced){
-    camera_adjustments();
+    camera_adjustments(advanced);
     static const char* const modes[]{"Off","Surround","Separate monitors"};
     {const int before=v.triple;
      if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
@@ -936,7 +964,7 @@ void player_quality(bool advanced){
     }
 }
 void player_cameras(bool advanced){
-    camera_adjustments();
+    camera_adjustments(advanced);
     dbce::panel::Heading("Display");
     {std::vector<const char*> labels;
      for(const auto& label:v.monitor_labels)labels.push_back(label.c_str());

@@ -11,8 +11,8 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-002 | Recording and playback from launch | n/a | Superseded by STD-012. |
 | STD-003 | Normalized FFB strength | pending | A default-off force path is built, but physical output and cross-game strength have not been qualified; see `ROADMAP.md` step 4. |
 | STD-004 | Consistent settings UX | partial | The F6 panel's five pages and Stop FFB/F8 path are in source; all pages were rendered muted in disposable copies. Keyboard/mouse saving and physical force remain unqualified; see `docs/F6-PANEL.md`. |
-| STD-005 | Camera numpad layout | partial | Native FOV +/- and reset 5 are built/tested; position/rotation layout and configurable bindings remain pending. See docs/CAMERA-FRAMING.md. |
-| STD-006 | Camera step sizes are settings | pending | |
+| STD-005 | Camera numpad layout | partial | Full 8/2 9/3 4/6 7/1 +/- 5 layout, keyboard rebinding and untouched-default migration built/tested through actual pose/FOV consumers. Custom sets are preserved. Physical/UI acceptance and wheel-button adjustment bindings remain open; docs/CAMERA-FRAMING.md. |
+| STD-006 | Camera step sizes are settings | partial | MoveStepMetres/TiltStepDegrees/FovStepDegrees default .02/1/2; F6 Advanced step controls and defaults command, actual consumer fixtures. Rendered control interaction remains unqualified. |
 | STD-007 | Triple screens in one wide window | partial | The planar span was seen at the rig. The default-off projected-view spike is not accepted as three independently rendered, angle-correct views; see `ROADMAP.md` step 3. |
 | STD-008 | Display changes: game applies once | unchecked | |
 | STD-009 | Dashboard telemetry matches the HUD | partial | The speed source is the HUD's +0x1F8 base and the packet byte fixture checks km/h to m/s; no attended numeric HUD/receiver comparison. See `docs/TELEMETRY-FIELDS.md`. |

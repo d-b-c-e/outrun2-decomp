@@ -1087,9 +1087,9 @@
  },
  {
   "file": "windows/source/camera_controls.cpp",
-  "line": "if(write_key(h.path,\"Camera\",key,value,error))return true;",
+  "line": "if(write_keys(h.path,\"Camera\",edits,error))return true;",
   "class": "latched-skip",
-  "reason": "camera_controls_configure returns before installing the controller/callback when test, recording or playback is disabled; inert controller fixture verifies the disabled path and save failures"
+  "reason": "camera controller's shared owned-key writer for binding, step, FOV, per-car pose and reset actions; configure disabled=true in test/record/playback installs no controller/callback, public actions require configured state"
  },
  {
   "file": "windows/source/ordinary_recording.cpp",
@@ -1450,12 +1450,6 @@
   "line": "if (!WriteFile(file.get(),text.data()+written,static_cast<DWORD>(text.size()-written),&count,nullptr) || !count)",
   "class": "latched-skip",
   "reason": "writes only the explicit reviewed report's exclusively created file; same ordinary Help guard, no automatic upload"
- },
- {
-  "file": "windows/source/camera_controls.cpp",
-  "line": "if(write_keys(h.path,\"Camera\",edits,error)){",
-  "class": "latched-skip",
-  "reason": "camera reset atomically clears only the current camera/set FOV and per-car pose offsets; controller is not configured during a test/record/playback process"
  },
  {
   "file": "windows/source/desktop_panel.cpp",
