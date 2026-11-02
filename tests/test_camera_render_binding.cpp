@@ -1,6 +1,9 @@
 #include "platform/camera_render_binding.hpp"
 #include "platform/embedded_camera_data.hpp"
 #include "system/exe_image.hpp"
+#include "platform/pc_scene_renderer.hpp"
+#include "platform/pc_soft_d3d9.hpp"
+#include "enhancements/frame_rate.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -103,6 +106,26 @@ int main(){
         CHECK(std::fabs(c.f32(0xb4)-240.f/std::tan(0.293f))<1e-2f&&c.f32(0xac)==ac&&rig.slots_95d860[1]!=game.slots_95d860[1]);
         PcCameraDevice back;camera_project_484bd0(c,stack,back,screen,blend);
         CHECK(c.f32(0xa0)==a0&&c.f32(0xa4)==a4&&back.slots_95d860[1]==game.slots_95d860[1]);
+    }
+    // The renderer's interpolation replay supplies only slot 0. Retain the last
+    // projection's single-view planes and angled panel frusta between 60 Hz ticks.
+    {
+        const auto saved=platform::g_pc_triple_corrections;
+        platform::g_pc_triple_corrections=[](const float*,float* out){
+            for(unsigned i=0;i<48;++i)out[i]=(i%16)%5==0?1.f:0.f;return true;};
+        platform::PcSoftD3D9Device soft(640,480);
+        platform::PcSceneRenderer scene(soft);
+        scene.vehicle_camera=[&](Bytes& vehicle,Bytes& camera){vehicle=v;camera=c;return true;};
+        CHECK(scene.invoke(0x484ee0u,0,385,32,0)&&scene.camera_unanswered==0);
+        enhancements::set_display_rate(120);
+        enhancements::display_before_tick();
+        CHECK(scene.invoke(0x485fe0u,0,385,32,0)&&scene.camera_unanswered==0);
+        const auto before=scene.render_view();CHECK(before.panels.valid&&before.frustum_95bf40[4]>0.f);
+        enhancements::display_after_ticks(0.5f,1);
+        CHECK(scene.render_view().frustum_95bf40==before.frustum_95bf40&&scene.render_view().planes_95bf58==before.planes_95bf58);
+        CHECK(scene.render_view().panels.valid&&scene.render_view().panels.panels[2].planes==before.panels.panels[2].planes);
+        enhancements::set_display_rate(60); // restores/clears the replay before local camera storage is released
+        platform::g_pc_triple_corrections=saved;
     }
     std::printf("camera render binding: %u checks\n",checks);
 }

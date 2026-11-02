@@ -170,9 +170,14 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
         device_.set_transform(State[slot],m.data());
     }
     view_.view_95d860=d.slots_95d860[0];
-    view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
-    std::array<float,16> projection{};std::memcpy(projection.data(),d.slots_95d860[1].data(),64);
-    view_.panels=pc_panel_frusta(projection.data(),g_pc_triple_corrections);
+    // Display-only interpolation stores the view only. Its blank projection record
+    // must not erase the tick's retained frustum (or the matching panel cache).
+    for(const auto& st:d.stores)if(st.slot==1){
+        view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
+        std::array<float,16> projection{};std::memcpy(projection.data(),st.matrix.data(),64);
+        view_.panels=pc_panel_frusta(projection.data(),g_pc_triple_corrections);
+        break;
+    }
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
 }
 bool& fix_znear(){static bool on=false;return on;}
