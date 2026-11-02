@@ -84,6 +84,20 @@ inline CurveWarpError curved_source_uv(const CurvedPanelWarp& warp,double u,doub
     if(!std::isfinite(candidate[0])||!std::isfinite(candidate[1]))return CurveWarpError::projection;
     out=candidate;return CurveWarpError::none;
 }
+// Recover the virtual render eye that makes the original native projection see
+// the flat centre panel. Thus Game/Realistic and saved FOV offsets stay encoded
+// in P; the real eye still defines curve UVs. Centre must use native X/Y axes.
+inline bool curve_native_eye(const Mat4& original,const RigPanel& center,RigVec& out){
+    Frustum fr;curve_detail::Basis b;
+    if(!perspective_frustum(original,fr)||!curve_detail::basis(center,b))return false;
+    if(length(b.right-RigVec{1,0,0})>1e-9||length(b.up-RigVec{0,1,0})>1e-9)return false;
+    const double dx=b.width*fr.n/(fr.r-fr.l),dy=b.height*fr.n/(fr.t-fr.b);
+    if(!std::isfinite(dx)||!std::isfinite(dy)||dx<=0||dy<=0||std::abs(dx-dy)>1e-6*std::max({1.,dx,dy}))return false;
+    const auto middle=center.lower_left+b.right*(b.width*.5)+b.up*(b.height*.5);
+    const auto eye=middle-b.right*((fr.l+fr.r)*dx/(2.*fr.n))-b.up*((fr.b+fr.t)*dx/(2.*fr.n))+b.normal*dx;
+    if(!curve_detail::finite(eye))return false;
+    out=eye;return true;
+}
 // Source frusta for the existing row-vector geometry-shader correction. Physical
 // panel coordinates are relative to render_eye; game view-space vertices remain
 // relative to their own camera. Depth follows the original native RH projection.
