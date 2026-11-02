@@ -683,6 +683,12 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     }
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
     const auto& proj=transform_proj;
+    const auto revision=platform::g_pc_triple_revision.load(std::memory_order_acquire);
+    if(triple_provider_!=corrections||triple_revision_!=revision){
+        // Both the active upload and the projection/fix LRU hold profile data.
+        triple_cached_=false;for(auto& entry:triple_corrections_)entry.used=false;triple_corrections_next_=0;
+        triple_provider_=corrections;triple_revision_=revision;
+    }
     if(coverage){
         std::array<float,52> c{};
         triple_ok_=platform::pc_world_coverage_constants(draw_phase(),rhw,true,fx,fy,c);

@@ -31,7 +31,13 @@
 #include <cstring>
 #include <map>
 #include <limits>
-namespace {bool panel_open;unsigned checks;}
+namespace {bool panel_open;unsigned checks;float profile_scale=1;unsigned profile_calls;bool profile_refused;
+bool profile_corrections(const float*,float* out){
+    ++profile_calls;if(profile_refused)return false;
+    for(unsigned panel=0;panel<3;++panel)for(unsigned k=0;k<16;++k)out[panel*16+k]=k%5==0?(k==0?profile_scale:1.f):0.f;
+    return true;
+}}
+
 namespace outrun::desktop {bool desktop_panel_open(){return panel_open;}}
 namespace outrun::xbox_runtime {InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}}
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"camera controls line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
@@ -253,6 +259,31 @@ int main(int argc,char** argv){
         CHECK(scene.load_bank(platform::VehicleResourceIds[0],std::move(bytes),error));
         scene.vehicle_camera=[&](driving::Bytes& vehicle,driving::Bytes& cam){vehicle=car;cam=camera;return true;};
         scene.set_screen(1280,720);CHECK(scene.invoke(0x484ee0u,0,385,32,0)&&scene.camera_unanswered==0);
+        { // A same-callback profile change must refresh retained culling without a new camera projection.
+            const auto saved_provider=platform::g_pc_triple_corrections;
+            platform::g_pc_triple_corrections=profile_corrections;platform::pc_triple_profile_changed();
+            CHECK(scene.render_view().panels.valid&&profile_calls==1);
+            const auto initial=scene.render_view().panels.panels[1].planes;const auto native_projection=soft.transform_proj;
+            CHECK(profile_calls==1);
+            profile_scale=.5f;platform::pc_triple_profile_changed();(void)scene.queue_context();
+            CHECK(profile_calls==2&&scene.render_view().panels.valid&&scene.render_view().panels.panels[1].planes!=initial);
+            CHECK(soft.transform_proj==native_projection&&profile_calls==2);
+            profile_refused=true;platform::pc_triple_profile_changed();CHECK(!scene.render_view().panels.valid&&profile_calls==3);
+            (void)scene.queue_context();CHECK(profile_calls==3);
+            platform::g_pc_triple_corrections=nullptr;CHECK(!scene.render_view().panels.valid&&profile_calls==3);
+            profile_refused=false;platform::g_pc_triple_corrections=profile_corrections;CHECK(scene.render_view().panels.valid&&profile_calls==4);
+            profile_scale=1;platform::pc_triple_profile_changed();CHECK(scene.render_view().panels.panels[1].planes==initial&&profile_calls==5);
+            CHECK(soft.transform_proj==native_projection);
+            // The actual sun near-plane scope saves/restores the original cache as well as its planes.
+            driving::PcEventControlState events{};events.slots[387].flags=2;
+            scene.course_effects=[](unsigned& work,unsigned& flags){work=0x780280;flags=2;};
+            bool visited=false;scene.leaf_hook=[&](unsigned pc,unsigned){if(pc==0x40cbc0){visited=true;profile_scale=.75f;platform::pc_triple_profile_changed();(void)scene.queue_context();}return true;};
+            const bool old_z=platform::fix_znear();platform::fix_znear()=true;scene.render_frame(events,16);platform::fix_znear()=old_z;
+            CHECK(visited&&scene.render_view().panels.valid&&scene.render_view().panels.panels[1].planes!=initial);
+            profile_scale=1;platform::pc_triple_profile_changed();CHECK(scene.render_view().panels.panels[1].planes==initial);
+            scene.course_effects=nullptr;scene.leaf_hook=nullptr;
+            platform::g_pc_triple_corrections=saved_provider;platform::pc_triple_profile_changed();
+        }
         scene.pause_780248=1;camera.put8(0x34a,0);(void)fov(1); // native bumper, no Bonnet flag
         const auto base_eye=camera.f32(0xf8),base_near=camera.f32(0xbc);
         enhancements::set_display_rate(120);enhancements::display_before_tick();

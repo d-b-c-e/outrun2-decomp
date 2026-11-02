@@ -24,6 +24,12 @@ inline float g_pc_wide_aspect=0.0f;
 // back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
 using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
 inline PcTripleCorrections g_pc_triple_corrections=nullptr;
+// Publish an immutable correction-profile change at an owned frame boundary.
+// The callback may stay the same while its session latch/profile changes.
+// This invalidates retained culling/backend matrices; it is not thread custody.
+inline std::atomic<std::uint64_t> g_pc_triple_revision{0};
+inline void pc_triple_profile_changed(){g_pc_triple_revision.fetch_add(1,std::memory_order_release);}
+
 // [Graphics] ScreenEdgeCullFix (the Tweaks key, on by default there and here): the object visibility test 4F0E40
 // (cones, course objects, gates) takes the same widened view as 4F02D0, so a widescreen screen edge no longer culls
 // objects that are still on it. Off: 4F0E40 keeps the 4:3 bounds (4F02D0 is widened either way).

@@ -174,10 +174,10 @@ public:
     // shader path is validated on screen (host: OR2_SHADOW_DRAW=1).
     bool shadow_draw_enabled{};
     std::string shadow_error;
-    PcRenderContext& queue_context(){return *queue_;}
+    PcRenderContext& queue_context(){refresh_panel_frusta();return *queue_;}
     // Car reflection cube (414340): the culling view the leaf keeps in step
     // with 95D860 / 404310, and the alpha flush 405830 of its face scenes.
-    PcRenderView& render_view(){return view_;}
+    PcRenderView& render_view(){refresh_panel_frusta();return view_;}
     // PC screen size 740C8C/740C90 seen by the camera (camera_fov 483C10, +B8 at 484EE0).
     void set_screen(float width,float height){screen_.width_740c8c=width;screen_.height_740c90=height;}
     float screen_width()const{return screen_.width_740c8c;}
@@ -220,6 +220,13 @@ private:
     bool effect_saved_{};std::array<float,16> effect_projection_{};
     std::array<float,6> effect_frustum_{};std::array<std::array<float,4>,4> effect_planes_{};
     PcPanelFrusta effect_panels_{};
+    std::array<float,16> panel_projection_{},effect_panel_projection_{};
+    bool panel_projection_valid_{},effect_panel_projection_valid_{};
+    PcTripleCorrections panel_provider_{},effect_panel_provider_{};
+    std::uint64_t panel_revision_{},effect_panel_revision_{};
+    void retain_panel_projection(const std::array<float,16>&);
+    void refresh_panel_frusta(bool force=false);
+
     // Port enhancement (enhancements/frame_rate.hpp): the 485FE0 view redone
     // between ticks from the camera before (`before`) and after this tick.
     void note_camera_replay(driving::Bytes camera,const std::vector<std::uint8_t>& before);

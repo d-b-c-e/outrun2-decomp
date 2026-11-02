@@ -165,6 +165,16 @@ std::uint32_t PcSceneRenderer::object_mesh_flags_406730(std::uint32_t handle,std
     auto* r=bank_resources(handle>>16);
     return r?pmt_object_mesh_flags_406730(*r,handle&0xffffu,and_mask,or_mask):0u;
 }
+void PcSceneRenderer::refresh_panel_frusta(bool force){
+    if(!panel_projection_valid_)return; // no authored camera projection yet
+    const auto revision=g_pc_triple_revision.load(std::memory_order_acquire);
+    if(!force&&panel_revision_==revision&&panel_provider_==g_pc_triple_corrections)return;
+    view_.panels=pc_panel_frusta(panel_projection_.data(),g_pc_triple_corrections);
+    panel_provider_=g_pc_triple_corrections;panel_revision_=revision;
+}
+void PcSceneRenderer::retain_panel_projection(const std::array<float,16>& projection){
+    panel_projection_=projection;panel_projection_valid_=true;refresh_panel_frusta(true);
+}
 void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera){
     for(const auto& st:d.stores){
         std::array<float,16> m{};std::memcpy(m.data(),st.matrix.data(),64);
@@ -184,7 +194,7 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     for(const auto& st:d.stores)if(st.slot==1){
         view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
         std::array<float,16> projection{};std::memcpy(projection.data(),st.matrix.data(),64);
-        view_.panels=pc_panel_frusta(projection.data(),g_pc_triple_corrections);
+        retain_panel_projection(projection);
         break;
     }
     const auto inverse=camera.sub(0x1c0,64);
@@ -216,11 +226,16 @@ void PcSceneRenderer::scene_effect_projection(bool begin){
         device_.set_transform(3,effect_projection_.data());
         view_.frustum_95bf40=effect_frustum_;view_.planes_95bf58=effect_planes_;
         view_.panels=effect_panels_;
+        panel_projection_=effect_panel_projection_;panel_projection_valid_=effect_panel_projection_valid_;
+        panel_provider_=effect_panel_provider_;panel_revision_=effect_panel_revision_;refresh_panel_frusta();
         return;
     }
     Bytes vehicle(nullptr,0),camera(nullptr,0);
     if(!vehicle_camera||!vehicle_camera(vehicle,camera)||camera.size()<0x3b4u)return;
     std::memcpy(effect_projection_.data(),globals_.transform().slot[1],64);
+    refresh_panel_frusta();
+    effect_panel_projection_=panel_projection_;effect_panel_projection_valid_=panel_projection_valid_;
+    effect_panel_provider_=panel_provider_;effect_panel_revision_=panel_revision_;
     effect_frustum_=view_.frustum_95bf40;effect_planes_=view_.planes_95bf58;effect_panels_=view_.panels;effect_saved_=true;
     driving::PcCameraDevice d;
     driving::pc_matrix_push(matrices_);
@@ -232,7 +247,7 @@ void PcSceneRenderer::scene_effect_projection(bool begin){
     render_set_matrix_410f90(*flush_,m,1);
     device_.set_transform(3,m.data());   // D3DTS_PROJECTION
     view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
-    view_.panels=pc_panel_frusta(m.data(),g_pc_triple_corrections);
+    retain_panel_projection(m);
 }
 void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uint8_t>& before){
     auto after=std::make_shared<std::vector<std::uint8_t>>(camera.data(),camera.data()+0x3b4);
@@ -608,6 +623,7 @@ bool PcSceneRenderer::environment_map_46bbc0(driving::Bytes car){
     return texture_swap_406630(token,globals_.w(0x8a89f4));
 }
 void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uint32_t mode_78026c){
+    refresh_panel_frusta();
     events_=&events;current_mode_=mode_78026c;
     if(clear_colour_89bd5c)frame_.clear_colour_89bd5c=*clear_colour_89bd5c;
     PcEnvironmentRenderTables tables{Bytes(environment_.lights_899b98.data(),environment_.lights_899b98.size()),

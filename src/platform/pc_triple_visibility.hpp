@@ -6,7 +6,7 @@
 
 namespace outrun::platform {
 // Camera-view-space planes from the same Pcenter * Cpanel the geometry shader uses.
-// Built at projection changes, not for each node; all planes point into the D3D clip volume.
+// Built at projection/profile changes, not for each node; all planes point into the D3D clip volume.
 struct PcPanelFrusta {
     struct Panel {
         std::array<std::array<double,4>,6> planes{};
