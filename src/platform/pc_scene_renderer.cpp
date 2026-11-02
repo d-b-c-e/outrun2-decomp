@@ -182,6 +182,7 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
 }
 bool& fix_znear(){static bool on=false;return on;}
 float& triple_fov_y(){static float fov=0.f;return fov;}
+driving::CameraFovAdjust& camera_fov_adjust(){static driving::CameraFovAdjust adjust=nullptr;return adjust;}
 // Tweaks re-runs all of CalcCameraMatrix around Clr_SceneEffect; only 404310's outputs depend on the near plane (the
 // projection, slot 1, and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so
 // only the projection is rebuilt with 0.05; afterwards the projection in effect before (95D8A0) is put back as it was.
@@ -301,8 +302,9 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             // FixZBufferPrecision: the 484BD0 projections inside this control (the main camera) take Tweaks' near plane.
             // MatchGameFov = false: in race and goal modes only, the rig's vertical FOV; the front end keeps the game's.
             struct Arm{Arm(std::uint32_t mode,std::int32_t model,bool race){driving::camera_znear_context()={fix_znear(),mode,model};
-                           driving::camera_fov_context().fov_y=race?triple_fov_y():0.f;}
-                       ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context().fov_y=0.f;}}
+                           driving::camera_fov_context().fov_y=race?triple_fov_y():0.f;
+                           driving::camera_fov_context().adjust=race?camera_fov_adjust():nullptr;}
+                       ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context()={};}}
                 arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1,
                     driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view);
             std::vector<std::uint8_t> before;

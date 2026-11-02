@@ -2,6 +2,7 @@
 // names, the Separate-monitors span rule (the Tweaks fork's TripleSpanFromMonitors) and the centred 16:9 frame.
 #include "triple_screens.hpp"
 #include "triple_rig.hpp"
+#include "camera_framing.hpp"
 #include "display_fit.hpp"
 #include "platform/ui_spacing.hpp"
 #include "platform/c2c_ui_spacing.hpp"
@@ -530,6 +531,25 @@ int main(){
             CHECK(!visible(40.f,0.f,10.f)&&visible(0.f,0.f,-50.f));CHECK(lod==center_lod);
             CHECK(!visible(0.f,0.f,-6000.f)&&!visible(0.f,100.f,-10.f));
         }
+    }
+    {
+        CameraFraming framing;
+        constexpr float game=1.1f,seat=0.586f;
+        CHECK(framing.fov(0,game,seat,true)==seat&&framing.fov(1,game,seat,true)==seat&&framing.fov(2,game,seat,true)==game);
+        for(unsigned view=0;view<3;++view)CHECK(framing.fov(view,game,seat,false)==game); // single screen keeps the game
+        framing.offsets[0][1]=-2.f; // numpad + narrows, isolated to this camera/set
+        CHECK(framing.fov(0,game,seat,true)<seat&&framing.fov(1,game,seat,true)==seat);
+        framing.realistic[0]=false;
+        CHECK(framing.fov(0,game,seat,true)==game&&framing.offsets[0][1]==-2.f);
+        framing.offsets[2][0]=3.f;
+        const float expected_delta=3.f*0.017453292519943295f;
+        CHECK(std::fabs(framing.fov(2,game,seat,true)-game-expected_delta)<1e-6f);
+        CHECK(std::fabs(framing.fov(2,1.3f,seat,true)-1.3f-expected_delta)<1e-6f); // dynamic chase FOV plus offset, no accumulation
+        framing.offsets[2][0]=0.f;CHECK(framing.fov(2,game,seat,true)==game); // reset returns to calculation
+        framing.offsets[0][0]=std::numeric_limits<float>::infinity();CHECK(framing.fov(0,game,seat,true)==game);
+        CHECK(framing.fov(30,game,seat,true)==game); // cinematic/start views remain authored
+        CHECK(CameraFraming::set_key(0)=="BumperRealistic"&&CameraFraming::set_key(1)=="CockpitRealistic"&&CameraFraming::set_key(2)=="ChaseRealistic");
+        CHECK(CameraFraming::offset_key(0,false)=="BumperGameFovOffset"&&CameraFraming::offset_key(0,true)=="BumperRealisticFovOffset");
     }
     std::printf("triple screens: %u checks\n",checks);
     return 0;

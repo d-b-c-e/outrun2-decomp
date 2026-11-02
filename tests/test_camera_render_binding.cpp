@@ -107,6 +107,19 @@ int main(){
         PcCameraDevice back;camera_project_484bd0(c,stack,back,screen,blend);
         CHECK(c.f32(0xa0)==a0&&c.f32(0xa4)==a4&&back.slots_95d860[1]==game.slots_95d860[1]);
     }
+    {
+        const float authored=c.f32(0xac);
+        camera_fov_context().adjust=[](std::uint8_t view,float game){return game+(view==1?0.1f:0.f);};
+        c.put8(0x34a,1);
+        camera_project_484bd0(c,stack,device,screen,blend);const auto once=c.f32(0xa0);
+        for(unsigned i=0;i<5;++i)camera_project_484bd0(c,stack,device,screen,blend);
+        CHECK(c.f32(0xa0)==once&&c.f32(0xac)==authored); // projection adjustment cannot feed back into authored/smoothed FOV
+        c.put8(0x34a,2);camera_project_484bd0(c,stack,device,screen,blend);
+        CHECK(std::fabs(c.f32(0xa0)+0.1f-once)<1e-6f);
+        camera_fov_context().adjust=[](std::uint8_t,float){return std::nanf("");};
+        camera_project_484bd0(c,stack,device,screen,blend);CHECK(std::isfinite(c.f32(0xa0))&&c.f32(0xac)==authored);
+        camera_fov_context()={};
+    }
     // The renderer's interpolation replay supplies only slot 0. Retain the last
     // projection's single-view planes and angled panel frusta between 60 Hz ticks.
     {

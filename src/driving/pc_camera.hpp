@@ -55,7 +55,8 @@ CameraZnearContext& camera_znear_context();
 // host sets it around the main camera's 485FE0 control in race and goal modes only), 484BD0 replaces the +A0 / +A4 that
 // 483C10 derived from +AC with this vertical FOV (radians) and its horizontal at the screen aspect. +AC is untouched, so
 // the game's own FOV returns at the next projection outside that window.
-struct CameraFovContext { float fov_y{}; };
+using CameraFovAdjust=float(*)(std::uint8_t view,float game_fov_y);
+struct CameraFovContext { float fov_y{};CameraFovAdjust adjust{}; };
 CameraFovContext& camera_fov_context();
 // Tweaks' rule: 1.0 in the chase or bumper view (+34A 2 or 0) with no camera switch running (+364 == 0) in GAME (0x10)
 // or GOAL (0x13); 0.1 during a switch or outside GAME; otherwise (the in-car view in GAME) 0.25, or 0.2 for the

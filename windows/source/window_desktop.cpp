@@ -13,6 +13,7 @@
 #include "login_protection.hpp"
 #include "ffb_shadow_live.hpp"
 #include "desktop_panel.hpp"
+#include "camera_controls.hpp"
 #include "hud_toggle.hpp"
 #include "level_select_input.hpp"
 #include "cd_switcher.hpp"
@@ -706,6 +707,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::hud_toggle_wrap_input_filter();
     outrun::desktop::cd_switcher_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
     outrun::desktop::cd_switcher_wrap_input_filter();
+    outrun::desktop::camera_controls_configure(settings,test_like||intake.kind==session::Intake::Kind::Record||playback,
+        float(outrun::desktop::triple_physical_fov_y(outrun::xbox_runtime::triple_rig,16./9.)));
+    outrun::desktop::camera_controls_wrap_input_filter();
     // A rendering test's frame burst (render_test.hpp): into the run folder, armed at the race entry. Nothing otherwise.
     outrun::desktop::render_test_start_capture(render_test,plan.run_root);
     // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.

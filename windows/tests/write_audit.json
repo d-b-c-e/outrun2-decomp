@@ -1039,13 +1039,13 @@
  },
  {
   "file": "windows/source/desktop_settings.cpp",
-  "line": "const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "line": "const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,nullptr);",
   "class": "not-a-file",
   "reason": "read_whole: a read-only open (GENERIC_READ, OPEN_EXISTING) of the settings file before a rewrite; writes nothing"
  },
  {
   "file": "windows/source/desktop_settings.cpp",
-  "line": "const HANDLE h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "line": "h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
   "class": "definition",
   "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the sibling temp file"
  },
@@ -1069,9 +1069,27 @@
  },
  {
   "file": "windows/source/desktop_settings.cpp",
-  "line": "return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;",
+  "line": "return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=0;",
   "class": "definition",
-  "reason": "write_section's body (read_whole / replace_whole, reached only through the watched wrappers write_section and write_key, whose call sites are audited): the one-step publish of the temp file over the original"
+  "reason": "settings publication: atomic creation from its unique temp; no replacement of a newly created destination"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "return ReplaceFileA(path.c_str(),temp.c_str(),nullptr,0,nullptr,nullptr)!=0;",
+  "class": "definition",
+  "reason": "settings publication: atomic replacement from its owned unique CREATE_NEW temp; failed publication cleans only that temp"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "const HANDLE current_file=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);",
+  "class": "not-a-file",
+  "reason": "read-only identity check before settings publication; no file creation or writing"
+ },
+ {
+  "file": "windows/source/camera_controls.cpp",
+  "line": "if(write_key(h.path,\"Camera\",key,value,error))return true;",
+  "class": "latched-skip",
+  "reason": "camera_controls_configure returns before installing the controller/callback when test, recording or playback is disabled; inert controller fixture verifies the disabled path and save failures"
  },
  {
   "file": "windows/source/ordinary_recording.cpp",

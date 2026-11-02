@@ -9,7 +9,7 @@ add_executable(OutRunDesktop WIN32 source/window_desktop.cpp source/startup_moni
     source/session_request.cpp source/ordinary_recording.cpp source/startup_state.cpp
     source/telemetry_forza.cpp source/telemetry_live.cpp source/ffb_outrun.cpp source/ffb_settings.cpp source/ffb_live.cpp source/gamepad_vibration_live.cpp
     source/ffb_producer2.cpp source/ffb_shadow.cpp source/ffb_shadow_live.cpp source/ffb_player_model.cpp source/login_protection.cpp
-    source/ffb_device.cpp source/desktop_panel.cpp source/desktop_report.cpp source/desktop_bindings.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp vendor/native/support/support_report.cpp
+    source/ffb_device.cpp source/desktop_panel.cpp source/desktop_report.cpp source/desktop_bindings.cpp source/camera_controls.cpp source/hud_toggle.cpp source/cd_switcher.cpp source/level_select_input.cpp vendor/native/panel/dbce_panel.cpp vendor/native/panel/dbce_panel_input.cpp vendor/native/support/support_report.cpp
     vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp vendor/native/third_party/imgui/imgui_tables.cpp
     vendor/native/third_party/imgui/imgui_widgets.cpp vendor/native/third_party/imgui/backends/imgui_impl_dx11.cpp)
 target_include_directories(OutRunDesktop PRIVATE source shim host host/recorder vendor/controls vendor/session vendor/telemetry vendor/wheelffb
@@ -381,6 +381,13 @@ target_link_libraries(test_triple_screens PRIVATE outrun_native_runtime)
 target_compile_features(test_triple_screens PRIVATE cxx_std_17)
 target_compile_options(test_triple_screens PRIVATE /W4 /WX)
 add_test(NAME triple_screens COMMAND test_triple_screens)
+add_executable(test_camera_controls tests/test_camera_controls.cpp source/camera_controls.cpp source/desktop_settings.cpp)
+target_include_directories(test_camera_controls PRIVATE source ${PROJECT_SOURCE_DIR}/xbox/source ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(test_camera_controls PRIVATE outrun_native_runtime)
+target_compile_features(test_camera_controls PRIVATE cxx_std_17)
+target_compile_definitions(test_camera_controls PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(test_camera_controls PRIVATE /W4 /WX)
+add_test(NAME camera_controls COMMAND test_camera_controls)
 
 add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp source/render_test.cpp shim/parse.cpp)
 target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/xbox/source)

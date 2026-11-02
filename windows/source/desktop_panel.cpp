@@ -1,6 +1,7 @@
 // The F6 panel (desktop_panel.hpp): the toolkit panel's frame sequence on our own D3D11 device, as the toolkit's
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
 #include "desktop_panel.hpp"
+#include "camera_controls.hpp"
 #include "enhancements/gamepad_vibration.hpp"
 #include "gamepad_vibration_live.hpp"
 #include "desktop_keyboard.hpp"
@@ -570,7 +571,22 @@ void page_controls(bool advanced){
         dbce::panel::Text("Character appearance choices apply at the next game start.");
     }
 }
+void camera_adjustments(){
+    dbce::panel::Heading("Current camera");
+    dbce::panel::Status("View",camera_controls_label().c_str());
+    if(camera_controls_tunable()){
+        if(camera_controls_triples()&&dbce::panel::Command("Switch Game / Realistic (F7)"))camera_controls_toggle_set();
+        if(dbce::panel::Command("Zoom in (Numpad +)"))camera_controls_zoom(-1.f);
+        if(dbce::panel::Command("Zoom out (Numpad -)"))camera_controls_zoom(1.f);
+        if(dbce::panel::Command("Reset calculated FOV (Numpad 5)"))camera_controls_reset();
+    }
+    dbce::panel::Text("FOV changes apply now and are remembered per camera and set. Wider than seat-true stretches the side screens.");
+    dbce::panel::Text("Triples use one borderless window. Measure eye distance to the plane through the center panel edges, with no curve sagitta subtraction.");
+    const auto note=camera_controls_notice();
+    if(note.find("not saved")!=std::string::npos)dbce::panel::Status("Camera save",note.c_str(),dbce::panel::Tone::Warning);
+}
 void page_cameras(bool advanced){
+    camera_adjustments();
     static const char* const modes[]{"Off","Surround","Separate monitors"};
     {const int before=v.triple;
      if(dbce::panel::Choice("Triple screens",modes,3,&v.triple,"Off: one 16:9 view. Surround: a Surround desktop's wide window. "
@@ -920,6 +936,7 @@ void player_quality(bool advanced){
     }
 }
 void player_cameras(bool advanced){
+    camera_adjustments();
     dbce::panel::Heading("Display");
     {std::vector<const char*> labels;
      for(const auto& label:v.monitor_labels)labels.push_back(label.c_str());
@@ -949,7 +966,7 @@ void player_cameras(bool advanced){
             keep(&v.letterbox,before,[&]{return save("Graphics","UILetterboxing",std::to_string(v.letterbox));});
     }
     player_quality(advanced);
-    dbce::panel::Text("Changes apply after restarting the game.");
+    dbce::panel::Text("Display and quality changes apply after restarting the game.");
 }
 void draw_page(dbce::panel::Page page,bool advanced){
     if(page!=dbce::panel::PAGE_CONTROLS){
@@ -1070,7 +1087,8 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
     const bool open=!p.playback&&dbce::panel::IsOpen();
     const auto badge=shim_input_recording_badge();
-    if((!open&&badge.empty()&&!v.show_frame_rate)||!device||!context||!view||!width||!height)return;
+    const auto camera_note=camera_controls_notice();
+    if((!open&&badge.empty()&&!v.show_frame_rate&&camera_note.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
         release_backend();
@@ -1101,6 +1119,14 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     if(open)dbce::panel::Draw(w,h);
     if(!badge.empty())draw_badge(badge,w,h);
     if(v.show_frame_rate&&!open)draw_frame_rate(w,h,!badge.empty());
+    if(!open&&!camera_note.empty()){
+        const auto size=ImGui::CalcTextSize(camera_note.c_str());
+        const float pad=8.f*dbce::panel::Scale();
+        const ImVec2 at((float(w)-size.x)*0.5f,float(h)-size.y-pad*3.f);
+        auto* list=ImGui::GetForegroundDrawList();
+        list->AddRectFilled(ImVec2(at.x-pad,at.y-pad),ImVec2(at.x+size.x+pad,at.y+size.y+pad),IM_COL32(0,0,0,180));
+        list->AddText(at,IM_COL32(245,245,245,255),camera_note.c_str());
+    }
     ImGui::Render();
     // On the back buffer, then the renderer's targets back (the DX11 backend restores the rest of its state itself).
     ID3D11RenderTargetView* saved[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};ID3D11DepthStencilView* depth=nullptr;

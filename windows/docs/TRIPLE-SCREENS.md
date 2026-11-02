@@ -345,7 +345,7 @@ t56.
 |---|---|---|---|
 | `PanelWidthMm` | 708.4 (the fixture's 708.40) | 100..3000 | visible width of one panel (32-inch 16:9) |
 | `PanelHeightMm` | 398.5 (the fixture's 398.47) | 100..2000 | visible height |
-| `EyeDistanceMm` | 660 | 200..3000 | eye to the centre panel, along its normal |
+| `EyeDistanceMm` | 660 | 200..3000 | eye to the plane through the center panel edges, along its normal; no curve sagitta subtraction (STD-047) |
 | `SideAngle` | 70 | 0 to below 90 | how far each side panel turns toward the driver |
 | `BezelMm` | 8 | 0..100 | gap between active areas at each seam |
 | `MatchGameFov` | `true` | true / false | DRIVE's name. True: today's behaviour (the eye matched to the game's FOV; EyeDistanceMm unused). False: the physical eye. |

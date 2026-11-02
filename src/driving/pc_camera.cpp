@@ -108,7 +108,9 @@ void camera_project_484bd0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,
     if(const auto& z=camera_znear_context();z.armed)c.putf(0xbc,camera_fix_znear(c,z.mode_78026c,z.car_model));
     pc_matrix_push(s);
     camera_fov_483c10(c,screen);
-    if(const float fov=camera_fov_context().fov_y;fov>0.f){
+    const auto& framing=camera_fov_context();
+    const float fov=framing.adjust?framing.adjust(c.u8(0x34a),c.f32(0xa0)):framing.fov_y;
+    if(std::isfinite(fov)&&fov>0.f&&fov<3.14159265f&&fov!=c.f32(0xa0)){
         c.putf(0xa0,fov);
         c.putf(0xa4,float(2.0*std::atan(std::tan(double(fov)*0.5)*double(screen.width_740c8c)/double(screen.height_740c90))));
     }
