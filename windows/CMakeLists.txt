@@ -401,6 +401,10 @@ target_link_libraries(test_telemetry_live PRIVATE outrun_native_runtime ${OR2_WI
 target_compile_features(test_telemetry_live PRIVATE cxx_std_17)
 target_compile_definitions(test_telemetry_live PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 add_test(NAME telemetry_live COMMAND test_telemetry_live)
+find_program(OR2_PWSH_EXECUTABLE NAMES pwsh)
+if(OR2_PWSH_EXECUTABLE)
+    add_test(NAME candidate_install COMMAND ${OR2_PWSH_EXECUTABLE} -NoProfile -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-CandidateInstall.ps1)
+endif()
 
 add_executable(test_fence tests/test_fence.cpp source/test_fence.cpp source/render_test.cpp shim/parse.cpp)
 target_include_directories(test_fence PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/xbox/source)
@@ -413,6 +417,7 @@ add_test(NAME test_fence COMMAND test_fence)
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
     add_test(NAME write_audit COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR})
+    add_test(NAME candidate_package COMMAND ${Python3_EXECUTABLE} -I -B ${PROJECT_SOURCE_DIR}/tools/alpha/test_package_candidate.py)
     add_test(NAME write_audit_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/write_audit.py ${PROJECT_SOURCE_DIR} --selftest)
 # The shim files under windows/ mirror the wheel toolkit's native/shim, pinned by vendor/shim.lock.json (vendor/SHIM.md).
 add_test(NAME shim_vendor_pin COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shim_vendor_pin.py)

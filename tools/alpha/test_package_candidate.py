@@ -24,7 +24,9 @@ def fake_pe(machine=0x8664, flags=0x22):
 
 class PackageSafety(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="outrun-alpha-package-")
+        fixture_parent = Path(__file__).resolve().parents[2] / "work/validation-20261102/package-fixtures"
+        fixture_parent.mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(prefix="outrun-alpha-package-", dir=fixture_parent)
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.root = self.base / "source"

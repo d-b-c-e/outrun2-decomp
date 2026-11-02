@@ -16,7 +16,7 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-007 | Triple screens in one wide window | partial | The planar span was seen at the rig. The default-off projected-view spike is not accepted as three independently rendered, angle-correct views; see `ROADMAP.md` step 3. |
 | STD-008 | Display changes: game applies once | unchecked | |
 | STD-009 | Dashboard telemetry matches the HUD | partial | The speed source is the HUD's +0x1F8 base and the packet byte fixture checks km/h to m/s; no attended numeric HUD/receiver comparison. See `docs/TELEMETRY-FIELDS.md`. |
-| STD-010 | Install the latest build for testing | unchecked | |
+| STD-010 | Install the latest build for testing | partial | Private manifest-bound EXE installer/receipt/restore built;41 synthetic file checks and8 allowlist package tests pass. Does not launch, change owner settings/assets/DLLs or imply a clean/player install. Latest overnight builds are retained privately; owner install remains2dd9886. |
 | STD-011 | Work lands on main | partial | The current reviewed integration line is `codex/outrun-wheel-parity` at `6777eb3`, not `main`; upstream work still needs its own review. |
 | STD-012 | Reproduce the route and preserve original signals | partial | Ordinary shim recording has consumed-input contract @2, a saved-while-alive pilot and offline fixtures; consumed replay has an input-tick seam and fixture. Neither proves a deterministic complete route or owner-accepted automated playback. See `docs/PLAY-WITH-RECORDING.md` and `ROADMAP.md`. |
 | STD-013 | The installed build launches plainly | partial | `OutRunDesktop.exe` boots from its folder (windowed run 2026-10-10); plain borderless launch from LaunchBox not yet checked. |

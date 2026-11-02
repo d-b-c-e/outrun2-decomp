@@ -42,10 +42,18 @@ a focused batch as a full suite or a warning-free build.
 
 There was no Windows candidate packager at the starting revision. The small
 allowlist tool now packages only the named AMD64 `OutRunDesktop.exe`, this
-guide, the repository/component notices, four explicitly supplied dependency
+guide, the EXE-only installer/restore script and its instructions, the repository/component notices, four explicitly supplied dependency
 license texts and a manifest. It never scans a game or build directory for
 payload files. No INI, save, cache, capture, retail EXE, test executable,
 `WheelFfb.dll`, debug symbol or arbitrary extra DLL is admitted.
+
+The [private candidate install guide](PRIVATE-CANDIDATE-INSTALL.md) explains the hash-bound EXE backup/receipt/restore route. Its PowerShell fixture uses synthetic disposable folders only:
+
+```powershell
+pwsh -File windows/tests/Test-CandidateInstall.ps1
+```
+
+No owner install or fresh game launch follows from a passing file fixture.
 
 Run the lightweight synthetic tests without a build or rig lease:
 

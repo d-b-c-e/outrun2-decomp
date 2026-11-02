@@ -19,6 +19,8 @@ import zipfile
 
 
 SOURCE_TEXT = (
+    "windows/Install-Candidate.ps1",
+    "docs/PRIVATE-CANDIDATE-INSTALL.md",
     "THIRD_PARTY_NOTICES.md",
     "docs/ALPHA-READINESS.md",
     "windows/vendor/controls/LICENSE",
