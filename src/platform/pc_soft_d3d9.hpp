@@ -195,6 +195,9 @@ protected:
     bool shade_vertex(std::uint32_t index,std::int32_t base,Vertex&);
     bool shade_vertex(std::uint32_t index,std::int32_t base,Vertex&,const pc_shader::V4* constants);   // the 256 VS constants
     void triangle(const Vertex&,const Vertex&,const Vertex&);
+    // A GPU backend can own depth clipping after its panel correction. The
+    // software reference and unqualified paths keep the original CPU clipper.
+    virtual bool defer_triangle_depth_clip()const noexcept{return false;}
     virtual void raster(const Vertex*,unsigned n);
     pc_shader::V4 sample(int stage,const pc_shader::V4& c,float dudx,float dvdx,float dudy,float dvdy);
     pc_shader::V4 fixed_function(const pc_shader::V4& diffuse,const pc_shader::V4& specular,const std::array<pc_shader::V4,8>& tc,

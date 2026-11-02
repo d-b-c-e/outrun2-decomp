@@ -4,6 +4,9 @@
 #include "platform/pc_d3d9.hpp"
 #include <cmath>
 namespace outrun::platform {
+inline bool pc_world_gpu_depth_clip(PcDrawPhase phase,bool backbuffer,bool angled){
+    return angled&&backbuffer&&phase==PcDrawPhase::World;
+}
 inline bool pc_world_coverage_draw(PcDrawPhase phase,bool rhw,bool backbuffer){
     return phase==PcDrawPhase::WorldCoverage&&rhw&&backbuffer;
 }

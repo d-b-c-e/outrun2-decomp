@@ -364,6 +364,9 @@ void D3D11D3D9Device::clear(std::uint32_t flags,std::uint32_t c,float z,std::uin
     if(auto* dsv=depth_view(depth_target_);dsv&&(flags&6))
         context_->ClearDepthStencilView(dsv,(flags&2?D3D11_CLEAR_DEPTH:0)|(flags&4?D3D11_CLEAR_STENCIL:0),z,UINT8(stencil));
 }
+bool D3D11D3D9Device::defer_triangle_depth_clip()const noexcept{
+    return platform::pc_world_gpu_depth_clip(draw_phase(),colour_target_==BackBuffer,platform::g_pc_triple_corrections!=nullptr);
+}
 void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
     if(count<3)return;
     batch_rhw_=pretransformed_;

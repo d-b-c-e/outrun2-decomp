@@ -51,6 +51,7 @@ public:
 private:
     struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
+    bool defer_triangle_depth_clip()const noexcept override;
     void flush();void pixel_pipeline();void bind_target();void apply_state();void bind_textures();
     // The GPU vertex path (the PS5 native path's design): DrawIndexedPrimitive with a vertex shader runs the game's
     // vertex program on the GPU (hlsl::native_vs specialized per blob list and input formats) from GPU copies of

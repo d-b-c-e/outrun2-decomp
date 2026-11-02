@@ -265,6 +265,13 @@ std::uint32_t PcSoftD3D9Device::draw_indexed_primitive(std::uint32_t type,std::i
     return 0;
 }
 void PcSoftD3D9Device::triangle(const Vertex& a,const Vertex& b,const Vertex& c){
+    if(defer_triangle_depth_clip()){
+        // The GPU clips after applying each panel's correction. Clipping here
+        // would irreversibly remove triangles behind the centre but visible at
+        // a side panel, or cut a crossing triangle to the centre's near plane.
+        for(const Vertex* v:{&a,&b,&c})for(float value:v->pos)if(!std::isfinite(value))return;
+        const Vertex tri[3]{a,b,c};raster(tri,3u);return;
+    }
     // Clip against z >= 0 and z <= w (D3D clip volume depth range). A triangle inside both planes (the usual
     // case) keeps its vertices in order, so it goes to raster as it is; two planes leave at most five vertices.
     auto inside=[](const Vertex& v){return v.pos[2]>=0.f&&v.pos[3]-v.pos[2]>=0.f;};

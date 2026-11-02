@@ -254,6 +254,10 @@ target_include_directories(test_shadow_world_coverage PRIVATE windows/source)
 target_link_libraries(test_shadow_world_coverage PRIVATE outrun_native_runtime)
 add_test(NAME shadow_world_coverage COMMAND test_shadow_world_coverage)
 set_tests_properties(shadow_world_coverage PROPERTIES SKIP_RETURN_CODE 77)
+add_executable(test_world_depth_clip tests/test_world_depth_clip.cpp)
+target_include_directories(test_world_depth_clip PRIVATE windows/source)
+target_link_libraries(test_world_depth_clip PRIVATE outrun_native_runtime)
+add_test(NAME world_depth_clip COMMAND test_world_depth_clip)
 # [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
 # compiled-in globals only, no game files.
 add_executable(test_hud_toggle_navi tests/test_hud_toggle_navi.cpp)
