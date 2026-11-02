@@ -12,6 +12,7 @@
 #include "platform/pc_shadow_volume.hpp"
 #include "platform/pc_vertex_shader_setup.hpp"
 #include "platform/embedded_camera_data.hpp"
+#include "platform/embedded_vehicle_draw_data.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
@@ -67,6 +68,14 @@ std::string pc_bank_pack_name(std::uint32_t resource){
 std::unique_ptr<PcSceneRenderer::Bank> PcSceneRenderer::open_bank(std::vector<std::uint8_t> pmt,std::string& error,std::uint32_t resource){
     if(pmt.size()<16){error="PMT too small";return nullptr;}
     auto bank=std::make_unique<Bank>();bank->pmt=std::move(pmt);bank->resources.pack_name=pc_bank_pack_name(resource);
+    // Measure the body before the loader writes device handles into PMT system records.
+    for(unsigned model=0;model<VehicleResourceIds.size();++model)if(resource==VehicleResourceIds[model]&&EmbeddedVehicleLayouts){
+        try{
+            const Bytes layout(const_cast<std::uint8_t*>(EmbeddedVehicleLayouts)+model*0x128,0x128);
+            const auto body=layout.u32(0); // main exterior body, no wheels/lights/accessory objects
+            if(body>>16==resource)camera_mounts_[model]=camera_mount_fit(assets::inspect_pc_pmt(assets::ByteView(bank->pmt)),body&0xffffu);
+        }catch(const std::exception&){camera_mounts_[model]={};} // unavailable geometry retains the native camera
+    }
     Bytes pb(bank->pmt.data(),bank->pmt.size());
     const auto system=pb.u32(8),video=pb.u32(12);
     if(std::uint64_t(system)+video+16u>bank->pmt.size()){error="PMT sections outside the archive";return nullptr;}
@@ -178,11 +187,22 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
         view_.panels=pc_panel_frusta(projection.data(),g_pc_triple_corrections);
         break;
     }
-    for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
+    const auto inverse=camera.sub(0x1c0,64);
+    const auto eye=driving::pc_transform_point(inverse,{0,0,0}),target=driving::pc_transform_point(inverse,{0,0,-1});
+    view_.eye={eye.x,eye.y,eye.z};view_.target={target.x,target.y,target.z};
 }
 bool& fix_znear(){static bool on=false;return on;}
 float& triple_fov_y(){static float fov=0.f;return fov;}
 driving::CameraFovAdjust& camera_fov_adjust(){static driving::CameraFovAdjust adjust=nullptr;return adjust;}
+CameraMountAdjust& camera_mount_adjust(){static CameraMountAdjust adjust=nullptr;return adjust;}
+driving::CameraViewCycle& camera_view_cycle(){static driving::CameraViewCycle cycle=nullptr;return cycle;}
+void PcSceneRenderer::adjust_camera_view(void* user,Bytes camera,driving::PcMatrixStack& s){
+    auto& renderer=*static_cast<PcSceneRenderer*>(user);Bytes car(nullptr,0),unused(nullptr,0);
+    if(!camera_mount_adjust()||!renderer.vehicle_camera||!renderer.vehicle_camera(car,unused)||car.size()<=0x11)return;
+    const int model=car.i8(0x11);
+    const auto* fit=model>=0&&model<30?&renderer.camera_mounts_[unsigned(model)]:nullptr;
+    camera_mount_adjust()(camera,car,fit,s);
+}
 // Tweaks re-runs all of CalcCameraMatrix around Clr_SceneEffect; only 404310's outputs depend on the near plane (the
 // projection, slot 1, and the frustum), and 484BD0's view part (482F20) advances the camera's previous-eye state, so
 // only the projection is rebuilt with 0.05; afterwards the projection in effect before (95D8A0) is put back as it was.
@@ -214,7 +234,10 @@ void PcSceneRenderer::scene_effect_projection(bool begin){
 }
 void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uint8_t>& before){
     auto after=std::make_shared<std::vector<std::uint8_t>>(camera.data(),camera.data()+0x3b4);
-    enhancements::display_note(this,[this,camera,before,after]{
+    const auto framing=driving::camera_fov_context();
+    enhancements::display_note(this,[this,camera,before,after,framing]{
+        struct Restore {driving::CameraFovContext saved;~Restore(){driving::camera_fov_context()=saved;}} restore{driving::camera_fov_context()};
+        driving::camera_fov_context()=framing;
         const std::uint8_t autoscene=std::uint8_t(events_?events_->slots[6].flags:0u);
         float t=(autoscene&3u)==2u?1.f:driving::camera_blend_4493e0({interpolation_override_82e7d8,autoscene,0,enhancements::display_blend()});
         const Bytes prev(const_cast<std::uint8_t*>(before.data()),before.size()),cur(after->data(),after->size());
@@ -301,11 +324,14 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             bool answered=false;
             // FixZBufferPrecision: the 484BD0 projections inside this control (the main camera) take Tweaks' near plane.
             // MatchGameFov = false: in race and goal modes only, the rig's vertical FOV; the front end keeps the game's.
-            struct Arm{Arm(std::uint32_t mode,std::int32_t model,bool race){driving::camera_znear_context()={fix_znear(),mode,model};
+            struct Arm{Arm(PcSceneRenderer* renderer,std::uint32_t mode,std::int32_t model,bool race){driving::camera_znear_context()={fix_znear(),mode,model};
                            driving::camera_fov_context().fov_y=race?triple_fov_y():0.f;
-                           driving::camera_fov_context().adjust=race?camera_fov_adjust():nullptr;}
+                           driving::camera_fov_context().adjust=race?camera_fov_adjust():nullptr;
+                           driving::camera_fov_context().cycle=race?camera_view_cycle():nullptr;
+                           driving::camera_fov_context().view_adjust=race&&camera_mount_adjust()?adjust_camera_view:nullptr;
+                           driving::camera_fov_context().view_user=renderer;}
                        ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context()={};}}
-                arm(mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1,
+                arm(this,mode_78026c,vehicle.size()>0x11u?std::int32_t(vehicle.i8(0x11)):-1,
                     driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view);
             std::vector<std::uint8_t> before;
             if(enhancements::display_frames()&&camera.size()>=0x3b4u)before.assign(camera.data(),camera.data()+0x3b4);
@@ -326,8 +352,9 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
             {   // Diagnostic only (sana 70042): read what this control left, still inside its FOV/near arming.
                 const RaceViewSample v{mode_78026c,std::int32_t(race_mode_780258),
                     driving::race_camera_mode_48618d(std::int32_t(mode_78026c))||goal_view,camera.u8(0x34a),
-                    camera.f32(0xa0),camera.f32(0xa4),camera.f32(0xbc),camera.f32(0xb8),screen_.width_740c8c,screen_.height_740c90,
-                    driving::camera_fov_context().fov_y>0.f,driving::camera_znear_context().armed};
+                    camera.f32(0xa0),camera.f32(0xa4),d.frustum_95bf40[4],camera.f32(0xb8),screen_.width_740c8c,screen_.height_740c90,
+                    driving::camera_fov_context().fov_y>0.f,driving::camera_znear_context().armed,
+                    driving::camera_fov_context().adjust!=nullptr};
                 if(const auto line=race_view_note_.observe(v))std::printf("%s\n",line->c_str());
             }
             apply_camera(d,camera);

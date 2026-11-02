@@ -6,7 +6,18 @@
 #include "native_window.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/pc_scene_renderer.hpp"
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmisleading-indentation" // existing compressed software-device headers
+#endif
+#include "platform/pc_soft_d3d9.hpp"
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#include "platform/retail_asset_store.hpp"
+#include "enhancements/frame_rate.hpp"
 #include "platform/pc_screen.hpp"
+#include "driving/pc_d3dx.hpp"
 #include <windows.h>
 #include <filesystem>
 #include <fstream>
@@ -15,11 +26,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 namespace {bool panel_open;unsigned checks;}
 namespace outrun::desktop {bool desktop_panel_open(){return panel_open;}}
 namespace outrun::xbox_runtime {InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}}
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"camera controls line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
-int main(){
+int main(int argc,char** argv){
     using namespace outrun;using namespace desktop;
     const auto dir=std::filesystem::current_path()/("camera-controls-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64()));
     CHECK(std::filesystem::create_directory(dir));const auto path=(dir/"fixture.ini").string();
@@ -61,7 +73,63 @@ int main(){
     Ini legacy;legacy.load_text("[Triple]\nMatchGameFov = true\n[Camera]\nBumperRealistic = true\n",path);
     camera_controls_configure(legacy,false,0.586f);platform::g_pc_triple_corrections=[](const float*,float*){return false;};
     CHECK(fov(0)==0.586f&&fov(1)==1.1f&&fov(2)==1.1f);
+    // Bonnet is a logical fourth view on the native bumper slot; the native cockpit remains distinct.
+    CHECK(platform::camera_view_cycle()(0)==0&&fov(0)==1.1f&&camera_controls_label().find("Bonnet Camera")!=std::string::npos);
+    std::array<std::uint8_t,0xf00> car_bytes{};driving::Bytes car(car_bytes.data(),car_bytes.size());
+    std::array<std::uint8_t,0x400> cam_bytes{};driving::Bytes camera(cam_bytes.data(),cam_bytes.size());
+    for(unsigned i=0;i<16;++i)car.putf(0xb0+i*4,i%5==0?1.f:0.f);
+    camera.putf(0xf8,5.f);camera.putf(0xbc,.1f);const auto untouched=cam_bytes;
+    platform::CameraMountFit fit;fit.valid=true;fit.bonnet={0,.9f,1.2f};fit.bumper={0,.4f,2.2f};
+    std::array<std::uint8_t,256> arena{};driving::PcMatrixStack stack{driving::Bytes(arena.data(),arena.size()),0,0,4};
+    driving::pc_matrix_identity(stack);platform::camera_mount_adjust()(camera,car,nullptr,stack);
+    CHECK(camera_controls_label().find("native placement")!=std::string::npos);
+    const auto mount=[&]{driving::pc_matrix_identity(stack);platform::camera_mount_adjust()(camera,car,&fit,stack);
+        driving::PcMatrix16 view{},inverse{};std::memcpy(view.data(),stack.current().data(),64);CHECK(driving::pc_d3dx_matrix_inverse(inverse,view));
+        return driving::pc_d3dx_vec3_transform_coord({0,0,0},inverse);};
+    const auto bonnet_eye=mount();CHECK(std::fabs(bonnet_eye[1]-.9f)<1e-5f&&std::fabs(bonnet_eye[2]+1.2f)<1e-5f&&car.u32(4)==0x4000u);
+    CHECK(cam_bytes==untouched&&mount()==bonnet_eye); // render-only placement never compounds in authored camera state
+    CHECK(platform::camera_view_cycle()(0)==1&&fov(1)==1.1f);
+    CHECK(platform::camera_view_cycle()(1)==2&&platform::camera_view_cycle()(2)==0);
+    (void)fov(0);const auto bumper_eye=mount();CHECK(std::fabs(bumper_eye[2]+2.2f)<1e-5f&&car.u32(4)==0u);
+    Ini posed;posed.load_text("[Camera]\nBonnetRealistic=false\nCar0.BonnetGameSideOffset=0.2\nCar0.BonnetGameUpOffset=0.1\n",path);
+    camera_controls_configure(posed,false,.586f);(void)platform::camera_view_cycle()(0);(void)fov(0);
+    const auto tuned=mount();CHECK(std::fabs(tuned[0]-.2f)<1e-5f&&std::fabs(tuned[1]-1.f)<1e-5f);
+    car.put8(0x11,1);CHECK(std::fabs(mount()[0])<1e-5f);car.put8(0x11,0);(void)mount();
+    camera_controls_toggle_set();(void)fov(0);CHECK(std::fabs(mount()[0])<1e-5f);
+    camera_controls_toggle_set();(void)fov(0);CHECK(std::fabs(mount()[0]-.2f)<1e-5f);
+    camera_controls_reset();CHECK(std::fabs(mount()[0])<1e-5f&&std::fabs(mount()[1]-.9f)<1e-5f);
+    CHECK(ini.load(path)&&ini.number("Camera","Car0.BonnetGameSideOffset",999.f)==0.f);
+    CHECK(fov(3)==1.1f&&driving::camera_fov_context().near_z==0.f); // native cinematic 3 is not logical Bonnet
+    // The actual native view-switch branch reaches the desktop four-view cycle.
+    (void)fov(1);camera.put8(0x34a,2);camera.put16(0x340,0);camera.put16(0x344,0);
+    driving::camera_fov_context().cycle=platform::camera_view_cycle();
+    driving::race_camera_view_switch_484a40(camera,0x40000u,0);CHECK(camera.u8(0x34a)==0);
+    driving::race_camera_view_switch_484a40(camera,0x40000u,0);CHECK(camera.u8(0x34a)==0&&fov(0)==1.1f&&camera_controls_label().find("Bonnet")!=std::string::npos);
+    driving::camera_fov_context()={};
+    if(argc==2){
+        CHECK(platform::exe_image_autoload());
+        platform::RetailAssetStore store;std::string error;CHECK(platform::retail_asset_store_open(store,argv[1],&error));
+        std::vector<std::uint8_t> bytes;
+        CHECK(platform::retail_asset_read_relative_inflated(store,platform::VehicleResourcePaths[0],bytes,128u<<20,&error));
+        const auto expected=platform::camera_mount_fit(assets::inspect_pc_pmt(assets::ByteView(bytes)),0);
+        platform::PcSoftD3D9Device soft(640,480);platform::PcSceneRenderer scene(soft);
+        CHECK(scene.load_bank(platform::VehicleResourceIds[0],std::move(bytes),error));
+        scene.vehicle_camera=[&](driving::Bytes& vehicle,driving::Bytes& cam){vehicle=car;cam=camera;return true;};
+        scene.set_screen(1280,720);CHECK(scene.invoke(0x484ee0u,0,385,32,0)&&scene.camera_unanswered==0);
+        scene.pause_780248=1;camera.put8(0x34a,0);(void)fov(1); // native bumper, no Bonnet flag
+        const auto base_eye=camera.f32(0xf8),base_near=camera.f32(0xbc);
+        enhancements::set_display_rate(120);enhancements::display_before_tick();
+        CHECK(scene.invoke(0x485fe0u,0,385,16,0)&&scene.camera_unanswered==0);
+        const auto rendered=scene.render_view();
+        CHECK(std::fabs(rendered.eye[1]-expected.bumper[1])<1e-5f&&std::fabs(rendered.eye[2]+expected.bumper[2])<1e-5f);
+        CHECK(rendered.frustum_95bf40[4]==0.05f&&camera.f32(0xbc)==base_near&&camera.f32(0xf8)==base_eye);
+        enhancements::display_after_ticks(.5f,0);
+        CHECK(scene.render_view().view_95d860==rendered.view_95d860&&scene.render_view().frustum_95bf40==rendered.frustum_95bf40);
+        enhancements::set_display_rate(60);
+        for(unsigned i=0;i<3;++i)CHECK(scene.invoke(0x485fe0u,0,385,16,0)&&scene.render_view().view_95d860==rendered.view_95d860&&camera.f32(0xf8)==base_eye);
+    }
     CHECK(std::filesystem::remove(path)&&std::filesystem::remove(dir));
-    platform::camera_fov_adjust()=nullptr;platform::g_pc_triple_corrections=nullptr;
+    platform::camera_fov_adjust()=nullptr;platform::camera_mount_adjust()=nullptr;platform::camera_view_cycle()=nullptr;
+    platform::g_pc_triple_corrections=nullptr;driving::camera_fov_context()={};
     std::printf("camera controls: %u checks\n",checks);
 }

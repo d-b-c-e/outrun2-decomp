@@ -173,7 +173,8 @@ void race_camera_view_switch_484a40(Bytes c,std::uint32_t mask,std::uint8_t byte
         }else if((mask&0x40000u)!=0u&&byte_780270==0u){
             race_camera_save_4833e0(c,0x1e);
             const std::int8_t v=c.i8(0x34a);
-            c.put8(0x34a,v>0?std::uint8_t(v-1):2u);
+            const auto cycle=camera_fov_context().cycle;
+            c.put8(0x34a,cycle&&v>=0&&v<=2?cycle(std::uint8_t(v)):(v>0?std::uint8_t(v-1):2u));
         }
     }
     const std::int16_t t346=c.i16(0x346);

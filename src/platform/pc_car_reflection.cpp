@@ -146,8 +146,8 @@ void car_reflection_frame_414340(PcFlushContext& c,PcMatrixStack& s,PcRenderView
                                  const PcCarReflectionInputs& in,const PcCarReflectionServices& sv,PcCarReflectionStats& st){
     if((in.player_flags_79fb50&3u)!=2u)return;
     if(in.final_stage_7d33d0!=0u&&in.car.u32(0x5c)!=0u)return;
-    struct PanelRestore { PcRenderView& view;PcPanelFrusta saved;~PanelRestore(){view.panels=saved;} };
-    const PanelRestore panel_restore{view,view.panels};
+    struct PanelRestore { PcRenderView& view;PcRenderView saved;~PanelRestore(){view=saved;} };
+    const PanelRestore panel_restore{view,view};
     view.panels={}; // cube faces are single-view render targets, not the main angled back buffer
     auto& g=c.g;auto& d=c.device;
     ++st.frames;
@@ -190,7 +190,8 @@ void car_reflection_frame_414340(PcFlushContext& c,PcMatrixStack& s,PcRenderView
     g.w(0x8a8bd0)=face;
     car_reflection_restore_413fc0(c,in.player_flags_79fb50);
     const auto cam=in.camera;
-    perspective(c,s,view,cam.f32(0xa0),cam.f32(0xb8),cam.f32(0xbc),cam.f32(0xc0),cam.f32(0xc4),cam.f32(0xc8));
+    const float saved_near=panel_restore.saved.frustum_95bf40[4];
+    perspective(c,s,view,cam.f32(0xa0),cam.f32(0xb8),saved_near>0.f?saved_near:cam.f32(0xbc),cam.f32(0xc0),cam.f32(0xc4),cam.f32(0xc8));
     g.put_matrix(0x95d8a0u,current(s));
     driving::pc_matrix_pop(s);
     // The saved view (409EA0(0)) back into 95D860, the matrix above copied down.

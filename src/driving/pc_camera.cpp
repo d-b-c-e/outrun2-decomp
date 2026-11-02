@@ -87,6 +87,7 @@ void camera_view_482f20(Bytes c,PcMatrixStack& s,PcCameraDevice& d,float f){
     pc_matrix_push_unit(s);
     pc_matrix_rotate_z(s,0.f-l.z);pc_matrix_rotate_x(s,0.f-l.x);pc_matrix_rotate_y(s,0.f-l.y);
     pc_matrix_translate_vector(s,{-p.x,-p.y,-p.z}); // 40A310
+    if(const auto& framing=camera_fov_context();framing.view_adjust)framing.view_adjust(framing.view_user,c,s);
     copy_words(c,0x180,0x140,16);
     pc_matrix_get(s,c.sub(0x140,64));
     camera_device_store(s,d,0);
@@ -114,7 +115,8 @@ void camera_project_484bd0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,
         c.putf(0xa0,fov);
         c.putf(0xa4,float(2.0*std::atan(std::tan(double(fov)*0.5)*double(screen.width_740c8c)/double(screen.height_740c90))));
     }
-    camera_perspective_404310(s,c.f32(0xa0),c.f32(0xb8),c.f32(0xbc),c.f32(0xc0),c.f32(0xc4),c.f32(0xc8),d);
+    const float near_z=framing.near_z>0.f?framing.near_z:c.f32(0xbc);
+    camera_perspective_404310(s,c.f32(0xa0),c.f32(0xb8),near_z,c.f32(0xc0),c.f32(0xc4),c.f32(0xc8),d);
     camera_device_store(s,d,1);
     pc_matrix_pop(s);
     camera_view_482f20(c,s,d,camera_blend_4493e0(blend));

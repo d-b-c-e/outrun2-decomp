@@ -18,6 +18,7 @@
 #include "driving/pc_race_camera.hpp"
 #include "platform/frontend_vehicle_data.hpp"
 #include "platform/race_view_note.hpp"
+#include "platform/camera_mount_fit.hpp"
 #include <map>
 #include <memory>
 #include <functional>
@@ -32,6 +33,9 @@ bool& fix_znear();
 float& triple_fov_y();
 // Optional desktop per-camera framing; scoped to the main race/goal projection.
 driving::CameraFovAdjust& camera_fov_adjust();
+using CameraMountAdjust=void(*)(driving::Bytes camera,driving::Bytes car,const CameraMountFit*,driving::PcMatrixStack& view);
+CameraMountAdjust& camera_mount_adjust();
+driving::CameraViewCycle& camera_view_cycle();
 // The file stem of model resource `resource` in the PC resource filename table 633558 ("cs_CS_BEAC_pmt"): the folder
 // of the bank's replacement textures. Empty when the entry is missing.
 std::string pc_bank_pack_name(std::uint32_t resource);
@@ -186,6 +190,8 @@ public:
     void flush_alpha_405830(){flush_alpha();}
     // ---- race AREA/SKY display hook: end ----
 private:
+    std::array<CameraMountFit,30> camera_mounts_{};
+    static void adjust_camera_view(void*,driving::Bytes,driving::PcMatrixStack&);
     std::array<std::uint8_t,12>* sun_lists_{};
     const std::vector<std::uint8_t>* select_table_{};
     driving::Bytes environment_list(std::uint32_t token);

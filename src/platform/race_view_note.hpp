@@ -21,6 +21,7 @@ struct RaceViewSample {
     float width{}, height{};     // the render the camera projects for (PcCameraScreen)
     bool fov_override{};         // camera_fov_context().fov_y > 0 while this control ran
     bool znear_fix{};            // camera_znear_context().armed while this control ran
+    bool per_camera{};
 };
 
 class RaceViewNote {
@@ -41,7 +42,7 @@ public:
                           "aspect %.3f, render %.0fx%.0f; FOV override %s, near-plane fix %s",
                           unsigned(s.mode_78026c), int(s.variant_780258), view, double(s.fov_y_a0) * deg,
                           double(s.fov_x_a4) * deg, double(s.znear_bc), double(s.aspect_b8), double(s.width),
-                          double(s.height), s.fov_override ? "on ([Triple] MatchGameFov = false)" : "off",
+                          double(s.height), s.per_camera ? "on (per-camera framing)" : s.fov_override ? "on ([Triple] MatchGameFov = false)" : "off",
                           s.znear_fix ? "on (FixZBufferPrecision)" : "off");
         }
         return std::string(line);

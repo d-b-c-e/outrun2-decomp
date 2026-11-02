@@ -214,6 +214,9 @@ add_test(NAME vehicle_preview_init COMMAND test_vehicle_preview_init)
 add_executable(test_camera_render_binding tests/test_camera_render_binding.cpp)
 target_link_libraries(test_camera_render_binding PRIVATE outrun_native_runtime)
 add_test(NAME camera_render_binding COMMAND test_camera_render_binding)
+add_executable(test_camera_mount_fit tests/test_camera_mount_fit.cpp)
+target_link_libraries(test_camera_mount_fit PRIVATE outrun_native_runtime)
+add_test(NAME camera_mount_fit COMMAND test_camera_mount_fit)
 # Its camera tables are views of the player's EXE image: without OR2_EXE it returns 77, a skip (sana 38280).
 set_tests_properties(camera_render_binding PROPERTIES SKIP_RETURN_CODE 77)
 # C2C GOAL sequencing (ROADMAP 7 / upstream #2): production mode 19 + goal camera + GAD_PUB GOAL display over

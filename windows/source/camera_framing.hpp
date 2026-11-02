@@ -5,13 +5,13 @@
 #include <cstdint>
 #include <string>
 namespace outrun::desktop {
-// Native 484A40 cycles 2 -> 1 -> 0: chase, in-car, bumper. Cinematic/table
-// entries above 2 are not extra player-mounted cameras; do not invent a bonnet.
+// Native slots: bumper 0, in-car 1, chase 2. Logical Bonnet 3 uses slot 0 with
+// a model-derived render transform; native cinematic slots >=3 stay distinct.
 struct CameraFraming {
-    std::array<bool,3> realistic{{true,true,false}};
-    std::array<std::array<float,2>,3> offsets{}; // vertical degrees, Game / Realistic, shared across cars
-    static bool tunable(unsigned view){return view<3;}
-    static const char* prefix(unsigned view){return view==0?"Bumper":view==1?"Cockpit":"Chase";}
+    std::array<bool,4> realistic{{true,true,false,false}};
+    std::array<std::array<float,2>,4> offsets{}; // vertical degrees, Game / Realistic, shared across cars
+    static bool tunable(unsigned view){return view<4;}
+    static const char* prefix(unsigned view){return view==0?"Bumper":view==1?"Cockpit":view==2?"Chase":"Bonnet";}
     static std::string set_key(unsigned view){return std::string(prefix(view))+"Realistic";}
     static std::string offset_key(unsigned view,bool seat){return std::string(prefix(view))+(seat?"RealisticFovOffset":"GameFovOffset");}
     bool seat(unsigned view,bool triples)const{return tunable(view)&&triples&&realistic[view];}
@@ -24,4 +24,8 @@ struct CameraFraming {
         return float(std::clamp(double(base)+double(offset)*0.017453292519943295,0.001,3.140592653589793));
     }
 };
+struct CameraPoseOffset {float side{},up{},forward{},pitch{};};
+inline std::string camera_pose_key(unsigned model,unsigned view,bool seat,const char* axis){
+    return "Car"+std::to_string(model)+"."+CameraFraming::prefix(view)+(seat?"Realistic":"Game")+axis+"Offset";
+}
 }

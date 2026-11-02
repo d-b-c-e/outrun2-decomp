@@ -1450,5 +1450,35 @@
   "line": "if (!WriteFile(file.get(),text.data()+written,static_cast<DWORD>(text.size()-written),&count,nullptr) || !count)",
   "class": "latched-skip",
   "reason": "writes only the explicit reviewed report's exclusively created file; same ordinary Help guard, no automatic upload"
+ },
+ {
+  "file": "windows/source/camera_controls.cpp",
+  "line": "if(write_keys(h.path,\"Camera\",edits,error)){",
+  "class": "latched-skip",
+  "reason": "camera reset atomically clears only the current camera/set FOV and per-car pose offsets; controller is not configured during a test/record/playback process"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "if(!write_keys(p.ini,\"Graphics\",next,error,&expected)){",
+  "class": "latched-skip",
+  "reason": "quality_apply returns under p.latched before this explicit owned Graphics edit; same guard as its audited Undo sidecar"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "return write_keys(path,section,{{key,value}},error);",
+  "class": "definition",
+  "reason": "write_key delegates to the same owned multi-key editor; public writer callers are separately watched"
+ },
+ {
+  "file": "windows/source/desktop_settings.cpp",
+  "line": "bool write_keys(const std::string& path,const std::string& section,const SettingsEdits& values,std::string& error,const SettingsEdits* expected){",
+  "class": "definition",
+  "reason": "owned multi-key editor definition; callers watched"
+ },
+ {
+  "file": "windows/source/desktop_settings.hpp",
+  "line": "bool write_keys(const std::string& path,const std::string& section,const SettingsEdits& values,std::string& error, const SettingsEdits* expected=nullptr);",
+  "class": "definition",
+  "reason": "multi-key writer declaration"
  }
 ]

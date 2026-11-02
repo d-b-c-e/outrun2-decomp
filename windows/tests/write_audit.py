@@ -37,7 +37,7 @@ SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
             "remove_directory", "open_result_log", "prepare_run", "write_refusal", "write_png", "set_home",
             "ImFileOpen",   # Dear ImGui's file helper (vendor/native): its call sites are audited, not only its fopen
-            "write_key",    # one settings key (desktop_settings.cpp, the F6 panel's saves)
+            "write_key", "write_keys",    # owned single/multi-key settings edits, including camera reset
             "write_new_file", "replace_file_atomically", "write_session_status"]   # Play with Recording (ordinary_recording.cpp)
 
 OPEN_RE = re.compile(r"\b(?:std::)?(fopen|_wfopen|fopen_s|_wfopen_s|freopen|_wfreopen|freopen_s|_wfreopen_s|_fsopen|_wfsopen|fdopen|_fdopen)\s*\(")
@@ -430,6 +430,7 @@ def selftest(repo, entries):
     cases.append(("an output stream", mutated(rank, lambda t: t + "\nstatic void s(){std::ofstream o(\"x.txt\");}\n")))
     cases.append(("an open with ios::out", mutated(rank, lambda t: t + "\nstatic void o(std::fstream& f){f.open(\"x\",std::ios::out);}\n")))
     cases.append(("a new wrapper call", mutated(rank, lambda t: t + "\nstatic void w(){write_options(\"x.ini\",{});}\n")))
+    cases.append(("a new multi-key settings writer", mutated(rank, lambda t: t + '\nstatic void cm(){write_keys("owner.ini","Camera",{},error);}\n')))
     cases.append(("a Win32 delete", mutated(rank, lambda t: t + "\nstatic void d(){DeleteFileW(L\"x\");}\n")))
     cases.append(("a filesystem mutation", mutated(rank, lambda t: t + "\nstatic void m(){std::filesystem::remove_all(\"x\");}\n")))
     cases.append(("a game-data read through home()", mutated(rank, lambda t: t + "\nstatic void h(){auto p=home()+\"/data/course.pak\";}\n")))
