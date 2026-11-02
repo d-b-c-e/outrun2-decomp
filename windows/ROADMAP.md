@@ -89,6 +89,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
    - The owner confirmed reception on the wheel's screen through SimHub, forwarded to Pit House (hub
      `docs/2026-10-12-session-release-progress.md`, 20:16).
    - Per-field accuracy is not yet fully qualified against the live HUD and receiver.
+   - November 2 offline delivery fixture now runs the production sender with synthetic runtime records, an OS-assigned private loopback port and a unique private shared-memory name: 159 checks cover both layouts, startup gates, real wire/shared bytes, pause/menu/invalid-speed behavior and shutdown/input-chain cleanup. Encoder + sender CTest 2/2 pass. No game, owner receiver/port/map or physical output; attended HUD/receiver evidence still required (`docs/TELEMETRY-QUALIFICATION.md`).
    - Source/retained-capture review (2026-10-13): HUD speed, gears and GAME-consumed input channels have traced
      producers; Forza steering now uses the consumed channel and unsupported lateral acceleration is zero. The
      shared-memory v1 raw-offset ABI stays byte-compatible, with its misleading steering/lateral/impact labels
