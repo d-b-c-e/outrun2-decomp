@@ -36,8 +36,10 @@ bool triples(){return platform::g_pc_triple_corrections!=nullptr;}
 std::string label(){
     if(!CameraFraming::tunable(h.view))return "Camera "+std::to_string(h.view>=4?h.view-4:h.view);
     const bool seat=h.framing.seat(h.view,triples());
+    bool custom=h.framing.offsets[h.view][seat?1:0]!=0.f;
+    if(h.model<30){const auto& p=h.poses[h.model][h.view][seat?1:0];custom=custom||p.side!=0.f||p.up!=0.f||p.forward!=0.f||p.pitch!=0.f;}
     return std::string(CameraFraming::prefix(h.view))+" Camera - "+(seat?"Realistic FOV":"Game FOV")+
-        (h.framing.offsets[h.view][seat?1:0]!=0.f?" (Custom)":"")+
+        (custom?" (Custom)":"")+
         ((h.view==0||h.view==3)&&h.model<30&&!h.fit_available?" (native placement)":"");
 }
 void notify(const std::string& text){h.notice=text;h.notice_until=GetTickCount64()+3000;}
@@ -70,7 +72,7 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
     const std::lock_guard<std::mutex> lock(camera_mutex);
     const auto old_model=h.model;const bool old_fit=h.fit_available;
     const int model=car.i8(0x11);h.model=model>=0&&model<30?unsigned(model):255;h.fit_available=fit&&fit->valid;
-    if((old_model!=h.model||old_fit!=h.fit_available)&&(h.view==0||h.view==3))notify(label());
+    if((old_model!=h.model||old_fit!=h.fit_available)&&(h.view==0||h.view==3)&&h.notice.find("not saved")==std::string::npos)notify(label());
     if(!CameraFraming::tunable(h.view)||h.model>=30)return;
     const bool mounted=h.view==0||h.view==3;
     if(mounted&&fit&&fit->valid){
@@ -196,8 +198,9 @@ std::string camera_controls_label(){const std::lock_guard<std::mutex> lock(camer
 std::string camera_controls_notice(){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     if(!h.configured||GetTickCount64()>=h.notice_until)return {};
-    return h.notice+"\n"+camera_key_display(h.keys.names[9])+" / "+camera_key_display(h.keys.names[8])+": zoom; "+
-        camera_key_display(h.keys.names[10])+": reset"+(triples()?"; F7 Game / Realistic":"");
+    if(!CameraFraming::tunable(h.view))return h.notice;
+    return h.notice+"\n"+camera_key_display(h.keys.names[9])+" / "+camera_key_display(h.keys.names[8])+" zoom; "+
+        camera_key_display(h.keys.names[10])+" reset"+(triples()?h.framing.seat(h.view,true)?"; F7 Game set":"; F7 Realistic set":"");
 }
 void camera_controls_toggle_set(){
     const std::lock_guard<std::mutex> lock(camera_mutex);

@@ -74,8 +74,10 @@ int main(int argc,char** argv){
     const auto release=[&](unsigned key){desktop_keys()[key]=0x80;poll();desktop_keys()[key]=0;poll();};
     (void)fov(1);poll();desktop_keys()[0x20]=0x80; // unrelated key remains held throughout camera actions
     release(0x4e);CHECK(fov(1)<0.586f&&camera_controls_label().find("(Custom)")!=std::string::npos);
+    CHECK(camera_controls_notice().find("Cockpit Camera - Realistic FOV (Custom)")!=std::string::npos&&camera_controls_notice().find("Numpad + / Numpad - zoom; Numpad 5 reset; F7 Game set")!=std::string::npos);
     CHECK(ini.load(path)&&ini.number("Camera","CockpitRealisticFovOffset",0.f)==-2.f);
     const auto narrowed=fov(1);release(0x41);CHECK(fov(1)==1.1f); // F7 changes only this camera's set
+    CHECK(camera_controls_notice().find("Cockpit Camera - Game FOV")!=std::string::npos&&camera_controls_notice().find("F7 Realistic set")!=std::string::npos);
     CHECK(fov(0)==0.586f&&fov(2)==1.1f);
     (void)fov(1);release(0x4a);CHECK(fov(1)>1.1f);
     release(0x41);CHECK(fov(1)==narrowed);release(0x4c);CHECK(fov(1)==0.586f);
@@ -97,6 +99,7 @@ int main(int argc,char** argv){
     CHECK(fov(0)==0.586f&&fov(1)==1.1f&&fov(2)==1.1f);
     // Bonnet is a logical fourth view on the native bumper slot; the native cockpit remains distinct.
     CHECK(platform::camera_view_cycle()(0)==0&&fov(0)==1.1f&&camera_controls_label().find("Bonnet Camera")!=std::string::npos);
+    CHECK(camera_controls_notice().find("Bonnet Camera - Game FOV")!=std::string::npos);
     std::array<std::uint8_t,0xf00> car_bytes{};driving::Bytes car(car_bytes.data(),car_bytes.size());
     std::array<std::uint8_t,0x400> cam_bytes{};driving::Bytes camera(cam_bytes.data(),cam_bytes.size());
     for(unsigned i=0;i<16;++i)car.putf(0xb0+i*4,i%5==0?1.f:0.f);
@@ -132,6 +135,7 @@ int main(int argc,char** argv){
     (void)fov(1);(void)platform::camera_view_cycle()(0);(void)fov(0);(void)mount();poll();camera_controls_reset();
     desktop_keys()[0x20]=0x80;
     release(0x48);CHECK(std::fabs(camera_controls_pose()[2]-.02f)<1e-6f); // 8 forward
+    CHECK(camera_controls_notice().find("Bonnet Camera - Game FOV (Custom)")!=std::string::npos);
     release(0x50);CHECK(camera_controls_pose()[2]==0.f); // 2 back
     release(0x49);CHECK(std::fabs(camera_controls_pose()[1]-.02f)<1e-6f); // 9 up
     release(0x51);CHECK(camera_controls_pose()[1]==0.f); // 3 down
