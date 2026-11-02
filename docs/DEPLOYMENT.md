@@ -10,8 +10,7 @@ release or tag. Test evidence is in [ALPHA-CHECKLIST.md](ALPHA-CHECKLIST.md).
 **The 2026-10-18/19 install below is gone.** `E:\Games\OutRunDecompSmoke` (exe `4D5BE954`, the owner's F6-saved INI
 `F1CB0F84`, the HD UI texture folder and its backups) no longer exists anywhere on disk, and it is not in the Recycle
 Bin. When or how it was removed is unknown. The LaunchBox entry "OutRun 2006: Coast 2 Coast (Decomp)" (ID
-`cab44f53-...`) still points at `..\..\..\..\Games\OutRunDecompSmoke\OutRunDesktop.exe`, so it cannot launch. Everything
-from "What is installed" downward is history.
+`cab44f53-...`) was repaired file-only during the November 2 overnight work: its ApplicationPath and RootFolder now point at the installed Decomp folder below. LaunchBox and BigBox were closed; unrelated XML bytes were retained and a backup kept. No launch was performed. Everything from "What is installed" downward is history.
 
 **Installed 2026-11-01 18:08Z** (file-only, game closed, not launched since) in the second, older copy under LaunchBox:
 `<LaunchBox-Racing>\Games\Windows\Outrun 2006 Coast to Coast\OutRun2006 Coast 2 Coast (Decomp)`:
@@ -30,13 +29,17 @@ from "What is installed" downward is history.
   the game, copy the exe back, delete `WheelFfb.dll`. Package: `E:\Source\temp\outrun2-decomp\package-2dd9886`.
 - Unverified: any launch of this build, F6, wheel input, and producer@2 force at a physical wheel (never felt).
 
+**November 2 source / launch-path follow-up.**
+- The LaunchBox entry `cab44f53-70b5-4b72-86f2-b64fc1f4a8b9` now uses `Games\Windows\Outrun 2006 Coast to Coast\OutRun2006 Coast 2 Coast (Decomp)\OutRunDesktop.exe` relative to LaunchBox. RootFolder matches and Version names installed `2dd9886` / `62E5531E`. Only those three entry fields changed; no game/INI/profile byte changed.
+- XML before SHA256 `B29DCB87FEE2D8306F1BB88B32C7ADF6ABBBA63E0CFA2DC6C300816192BEEE34`, after `69383F59CCA5EB766818A81B8CF2690054C8F9D0F3259CF27BA6BBEB780CFA59`.
+- Backup/receipt: `work/mevu-overnight-20261102/work/launchbox-route-20261102/{Windows.xml.before,receipt.json}` inside the primary project. Before a rollback, close LaunchBox/BigBox. Restore the full backup only if current XML still equals the recorded after hash; otherwise restore only these three fields in this entry, preserving later library edits. The deleted Smoke directory and its lost owner settings were not recreated.
+- `outrun_adapter` failure reproduced, then fixed in its stale assertion: contract commit `6b0bf0c5` added `modMenu` and `muteFfb`, so the current partition is 22 delivered / 9 unavailable (horn remains delivered). Focused adapter test passes; this changes a test expectation, not the installed game. Historical full Windows result above remains 45/46; no fresh full-suite pass is claimed.
+
 **Next steps.**
-1. Owner: launch `OutRunDesktop.exe` from the "(Decomp)" folder above (from its own folder), not the LaunchBox entry.
-   First drive is the first physical force check: hands on the wheel; F8 stops force, F6 Force turns it off.
-2. Repoint the LaunchBox entry (LaunchBox closed) to the "(Decomp)" folder, or restore a maintained install, and
-   re-apply the Wheelkit profile so `[Controls]` and `[Triple]` match the rig.
-3. A packaged installer (receipt, backup, uninstall) so installs stop being hand copies (grid `clean_install`).
-4. `outrun_adapter` test: reconcile the horn action count (20 delivered / 11 unavailable) with the current contract.
+1. The owner can use the repaired LaunchBox Decomp entry or run the installed executable from its own folder. This route is statically verified, not launch-tested. First physical producer@2 force check remains owner-attended; F8 stops force and F6 Force turns it off.
+2. Re-apply the Wheelkit profile when desired so `[Controls]` and `[Triple]` in this older install match the current rig. Do not substitute or reconstruct the lost Smoke INI from assumptions.
+3. Follow [the native triples next-step plan](../windows/docs/TRIPLES-NEXT-2026-11-02.md): ordinary scene-node culling across panel frusta first; keep the existing GPU replication and stateful camera lifecycle.
+4. Build a player installer with honest receipt/dependency identity, backup and uninstall (`clean_install`). The present install is still the file-only 2dd9886 + WheelFfb payload above; no new binary was deployed overnight.
 
 ## What is installed (consolidated 2026-10-18 21:57:30Z; force correction 2026-10-19 02:17:54Z; candidate 54eca08 2026-10-19 05:17Z)
 

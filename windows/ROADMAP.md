@@ -13,6 +13,13 @@ Fork: https://github.com/d-b-c-e/outrun2-decomp (`main` = this work;
 narrow hooks in shared files, so upstream drops rebase cleanly. Generic fixes
 go upstream as small pull requests (first: `tweaks-exe`).
 
+## Overnight checkpoint — November 2, 2026
+
+- The LaunchBox Decomp entry was repaired while LaunchBox/BigBox were closed; it now points at the existing installed `62E5531E` executable, with its XML backup/hash receipt retained. No game launch or new game binary install. See `docs/DEPLOYMENT.md` for rollback and exact paths.
+- Reproduced the `outrun_adapter` failure and corrected its old 20/11 count to 22/9 after `modMenu` and `muteFfb` became delivered actions (`1d0195e`). CTest adapter + triple_screens passes 2/2; triple_screens reports 1,153 checks. Runtime behavior is unchanged; the full suite was not rerun.
+- Work from `origin/main` in `work/mevu-overnight-20261102` (branch `mevu/overnight-20261102`), preserving the stale primary checkout. Retain this worktree/build cache and private launch-path receipt.
+- [Concrete triples/perspective next increment](docs/TRIPLES-NEXT-2026-11-02.md): keep GPU replication, address ordinary scene-node center-frustum culling, then current Game/Realistic framing and curve with separate HUD presentation. The abandoned mod's camera findings inform source tracing, not hook addresses or native-port acceptance.
+
 ## Order of work
 
 1. ✅ **Retail EXE.** The Tweaks `OR2006C2C.exe` (the DVD build without its
