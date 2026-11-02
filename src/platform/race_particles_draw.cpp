@@ -10,6 +10,9 @@
 // the service in the same order.
 #include "platform/race_particles_port.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_d3d9.hpp"
+#include "driving/pc_d3dx.hpp"
+#include <algorithm>
 namespace outrun::platform {
 using namespace particles_detail;
 namespace {
@@ -96,17 +99,52 @@ void tire_mark_disp_486450(D& d){
     p.pop();
 }
 // ---- draw functions --------------------------------------------------------
+bool unproject_particle(const std::array<float,4>& clip,const driving::PcMatrix16& inverse,std::array<float,3>& out){
+    std::array<double,4> q{};
+    for(unsigned j=0;j<4;++j)for(unsigned i=0;i<4;++i)q[j]+=double(clip[i])*inverse[i*4+j];
+    if(!std::isfinite(q[3])||q[3]==0.)return false;
+    for(unsigned j=0;j<3;++j){out[j]=float(q[j]/q[3]);if(!std::isfinite(out[j]))return false;}return true;
+}
 std::uint32_t draw_418cf0(D& d,std::uint32_t buffer,std::uint32_t src){
     P& p=d.p;
     const std::uint32_t tex=p.u(src+0x50);
     std::uint32_t count=0;
     const float scale=push_view(p,true)[0];
-    d.d.set_vertex_shader(0);d.d.set_fvf(0x144);d.d.set_texture(0,tex);
+    driving::PcMatrix16 combined{},inverse{};d.matrix(combined);
+    const bool world=g_pc_triple_corrections&&g_pc_fix_particle_rendering&&p.pc.d3d&&p.pc.d3d->draw_phase()==PcDrawPhase::World&&
+        p.pc.d3d->logical_backbuffer_target()&&p.f(0x740c8c)==640.f&&p.f(0x740c90)==480.f&&
+        std::all_of(combined.begin(),combined.end(),[](float v){return std::isfinite(v);})&&driving::pc_d3dx_matrix_inverse(inverse,combined);
+    d.d.set_vertex_shader(0);d.d.set_fvf(world?0x142:0x144);d.d.set_texture(0,tex);
+    if(world){d.rs(0x89,0);d.rs(0x1c,0);d.tss(0,0xb,0);d.tss(0,0x18,0);} // already-shaded particle colour/UV, as the native XYZ billboard path
     d.rs(0x16,1);d.rs(0x18,0x80);d.rs(0x1b,1);d.rs(0x13,p.u(src+0x70));d.rs(0x14,p.u(src+0x74));d.rs(0x07,1);d.rs(0x0e,1);d.rs(0xa8,7);
     std::uint32_t esi=0x8bc378u;
     for(std::uint32_t k=0,edi=buffer;k<p.u(src+4);++k,edi+=0x50){
         if(p.i(edi)>=0)continue;
         const auto v=vec4(p,p.f(edi+4),p.f(edi+8),p.f(edi+0xc),1.f);
+        if(world){
+            // Preserve world identity before center-eye division/rejection. The
+            // GPU can then clip/replicate XYZ against each panel's own near plane.
+            if(!std::all_of(v.begin(),v.end(),[](float f){return std::isfinite(f);}))continue;
+            float dx=st((p.x(edi+0x3c)*p.x(src+0x44))*X(scale)),dy=st(X(dx)*X(320.f)/X(240.f));
+            if(v[3]>0.f){
+                const float inv=st(X(1.f)/X(v[3]));
+                X pixels=(((p.x(edi+0x3c)*p.x(src+0x44))*X(640.f))*X(inv))*X(scale);pixels=X(st(pixels)*.5f);
+                if(!c0c3(pixels,p.x(0x74f7bc)))pixels=(pixels-p.x(0x74f7bc))*p.x(0x74f7c0)+p.x(0x74f7bc);
+                dx=st(pixels*X(v[3])/X(320.f));dy=st(pixels*X(v[3])/X(240.f));
+            }
+            if(!std::isfinite(dx)||!std::isfinite(dy))continue;
+            const std::array<std::array<float,4>,4> clips{{{{v[0]-dx,v[1]+dy,v[2],v[3]}},{{v[0]-dx,v[1]-dy,v[2],v[3]}},
+                {{v[0]+dx,v[1]+dy,v[2],v[3]}},{{v[0]+dx,v[1]-dy,v[2],v[3]}}}};
+            std::array<std::array<float,3>,4> corners{};bool valid=true;
+            for(unsigned j=0;j<4;++j)valid=unproject_particle(clips[j],inverse,corners[j])&&valid;
+            if(!valid)continue;
+            constexpr unsigned order[]{0,1,2,2,1,3};const auto base=0x8bc2f8u+count*6u*0x18u;
+            for(unsigned j=0;j<6;++j){const auto corner=order[j],a=base+j*0x18;
+                for(unsigned axis=0;axis<3;++axis)p.putf(a+axis*4,corners[corner][axis]);
+                p.put(a+0xc,p.u(edi+0x38));p.put(a+0x10,p.u(edi+(corner==1||corner==3?0x48:0x40)));p.put(a+0x14,p.u(edi+(corner>=2?0x4c:0x44)));
+            }
+            if(++count==512)break;continue;
+        }
         {const X w=X(v[3]);if(!(w>X(0.0f))&&!(c2(w,X(0.0f))))continue;}   // jnp: w <= 0 skips, NaN draws
         const float inv=st(X(1.0f)/X(v[3]));
         float sx=st((p.x(0x740c8cu)*X(v[0]))*X(inv)+p.x(0x740c8cu));
@@ -128,7 +166,7 @@ std::uint32_t draw_418cf0(D& d,std::uint32_t buffer,std::uint32_t src){
         esi+=0xa8u;
         if(esi==0x8d1378u)break;
     }
-    if(count)d.draw(4,count*2u,0x8bc2f8u,0x1c,count*6u);
+    if(count)d.draw(4,count*2u,0x8bc2f8u,world?0x18:0x1c,count*6u);
     p.pop();
     d.rs(0xa8,0xf);d.rs(0x0f,1);d.d.set_texture(0,0);
     return count;

@@ -93,6 +93,7 @@ public:
     // in colour_/depth_/stencil_ (swapped with their owner); SetRenderTarget
     // resets the viewport to the whole target as D3D9 does.
     std::uint32_t get_render_target(std::uint32_t index)override{if(index!=0u)return 0u;add_ref(colour_target_);return colour_target_;}
+    bool logical_backbuffer_target()const noexcept override{return colour_target_==BackBuffer;}
     std::uint32_t get_depth_stencil_surface()override{add_ref(depth_target_);return depth_target_;}
     void set_render_target(std::uint32_t index,std::uint32_t surface)override;
     void set_depth_stencil_surface(std::uint32_t surface)override;

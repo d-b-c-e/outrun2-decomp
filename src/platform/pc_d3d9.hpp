@@ -56,6 +56,8 @@ public:
     PcDrawPhase draw_phase()const noexcept{return draw_phase_;}
     void set_draw_phase(PcDrawPhase phase)noexcept{draw_phase_=phase;}
     PcDrawDomain draw_domain(bool rhw,bool logical_backbuffer=true)const noexcept{return pc_draw_domain(draw_phase_,rhw,logical_backbuffer);}
+    // Explicit target identity for world-effect admission; unknown devices refuse.
+    virtual bool logical_backbuffer_target()const noexcept{return false;}
     // CreateVertexBuffer / CreateIndexBuffer (vtable 0x68 / 0x6C).
     virtual std::uint32_t create_vertex_buffer(std::uint32_t length,std::uint32_t usage,std::uint32_t fvf,std::uint32_t pool)=0;
     virtual std::uint32_t create_index_buffer(std::uint32_t length,std::uint32_t usage,std::uint32_t format,std::uint32_t pool)=0;

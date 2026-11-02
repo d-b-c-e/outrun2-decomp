@@ -246,6 +246,7 @@ add_executable(test_girlfriend_mission tests/test_girlfriend_mission.cpp)
 target_link_libraries(test_girlfriend_mission PRIVATE outrun_native_runtime)
 add_test(NAME girlfriend_mission COMMAND test_girlfriend_mission)
 add_executable(test_particle_screen_admission tests/test_particle_screen_admission.cpp)
+target_include_directories(test_particle_screen_admission PRIVATE windows/source)
 target_link_libraries(test_particle_screen_admission PRIVATE outrun_native_runtime)
 add_test(NAME particle_screen_admission COMMAND test_particle_screen_admission)
 # [Misc] HudToggleKey routing (src/platform/pc_screen.hpp): NaviPub_Disp hidden and shown by posted toggles; NaviPub's
