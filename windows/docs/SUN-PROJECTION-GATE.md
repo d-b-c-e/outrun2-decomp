@@ -1,4 +1,4 @@
-# Remaining course sun / lens-flare projection gap
+# Legacy course sun / lens-flare projection gap
 
 The actual `native_course_pass_leaf(...,40CBC0,work+90)` rejects a sun point with center-view P.z >=0. For a point in front, it calculates center-camera sx/sy using camera+B0/B4 and rejects outside (-470,+470) horizontally or (-440,+440) vertically. These happen before queueing any sun/disc/glow/flare draw. Later XYZ/point/GS corrections therefore cannot recover these caller losses.
 
@@ -29,3 +29,7 @@ GO494081 entered08:31:43, released08:31:59 local immediately after results; own 
 ## Preparation/view-state split follow-up
 
 Step1 now separates shared frame preparation from explicit view/query/flicker storage while the runtime keeps its one legacy render call. The retail fixture verifies165 assertions, including190128-byte equality of34 captured legacy indexed packets and three independent synthetic query/flicker contexts from one preparation. The three contexts deliberately reuse the legacy camera, so no side projection, routing or rendered acceptance is implied. See SUN-FRAME-VIEW-SPLIT.md for exact source contracts, baseline identity, custody and remaining GS/compositor routing work.
+
+## Developer per-view routing checkpoint
+
+The default/legacy branch above is unchanged. Under the existing admitted compositor developer profile, step2 now CPU-issues independent source-eye sun views with a GS-excluded world-source phase, per-panel viewport/culling/projection and independent temporal/query state. The retail fixture passes655 assertions including exact190128-byte legacy packet equality and8 developer flat/curve side-point routing cases. Native D3D11 query APIs and viewport routing compile but have not run. See [the current split/routing contract](SUN-FRAME-VIEW-SPLIT.md#step2-developer-routing-checkpoint) for source details, custody and rendered gates. No owner installation or visual/physical qualification is implied.

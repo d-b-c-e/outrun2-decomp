@@ -27,6 +27,10 @@ int main(){
             auto p=perspective_off_center_rh(-right,right,-top,top,near,10000);std::array<float,16> original;
             for(unsigned i=0;i<16;++i)p[i]=original[i]=float(p[i]);
             std::array<float,48> actual;CHECK(curve_scene_corrections(*profile,original.data(),actual.data()));
+            TripleViews direct;CHECK(curve_scene_views(*profile,original.data(),direct));
+            Mat4 inverse;CHECK(mat_inverse(p,inverse));
+            for(unsigned panel=0;panel<3;++panel){const auto composed=mat_mul(mat_mul(inverse,direct.rotation[panel]),direct.projection[panel]);
+                for(unsigned k=0;k<16;++k)CHECK(float(composed[k])==actual[panel*16+k]);}
             TripleViews flat;CHECK(triple_views(p,rig,flat));
             if(radius==0.)for(unsigned panel=0;panel<3;++panel)for(unsigned k=0;k<16;++k)CHECK(std::abs(actual[panel*16+k]-flat.correction[panel][k])<1e-5);
             for(unsigned panel=0;panel<3;++panel){

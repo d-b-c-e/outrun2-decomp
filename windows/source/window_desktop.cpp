@@ -88,6 +88,22 @@ bool triple_fixture_corrections(const float* projection,float* out){
     for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
     return true;
 }
+bool sun_fixture_views(const float* projection,outrun::platform::PcSunViews& out){
+    if(!curve_profile||!outrun::platform::g_pc_triple_corrections)return false;
+    outrun::desktop::TripleViews views;
+    if(outrun::platform::pc_curve_active()&&outrun::platform::pc_comparison_curve()){
+        if(!outrun::desktop::curve_scene_views(*curve_profile,projection,views))return false;
+    }else{
+        outrun::desktop::Mat4 p{};for(unsigned k=0;k<16;++k)p[k]=projection[k];
+        if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),views))return false;
+    }
+    outrun::platform::PcSunViews candidate;
+    for(unsigned i=0;i<3;++i)for(unsigned k=0;k<16;++k){
+        candidate.rotation[i][k]=float(views.rotation[i][k]);candidate.projection[i][k]=float(views.projection[i][k]);
+        if(!std::isfinite(candidate.rotation[i][k])||!std::isfinite(candidate.projection[i][k]))return false;
+    }
+    out=candidate;return true;
+}
 struct MonitorScan { std::vector<outrun::desktop::ScreenRect> rects; bool failed{}; };
 BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM state){
     auto& scan=*reinterpret_cast<MonitorScan*>(state);
@@ -173,7 +189,10 @@ NativeWindow& native_window(){
         if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
         if(triple_status.applied==td::TripleProjection::angled){
             outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;
-            if(curve_profile)outrun::platform::g_pc_curve_mesh_provider=curve_mesh_view;
+            if(curve_profile){
+                outrun::platform::g_pc_curve_mesh_provider=curve_mesh_view;
+                outrun::platform::g_pc_sun_views_provider=sun_fixture_views;
+            }
             // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
             // 44DE10) draw nothing behind the car and add objects beside it only a few sections on. Where [Graphics]
             // leaves a key at 0, the views union 64 sections ahead and 64 behind (td::triple_default_union). Tweaks'

@@ -8,6 +8,10 @@
 #include "platform/race_course_passes.hpp"
 #include "system/exe_image.hpp"
 #include "triple_rig.hpp"
+#include "curve_scene_profile.hpp"
+#include "platform/pc_render_flush.hpp"
+#include "platform/pc_world_coverage.hpp"
+#include "driving/pc_d3dx.hpp"
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -25,12 +29,15 @@ struct Device:PcSoftD3D9Device {
     unsigned draws{},queries{},query_reads{},query_begin{},query_end{};bool query_ready{};
     std::vector<unsigned> primitive_counts;std::vector<PcDrawPhase> phases;
     std::vector<std::uint8_t> packets;std::vector<unsigned> query_begin_ids;
+    struct Routed {int panel;std::array<float,16> view,projection;};
+    std::vector<Routed> routed;
     std::map<unsigned,unsigned> query_samples;std::map<unsigned,bool> query_ready_by_id;
     template<class T>void capture(const T& value){const auto* b=reinterpret_cast<const std::uint8_t*>(&value);packets.insert(packets.end(),b,b+sizeof value);}
     unsigned create_occlusion_query()override{++queries;return 41+queries;} // synthetic query identity only
     unsigned query_get_data(unsigned q,unsigned& samples)override{CHECK(q>=42&&q<42+queries);++query_reads;const auto sample=query_samples.find(q);samples=sample==query_samples.end()?11500:sample->second;const auto ready=query_ready_by_id.find(q);return (ready==query_ready_by_id.end()?query_ready:ready->second)?0:1;}
     void query_issue(unsigned q,unsigned flags)override{CHECK(q>=42&&q<42+queries);if(flags&2){++query_begin;query_begin_ids.push_back(q);}if(flags&1)++query_end;}
     unsigned draw_indexed_primitive(unsigned type,std::int32_t base,unsigned minimum,unsigned vertices,unsigned start,unsigned count)override{
+        if(draw_phase()==PcDrawPhase::SunView)routed.push_back({sun_panel(),transform_view,transform_proj});
         capture(type);capture(base);capture(minimum);capture(vertices);capture(start);capture(count);
         capture(transform_world);capture(transform_view);capture(transform_proj);capture(render);capture(textures);
         capture(indices);capture(declaration);capture(vertex_shader);capture(pixel_shader);capture(vs_constants);capture(ps_constants);
@@ -44,6 +51,16 @@ static std::array<double,4> transform(const math::Mat4& m,const math::RigVec& v)
     return {v.x*m[0]+v.y*m[4]+v.z*m[8]+m[12],v.x*m[1]+v.y*m[5]+v.z*m[9]+m[13],v.x*m[2]+v.y*m[6]+v.z*m[10]+m[14],v.x*m[3]+v.y*m[7]+v.z*m[11]+m[15]};
 }
 static bool inside(const std::array<double,4>& p){return p[3]>0&&p[0]>=-p[3]&&p[0]<=p[3]&&p[1]>=-p[3]&&p[1]<=p[3]&&p[2]>=0&&p[2]<=p[3];}
+static bool curve_sources;
+static bool source_views(const float* projection,PcSunViews& out){
+    math::Mat4 p{};for(unsigned k=0;k<16;++k)p[k]=projection[k];math::TripleViews views;
+    if(curve_sources){
+        auto profile=std::make_unique<math::CurveSceneProfile>();auto rig=math::fixture_rig();rig.panel_height_mm=rig.panel_width_mm*9./16.;
+        if(!math::curve_scene_profile(rig,1500.,*profile)||!math::curve_scene_views(*profile,projection,views))return false;
+    }else if(!math::triple_views(p,math::fixture_rig(),views))return false;
+    for(unsigned i=0;i<3;++i)for(unsigned k=0;k<16;++k){out.rotation[i][k]=float(views.rotation[i][k]);out.projection[i][k]=float(views.projection[i][k]);}
+    return true;
+}
 int main(int argc,char** argv){try{
     if(!exe_image_autoload()){std::puts("SKIP: OR2_EXE verified cache required for actual course/manager constants");return 77;}
     auto context=std::make_unique<NativeRuntimeContext>();auto& c=*context;
@@ -146,6 +163,46 @@ int main(int argc,char** argv){try{
         CHECK(std::abs(r.globals().f(0x95aef8)-2000.f/11500.f)<1e-6f&&c.race_effects.scene.work==prepared_work);
         CHECK(d.errors.empty());
         std::printf("sun split: one preparation, independent3 query/flicker contexts; no panel routing or rendering\n");
+
+        // Exercise the actual 40CBC0 route with retail sprites. The formerly
+        // rejected side-visible points must reach the matching source eye.
+        std::array<float,16> native_projection{},identity{};
+        for(unsigned k=0;k<16;++k){native_projection[k]=float(projection[k]);identity[k]=k%5==0?1.f:0.f;}
+        native_projection[5]=native_projection[0]*16.f/9.f; // admitted equal16:9 developer source
+        render_queue_flush_4052c0(r.flush_context(),r.queue_context());
+        render_set_matrix_410f90(r.flush_context(),native_projection,1);render_set_matrix_410f90(r.flush_context(),identity,0);
+        d.set_transform(3,native_projection.data());d.set_transform(2,identity.data());
+        const auto main_view=r.render_view();const auto car_before=car;
+        const auto old_provider=g_pc_sun_views_provider;g_pc_sun_views_provider=source_views;g_pc_triple_corrections=corrections;
+        for(const bool curved:{false,true})for(const bool left:{false,true})for(const auto point:{behind,edge}){
+            curve_sources=curved;const auto eye_point=math::RigVec{left?-point.x:point.x,point.y,point.z};
+            for(unsigned k=0;k<3;++k){const float f=float(k==0?eye_point.x:k==1?eye_point.y:eye_point.z);cam.putf(0xd4+k*4,f);cam.putf(0x3a8+k*4,f);}
+            const auto unchanged_camera=camera;
+            PcSunViews expected;CHECK(source_views(native_projection.data(),expected));
+            work.put16(0x90+0x10,0);work.put16(0x90+0x12,3);r.pause_780248=false;
+            r.globals().putf(0x95aef8,.123f);const auto before=d.routed.size();const auto queries_before=d.query_begin;
+            CHECK(native_course_pass_leaf(c,r,0x40cbc0,Object));
+            CHECK(native_course_pass_stats().failures==0&&d.routed.size()>before&&d.query_begin>queries_before);
+            bool matching=false;
+            for(std::size_t n=before;n<d.routed.size();++n){
+                const auto& record=d.routed[n];CHECK(record.panel>=0&&record.panel<3);
+                const unsigned i=unsigned(record.panel);matching=matching||i==(left?0u:2u);
+                CHECK(record.projection==expected.projection[i]);
+                CHECK(record.view==driving::pc_d3dx_matrix_multiply(identity,expected.rotation[i]));
+            }
+            CHECK(matching&&d.sun_panel()==-1&&d.draw_phase()==PcDrawPhase::World);
+            CHECK(pc_world_source_phase(PcDrawPhase::SunView)&&!pc_world_three_views(PcDrawPhase::SunView,false,true));
+            CHECK(r.queue_context().opaque.count==0&&r.queue_context().opaque.undo.empty());
+            CHECK(d.transform_view==identity&&d.transform_proj==native_projection);
+            CHECK(r.render_view().view_95d860==main_view.view_95d860&&r.render_view().panels.valid==main_view.panels.valid);
+            CHECK(r.globals().f(0x95aef8)==.123f&&work.i16(0x90+0x12)==2&&camera==unchanged_camera&&car==car_before);
+        }
+        g_pc_sun_views_provider=old_provider;g_pc_triple_corrections=nullptr;
+        // The renderer-owned camera scope restores even when its draw fails.
+        bool failed=false;try{r.with_sun_camera(identity,native_projection,[&]{throw std::runtime_error("injected sun camera failure");});}catch(const std::runtime_error&){failed=true;}
+        CHECK(failed&&d.transform_view==identity&&d.transform_proj==native_projection&&r.render_view().view_95d860==main_view.view_95d860);
+        CHECK(d.errors.empty());
+        std::printf("sun routing:8 actual flat/curved side-point calls, matching source camera packets and drained queues; no rasterization\n");
 
     }
     std::printf("sun gate: %u assertions;8 actual caller rejections, side-visible loss remains; no rendering\n",checks);return 0;

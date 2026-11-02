@@ -282,7 +282,7 @@ void D3D11D3D9Device::prepare_curve(){
 }
 void D3D11D3D9Device::curve_before_draw(){
     if(!curve_frame_||colour_target_!=BackBuffer)return;
-    const bool world=draw_phase()==platform::PcDrawPhase::World||draw_phase()==platform::PcDrawPhase::WorldCoverage;
+    const bool world=platform::pc_world_source_phase(draw_phase());
     if(!world&&curve_world_&&!scene_finished_)finish_scene(); // before binding the next native pipeline
     if(world&&!scene_finished_)curve_world_=true;
 }
@@ -447,6 +447,29 @@ void D3D11D3D9Device::bind_target(){
     context_->OMSetRenderTargets(1,&rtv,dsv);
     bound_.target=true;bound_.rtv=rtv;bound_.dsv=dsv;bound_.textures_set=false;
 }
+std::uint32_t D3D11D3D9Device::create_occlusion_query(){
+    const auto handle=PcSoftD3D9Device::create_occlusion_query();
+    if(draw_phase()==platform::PcDrawPhase::SunView){
+        SunQuery value;D3D11_QUERY_DESC desc{};desc.Query=D3D11_QUERY_OCCLUSION;
+        check(device_->CreateQuery(&desc,&value.query),"CreateQuery(sun view)");sun_queries_.emplace(handle,std::move(value));
+    }
+    return handle;
+}
+void D3D11D3D9Device::query_issue(std::uint32_t handle,std::uint32_t flags){
+    const auto found=sun_queries_.find(handle);
+    if(found==sun_queries_.end()){PcSoftD3D9Device::query_issue(handle,flags);return;}
+    auto& q=found->second;flush();
+    if((flags&2u)&&!q.active){context_->Begin(q.query.Get());q.active=true;}
+    if((flags&1u)&&q.active){context_->End(q.query.Get());q.active=false;q.pending=true;}
+}
+std::uint32_t D3D11D3D9Device::query_get_data(std::uint32_t handle,std::uint32_t& samples){
+    const auto found=sun_queries_.find(handle);
+    if(found==sun_queries_.end())return PcSoftD3D9Device::query_get_data(handle,samples);
+    auto& q=found->second;samples=0;if(q.active)return 1u;if(!q.pending)return 0u;
+    UINT64 result{};const auto hr=context_->GetData(q.query.Get(),&result,sizeof result,D3D11_ASYNC_GETDATA_DONOTFLUSH);
+    if(hr==S_FALSE)return 1u;check(hr,"GetData(sun view)");
+    samples=std::uint32_t(std::min<UINT64>(result,0xffffffffu));return 0u;
+}
 void D3D11D3D9Device::release(std::uint32_t handle){
     PcSoftD3D9Device::release(handle);if(object(handle))return;
     textures_.erase(handle);depth_views_.erase(handle);shader_programs_.erase(handle);gpu_buffers_.erase(handle);index_ranges_.erase(handle);
@@ -482,6 +505,7 @@ void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
             if(ex>0.f)v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x+ex)/(soft_viewport_.w+2*ex)-1)*w;
             else v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x)/soft_viewport_.w-1)*w;
             v.pos[1]=(1-2*(v.pos[1]+.5f-soft_viewport_.y)/soft_viewport_.h)*w;v.pos[2]=v.pos[2]*w;v.pos[3]=w;}
+        else if(draw_phase()==platform::PcDrawPhase::SunView){const auto scale=sun_source_scale();v.pos[0]+=scale[0]*v.pos[3]/soft_viewport_.w;v.pos[1]-=scale[1]*v.pos[3]/soft_viewport_.h;}
         else{v.pos[0]+=v.pos[3]/soft_viewport_.w;v.pos[1]-=v.pos[3]/soft_viewport_.h;}
         batch_.push_back(v);};
     for(unsigned k=1;k+1<count;++k){push(vertices[0]);push(vertices[k]);push(vertices[k+1]);++triangles_drawn;}
@@ -609,7 +633,8 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     pixel_pipeline();
     if(vs_shadow_.size()!=257*4)vs_shadow_.assign(257*4,std::numeric_limits<float>::quiet_NaN());
     float constants[257*4];std::memcpy(constants,vs_constants.data(),256*16);
-    constants[1024]=1.f/soft_viewport_.w;constants[1025]=1.f/soft_viewport_.h;constants[1026]=0.f;constants[1027]=0.f;
+    const auto source_scale=sun_source_scale();
+    constants[1024]=source_scale[0]/soft_viewport_.w;constants[1025]=source_scale[1]/soft_viewport_.h;constants[1026]=0.f;constants[1027]=0.f;
     if(std::memcmp(constants,vs_shadow_.data(),sizeof constants)!=0){
         D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(vs_constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(vertex constants)");
         std::memcpy(m.pData,constants,sizeof constants);context_->Unmap(vs_constants_.Get(),0);std::memcpy(vs_shadow_.data(),constants,sizeof constants);
@@ -624,7 +649,7 @@ bool D3D11D3D9Device::draw_native(std::uint32_t type,std::int32_t base,std::uint
     if(bound_.topology!=topology){context_->IASetPrimitiveTopology(topology);bound_.topology=topology;}
     if(!bound_.vs_constants){ID3D11Buffer* vsb=vs_constants_.Get();context_->VSSetConstantBuffers(0,1,&vsb);bound_.vs_constants=true;}
     if(bound_.vs!=program->shader.Get()){context_->VSSetShader(program->shader.Get(),nullptr,0);bound_.vs=program->shader.Get();}
-    if(platform::g_pc_triple_corrections){const int match=colour_target_!=BackBuffer?1:triple_native_standard(program,key);triple_bind(false,match!=0,match==2);}
+    if(platform::g_pc_triple_corrections){const int match=colour_target_!=BackBuffer||draw_phase()==platform::PcDrawPhase::SunView?1:triple_native_standard(program,key);triple_bind(false,match!=0,match==2);}
     context_->DrawIndexed(UINT(total),start,base);
     ++frame_draws_;frame_vertices_+=unsigned(total);++native_stats_.draws;triangles_drawn+=count;
     return true;
@@ -762,12 +787,20 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     ++triple_draw_domains[unsigned(draw_domain(rhw,colour_target_==BackBuffer))]; // metadata only: no target/viewport/shader change
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
     const bool coverage=platform::pc_world_coverage_draw(draw_phase(),rhw,true);
-    if(rhw&&!coverage&&!curve_source_world()){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
+    if(rhw&&!coverage&&!curve_source_world()&&draw_phase()!=platform::PcDrawPhase::SunView){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
     const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
     const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
         float(soft_viewport_.w*sx),float(soft_viewport_.h*sy),soft_viewport_.min_z,soft_viewport_.max_z};};
     const auto scissor=[](const D3D11_VIEWPORT& v){return D3D11_RECT{LONG(std::lround(v.TopLeftX)),LONG(std::lround(v.TopLeftY)),
         LONG(std::lround(v.TopLeftX+v.Width)),LONG(std::lround(v.TopLeftY+v.Height))};};
+    // Already projected by the CPU through one source eye. Keep compositor
+    // ownership, but never replicate or apply another clip correction.
+    if(draw_phase()==platform::PcDrawPhase::SunView){
+        triple_unbind();bound_.viewport_set=bound_.scissor_set=false;
+        if(sun_panel()<0||sun_panel()>2)throw std::runtime_error("sun view: invalid panel");
+        const auto v=viewport(unsigned(sun_panel()));const auto r=scissor(v);
+        context_->RSSetViewports(1,&v);context_->RSSetScissorRects(1,&r);return false;
+    }
     const auto single=[&]{
         auto v=viewport(1);
         if(curve_source_world()){

@@ -178,6 +178,10 @@ public:
     // Car reflection cube (414340): the culling view the leaf keeps in step
     // with 95D860 / 404310, and the alpha flush 405830 of its face scenes.
     PcRenderView& render_view(){refresh_panel_frusta();return view_;}
+    // One CPU-issued source eye, including native shader transforms and culling.
+    // The callback must drain its packets before this restores the main camera.
+    void with_sun_camera(const std::array<float,16>& view,const std::array<float,16>& projection,
+                         const std::function<void()>& draw);
     // PC screen size 740C8C/740C90 seen by the camera (camera_fov 483C10, +B8 at 484EE0).
     void set_screen(float width,float height){screen_.width_740c8c=width;screen_.height_740c90=height;}
     float screen_width()const{return screen_.width_740c8c;}

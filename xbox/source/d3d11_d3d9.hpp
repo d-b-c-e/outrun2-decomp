@@ -27,6 +27,9 @@ public:
     void clear(std::uint32_t,std::uint32_t,float,std::uint32_t)override;
     void unlock_rect(std::uint32_t)override;
     void release(std::uint32_t)override;
+    std::uint32_t create_occlusion_query()override;
+    void query_issue(std::uint32_t,std::uint32_t)override;
+    std::uint32_t query_get_data(std::uint32_t,std::uint32_t&)override;
     std::uint8_t* lock(std::uint32_t,std::uint32_t,std::uint32_t,std::uint32_t)override;
     void begin_frame();void end_frame();
     // The frame the game drew (RGBA8), for the presenter.
@@ -51,6 +54,8 @@ public:
     std::uint32_t fxaa_passes{},msaa_resolves{};
     std::uint64_t native_draws()const{return native_stats_.draws;}   // draws taken by the GPU vertex path
 private:
+    struct SunQuery {ComPtr<ID3D11Query> query;bool active{},pending{};};
+    std::map<std::uint32_t,SunQuery> sun_queries_;
     struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
     bool defer_triangle_depth_clip()const noexcept override;
@@ -155,8 +160,13 @@ private:
     D3D11_BLEND_DESC last_blend_{};ID3D11BlendState* last_blend_state_{};
     D3D11_SAMPLER_DESC last_sampler_[6]{};ID3D11SamplerState* last_sampler_state_[6]{};
     void prepare_curve();void prepare_curve_source();void composite_curve();void curve_before_draw();
+    std::array<float,2> sun_source_scale()const{
+        if(draw_phase()==platform::PcDrawPhase::SunView&&sun_panel()>=0&&sun_panel()<3&&curve_source_world())
+            return {curve_mesh_.inner[unsigned(sun_panel())][2],curve_mesh_.inner[unsigned(sun_panel())][3]};
+        return {1.f,1.f};
+    }
     bool curve_source_world()const{return curve_frame_&&!scene_finished_&&colour_target_==BackBuffer&&
-        (draw_phase()==platform::PcDrawPhase::World||draw_phase()==platform::PcDrawPhase::WorldCoverage);}
+        platform::pc_world_source_phase(draw_phase());}
     platform::PcCurveMeshView curve_mesh_{};
     ComPtr<ID3D11Buffer> curve_vb_,curve_ib_,curve_cb_,curve_scale_cb_;
     ComPtr<ID3D11VertexShader> curve_vs_;ComPtr<ID3D11PixelShader> curve_ps_;ComPtr<ID3D11InputLayout> curve_layout_;

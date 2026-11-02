@@ -39,6 +39,9 @@ struct CoursePassState {
     std::array<std::uint8_t,0x420> flare_7d2938{};       // 7D2938 \common\lens_flare_offset.bin (44A630), 7D2B18 its copy
     std::array<std::uint8_t,4> flag_7d2d74{};             // 7D2D74 (44A690)
     NativeSunViewState sun_view;          // legacy view query and temporal render state
+    std::array<NativeSunViewState,3> sun_panels;
+    std::array<std::array<std::uint8_t,2>,3> sun_flicker{};
+    std::array<std::uint8_t,2> sun_flicker_written{};bool sun_flicker_seeded{};
 };
 CoursePassState& state(){static CoursePassState s;return s;}
 void sun_query(PcD3D9Device& device,NativeSunViewState& view){
@@ -613,6 +616,7 @@ void sun_render_40cbc0(CoursePass& p,const NativeSunFrame& frame,const NativeSun
             }
         }
         driving::pc_matrix_pop(s);
+        if(view.source_projection){sx+=view.offset_x;sy+=view.offset_y;}
         sx=st(X(sx)/X(1.0f));                                                    // 740C94 = 1.0
         sy=st(X(sy)/X(g.f(0x740c98)));
         if(!(X(sx)>X(-470.0f)&&X(sx)<X(470.0f)&&X(sy)>X(-440.0f)&&X(sy)<X(440.0f))){
@@ -742,7 +746,48 @@ void sun_render_40cbc0(CoursePass& p,const NativeSunFrame& frame,const NativeSun
 void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
     const auto frame=sun_prepare_40cbc0(p,object);
     auto* flicker=const_cast<std::uint8_t*>(p.work(object+0x10,2));
-    sun_render_40cbc0(p,frame,frame.legacy_view,state().sun_view,driving::Bytes(flicker,2));
+    PcSunViews sources;
+    const auto provider=g_pc_sun_views_provider;
+    std::array<float,16> projection{};std::memcpy(projection.data(),p.fl.g.transform().slot[1],64);
+    if(!provider||!g_pc_triple_corrections||p.d.draw_phase()!=PcDrawPhase::World||!p.d.logical_backbuffer_target()||!provider(projection.data(),sources)){
+        sun_render_40cbc0(p,frame,frame.legacy_view,state().sun_view,driving::Bytes(flicker,2));return;
+    }
+    std::array<NativeSunView,3> views;
+    for(unsigned i=0;i<3;++i){
+        auto& view=views[i];view.matrix=driving::pc_d3dx_matrix_multiply(frame.legacy_view.matrix,sources.rotation[i]);
+        if(!driving::pc_d3dx_matrix_inverse(view.screen,view.matrix))throw std::runtime_error("sun view: inverse refused");
+        view.eye=driving::pc_d3dx_vec3_transform_coord({0,0,0},view.screen);
+        view.target=driving::pc_d3dx_vec3_transform_coord({0,0,-1},view.screen);
+        view.screen_x=320.f*sources.projection[i][0];view.screen_y=240.f*sources.projection[i][5];
+        view.offset_x=-320.f*sources.projection[i][8];view.offset_y=-240.f*sources.projection[i][9];view.source_projection=true;
+    }
+    // Flush unrelated main-camera work before switching CPU culling and shader
+    // transforms. The legacy function's final glow is also queued, so each
+    // view drains explicitly before the next view or the main camera returns.
+    render_queue_flush_4052c0(p.fl,p.r.queue_context());
+    auto& temporal_state=state();
+    if(!temporal_state.sun_flicker_seeded||std::memcmp(flicker,temporal_state.sun_flicker_written.data(),2)!=0){
+        for(auto& value:temporal_state.sun_flicker)std::memcpy(value.data(),flicker,2);
+        temporal_state.sun_flicker_seeded=true;
+    }
+    const auto saved_panel=p.d.sun_panel();const auto saved_visibility=p.fl.g.w(0x95aef8);
+    const auto saved_phase=p.d.draw_phase();
+    const auto restore=[&]{p.d.set_sun_panel(saved_panel);p.d.set_draw_phase(saved_phase);p.fl.g.w(0x95aef8)=saved_visibility;};
+    try{
+        p.d.set_draw_phase(PcDrawPhase::SunView);
+        for(unsigned i=0;i<3;++i){
+            p.d.set_sun_panel(int(i));auto& temporal=state().sun_panels[i];sun_query(p.d,temporal);
+            p.r.with_sun_camera(views[i].matrix,sources.projection[i],[&]{
+                sun_render_40cbc0(p,frame,views[i],temporal,driving::Bytes(state().sun_flicker[i].data(),2));
+                render_queue_flush_4052c0(p.fl,p.r.queue_context());
+            });
+        }
+    }catch(...){restore();throw;}
+    restore();
+    // Retain the native centre-camera work word; side flickers keep their own
+    // progress. Only an external work-word change seeds all views again.
+    temporal_state.sun_flicker_written=temporal_state.sun_flicker[1];
+    std::memcpy(flicker,temporal_state.sun_flicker_written.data(),2);
 }
 bool native_pass(NativeRuntimeContext& c,PcSceneRenderer& r,std::uint32_t pc,std::uint32_t arg){
     CoursePass p(c,r);

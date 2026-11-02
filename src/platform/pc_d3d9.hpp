@@ -14,11 +14,12 @@
 namespace outrun::platform {
 // Semantic ownership is independent of XYZ/XYZRHW storage. Screen-space smoke
 // and stencil darkening belong to the world; frontend 3D may follow the HUD.
-enum class PcDrawPhase:std::uint8_t {Unclassified,World,Hud,FrontendOverlay,WorldCoverage};
+enum class PcDrawPhase:std::uint8_t {Unclassified,World,Hud,FrontendOverlay,WorldCoverage,SunView};
+inline bool pc_world_source_phase(PcDrawPhase phase){return phase==PcDrawPhase::World||phase==PcDrawPhase::WorldCoverage||phase==PcDrawPhase::SunView;}
 enum class PcDrawDomain:std::uint8_t {Unclassified,WorldGeometry,WorldScreenEffect,Hud,FrontendOverlay,Offscreen,Count};
 inline PcDrawDomain pc_draw_domain(PcDrawPhase phase,bool rhw,bool logical_backbuffer){
     if(!logical_backbuffer)return PcDrawDomain::Offscreen;
-    if(phase==PcDrawPhase::World||phase==PcDrawPhase::WorldCoverage)return rhw?PcDrawDomain::WorldScreenEffect:PcDrawDomain::WorldGeometry;
+    if(pc_world_source_phase(phase))return rhw?PcDrawDomain::WorldScreenEffect:PcDrawDomain::WorldGeometry;
     if(phase==PcDrawPhase::Hud)return PcDrawDomain::Hud;
     if(phase==PcDrawPhase::FrontendOverlay)return PcDrawDomain::FrontendOverlay;
     return PcDrawDomain::Unclassified;
@@ -54,6 +55,8 @@ class PcD3D9Device {
 public:
     virtual ~PcD3D9Device()=default;
     PcDrawPhase draw_phase()const noexcept{return draw_phase_;}
+    int sun_panel()const noexcept{return sun_panel_;}
+    void set_sun_panel(int panel)noexcept{sun_panel_=panel;}
     void set_draw_phase(PcDrawPhase phase)noexcept{draw_phase_=phase;}
     PcDrawDomain draw_domain(bool rhw,bool logical_backbuffer=true)const noexcept{return pc_draw_domain(draw_phase_,rhw,logical_backbuffer);}
     // Explicit target identity for world-effect admission; unknown devices refuse.
@@ -172,6 +175,7 @@ public:
     virtual std::uint32_t query_get_data(std::uint32_t query,std::uint32_t& samples){(void)query;samples=0;return 1;}
 protected:
     PcDrawPhase draw_phase_{PcDrawPhase::Unclassified};
+    int sun_panel_{-1};
     std::uint32_t viewport_[6]{0,0,640,480,0,0x3f800000u};
 };
 class PcDrawPhaseScope {

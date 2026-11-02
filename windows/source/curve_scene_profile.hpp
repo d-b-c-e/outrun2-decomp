@@ -25,10 +25,13 @@ inline bool curve_scene_mesh_view(const CurveSceneProfile& p,unsigned width,unsi
     }
     if(!platform::pc_curve_mesh_valid(v))return false;out=v;return true;
 }
-inline bool curve_scene_corrections(const CurveSceneProfile& p,const float* original,float* out){
-    if(!original||!out)return false;Mat4 m{};for(unsigned i=0;i<16;++i)m[i]=original[i];
+inline bool curve_scene_views(const CurveSceneProfile& p,const float* original,TripleViews& views){
+    if(!original)return false;Mat4 m{};for(unsigned i=0;i<16;++i)m[i]=original[i];
     RigVec eye;if(!curve_native_eye(m,p.warps[1].panel,eye))return false;
-    TripleViews views;if(!curved_source_views(m,eye,p.warps,views))return false;
+    return curved_source_views(m,eye,p.warps,views);
+}
+inline bool curve_scene_corrections(const CurveSceneProfile& p,const float* original,float* out){
+    if(!out)return false;TripleViews views;if(!curve_scene_views(p,original,views))return false;
     std::array<float,48> c{};for(unsigned panel=0;panel<3;++panel)for(unsigned k=0;k<16;++k){
         c[panel*16+k]=float(views.correction[panel][k]);if(!std::isfinite(c[panel*16+k]))return false;}
     std::copy(c.begin(),c.end(),out);return true;

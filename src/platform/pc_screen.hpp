@@ -3,6 +3,7 @@
 // game draws. 320 is the PC's 4:3 screen (6281C8 / 5DA2D4); the widescreen
 // option (Y) sets 240*16/9 so the screen-bound visibility tests (4F02D0) keep
 // objects until they leave the wider view.
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -24,6 +25,11 @@ inline float g_pc_wide_aspect=0.0f;
 // back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
 using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
 inline PcTripleCorrections g_pc_triple_corrections=nullptr;
+// CPU-issued sun views use the same source cameras as the world correction.
+// Installed only by the existing admitted developer compositor profile.
+struct PcSunViews {std::array<std::array<float,16>,3> rotation{},projection{};};
+using PcSunViewsProvider=bool(*)(const float* projection,PcSunViews&);
+inline PcSunViewsProvider g_pc_sun_views_provider=nullptr;
 // Session comparison is switched only by desktop input at a game-thread boundary.
 // Saved framing keeps the configured triple context even while Original uses Off.
 enum class PcScreenComparison {normal,original,angle,curve};

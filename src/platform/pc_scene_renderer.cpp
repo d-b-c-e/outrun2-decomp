@@ -175,6 +175,32 @@ void PcSceneRenderer::refresh_panel_frusta(bool force){
 void PcSceneRenderer::retain_panel_projection(const std::array<float,16>& projection){
     panel_projection_=projection;panel_projection_valid_=true;refresh_panel_frusta(true);
 }
+void PcSceneRenderer::with_sun_camera(const std::array<float,16>& view,const std::array<float,16>& projection,
+                                       const std::function<void()>& draw){
+    const auto identity=[](const float*,float* out){for(unsigned p=0;p<3;++p)for(unsigned k=0;k<16;++k)out[p*16+k]=k%5==0?1.f:0.f;return true;};
+    const auto frusta=pc_panel_frusta(projection.data(),identity);
+    std::array<float,16> inverse{};
+    if(!frusta.valid||!driving::pc_d3dx_matrix_inverse(inverse,view))throw std::runtime_error("sun view: invalid camera");
+    const auto saved_view=render_view();const bool saved_valid=panel_projection_valid_;
+    std::array<float,16> saved_v{},saved_p{};
+    std::memcpy(saved_v.data(),globals_.transform().slot[0],64);std::memcpy(saved_p.data(),globals_.transform().slot[1],64);
+    const auto restore=[&]{
+        render_set_matrix_410f90(*flush_,saved_p,1);render_set_matrix_410f90(*flush_,saved_v,0);
+        device_.set_transform(3,saved_p.data());device_.set_transform(2,saved_v.data());
+        std::array<float,16> world{};std::memcpy(world.data(),globals_.transform().slot[6],64);render_set_matrix_410f90(*flush_,world,6);
+        view_=saved_view;panel_projection_valid_=saved_valid;
+    };
+    try{
+        panel_projection_valid_=false;view_.panels=frusta;std::memcpy(view_.view_95d860.data(),view.data(),64);
+        const auto eye=driving::pc_d3dx_vec3_transform_coord({0,0,0},inverse);
+        const auto target=driving::pc_d3dx_vec3_transform_coord({0,0,-1},inverse);
+        view_.eye=eye;view_.target=target;
+        render_set_matrix_410f90(*flush_,projection,1);render_set_matrix_410f90(*flush_,view,0);
+        device_.set_transform(3,projection.data());device_.set_transform(2,view.data());
+        draw();
+    }catch(...){restore();throw;}
+    restore();
+}
 void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera){
     for(const auto& st:d.stores){
         std::array<float,16> m{};std::memcpy(m.data(),st.matrix.data(),64);

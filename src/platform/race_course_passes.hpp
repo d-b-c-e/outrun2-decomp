@@ -15,12 +15,13 @@ namespace outrun::platform {
 struct NativeRuntimeContext;
 class PcSceneRenderer;
 class PcD3D9Device;
-// Native fields consumed by the sun's screen-space renderer. Step1 keeps the
-// runtime's one legacy view; per-panel viewport/projection routing is separate.
+// Explicit native/source-eye inputs consumed by the sun screen-space renderer.
+// Default values preserve the legacy centred gate.
 struct NativeSunView {
     std::array<float,16> matrix{},screen{};
     std::array<float,3> eye{},target{};
     float screen_x{},screen_y{};
+    float offset_x{},offset_y{};bool source_projection{};
 };
 struct NativeSunFrame {
     NativeSunView legacy_view;
