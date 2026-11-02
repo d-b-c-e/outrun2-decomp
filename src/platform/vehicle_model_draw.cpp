@@ -411,7 +411,9 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
     const std::int32_t index=in.model+in.variant;
     if(index<0||index>=30)throw std::out_of_range("469600 layout index outside 5B2F68's thirty records");
     const Bytes layout(const_cast<std::uint8_t*>(EmbeddedVehicleLayouts)+std::size_t(index)*0x128,0x128);
+    bool recording_shadow=false;
     auto record=[&](std::uint32_t pc,std::initializer_list<std::uint32_t> args){
+        if(in.hide_body&&!recording_shadow&&(pc==0x405360u||pc==0x4056d0u))return;
         PcVehicleDrawCall c{};c.pc=pc;c.argc=std::uint32_t(args.size());
         unsigned k=0;for(auto a:args)c.args[k++]=a;
         const auto m=s.current();for(unsigned i=0;i<64;++i)c.matrix[i]=m.u8(i);
@@ -424,7 +426,7 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
     const std::int32_t c38=car.i32(0x38);const std::uint32_t age=car.u32(0x1f4);
     std::uint32_t flags=car.u32(4);
     flags=layout.u32(0x64)==None?(flags|0x800u):(flags&~0x800u);car.put32(4,flags);
-    const std::uint32_t vm=(flags>>14)&3u;
+    const std::uint32_t vm=in.hide_body?1u:(flags>>14)&3u; // keep full-model shadow generation without rewriting native visibility bits
     std::int32_t alt=0;
     std::array<std::uint8_t,64> local{};Bytes l(local.data(),64);
     if(vm==2&&1.f>car.f32(0xe9c))alt=1;
@@ -528,7 +530,9 @@ void vehicle_race_model_draw_469600(const PcRaceModelDraw& in,PcMatrixStack& s,s
             driving::pc_matrix_rotate_y(s,word_angle(car.i16(0x2e)));
             if(car.f32(0x2c8)>0.f)driving::pc_matrix_rotate_y(s,car.f32(0x2e8));
         }
+        recording_shadow=true; // this mesh is the ground shadow, not part of the visible body
         base_shadow(s,car,layout.u32(0xc),record);   // CarBaseShadowOpacity at the RET (469EB4)
+        recording_shadow=false;
         driving::pc_matrix_pop(s);
     }
     record(0x4052b0,{});

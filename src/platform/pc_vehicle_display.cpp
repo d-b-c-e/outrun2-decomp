@@ -100,6 +100,7 @@ void vehicle_race_display_46bd30(PcVehicleDisplayContext& c,PcRaceCarDisplayStat
     PcRaceModelDraw draw{};
     draw.car=car;draw.model=std::int32_t(car.i8(0x11));draw.variant=0;draw.body_82e7f0=c.body_82e7f0;
     draw.game_mode_78026c=c.game_mode_78026c;draw.scene_82e7d4=c.scene_82e7d4;
+    draw.hide_body=in.hide_body;
     std::vector<PcVehicleDrawCall> calls;
     vehicle_race_model_draw_469600(draw,c.matrices,calls);
     c.unported=unported;

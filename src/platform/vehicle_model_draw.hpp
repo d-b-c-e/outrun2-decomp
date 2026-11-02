@@ -39,6 +39,7 @@ struct PcRaceModelDraw {
     driving::Bytes body_82e7f0{nullptr,0};
     std::int32_t game_mode_78026c{};
     std::uint8_t scene_82e7d4{};
+    bool hide_body{};                     // emits full-model shadows, suppresses visible mesh leaves only
 };
 void vehicle_race_model_draw_469600(const PcRaceModelDraw&,driving::PcMatrixStack&,
     std::vector<PcVehicleDrawCall>& calls);

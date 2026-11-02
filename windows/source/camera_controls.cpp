@@ -72,6 +72,7 @@ std::uint8_t restore_view(std::uint8_t native_default){
     h.rotation={};
     return h.last_camera<0?native_default:std::uint8_t(h.bonnet?0:h.last_camera);
 }
+bool body_hidden(){const std::lock_guard<std::mutex> lock(camera_mutex);return h.configured&&h.view==0;}
 void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::CameraMountFit* fit,driving::PcMatrixStack& s){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     const auto old_model=h.model;const bool old_fit=h.fit_available;
@@ -201,6 +202,7 @@ void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     }
     platform::camera_fov_adjust()=adjust;
     platform::camera_view_cycle()=cycle;platform::camera_view_restore()=restore_view;platform::camera_mount_adjust()=adjust_view;
+    platform::camera_body_hidden()=body_hidden;
 }
 void camera_controls_wrap_input_filter(){
     if(!h.configured)return;

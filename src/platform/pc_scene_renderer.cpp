@@ -197,6 +197,7 @@ driving::CameraFovAdjust& camera_fov_adjust(){static driving::CameraFovAdjust ad
 CameraMountAdjust& camera_mount_adjust(){static CameraMountAdjust adjust=nullptr;return adjust;}
 driving::CameraViewCycle& camera_view_cycle(){static driving::CameraViewCycle cycle=nullptr;return cycle;}
 driving::CameraViewCycle& camera_view_restore(){static driving::CameraViewCycle restore=nullptr;return restore;}
+CameraBodyHidden& camera_body_hidden(){static CameraBodyHidden hidden=nullptr;return hidden;}
 void PcSceneRenderer::adjust_camera_view(void* user,Bytes camera,driving::PcMatrixStack& s){
     auto& renderer=*static_cast<PcSceneRenderer*>(user);Bytes car(nullptr,0),unused(nullptr,0);
     if(!camera_mount_adjust()||!renderer.vehicle_camera||!renderer.vehicle_camera(car,unused)||car.size()<=0x11)return;
@@ -462,7 +463,7 @@ bool PcSceneRenderer::display_race_car(){
         std::int32_t(current_mode_),scene_82e7d4};
     // Offline race: the network session word 7F9460+60 is 0 (no LAN session is ported).
     c.shadow=[this,vehicle](const PcVehicleDrawCall& call){return shadow_leaf(call,vehicle);};
-    vehicle_race_display_46bd30(c,race_display_,PcRaceCarDisplayInputs{0u,0u,pause_780248},vehicle,
+    vehicle_race_display_46bd30(c,race_display_,PcRaceCarDisplayInputs{0u,0u,pause_780248,camera_body_hidden()&&camera_body_hidden()()},vehicle,
         [this](std::uint32_t pc){++unported_leaves[pc];});
     ++race_car_displays;return true;
 }

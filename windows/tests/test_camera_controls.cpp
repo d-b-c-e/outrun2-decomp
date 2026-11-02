@@ -115,6 +115,7 @@ int main(int argc,char** argv){
     CHECK(fov(0)==0.586f&&fov(1)==1.1f&&fov(2)==1.1f);
     // Bonnet is a logical fourth view on the native bumper slot; the native cockpit remains distinct.
     CHECK(platform::camera_view_cycle()(0)==0&&fov(0)==1.1f&&camera_controls_label().find("Bonnet Camera")!=std::string::npos);
+    CHECK(!platform::camera_body_hidden()());
     CHECK(camera_controls_notice().find("Bonnet Camera - Game FOV")!=std::string::npos);
     std::array<std::uint8_t,0xf00> car_bytes{};driving::Bytes car(car_bytes.data(),car_bytes.size());
     std::array<std::uint8_t,0x400> cam_bytes{};driving::Bytes camera(cam_bytes.data(),cam_bytes.size());
@@ -132,6 +133,7 @@ int main(int argc,char** argv){
     CHECK(platform::camera_view_cycle()(0)==1&&fov(1)==1.1f);
     CHECK(platform::camera_view_cycle()(1)==2&&platform::camera_view_cycle()(2)==0);
     (void)fov(0);const auto bumper_eye=mount();CHECK(std::fabs(bumper_eye[2]+2.2f)<1e-5f&&car.u32(4)==0u);
+    CHECK(platform::camera_body_hidden()());
     // The actual consumer damps rotation only. Translation follows the displayed
     // car immediately; pause/replay cannot integrate an extra filter step.
     const auto set_car=[&](float degrees,float x){const float half=degrees*.008726646259971648f;
@@ -150,6 +152,7 @@ int main(int argc,char** argv){
     (void)set_car(0,0);(void)mount();
     // Cockpit uses its native eye and target rotation; chase is entirely unfiltered.
     (void)fov(1);(void)mount();
+    CHECK(!platform::camera_body_hidden()());
     const auto native_view=[&](float degrees){driving::PcMatrix16 p{};p[12]=3;p[13]=4;p[14]=5;
         const float half=degrees*.008726646259971648f;driving::PcMatrix16 view{};CHECK(driving::pc_d3dx_matrix_inverse(view,camera_rotation_world({0,std::sin(half),0,std::cos(half)},p)));
         std::memcpy(stack.current().data(),view.data(),64);return view;};
@@ -260,7 +263,7 @@ int main(int argc,char** argv){
         CHECK(camera.u8(0x34a)==0&&fov(0)==1.1f&&read()==saved_camera);driving::camera_fov_context()={};
     }
     CHECK(std::filesystem::remove(path)&&std::filesystem::remove(dir));
-    platform::camera_fov_adjust()=nullptr;platform::camera_mount_adjust()=nullptr;platform::camera_view_cycle()=nullptr;platform::camera_view_restore()=nullptr;
+    platform::camera_fov_adjust()=nullptr;platform::camera_mount_adjust()=nullptr;platform::camera_view_cycle()=nullptr;platform::camera_view_restore()=nullptr;platform::camera_body_hidden()=nullptr;
     platform::g_pc_triple_corrections=nullptr;driving::camera_fov_context()={};
     std::printf("camera controls: %u checks\n",checks);
 }

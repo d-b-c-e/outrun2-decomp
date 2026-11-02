@@ -37,6 +37,7 @@ struct PcRaceCarDisplayInputs {
     std::uint32_t network_7f9460_60{};  // 55A930(7F9460)
     std::uint32_t network_800abc{};     // 46C550 second word
     std::uint8_t pause_780248{};        // 43F9C0
+    bool hide_body{};                  // mounted bumper: shadow-only player meshes, no effect/traffic changes
 };
 // PC 0x46BD30 (race car display, via 49F3E0): sun light 4082B0(2,0,0)
 // diffuse scaled by +58 (and, in a network race with +D10 == 1, the pulsing
