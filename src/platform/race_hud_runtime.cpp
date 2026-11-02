@@ -639,9 +639,12 @@ bool native_race_hud_mission_control(NativeRuntimeContext& c,MissionManagerServi
         std::array<std::uint8_t,0x40> mb{};driving::PcMatrixStack st{driving::Bytes(mb.data(),mb.size())};
         return native_race_score(*static_cast<NativeRuntimeContext*>(u),st,0x4763d0u,id);};
     if(r.voice_services.busy_7f94c0){note(o,0x46c530u);}
-    // The race part's 495D90 projection runs on the renderer's matrix stack;
-    // without it (no PC renderer) the mission manager reports it.
-    r.matrices=nullptr;                                      // not bound yet: 495D90 reports it (see report)
+    // 495D90 only needs scratch matrix arithmetic over the existing car/camera
+    // snapshots. A scoped stack also works in control ticks without a renderer,
+    // and never borrows or changes the renderer's authored/interpolated stack.
+    std::array<std::uint8_t,2*64> projection_storage{};
+    driving::PcMatrixStack projection_matrices{Bytes(projection_storage.data(),projection_storage.size()),0,0,2};
+    driving::pc_matrix_identity(projection_matrices);r.matrices=&projection_matrices;
     bool ok=false;
     try{ok=mission_manager_control_496a30(m.manager,ms,r);}
     catch(const std::exception& e){o.last_error="496A30: "+what(e);}

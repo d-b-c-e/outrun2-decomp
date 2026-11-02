@@ -1,0 +1,11 @@
+# Mission-marker projection runtime binding
+
+The native mission wrapper in `race_hud_runtime.cpp` previously passed `r.matrices = nullptr` to `496A30`. When the stored camera `+34A` was greater than1 (including chase), `495D90` needed a matrix stack and reported missing `495DF7`. Bumper/cockpit use the existing fixed marker position and did not need that branch.
+
+The actual-wrapper fixture reproduced the failure with inert runtime/UI records: the rival timer changed3->2 before `495DF7` was reported. Scoring occurs before marker projection, and the native event keeps invoking the wrapper. **This is not established as the cause or a fix of upstream score issues3/4.** No score, AI, ranking or mission rule changed.
+
+The wrapper now supplies a scoped two-slot matrix stack. Projection reads the same stored car/camera matrices and model offset as before; it does not require a renderer/device or borrow its authored/interpolated stack. The stack exists for the synchronous controller call and is discarded afterward, including on an exception. Existing missing-service reporting remains in place.
+
+`test_mission_marker_runtime` runs the actual runtime wrapper with the verified EXE constants, synthetic type-6/type-2 records and in-memory sprite timing. Its **27 checks pass**: three chase-view countdown calls through final win publication, racer release state, unchanged camera bytes, unchanged car bytes outside the controller's existing boost field, repeated type-2 player/rival score updates, pause guard and no missing-service report. No retail mission selection, traffic scheduling/mirror, natural AI, HUD pixels or owner files are exercised. Absent `OR2_EXE` skips77; a skip does not pass these assertions.
+
+Named Release `OutRunDesktop` and actual-wrapper target builds pass (jobs1, incremental). Logs under `work/validation-20261102/`: `mission-marker-baseline*.log`, `mission-marker-fix-build.log`, `mission-marker-fixed.log`. The first test compile had two differently typed arrays in one `auto` declaration; it was corrected before the baseline reproduction. No tool install, renderer/device/game launch or owner install occurred. Chase-marker position/appearance and the original natural mission reports still need an attended candidate run.
