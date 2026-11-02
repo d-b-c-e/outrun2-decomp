@@ -298,7 +298,10 @@ void darken_4220f0(PcShadowServices& s,PcShadowFrame& f,std::uint32_t object){
     st.tss(0,2,2);st.tss(0,3,0);st.tss(0,1,4);st.tss(0,5,2);st.tss(0,6,0);st.tss(0,4,4);
     st.rs(0x39,0);st.rs(0x38,2);st.rs(0x37,1);
     d.set_fvf(0x44);
-    d.draw_primitive_up(5,4,s.m.at(object+0x20,6u*0x14u),0x14);
+    {   // This stencil darkening is world coverage, not a HUD/particle projection.
+        const PcDrawPhaseScope coverage(d,d.draw_phase()==PcDrawPhase::World?PcDrawPhase::WorldCoverage:d.draw_phase());
+        d.draw_primitive_up(5,4,s.m.at(object+0x20,6u*0x14u),0x14);
+    }
     st.rs(0x07,1);st.rs(0x34,0);st.rs(0x38,8);st.rs(0x37,1);st.rs(0x1b,0);st.rs(0x16,2);
     f.fl.g.w(0x89ede0)=0;f.fl.g.w(0x89ede8)=0;
 }

@@ -5,6 +5,7 @@
 #include <d3dcompiler.h>
 #include "runtime/game_host.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_world_coverage.hpp"
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -177,6 +178,7 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                     (unsigned long long)triple_draws_affine,(unsigned long long)triple_single_rhw,(unsigned long long)triple_single_unmatched,
                     (unsigned long long)triple_single_refused,(unsigned long long)triple_single_topology,(unsigned long long)triple_single_target);
     if(platform::g_pc_triple_corrections){
+        std::printf("triple views: %llu explicit world-coverage draws into three viewports\n",(unsigned long long)triple_draws_world_coverage);
         std::printf("triple draw domains: world geometry %llu, world screen effects %llu, HUD %llu, frontend overlay %llu, offscreen %llu, unclassified %llu\n",
             (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldGeometry)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::WorldScreenEffect)],
             (unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::Hud)],(unsigned long long)triple_draw_domains[unsigned(platform::PcDrawDomain::FrontendOverlay)],
@@ -365,7 +367,8 @@ void D3D11D3D9Device::clear(std::uint32_t flags,std::uint32_t c,float z,std::uin
 void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
     if(count<3)return;
     batch_rhw_=pretransformed_;
-    const float ex=pretransformed_?ui_extension():0.f;   // UIScalingMode 1: the 2D range widened by ex UI units each side
+    const bool coverage=platform::g_pc_triple_corrections&&platform::pc_world_coverage_draw(draw_phase(),pretransformed_,colour_target_==BackBuffer);
+    const float ex=pretransformed_&&!coverage?ui_extension():0.f; // world coverage must not inherit HUD spacing
     auto push=[&](const Vertex& source){auto v=source;
         if(pretransformed_){const float w=1.f/v.pos[3];
             if(ex>0.f)v.pos[0]=(2*(v.pos[0]+.5f-soft_viewport_.x+ex)/(soft_viewport_.w+2*ex)-1)*w;
@@ -643,17 +646,29 @@ ID3D11PixelShader* D3D11D3D9Device::pixel_program(unsigned kind,const platform::
 }
 // The three-view spike: just before a draw (after pixel_pipeline's single viewport). A back-buffer draw that is not
 // pretransformed and whose projection is a standard perspective goes to three viewports (the back buffer's thirds)
-// through the geometry shader; any other back-buffer draw stays single on the centre third, where the game's 16:9
-// camera put it. Nothing changes without g_pc_triple_corrections.
+// through the geometry shader. Explicit WorldCoverage RHW uses identity corrections instead; ordinary RHW and
+// unsupported world projections keep their existing single viewport. Nothing changes without g_pc_triple_corrections.
 bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     const auto corrections=platform::g_pc_triple_corrections;
     if(!corrections)return false;
     ++triple_draw_domains[unsigned(draw_domain(rhw,colour_target_==BackBuffer))]; // metadata only: no target/viewport/shader change
     if(colour_target_!=BackBuffer){++triple_single_target;triple_unbind();return false;}
-    if(rhw){++triple_single_rhw;triple_unbind();return false;}   // apply_state's ui_rect already keeps it in the centre
+    const bool coverage=platform::pc_world_coverage_draw(draw_phase(),rhw,true);
+    if(rhw&&!coverage){++triple_single_rhw;triple_unbind();return false;} // ordinary RHW keeps the UI rectangle
     const float fx=1.f/soft_viewport_.w,fy=1.f/soft_viewport_.h;
     const auto& proj=transform_proj;
-    if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+    if(coverage){
+        std::array<float,52> c{};
+        triple_ok_=platform::pc_world_coverage_constants(draw_phase(),rhw,true,fx,fy,c);
+        // This upload replaces the scene constants. The next XYZ draw must
+        // reload its cached correction even when its projection is unchanged.
+        triple_cached_=false;
+        if(triple_ok_){
+            if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+                b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(world coverage)");}
+            D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(world coverage)");
+            std::memcpy(m.pData,c.data(),sizeof c);context_->Unmap(triple_cb_.Get(),0);}
+    }else if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
         triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
         TripleCorrections* e=nullptr;
         for(auto& k:triple_corrections_)if(k.used&&k.fix[0]==fx&&k.fix[1]==fy&&std::memcmp(k.p.data(),proj.data(),64)==0){e=&k;break;}
@@ -695,7 +710,7 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
     if(!triple_logged_){triple_logged_=true;
         std::printf("triple views: back buffer %ux%u, viewports x %.0f / %.0f / %.0f, width %.0f each, height %.0f\n",back_w_,back_h_,
                     double(v[0].TopLeftX),double(v[1].TopLeftX),double(v[2].TopLeftX),double(v[0].Width),double(v[0].Height));}
-    ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;
+    ++triple_draws;++triple_frame_draws_;if(affine)++triple_draws_affine;if(coverage)++triple_draws_world_coverage;
     return true;
 }
 void D3D11D3D9Device::triple_unbind(){if(triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}}

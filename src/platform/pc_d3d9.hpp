@@ -14,11 +14,11 @@
 namespace outrun::platform {
 // Semantic ownership is independent of XYZ/XYZRHW storage. Screen-space smoke
 // and stencil darkening belong to the world; frontend 3D may follow the HUD.
-enum class PcDrawPhase:std::uint8_t {Unclassified,World,Hud,FrontendOverlay};
+enum class PcDrawPhase:std::uint8_t {Unclassified,World,Hud,FrontendOverlay,WorldCoverage};
 enum class PcDrawDomain:std::uint8_t {Unclassified,WorldGeometry,WorldScreenEffect,Hud,FrontendOverlay,Offscreen,Count};
 inline PcDrawDomain pc_draw_domain(PcDrawPhase phase,bool rhw,bool logical_backbuffer){
     if(!logical_backbuffer)return PcDrawDomain::Offscreen;
-    if(phase==PcDrawPhase::World)return rhw?PcDrawDomain::WorldScreenEffect:PcDrawDomain::WorldGeometry;
+    if(phase==PcDrawPhase::World||phase==PcDrawPhase::WorldCoverage)return rhw?PcDrawDomain::WorldScreenEffect:PcDrawDomain::WorldGeometry;
     if(phase==PcDrawPhase::Hud)return PcDrawDomain::Hud;
     if(phase==PcDrawPhase::FrontendOverlay)return PcDrawDomain::FrontendOverlay;
     return PcDrawDomain::Unclassified;

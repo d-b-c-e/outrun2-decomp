@@ -96,7 +96,7 @@ public:
     // centre panel because pretransformed (rhw: HUD, menus, screen-space particles), a vertex program with no matrix of
     // the current projection in its constants, a projection the rig refuses, not triangles (the geometry shader takes
     // only those), or not drawn into the back buffer; frames with at least one three-viewport draw.
-    std::uint64_t triple_draws{},triple_draws_affine{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
+    std::uint64_t triple_draws{},triple_draws_affine{},triple_draws_world_coverage{},triple_single_rhw{},triple_single_unmatched{},triple_single_refused{},
         triple_single_topology{},triple_single_target{},triple_frames{};
     std::array<std::uint64_t,unsigned(platform::PcDrawDomain::Count)> triple_draw_domains{}; // binding decisions by semantic domain
     // Texture CPU copies (texture(); OR2_KEEP_TEXTURE_RGBA=1 keeps them): file textures released after their upload,
