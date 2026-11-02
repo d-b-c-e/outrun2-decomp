@@ -241,7 +241,7 @@ void test_write_key(){
     check(write_key(path,"FFB","FFBGlobalStrength","0.80",error),"append to the section: "+error);
     check(write_key(path,"Triple","Screens","Separate monitors",error),"a new section: "+error);
     const auto read=[&]{std::ifstream f(path,std::ios::binary);std::stringstream s;s<<f.rdbuf();return s.str();};
-    const std::string want="; head\r\n"+controls+"\r\n[FFB]\r\n; tuning\r\nFFBSpringStrength = 0.30\r\nFFBDamperStrength = 0.10\r\n"
+    const std::string want="; head\r\n"+controls+"\r\n[FFB]\r\n; tuning\r\nffbspringstrength = 0.30\r\nFFBDamperStrength = 0.10\r\n"
         "FFBGlobalStrength = 0.80\r\n\r\n[Window]\r\nFrameLatency = 2\r\n\r\n[Triple]\r\nScreens = Separate monitors\r\n";
     check(read()==want,"file after the writes:\n"+read());
     for(int i=0;i<3;++i)check(write_key(path,"FFB","FFBSpringStrength","0.30",error),"rewrite: "+error);
@@ -279,6 +279,44 @@ void test_write_key(){
     check(read()==twice,"the file with the duplicate is unchanged");
     check(write_key(path,"Window","FrameLatency","1",error),"another section of that file still saves: "+error);
     {Ini dup;dup.load(path);check(dup.text("Window","FrameLatency")=="1"&&dup.text("FFB","FFBSpringStrength")=="0.60","the reader's view after it");}
+    // STD-044: BOM at a first-line target header; mixed endings, key spelling,
+    // inline comments, unrelated bytes and a missing final newline stay exact.
+    const std::string mixed="\xef\xbb\xbf[Camera] ; owner\r\n  CockpitRealistic\t= false  ; preference\nUnknown = kept\r\n[Controls]\nSchema = 1";
+    {std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<mixed;}
+    check(ini.load(path)&&ini.has_section("Camera")&&!ini.flag("Camera","CockpitRealistic",true),"BOM reader sees the first section");
+    check(write_key(path,"Camera","CockpitRealistic","true",error),"BOM/mixed line endings write: "+error);
+    const auto mixed_after="\xef\xbb\xbf[Camera] ; owner\r\n  CockpitRealistic\t= true  ; preference\nUnknown = kept\r\n[Controls]\nSchema = 1";
+    check(read()==mixed_after,"only the owned value changes, BOM/mixed endings/no final newline retained");
+    check(write_keys(path,"Camera",{{"CockpitRealistic",std::nullopt}},error)&&read()==
+        "\xef\xbb\xbf[Camera] ; owner\r\nUnknown = kept\r\n[Controls]\nSchema = 1","owned key removal preserves unrelated bytes");
+    const std::vector<std::string> malformed{
+        "[Camera\nCockpitRealistic = false\n","[Camera] trailing\nCockpitRealistic = false\n",
+        "[Camera]\nnot an assignment\n","[Camera]\rCockpitRealistic = false\r",
+        "[Camera]\nCockpitRealistic = false\nCOCKPITREALISTIC = true\n",
+        std::string("[Camera]\nA=")+std::string(1,'\0')+"\n",std::string("\xff\xfe[\0",4)};
+    for(const auto& bytes:malformed){
+        {std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<bytes;}
+        check(!write_key(path,"Camera","CockpitRealistic","true",error)&&read()==bytes,"ambiguous/malformed settings refuse unchanged");
+    }
+    {std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<"[Camera]\nCockpitRealistic=false";}
+    check(write_key(path,"Camera","CockpitRealistic","true",error)&&read()=="[Camera]\nCockpitRealistic=true","owned final line keeps absent newline");
+    {std::ofstream f(path,std::ios::binary|std::ios::trunc);f<<"[Camera]\nCockpitRealistic =  ; keep";}
+    check(write_key(path,"Camera","CockpitRealistic","true",error)&&ini.load(path)&&ini.flag("Camera","CockpitRealistic",false),
+          "writing an empty value preserves a parseable inline comment");
+    const auto final_line=read();
+    check(!write_key(path,"Camera","A\nB","value",error)&&read()==final_line,"key injection refused");
+    check(!write_key(path,"Camera","Key","value\nOther=1",error)&&read()==final_line,"value injection refused");
+    // The old predictable temp name can belong to someone else. A successful or
+    // failed save uses and cleans only a unique sibling CREATE_NEW file instead.
+    {std::ofstream f(path+".tmp",std::ios::binary);f<<"unrelated temp";}
+    const auto real=settings_publish();std::string temp_seen;
+    static std::string* observed_temp=nullptr;observed_temp=&temp_seen;
+    settings_publish()=[](const std::string& temp,const std::string&){*observed_temp=temp;return false;};
+    check(!write_key(path,"Camera","CockpitRealistic","false",error)&&read()==final_line,"publish failure leaves BOM-aware original intact");
+    settings_publish()=real;
+    check(temp_seen!=path+".tmp"&&GetFileAttributesA(temp_seen.c_str())==INVALID_FILE_ATTRIBUTES,"only unique owned temp was cleaned after failure");
+    {std::ifstream f(path+".tmp",std::ios::binary);std::stringstream s;s<<f.rdbuf();check(s.str()=="unrelated temp","existing predictable temp untouched");}
+    std::remove((path+".tmp").c_str());
     std::remove(path.c_str());
 }
 void test_graphical_presets(){

@@ -38,15 +38,17 @@ WheelSteering wheel_steering(float sensitivity,float dead_zone);
 WheelSteering wheel_steering(const Ini& settings);   // [Wheel] SteeringSensitivity / SteeringDeadZone
 // Replaces [section]'s body in the file (or appends the section); every other byte of the file is kept. The file is
 // read once and whole (a missing file is empty; one that cannot be read is refused) and replaced in one step (a flushed
-// temp file moved over it): on any failure the original is left exactly as it was and `error` says why.
+// temp file atomically published): on any failure the original is left exactly as it was and `error` says why.
 bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error);
-// The publish step of write_section / write_key: the flushed temp file moved over the original (MoveFileExA
-// REPLACE_EXISTING | WRITE_THROUGH by default). A test seam: a failing one shows the original survives a refused publish.
+// The publish step: ReplaceFileA for an existing file, MoveFileExA WRITE_THROUGH without replacement for creation.
+// A test seam: a failing one shows the original survives a refused publish.
 using SettingsPublish=bool(*)(const std::string& temp,const std::string& path);
 SettingsPublish& settings_publish();
-// One key of [section] set to `value` in the file as it is now (re-read, so another writer's lines, Wheelkit's
-// [Controls] among them, are kept): every line of that key (any case) becomes "key = value", or the line is added;
-// the section's other lines, comments included, and the rest of the file are kept (write_section).
+// One key of [section] set to `value` in the file as it is now: replace only the value, preserving spelling, spacing,
+// inline comments, each line's ending and UTF-8 BOM state. Add an absent key/section. Duplicate edited keys/sections,
+// malformed syntax and unsupported encodings refuse without writing. UTF-16 is not supported by the game reader.
+// Publication uses a unique CREATE_NEW sibling temp, flushed then atomically moved over the file; only its own temp
+// is removed after a failure. The read handle denies in-place writes; a changed file identity refuses publication.
 bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error);
 // One explicit multi-key edit in one section replacement. nullopt removes a key (Undo restores absence).
 // Optional expected values are checked in the same read before any temp file is written. Other keys,

@@ -1,6 +1,7 @@
 #include "desktop_settings.hpp"
 #include <windows.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -76,14 +77,15 @@ constexpr const char* ImportHeader=
 }
 bool Ini::load(const std::string& path){
     values_.clear();sections_.clear();path_=path;
-    std::ifstream f(path);if(!f)return false;
+    std::ifstream f(path,std::ios::binary);if(!f)return false;
     std::ostringstream all;all<<f.rdbuf();
     load_text(all.str(),path);
     return true;
 }
 void Ini::load_text(const std::string& text,const std::string& path){
     values_.clear();sections_.clear();path_=path;
-    std::istringstream f(text);
+    const bool bom=text.compare(0,3,"\xef\xbb\xbf")==0;
+    std::istringstream f(bom?text.substr(3):text);
     std::string line,section;
     while(std::getline(f,line)){
         if(!line.empty()&&line.back()=='\r')line.pop_back();
@@ -136,29 +138,41 @@ bool Ini::flag(const std::string& section,const std::string& key,bool fallback)c
 namespace {
 // The file's bytes. A missing file is empty; one that exists but cannot be read whole is refused (never treated as
 // empty, which would replace it with a single section).
-bool read_whole(const std::string& path,std::string& text,std::string& error){
+struct SettingsRead {
+    HANDLE handle{INVALID_HANDLE_VALUE};
+    BY_HANDLE_FILE_INFORMATION identity{};
+    ~SettingsRead(){if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);}
+};
+bool read_whole(const std::string& path,std::string& text,std::string& error,SettingsRead& input){
     text.clear();
-    const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
-                               FILE_ATTRIBUTE_NORMAL,nullptr);
+    const HANDLE h=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+                               FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
     if(h==INVALID_HANDLE_VALUE){
         if(GetLastError()==ERROR_FILE_NOT_FOUND)return true;
         error="cannot read "+path+" (Win32 "+std::to_string(GetLastError())+"); nothing written";return false;
     }
-    LARGE_INTEGER size{};bool ok=GetFileSizeEx(h,&size)&&size.QuadPart>=0&&size.QuadPart<=16*1024*1024;
+    input.handle=h;
+    LARGE_INTEGER size{};bool ok=GetFileInformationByHandle(h,&input.identity)&&
+        !(input.identity.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))&&input.identity.nNumberOfLinks==1&&
+        GetFileSizeEx(h,&size)&&size.QuadPart>=0&&size.QuadPart<=16*1024*1024;
     if(ok){
         text.resize(std::size_t(size.QuadPart));
         DWORD got=0;
         ok=text.empty()||(ReadFile(h,text.data(),DWORD(text.size()),&got,nullptr)&&got==text.size());
     }
-    CloseHandle(h);
     if(!ok){text.clear();error="cannot read "+path+" whole; nothing written";}
     return ok;
 }
-// Written whole to a sibling temp file, flushed, then moved over the original in one step (MoveFileEx
-// REPLACE_EXISTING | WRITE_THROUGH): a failure anywhere leaves the original exactly as it was.
+// Written whole to a unique sibling temp file, flushed, then atomically published:
+// a failure anywhere leaves the original exactly as it was.
 bool replace_whole(const std::string& path,const std::string& text,std::string& error){
-    const auto temp=path+".tmp";
-    const HANDLE h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    static std::atomic<unsigned long> serial{};
+    std::string temp;HANDLE h=INVALID_HANDLE_VALUE;
+    for(unsigned attempt=0;attempt<16;++attempt){
+        temp=path+".tmp-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64())+"-"+std::to_string(++serial);
+        h=CreateFileA(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(h!=INVALID_HANDLE_VALUE||GetLastError()!=ERROR_FILE_EXISTS)break;
+    }
     if(h==INVALID_HANDLE_VALUE){error="cannot write "+temp+"; "+path+" is unchanged";return false;}
     DWORD written=0;
     const bool ok=(text.empty()||(WriteFile(h,text.data(),DWORD(text.size()),&written,nullptr)&&written==text.size()))&&FlushFileBuffers(h);
@@ -169,23 +183,42 @@ bool replace_whole(const std::string& path,const std::string& text,std::string& 
     return true;
 }
 bool publish_by_move(const std::string& temp,const std::string& path){
-    return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+    if(GetFileAttributesA(path.c_str())!=INVALID_FILE_ATTRIBUTES)
+        return ReplaceFileA(path.c_str(),temp.c_str(),nullptr,0,nullptr,nullptr)!=0;
+    return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=0;
 }
 }
 SettingsPublish& settings_publish(){static SettingsPublish publish=publish_by_move;return publish;}
 namespace {
 // [section]'s body replaced by edit(its current lines) in one read and one replacement of the file.
 template<class Edit> bool rewrite_section(const std::string& path,const std::string& section,Edit edit,std::string& error){
-    std::string text;
-    if(!read_whole(path,text,error))return false;
-    const std::string eol=text.find("\r\n")!=std::string::npos?"\r\n":"\n";
+    error.clear();std::string text;SettingsRead input;
+    if(section.empty()||trim(section)!=section||section.find_first_of("[]\r\n")!=std::string::npos||section.find('\0')!=std::string::npos){
+        error="invalid settings section; nothing written";return false;}
+    if(!read_whole(path,text,error,input))return false;
+    const auto original=text;
+    const bool bom=text.compare(0,3,"\xef\xbb\xbf")==0;
+    if(bom)text.erase(0,3);
+    if(text.find('\0')!=std::string::npos||text.compare(0,2,"\xff\xfe")==0||text.compare(0,2,"\xfe\xff")==0){
+        error="unsupported settings encoding; nothing written";return false;}
+    for(std::size_t i=0;i<text.size();++i)if(text[i]=='\r'&&(i+1==text.size()||text[i+1]!='\n')){
+        error="malformed settings line ending; nothing written";return false;}
+    const auto first_nl=text.find('\n');
+    std::string eol=first_nl!=std::string::npos&&first_nl>0&&text[first_nl-1]=='\r'?"\r\n":"\n";
     // Lines with their own line ends, so untouched lines are copied byte for byte.
     std::vector<std::string> lines;
     for(std::size_t pos=0;pos<text.size();){
         const auto nl=text.find('\n',pos);const auto next=nl==std::string::npos?text.size():nl+1;
         lines.push_back(text.substr(pos,next-pos));pos=next;
     }
-    if(!lines.empty()&&lines.back().back()!='\n')lines.back()+=eol;
+    for(const auto& line:lines){
+        const auto t=trim(line);if(t.empty()||t[0]==';'||t[0]=='#')continue;
+        const auto equal=t.find('=');const auto close=t.find(']');
+        const auto tail=close==std::string::npos?std::string():trim(t.substr(close+1));
+        if((t[0]=='['&&(header(t).empty()||header(t).find_first_of("[]")!=std::string::npos||(!tail.empty()&&tail[0]!=';'&&tail[0]!='#')))||
+           (t[0]!='['&&(equal==std::string::npos||trim(t.substr(0,equal)).empty()))){
+            error="malformed settings line; nothing written";return false;}
+    }
     // A section that appears more than once is refused: Ini reads every copy (the last value wins), so a write to one
     // copy could report Saved and still not be what the game reads (romi 31196).
     const auto want=lower(section);
@@ -199,38 +232,48 @@ template<class Edit> bool rewrite_section(const std::string& path,const std::str
         if(h==want)start=i;
     }
     if(start!=lines.size())while(end>start+1&&trim(lines[end-1]).empty())--end;
-    std::vector<std::string> current;   // the section's lines as they are, without their line ends
+    if(start!=lines.size()&&!lines[start].empty()&&lines[start].back()=='\n')
+        eol=lines[start].size()>1&&lines[start][lines[start].size()-2]=='\r'?"\r\n":"\n";
+    std::vector<std::string> current;   // retain each line's own terminator, including no final newline
     if(start!=lines.size())for(std::size_t i=start+1;i<end;++i){
-        auto l=lines[i];while(!l.empty()&&(l.back()=='\n'||l.back()=='\r'))l.pop_back();current.push_back(l);}
-    std::vector<std::string> block{"["+section+"]"+eol};
-    for(const auto& l:edit(current))block.push_back(l+eol);
+        current.push_back(lines[i]);}
+    const auto edited=edit(current,eol);
+    std::vector<std::string> block{start==lines.size()?"["+section+"]"+eol:lines[start]};
+    if(!edited.empty()&&!block[0].empty()&&block[0].back()!='\n')block[0]+=eol;
+    block.insert(block.end(),edited.begin(),edited.end());
     if(start==lines.size()){
-        if(!lines.empty())lines.push_back(eol);
+        if(!lines.empty()){
+            if(lines.back().back()!='\n')lines.back()+=eol;
+            lines.push_back(eol);
+        }
         lines.insert(lines.end(),block.begin(),block.end());
     }else{
         lines.erase(lines.begin()+std::ptrdiff_t(start),lines.begin()+std::ptrdiff_t(end));
         lines.insert(lines.begin()+std::ptrdiff_t(start),block.begin(),block.end());
     }
-    text.clear();for(const auto& l:lines)text+=l;
+    text=bom?"\xef\xbb\xbf":"";for(const auto& l:lines)text+=l;
+    // The retained handle denies in-place writes. Refuse a concurrent path replacement too.
+    const HANDLE current_file=CreateFileA(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    bool same=input.handle==INVALID_HANDLE_VALUE&&current_file==INVALID_HANDLE_VALUE&&GetLastError()==ERROR_FILE_NOT_FOUND;
+    if(current_file!=INVALID_HANDLE_VALUE){
+        BY_HANDLE_FILE_INFORMATION now{};
+        same=input.handle!=INVALID_HANDLE_VALUE&&GetFileInformationByHandle(current_file,&now)&&
+            now.dwVolumeSerialNumber==input.identity.dwVolumeSerialNumber&&now.nFileIndexHigh==input.identity.nFileIndexHigh&&now.nFileIndexLow==input.identity.nFileIndexLow;
+        CloseHandle(current_file);
+    }
+    if(!same){error="settings changed while editing; nothing written";return false;}
+    if(text==original)return true;
     return replace_whole(path,text,error);
 }
 }
 bool write_section(const std::string& path,const std::string& section,const std::vector<std::string>& body,std::string& error){
-    return rewrite_section(path,section,[&](const std::vector<std::string>&){return body;},error);
+    for(const auto& line:body)if(line.find_first_of("\r\n")!=std::string::npos||line.find('\0')!=std::string::npos){
+        error="invalid settings section body; nothing written";return false;}
+    return rewrite_section(path,section,[&](const std::vector<std::string>&,const std::string& eol){
+        auto lines=body;for(auto& line:lines)line+=eol;return lines;},error);
 }
 bool write_key(const std::string& path,const std::string& section,const std::string& key,const std::string& value,std::string& error){
-    return rewrite_section(path,section,[&](std::vector<std::string> lines){
-        bool found=false;
-        for(auto& l:lines){
-            const auto t=trim(l);
-            if(t.empty()||t[0]==';'||t[0]=='#')continue;
-            const auto eq=t.find('=');
-            if(eq==std::string::npos||lower(trim(t.substr(0,eq)))!=lower(key))continue;
-            l=key+" = "+value;found=true;
-        }
-        if(!found)lines.push_back(key+" = "+value);
-        return lines;
-    },error);
+    return write_keys(path,section,{{key,value}},error);
 }
 bool write_keys(const std::string& path,const std::string& section,const SettingsEdits& values,std::string& error,const SettingsEdits* expected){
     error.clear();
@@ -244,10 +287,10 @@ bool write_keys(const std::string& path,const std::string& section,const Setting
     };
     if(section.empty()||!safe(section)||section.find_first_of("[]")!=std::string::npos||values.empty()||!valid(values)||(expected&&!valid(*expected))){
         error="invalid settings edit; nothing written";return false;}
-    struct Changed {};
-    try{return rewrite_section(path,section,[&](std::vector<std::string> lines){
+    struct Changed {};struct Duplicate {};
+    try{return rewrite_section(path,section,[&](std::vector<std::string> lines,const std::string& eol){
         if(expected){
-            std::string text="["+section+"]\n";for(const auto& line:lines)text+=line+'\n';
+            std::string text="["+section+"]\n";for(const auto& line:lines)text+=line;
             Ini actual;actual.load_text(text,path);
             for(const auto& edit:*expected){
                 const bool present=actual.has_value(section,edit.first);
@@ -260,13 +303,27 @@ bool write_keys(const std::string& path,const std::string& section,const Setting
                 const auto text=trim(line);const auto equal=text.find('=');
                 const bool match=!text.empty()&&text[0]!=';'&&text[0]!='#'&&equal!=std::string::npos&&lower(trim(text.substr(0,equal)))==lower(edit.first);
                 if(!match)next.push_back(line);
-                else{found=true;if(edit.second)next.push_back(edit.first+" = "+*edit.second);}
+                else{
+                    if(found)throw Duplicate{};found=true;
+                    if(edit.second){
+                        const auto eq=line.find('=');std::size_t begin=eq+1,last=line.size();bool comment=false;
+                        while(last>begin&&(line[last-1]=='\n'||line[last-1]=='\r'))--last;
+                        for(std::size_t k=begin+1;k<last;++k)if((line[k]==';'||line[k]=='#')&&(line[k-1]==' '||line[k-1]=='\t')){last=k;comment=true;break;}
+                        while(begin<last&&(line[begin]==' '||line[begin]=='\t'))++begin;
+                        while(last>begin&&(line[last-1]==' '||line[last-1]=='\t'))--last;
+                        auto updated=line;updated.replace(begin,last-begin,*edit.second+(comment&&last==begin&&!edit.second->empty()?" ":""));next.push_back(std::move(updated));
+                    }
+                }
             }
-            if(!found&&edit.second)next.push_back(edit.first+" = "+*edit.second);
+            if(!found&&edit.second){
+                if(!next.empty()&&!next.back().empty()&&next.back().back()!='\n')next.back()+=eol;
+                next.push_back(edit.first+" = "+*edit.second+eol);
+            }
             lines=std::move(next);
         }
         return lines;
     },error);}catch(const Changed&){error="these settings changed since the preview; nothing written";return false;}
+    catch(const Duplicate&){error="an edited key appears more than once; nothing written";return false;}
 }
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     Ini ini;
