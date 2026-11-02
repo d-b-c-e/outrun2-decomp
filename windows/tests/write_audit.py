@@ -30,7 +30,8 @@ ROOTS = ["src", "xbox/source", "windows/source", "windows/shim", "windows/host",
 # run by the first-loop runner as its own process) is not linked either. An audited file that includes its header
 # directly is a finding (romi 30058: a direct-use guard only, not a transitive include or link-graph proof).
 EXCLUDE = ["src/tools/", "xbox/source/window_uwp.cpp", "xbox/source/window_win32.cpp",
-           "windows/host/control_publish.cpp", "windows/host/control_publish.hpp"]
+           "windows/host/control_publish.cpp", "windows/host/control_publish.hpp",
+           "windows/vendor/native/panel/test/"]  # standalone vendored fixtures, absent from OutRunDesktop's explicit source list
 STANDALONE_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?:[^>"]*/)?control_publish\.hpp[>"]', re.M)
 SUFFIXES = {".cpp", ".hpp", ".h", ".inc", ".cc"}
 WRAPPERS = ["write_options", "write_checked", "exe_image_write_cache", "write_section", "make_directory",
@@ -383,6 +384,16 @@ GUARDS = [
     # Playback (startup_state.hpp): an admitted playback's private home is set before anything writes (the log included).
     ("windows/source/window_desktop.cpp", "outrun::xbox_runtime::latched_home()=session::utf8(intake.home);", "std::freopen(log.c_str(),\"w\",stdout)"),
     ("windows/source/desktop_settings.cpp", "if(!create_if_missing){", "std::fopen(own.c_str(),\"wb\")"),
+    ("windows/source/desktop_panel.cpp", "c.iniPath=latched?nullptr:p.ini.c_str();", None),
+    ("windows/vendor/native/panel/dbce_panel_preferences.hpp", "if(!config.iniPath||", "WritePrivateProfileStringA"),
+    ("windows/source/desktop_panel.cpp", "if(!p.latched&&!p.playback)route_trace.observe(rt);", None),
+    ("windows/source/desktop_panel.cpp", "if(p.latched){dbce::panel::NoteSaved(false,\"a test run saves nothing\");return;}", "write_section(p.quality_backup"),
+    ("windows/source/desktop_panel.cpp", "if(!p.latched&&!p.playback){", "draw_support_report(log.c_str());"),
+    ("windows/source/window_desktop.cpp", "const bool extraction_allowed=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;", "texture_replacement_configure(on,ui,"),
+    ("windows/source/window_desktop.cpp", "const bool extract=extract_requested&&extraction_allowed,ui_extract=ui_extract_requested&&extraction_allowed;", "texture_replacement_configure(on,ui,"),
+    ("windows/source/ffb_shadow_live.cpp", "if(!ordinary_allowed){", "live.file=CreateFileW"),
+    ("windows/source/window_desktop.cpp", "ffb_shadow_configure(trace,!test_like&&intake.kind!=session::Intake::Kind::Record);", None),
+    ("windows/source/camera_controls.cpp", "if(disabled)return;", "platform::camera_fov_adjust()=adjust;"),
 ]
 
 def check_guards(repo, texts=None):
@@ -455,6 +466,19 @@ def selftest(repo, entries):
         ("the LAN guard removed", {"xbox/source/main.cpp": (repo / "xbox/source/main.cpp").read_bytes().decode("utf-8").replace(
             "if(outrun::xbox_runtime::latched_home().empty())outrun::platform::native_network_set_platform(", "outrun::platform::native_network_set_platform(")}),
     ]
+    # These classified writers kept their destinations while their latch guards
+    # moved into newer host/helper code. Removing a guard must still fail.
+    for rel, old, new, name in [
+        ("windows/source/desktop_panel.cpp", "c.iniPath=latched?nullptr:p.ini.c_str();", "c.iniPath=p.ini.c_str();", "panel preferences admitted during a test"),
+        ("windows/source/window_desktop.cpp", "const bool extraction_allowed=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;", "const bool extraction_allowed=true;", "texture extraction admitted during a test"),
+        ("windows/source/camera_controls.cpp", "if(disabled)return;", "if(false)return;", "saved camera controls admitted during a test"),
+        ("windows/source/ffb_shadow_live.cpp", "if(!ordinary_allowed){", "if(false){", "shadow trace admitted during a test"),
+        ("windows/source/desktop_panel.cpp", "if(!p.latched&&!p.playback)route_trace.observe(rt);", "route_trace.observe(rt);", "route trace host guard removed"),
+        ("windows/source/desktop_panel.cpp", "if(!p.latched&&!p.playback){", "{", "report export admitted during a test"),
+    ]:
+        text = (repo / rel).read_bytes().decode("utf-8")
+        assert old in text, name
+        guard_cases.append((name, {rel: text.replace(old, new)}))
     for name, texts in guard_cases:
         if not check_guards(repo, texts):
             failures.append("NOT CAUGHT: " + name)

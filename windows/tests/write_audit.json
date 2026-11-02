@@ -1,7 +1,7 @@
 [
  {
   "file": "src/enhancements/gpu_backend.cpp",
-  "line": "if(!path_.empty())write_options(path_,{{\"widescreen\",settings_.widescreen?\"1\":\"0\"}, {\"resolution\",resolution_key(settings_.resolution)},{\"antialiasing\",antialiasing_key(settings_.antialiasing)}, {\"framerate\",std::to_string(settings_.frame_rate)}});",
+  "line": "if(!path_.empty())write_options(path_,values);",
   "class": "redirected",
   "reason": "path_ = home()/options.ini (xbox main.cpp: GpuVideoBackend video(rt::home()+\"/options.ini\"))"
  },
@@ -91,7 +91,7 @@
  },
  {
   "file": "src/platform/frontend_profiles.cpp",
-  "line": "result.error=result.common_error=write_checked(dir+\"/common.dat\",p.common);",
+  "line": "}else result.error=result.common_error=write_checked(dir+\"/common.dat\",p.common);",
   "class": "redirected",
   "reason": "dir = the save folder (frontend_save_directory = home()/SaveGame), the run folder under the latch"
  },
@@ -559,7 +559,7 @@
  },
  {
   "file": "xbox/source/main.cpp",
-  "line": "outrun::enhancements::GpuVideoBackend video(rt::home()+\"/options.ini\",g_options.video);",
+  "line": "outrun::enhancements::GpuVideoBackend video(rt::home()+\"/options.ini\",video_options);",
   "class": "redirected",
   "reason": "options.ini read and written in home()"
  },
@@ -960,8 +960,8 @@
   "reason": "the software force trace: latched, the run folder the latched entry passes (fence plan.run_root\\ffb-trace.csv); ordinary, only with OR2_FFB_TRACE (cleared by the latch)"
  },
  {
-  "file": "windows/vendor/native/panel/dbce_panel.cpp",
-  "line": "if (!WritePrivateProfileStringA(\"Panel\", key, value, g_cfg.iniPath)) {",
+  "file": "windows/vendor/native/panel/dbce_panel_preferences.hpp",
+  "line": "return WritePrivateProfileStringA(\"Panel\",key,value,config.iniPath)!=0;",
   "class": "latched-skip",
   "reason": "the F6 panel's [Panel] View / Scale / Page in OutRunDesktop.ini: iniPath is null in a latched process (desktop_panel_configure), so the panel returns before this"
  },
@@ -1336,5 +1336,119 @@
   "line": "if(std::FILE* f=_wfopen((cap.folder+name).c_str(),L\"wbx\")){",
   "class": "fence",
   "reason": "rendering test burst (frame_capture.hpp): cap.folder is set only by render_test_start_capture to <run>\\frames of a latched run that admitted render-test.txt; exclusive (x), at most 300 frames and 1 GiB"
+ },
+ {
+  "file": "src/platform/frontend_profiles.cpp",
+  "line": "error=write_checked(dir+\"/common.dat\",sanitized);",
+  "class": "redirected",
+  "reason": "login-protected common save uses the same SaveGame dir as the plaintext branch; game_host installs home()/SaveGame and the latched home is the run folder"
+ },
+ {
+  "file": "src/platform/pc_pmt_loader.cpp",
+  "line": "std::error_code error;std::filesystem::create_directories(directory,error);",
+  "class": "latched-skip",
+  "reason": "extract_stock_texture: window_desktop extraction_allowed excludes tests/playback/recording; both extraction flags are false under the latch"
+ },
+ {
+  "file": "src/platform/pc_pmt_loader.cpp",
+  "line": "auto* file=_wfopen(path.c_str(),L\"wbx\");",
+  "class": "latched-skip",
+  "reason": "stock texture extraction is disabled under the latch; ordinary extraction creates a new DDS exclusively in the chosen texture base's dump folder"
+ },
+ {
+  "file": "src/platform/pc_pmt_loader.cpp",
+  "line": "auto* file=std::fopen(path.c_str(),\"wbx\");",
+  "class": "latched-skip",
+  "reason": "non-Windows counterpart of stock texture exclusive extraction; same disabled extraction flags"
+ },
+ {
+  "file": "src/platform/pc_pmt_loader.cpp",
+  "line": "if(!wrote||!closed){std::filesystem::remove(path,error);failed(\"cannot finish dump file\");return;}",
+  "class": "latched-skip",
+  "reason": "failed extraction removes only the file it exclusively created; extraction is disabled in test/playback/recording"
+ },
+ {
+  "file": "src/runtime/game_host.cpp",
+  "line": "static std::FILE* file=std::fopen(path,\"ab\");",
+  "class": "env-gated",
+  "reason": "route_state_note uses OR2_ROUTE_STATE; all OR2_ environment variables are cleared by the latch before host initialization"
+ },
+ {
+  "file": "windows/source/desktop_bindings.hpp",
+  "line": "bool open();",
+  "class": "not-a-file",
+  "reason": "Editor::open declaration: creates an in-memory draft from a read-only saved-profile read, no file write"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW, FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);",
+  "class": "env-gated",
+  "reason": "FrontendRouteTrace uses OR2_FRONTEND_STATE_TRACE and observe is called only in ordinary non-playback; latch clears all OR2_ switches"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "if(!WriteFile(file,header,DWORD(sizeof header-1),&written,nullptr)||written!=sizeof header-1){failed=true;return;}",
+  "class": "env-gated",
+  "reason": "FrontendRouteTrace header on its exclusively created diagnostic file; same ordinary/env guard"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "if(!WriteFile(file,line.data(),DWORD(line.size()),&written,nullptr)||written!=line.size()){",
+  "class": "env-gated",
+  "reason": "FrontendRouteTrace transition record on its diagnostic file; same ordinary/env guard"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "if(dbce::panel::Command(\"Edit bindings\")&&!p.binding_editor->open()){",
+  "class": "not-a-file",
+  "reason": "Editor::open reads the saved profile into an in-memory draft only; Save is a separate guarded writer"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "if(!write_section(p.quality_backup,\"GraphicsUndo\",quality::undo_document(previous,next),error)){",
+  "class": "latched-skip",
+  "reason": "quality_apply returns under p.latched before writing the dedicated graphics Undo sidecar"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "const bool restored=backup_exists?write_section(p.quality_backup,\"GraphicsUndo\",old_backup.section_lines(\"GraphicsUndo\"),restore_error):",
+  "class": "latched-skip",
+  "reason": "quality_apply failed-save cleanup restores only its previous Undo sidecar; p.latched returned before the operation"
+ },
+ {
+  "file": "windows/source/desktop_panel.cpp",
+  "line": "DeleteFileA(p.quality_backup.c_str())!=0;",
+  "class": "latched-skip",
+  "reason": "quality_apply failed-save cleanup removes only its newly created Undo sidecar when none existed; p.latched returns first"
+ },
+ {
+  "file": "windows/source/ffb_shadow_live.cpp",
+  "line": "return WriteFile(live.file,bytes.data(),DWORD(bytes.size()),&n,nullptr)&&n==bytes.size();",
+  "class": "latched-skip",
+  "reason": "shadow diagnostic sink writes only its trace handle; ffb_shadow_configure refuses ordinary_allowed=false for test/playback/recording"
+ },
+ {
+  "file": "windows/source/ffb_shadow_live.cpp",
+  "line": "live.file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);",
+  "class": "latched-skip",
+  "reason": "shadow trace requires ordinary_allowed and an absolute OR2_FFB_PRODUCER2_SHADOW_TRACE path; latch clears that switch too"
+ },
+ {
+  "file": "windows/vendor/native/support/support_report.cpp",
+  "line": "Handle file(CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr, OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr));",
+  "class": "not-a-file",
+  "reason": "read-only selected text log, opened GENERIC_READ/OPEN_EXISTING; no file write"
+ },
+ {
+  "file": "windows/vendor/native/support/support_report.cpp",
+  "line": "Handle file(CreateFileW(absolute.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));",
+  "class": "latched-skip",
+  "reason": "reviewed report export is reachable only from Help draw_support_report, excluded for latched/playback; ordinary UI requires explicit Save As to a new txt file"
+ },
+ {
+  "file": "windows/vendor/native/support/support_report.cpp",
+  "line": "if (!WriteFile(file.get(),text.data()+written,static_cast<DWORD>(text.size()-written),&count,nullptr) || !count)",
+  "class": "latched-skip",
+  "reason": "writes only the explicit reviewed report's exclusively created file; same ordinary Help guard, no automatic upload"
  }
 ]
