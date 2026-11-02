@@ -43,6 +43,15 @@ brought in. Update a row in the same commit that adopts it. Statuses: `adopted`,
 | STD-034 | A rig profile Apply is qualified by a closed loop | pending | Harness design with Astra. |
 | STD-035 | Writers and test injection: identity, provenance and failure rules | partial | Instance-GUID-only matching; injection gated by session, applied `[Controls]` and a force-free build; awaiting Astra's review. |
 | STD-036 | Every profile binding reaches the game from its own device | partial | Each binding is read from its own device instance; unverified at the rig. |
+| STD-041 | Corrected triples and camera framing sets | partial | Angled GPU replication and any-panel ordinary-node admission are in source and fixtures; legacy Planar/Angled and global MatchGameFov remain. Curve/source-eye mapping and per-camera sets are pending. No new rendered acceptance. |
+| STD-042 | Adjustable, remembered and named camera views | pending | Native authored camera identities and projection lifecycle are traced; saved FOV offsets, camera-change/stage notices and last-camera restore remain open. |
+| STD-043 | Own-key release wait and held H-pattern truth | unchecked | Verify the actual camera hotkey and held-gate consumers; do not infer adoption from the adapter capability table. |
+| STD-044 | Owned settings edits preserve file bytes | partial | Existing write_keys retains unrelated lines, refuses duplicate target sections and supports expected values; BOM/malformed-input/unique-temp behavior needs qualification before saved camera keys use it. |
+| STD-045 | FFB On by default, My Rig writes master switch | partial | Installed 2dd9886 defaults absent Output/Model to wheel/producer@2; physical admission and Wheelkit closed-loop Apply remain open. Preserve explicit saved Off; no unattended force qualification. |
+| STD-046 | Per-camera starts and offsets on the calculation | pending | Target: cockpit/bumper Realistic, bonnet/chase Game on triples; per-camera saved F7 set, per-camera/set FOV offsets, per-car position offsets and reset. Single-screen stays game-owned. Native camera identity and model placement must be established first. |
+| STD-047 | One spanning window and panel-edge-plane eye distance | partial | Source already uses one borderless span for Surround/separate monitors and direct EyeDistanceMm without sagitta subtraction. Current source requires matching equal panel layouts; curved/N-display mapping and runtime topology acceptance remain open. |
+| STD-048 | Numpad + zooms in, minus zooms out | pending | No native camera FOV hotkeys yet; implement the new direction when the offset consumer lands, preserving explicit custom bindings. |
+| STD-049 | Cab-over bonnet at roof front edge | pending | No model-derived mounted-camera placement yet; do not transplant Art's calibrated geometry or assume every native camera exists. |
 
 ## Feature checklist (STD-020)
 

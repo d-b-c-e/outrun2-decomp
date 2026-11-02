@@ -12,11 +12,15 @@ This is a source-based implementation plan for the native Decomp, not a renderer
 | Native GPU path | `xbox/source/d3d11_d3d9.cpp`, `TripleGsMain`, `triple_bind`, `triple_native_standard` | Replicates each admitted triangle into three viewports, undoing/reapplying D3D9 half-pixel fix. Back-buffer standard/affine projections are classified; custom/unmatched draws fall back to center; non-backbuffer targets stay single. |
 | UI/window geometry | `windows/source/window_desktop.cpp`; `src/runtime/game_host.cpp` | The selected row spans one window. Angled keeps center 16:9 and widens legacy screen culling; `ui_rect_` keeps RHW content on center. No new display topology switch is needed in source. |
 | Traffic visibility | `src/platform/race_traffic.cpp`, `triple_outer_edges`, `triple_sphere_hidden` | Has an angled-view visibility route beyond the center-eye near test, with existing numerical cases in `windows/tests/test_triple_screens.cpp`. |
-| Ordinary scene nodes | `src/platform/pc_render_queue.cpp`, node visibility / 404Cxx path | Still rejects bounding spheres against the center camera near and side planes. Widening `g_pc_view_half_width` does not remove this center near-plane rejection. |
+| Ordinary scene nodes | `src/platform/pc_render_queue.cpp`, node visibility / 404B00 path | Angled now admits spheres intersecting any panel's six clip planes. Off/Planar keep the original tests. See the implementation checkpoint below. |
 
 The old mod's camera-at-tick and GetViewport observations identify things to check, not addresses to hook in the port. Its legacy +A0/+B8/+C4 field meanings are reflected by the native functions above. Native viewport/scissor state and the render queue must be checked directly; there is no reason to add an original-EXE D3D9 wrapper here.
 
 ## Smallest next source increment
+
+**Implemented offline, November 2:** `pc_triple_visibility.hpp` derives normalized near/far/side planes from the same `Pcenter * Cpanel` used by the geometry shader. The renderer caches them whenever the main/effect projection changes; effect projection restoration restores its cache. Reflection cubes temporarily disable the panel cache and restore it afterward, matching their single-view GPU target. Node LOD uses the largest projected radius among intersected panels, clamping depth to that panel's near distance; the center-view position remains unchanged for queue sorting. Angled startup no longer forces `DisableStageCulling`, so this consumer is active; an explicit saved `DisableStageCulling` still overrides it. The existing ahead/behind section union remains.
+
+Named desktop and fixture builds validate compilation; fixture results are recorded in the morning handoff. Numerical admission and LOD checks do not prove that every stage/custom program/particle is rendered on every panel. The inventory in item 4 and rendered comparison remain next.
 
 Keep the existing one-simulation-frame / GPU-replication design. Start with **ordinary scene-node culling**, not a second rendering architecture or default flip:
 
@@ -37,4 +41,4 @@ Before a future live slot: freeze the exact package and dependencies, make a dis
 
 ## Offline baseline collected in this worktree
 
-`ctest --test-dir build-xbox-pc -C Release --output-on-failure -R '^(outrun_adapter|triple_screens)$' passed 2/2 after building only those named targets. `triple_screens` reports 1,153 checks. This establishes current numerical/contract baseline only; no new visibility fix, rendered views, performance or hardware acceptance was tested. The full Windows suite was not rerun. Private log: `work/validation-20261102/adapter-triples.log`.
+The initial baseline `outrun_adapter|triple_screens` passed 2/2 (1,153 triple checks). After the node increment, named fixture builds passed and `outrun_adapter|triple_screens|camera_render_binding|screen_edge_cull` passed **4/4**, using the installed `OR2006C2C.cache` read-only through `OR2_EXE` for the camera binding fixture. Without that fixture the binding test correctly skips. `triple_screens` now reports **1,200 checks**, including actual `render_node_visible_404b00` admission/LOD, side-visible centers behind the eye, outside/near/far rejection, pitched/rolled view transforms, matrix-stack preservation, and invalid/no-callback fallback. Private logs: `work/validation-20261102/culling-{build,tests,desktop-build}.log`. No game process, rendered comparison, performance, device or owner acceptance was exercised. The full Windows suite was not rerun.

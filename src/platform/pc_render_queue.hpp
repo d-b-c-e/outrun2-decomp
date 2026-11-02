@@ -1,5 +1,6 @@
 #pragma once
 #include "driving/pc_matrix_stack.hpp"
+#include "platform/pc_triple_visibility.hpp"
 #include <array>
 #include <functional>
 #include <vector>
@@ -33,6 +34,7 @@ struct PcRenderView {
     std::array<float,6> frustum_95bf40{};         // l, r, b, t, near, far
     std::array<std::array<float,4>,4> planes_95bf58{};
     std::array<float,3> eye{},target{};           // camera 79F574 +F8 / +104
+    PcPanelFrusta panels;                       // main angled view only; invalid = original single-view culling
 };
 struct PcRenderContext {
     PcRenderQueue& opaque;

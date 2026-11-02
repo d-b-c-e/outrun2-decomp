@@ -121,19 +121,23 @@ bool node_visible(PcRenderContext& c,const PmtNode& node,CourseProbe& v,std::int
     const float r=float(driving::x87_sqrt((X(u.z)*u.z+X(u.y)*u.y)+X(u.x)*u.x)*node.radius);
     std::int32_t lod=0;bool visible=false;
     const auto& f=c.view.frustum_95bf40;const auto& p=c.view.planes_95bf58;
+    const auto panel=c.view.panels.valid?pc_panel_sphere(c.view.panels,v.x,v.y,v.z,r):PcPanelVisibility{};
     const X near_limit=-X(f[4]);
     auto greater=[](X a,X b){return a>b;}; // FCOMP/TEST 41/JE: strictly greater, ordered
-    if(greater(X(v.z)-r,near_limit))goto done;
-    if(greater(X(p[1][2])*v.z+X(p[1][0])*v.x,r))goto done;
-    if(greater(X(p[0][2])*v.z+X(p[0][0])*v.x,r))goto done;
-    if(greater(X(p[2][1])*v.y+X(p[2][2])*v.z,r))goto done;
-    if(greater(X(p[3][1])*v.y+X(p[3][2])*v.z,r))goto done;
-    if((X(r)+v.z)<-X(f[5]))goto done;         // far: TEST 5 / JNP
+    if(c.view.panels.valid){if(!panel.visible)goto done;}
+    else{
+        if(greater(X(v.z)-r,near_limit))goto done;
+        if(greater(X(p[1][2])*v.z+X(p[1][0])*v.x,r))goto done;
+        if(greater(X(p[0][2])*v.z+X(p[0][0])*v.x,r))goto done;
+        if(greater(X(p[2][1])*v.y+X(p[2][2])*v.z,r))goto done;
+        if(greater(X(p[3][1])*v.y+X(p[3][2])*v.z,r))goto done;
+        if((X(r)+v.z)<-X(f[5]))goto done;         // far: TEST 5 / JNP
+    }
     {
         std::int32_t e=-126;
-        if(!(v.z==0.f)){
+        if(c.view.panels.valid||!(v.z==0.f)){
             e=127;
-            const float w=float((((X(-1.f)/f[3])/v.z)*f[4])*r);
+            const float w=c.view.panels.valid?panel.projected_radius:float((((X(-1.f)/f[3])/v.z)*f[4])*r);
             std::uint32_t bits;std::memcpy(&bits,&w,4);
             e-=std::int32_t((bits>>23)&0xffu);
             if(e>=c.lod_threshold_8999b8)goto done;

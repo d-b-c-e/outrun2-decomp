@@ -171,6 +171,8 @@ void PcSceneRenderer::apply_camera(const driving::PcCameraDevice& d,Bytes camera
     }
     view_.view_95d860=d.slots_95d860[0];
     view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
+    std::array<float,16> projection{};std::memcpy(projection.data(),d.slots_95d860[1].data(),64);
+    view_.panels=pc_panel_frusta(projection.data(),g_pc_triple_corrections);
     for(unsigned k=0;k<3;++k){view_.eye[k]=camera.f32(0xf8+k*4);view_.target[k]=camera.f32(0x104+k*4);}
 }
 bool& fix_znear(){static bool on=false;return on;}
@@ -185,12 +187,13 @@ void PcSceneRenderer::scene_effect_projection(bool begin){
         render_set_matrix_410f90(*flush_,effect_projection_,1);
         device_.set_transform(3,effect_projection_.data());
         view_.frustum_95bf40=effect_frustum_;view_.planes_95bf58=effect_planes_;
+        view_.panels=effect_panels_;
         return;
     }
     Bytes vehicle(nullptr,0),camera(nullptr,0);
     if(!vehicle_camera||!vehicle_camera(vehicle,camera)||camera.size()<0x3b4u)return;
     std::memcpy(effect_projection_.data(),globals_.transform().slot[1],64);
-    effect_frustum_=view_.frustum_95bf40;effect_planes_=view_.planes_95bf58;effect_saved_=true;
+    effect_frustum_=view_.frustum_95bf40;effect_planes_=view_.planes_95bf58;effect_panels_=view_.panels;effect_saved_=true;
     driving::PcCameraDevice d;
     driving::pc_matrix_push(matrices_);
     driving::camera_perspective_404310(matrices_,camera.f32(0xa0),camera.f32(0xb8),0.05f,camera.f32(0xc0),
@@ -201,6 +204,7 @@ void PcSceneRenderer::scene_effect_projection(bool begin){
     render_set_matrix_410f90(*flush_,m,1);
     device_.set_transform(3,m.data());   // D3DTS_PROJECTION
     view_.frustum_95bf40=d.frustum_95bf40;view_.planes_95bf58=d.planes_95bf58;
+    view_.panels=pc_panel_frusta(m.data(),g_pc_triple_corrections);
 }
 void PcSceneRenderer::note_camera_replay(Bytes camera,const std::vector<std::uint8_t>& before){
     auto after=std::make_shared<std::vector<std::uint8_t>>(camera.data(),camera.data()+0x3b4);

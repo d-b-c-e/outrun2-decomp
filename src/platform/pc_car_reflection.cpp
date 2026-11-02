@@ -146,6 +146,9 @@ void car_reflection_frame_414340(PcFlushContext& c,PcMatrixStack& s,PcRenderView
                                  const PcCarReflectionInputs& in,const PcCarReflectionServices& sv,PcCarReflectionStats& st){
     if((in.player_flags_79fb50&3u)!=2u)return;
     if(in.final_stage_7d33d0!=0u&&in.car.u32(0x5c)!=0u)return;
+    struct PanelRestore { PcRenderView& view;PcPanelFrusta saved;~PanelRestore(){view.panels=saved;} };
+    const PanelRestore panel_restore{view,view.panels};
+    view.panels={}; // cube faces are single-view render targets, not the main angled back buffer
     auto& g=c.g;auto& d=c.device;
     ++st.frames;
     const std::uint32_t cube=g.w(0x8a89f4);

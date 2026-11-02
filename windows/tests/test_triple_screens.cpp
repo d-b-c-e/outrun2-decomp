@@ -8,6 +8,8 @@
 #include "platform/race_translated.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/race_traffic.hpp"
+#include "platform/pc_render_queue.hpp"
+#include "platform/pc_pmt_records.hpp"
 #include "driving/pc_camera.hpp"
 #include <array>
 #include <cmath>
@@ -16,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <limits>
 using namespace outrun::desktop;
 using outrun::xbox_runtime::display_fit;
 using outrun::xbox_runtime::planar_width;
@@ -470,6 +473,63 @@ int main(){
         CHECK(!pf::triple_outer_edges(nullptr,fov_y,aspect,1.f,5000.f,0.f,0.f).ok);
         CHECK(!pf::triple_outer_edges([](const float*,float*){return false;},fov_y,aspect,1.f,5000.f,0.f,0.f).ok);
         CHECK(!pf::triple_outer_edges(rig,0.f,aspect,1.f,5000.f,0.f,0.f).ok&&!pf::triple_outer_edges(rig,fov_y,aspect,0.f,5000.f,0.f,0.f).ok);
+    }
+    // Ordinary PMT nodes use all six planes of every rendered panel, including when a
+    // side-visible node is behind the center eye. Exercise the actual 404B00 consumer.
+    {
+        namespace pf=outrun::platform;namespace dr=outrun::driving;
+        const auto corrections=[](const float* projection,float* out){
+            Mat4 p{};for(unsigned k=0;k<16;++k)p[k]=projection[k];
+            TripleViews v{};if(!triple_views(p,fixture_rig(8.),v))return false;
+            for(unsigned i=0;i<3;++i)for(unsigned k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+            return true;};
+        std::array<std::uint8_t,256> arena{};
+        dr::PcMatrixStack stack{dr::Bytes(arena.data(),arena.size()),0,0,4};
+        dr::PcCameraDevice camera;
+        dr::camera_perspective_404310(stack,float(2.*std::atan(1./1.589)),16.f/9.f,1.f,5000.f,0.f,0.f,camera);
+        std::array<float,16> projection{};std::memcpy(projection.data(),stack.current().data(),64);
+        dr::pc_matrix_identity(stack);
+        pf::PcRenderView view;
+        std::memcpy(view.view_95d860.data(),stack.current().data(),64);
+        view.frustum_95bf40=camera.frustum_95bf40;view.planes_95bf58=camera.planes_95bf58;
+        const auto panels=pf::pc_panel_frusta(projection.data(),corrections);CHECK(panels.valid);
+        pf::PcRenderQueue opaque,alpha;
+        pf::PcRenderContext context{opaque,alpha,view,stack,{},1000,{},0,0,{},0};
+        pf::pmt_records::PmtNode node{};node.flags=0x10;node.radius=1.f;
+        dr::CourseProbe center{};std::int32_t lod=-1;
+        const auto visible=[&](float x,float y,float z,float radius=1.f){
+            node.centre[0]=x;node.centre[1]=y;node.centre[2]=z;node.radius=radius;
+            const auto model=stack.current();std::array<std::uint8_t,64> before{};std::memcpy(before.data(),model.data(),64);
+            const bool result=pf::render_node_visible_404b00(context,dr::Bytes(&node,sizeof node),center,lod);
+            CHECK(stack.depth==0&&stack.current_offset==0&&std::memcmp(before.data(),stack.current().data(),64)==0);
+            return result;};
+        CHECK(!visible(40.f,0.f,10.f)); // original center near rejection
+        view.panels=panels;
+        CHECK(visible(40.f,0.f,10.f)&&center.z==10.f&&lod>=0&&lod<=3);
+        CHECK(visible(-40.f,0.f,10.f)&&center.z==10.f);
+        CHECK(!visible(0.f,0.f,10.f)&&!visible(40.f,100.f,10.f));
+        CHECK(!visible(0.f,0.f,-6000.f));
+        CHECK(visible(0.f,0.f,-0.95f,0.1f)&&!visible(0.f,0.f,-0.8f,0.1f));
+        CHECK(!visible(std::numeric_limits<float>::quiet_NaN(),0.f,-10.f));
+        // The largest visible-panel projection determines LOD; center sort depth stays intact.
+        CHECK(visible(0.f,0.f,-50.f));const auto center_lod=lod;
+        CHECK(visible(0.f,0.f,-500.f)&&lod>=center_lod);
+        // Pitched/rolled camera: test a world point that maps behind the center eye.
+        dr::pc_matrix_rotate_x(stack,0.3f);dr::pc_matrix_rotate_z(stack,-0.2f);
+        std::memcpy(view.view_95d860.data(),stack.current().data(),64);
+        const auto world=dr::pc_inverse_point(stack.current(),{40.f,0.f,10.f});
+        dr::pc_matrix_identity(stack);
+        CHECK(visible(world.x,world.y,world.z)&&std::fabs(center.x-40.f)<1e-4f&&std::fabs(center.z-10.f)<1e-4f);
+        std::memcpy(view.view_95d860.data(),stack.current().data(),64);
+        // No callback (Off/Planar), refusal, or corrupt matrix retain original culling and LOD.
+        const pf::PcPanelFrusta fallbacks[]{pf::pc_panel_frusta(projection.data(),nullptr),
+            pf::pc_panel_frusta(projection.data(),[](const float*,float*){return false;}),
+            pf::pc_panel_frusta(projection.data(),[](const float*,float* out){out[0]=std::numeric_limits<float>::quiet_NaN();return true;})};
+        for(const auto& fallback:fallbacks){
+            CHECK(!fallback.valid);view.panels=fallback;
+            CHECK(!visible(40.f,0.f,10.f)&&visible(0.f,0.f,-50.f));CHECK(lod==center_lod);
+            CHECK(!visible(0.f,0.f,-6000.f)&&!visible(0.f,100.f,-10.f));
+        }
     }
     std::printf("triple screens: %u checks\n",checks);
     return 0;

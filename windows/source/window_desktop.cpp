@@ -162,7 +162,7 @@ NativeWindow& native_window(){
         triple_status.projection_note=refused?refused:"";
         if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
         if(triple_status.applied==td::TripleProjection::angled){
-            outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;outrun::platform::render_disable_culling()=true;
+            outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;
             // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
             // 44DE10) draw nothing behind the car and add objects beside it only a few sections on. Where [Graphics]
             // leaves a key at 0, the views union 64 sections ahead and 64 behind (td::triple_default_union). Tweaks'
@@ -187,8 +187,8 @@ NativeWindow& native_window(){
                               triple_rig.eye_distance_mm,fov*180./3.14159265358979323846);}
             std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the rig "
                         "(panels %.1f x %.1f mm%s, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
-                        "viewports; stage culling off; stage sections drawn +%d ahead and %d behind the car; objects behind the eye "
-                        "still culled; the HUD, menus and screen-space particles on the center only\n",td::triple_screens_name(triple),
+                        "viewports; ordinary nodes culled against all panel frusta (unless DisableStageCulling); stage sections "
+                        "drawn +%d ahead and %d behind the car; the HUD, menus and screen-space particles on the center only\n",td::triple_screens_name(triple),
                         w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,used_h,height,
                         triple_rig.side_angle_deg,triple_rig.bezel_mm,eye,dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
