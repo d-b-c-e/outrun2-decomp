@@ -84,7 +84,7 @@ def source_revision(root: Path, commit: str) -> None:
 
 
 def pe_identity(data: bytes) -> None:
-    # Header admission only, not a loader, dependency scanner or authenticity check.
+    # Header admission only, not a loader or authenticity check.
     if len(data) < 64 or data[:2] != b"MZ":
         raise ValueError("Candidate is not a PE executable.")
     offset = struct.unpack_from("<I", data, 0x3C)[0]
@@ -96,6 +96,64 @@ def pe_identity(data: bytes) -> None:
             offset + 24 + optional_size + sections * 40 > len(data) or
             magic != 0x20B or not flags & 2 or flags & 0x2000):
         raise ValueError("Expected an AMD64 PE32+ executable, not a DLL or x86 image.")
+
+
+def pe_static_imports(data: bytes) -> list[str]:
+    """DLL names from the ordinary import directory, never load/resolve anything.
+
+    Microsoft PE format: https://learn.microsoft.com/windows/win32/debug/pe-format
+    Delay, transitive and dynamic imports are deliberately outside this inventory.
+    """
+    pe_identity(data)
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    optional, sections = pe + 24, struct.unpack_from("<H", data, pe + 6)[0]
+    optional_size = struct.unpack_from("<H", data, pe + 20)[0]
+    directories = struct.unpack_from("<I", data, optional + 108)[0]
+    if directories < 2:
+        return []
+    if optional_size < 128:
+        raise ValueError("Truncated PE import data directory.")
+    directory, size = struct.unpack_from("<II", data, optional + 120)
+    if not directory and not size:
+        return []
+    if not directory or size < 20 or size > 4096 * 20:
+        raise ValueError("Invalid or oversized PE import directory.")
+    headers = struct.unpack_from("<I", data, optional + 60)[0]
+    table = optional + optional_size
+
+    def locate(rva: int) -> tuple[int, int]:
+        candidates = []
+        if rva < min(headers, len(data)):
+            candidates.append((rva, min(headers, len(data)) - rva))
+        for i in range(sections):
+            virtual_size, address, raw_size, raw = struct.unpack_from("<IIII", data, table + i * 40 + 8)
+            if address <= rva < address + max(virtual_size, raw_size):
+                delta = rva - address
+                if delta < raw_size and raw + raw_size <= len(data):
+                    candidates.append((raw + delta, raw_size - delta))
+        if len(candidates) != 1:
+            raise ValueError("PE import RVA is unmapped, ambiguous or outside file-backed data.")
+        return candidates[0]
+
+    start, available = locate(directory)
+    if size > available:
+        raise ValueError("PE import directory exceeds its file-backed region.")
+    names = set()
+    for descriptor in range(size // 20):
+        words = struct.unpack_from("<IIIII", data, start + descriptor * 20)
+        if not any(words):
+            return sorted(names)
+        if not words[3]:
+            raise ValueError("PE import descriptor has no DLL name.")
+        at, available = locate(words[3])
+        end = data.find(b"\0", at, at + min(available, 4096))
+        if end <= at:
+            raise ValueError("Empty or unterminated PE import DLL name.")
+        raw_name = data[at:end]
+        if any(b < 32 or b > 126 for b in raw_name):
+            raise ValueError("Non-ASCII/control byte in PE import DLL name.")
+        names.add(raw_name.decode("ascii").lower())
+    raise ValueError("PE import directory lacks a terminating descriptor.")
 
 
 def package(root: Path, exe: Path, expected_sha: str, commit: str,
@@ -113,7 +171,7 @@ def package(root: Path, exe: Path, expected_sha: str, commit: str,
     binary = regular_bytes(exe, MAX_EXE)
     if digest(binary) != expected_sha.lower():
         raise ValueError("Candidate EXE hash differs from the qualified build receipt.")
-    pe_identity(binary)
+    imports = pe_static_imports(binary)
     members = {"OutRunDesktop.exe": binary}
     for name in SOURCE_TEXT:
         # Bind every supplied source text to the recorded Git blob, even when ignored.
@@ -133,7 +191,9 @@ def package(root: Path, exe: Path, expected_sha: str, commit: str,
         "buildBinding": "Operator-supplied EXE hash; verify the separate build receipt.",
         "readiness": "pending-candidate-regression-and-runtime-review",
         "distribution": "private-only; public release requires separate review",
-        "runtimeDependencies": "Inspect actual PE imports; system/VC runtime prerequisites are not bundled.",
+        "staticImports": imports,
+        "runtimeDependencies": "Ordinary PE imports only; delay, transitive and dynamic loads are not inventoried. "
+                               "Names do not prove dependency availability; system/VC runtimes are not bundled.",
         "members": [{"path": name, "bytes": len(data), "sha256": digest(data)}
                     for name, data in sorted(members.items())],
     }

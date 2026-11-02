@@ -10,6 +10,8 @@ pwsh -File ./windows/Install-Candidate.ps1 -GameDir 'D:/Games/OutRun Decomp'
 
 The destination must already contain `OR2006C2C.cache` or `OR2006C2C.exe`; this is a folder marker check, not validation of the retail assets. The tool checks the private manifest's schema/platform/source identity, executable hash/length and AMD64 PE32+ identity. It refuses linked/reparse paths, hard-linked destinations and a running destination executable. Identical bytes return `AlreadyPresent` without a new transaction.
 
+The manifest also lists the EXE's ordinary static import DLL names in `staticImports`. This is an inventory for the candidate operator, not a runtime prerequisite check: delay-load, transitive and dynamic dependencies (including optional force output) are outside that list. The installer neither loads those modules nor installs runtimes.
+
 For a change, the tool retains the prior executable and a JSON receipt under `.outrun-candidate-history/<ReceiptId>/` in the game folder. It verifies the backup, writes a durable `Prepared` receipt, verifies a uniquely staged executable, then publishes it atomically and records `Installed`. Save the returned ReceiptId and keep the history directory. Settings, saves, assets, DLLs and unrelated files remain untouched. The tool does not infer that the executable was built from its manifest revision; retain the separate build/hash receipt.
 
 To undo that transaction:

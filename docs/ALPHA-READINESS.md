@@ -62,7 +62,12 @@ python -I -B tools/alpha/test_package_candidate.py
 ```
 
 After the candidate build, record the actual EXE SHA-256 in its build receipt.
-Inspect normal and delay-load PE imports using the installed toolchain (for
+The manifest's `staticImports` inventories lowercased, sorted ordinary PE import
+DLL names from the exact supplied EXE. The bounded parser follows file-backed
+RVAs, refuses malformed/unterminated tables, and never loads a module. This does
+not include delay-load, transitive or dynamic dependencies, and names do not
+prove availability. API-set names are loader contracts, not an instruction to
+copy matching files. Inspect normal and delay-load PE imports using the installed toolchain (for
 example `dumpbin /DEPENDENTS` and `/IMPORTS`). Record Windows/VC runtime
 prerequisites and check they exist on the target. If an unexpected non-system
 DLL is required, stop and resolve its origin and packaging explicitly; do not
