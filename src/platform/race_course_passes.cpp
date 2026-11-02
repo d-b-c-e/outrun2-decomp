@@ -38,10 +38,12 @@ struct CoursePassState {
     bool shadow_skipped{};                            // 422820 drew nothing: its 422F20 too (host guard)
     std::array<std::uint8_t,0x420> flare_7d2938{};       // 7D2938 \common\lens_flare_offset.bin (44A630), 7D2B18 its copy
     std::array<std::uint8_t,4> flag_7d2d74{};             // 7D2D74 (44A690)
-    PcD3D9Device* query_device{};
-    std::uint32_t query{};                 // 89F680 occlusion query (never released, as on the PC)
+    NativeSunViewState sun_view;          // legacy view query and temporal render state
 };
 CoursePassState& state(){static CoursePassState s;return s;}
+void sun_query(PcD3D9Device& device,NativeSunViewState& view){
+    if(view.query_device!=&device){view.query_device=&device;view.query=device.create_occlusion_query();}
+}
 NativeCoursePassStats stats_;
 bool exe_bytes(std::uint32_t a,std::uint8_t* out,std::size_t n){
     for(std::size_t i=0;i<EmbeddedExeRangeCount;++i){const auto& e=EmbeddedExeRanges[i];
@@ -346,16 +348,8 @@ void shadow_map_end_422f20(CoursePass& p){
 }
 // ---- sun and lens flare (bit 1, layer 8): 40CBC0 on the object at work+90 ----
 // PC statics of the pass (.data / .bss).
-struct SunState {
-    std::uint32_t visibility_73e2ac{0x2cec};   // 73E2AC (.data 11500): occlusion samples of a fully visible sun
-    std::uint8_t first_73e2b0{1};              // 73E2B0 (.data 1): first visible frame
-    float previous_89bd48[3]{};                // 89BD48 sun position 899C70 of the last direction update
-    std::uint32_t samples_89f684{};            // 89F684 last query result
-    std::uint32_t saved_89f670[4]{};           // 89F670 states 7 / E / F / A8 around the occlusion draw (411560)
-    std::uint32_t count_89f66c{};              // 89F66C occlusion records (at most 1)
-    struct Record {std::uint32_t handle{},arg{};M matrix{};} record_89f690;
-};
-SunState& sun_state(){static SunState s;return s;}
+struct SunWorldState {float previous_89bd48[3]{};};
+SunWorldState& sun_world_state(){static SunWorldState s;return s;}
 float fbits(std::uint32_t bits){float v;std::memcpy(&v,&bits,4);return v;}
 // lens_flare_offset.bin (44A630 at device setup: the file read over a
 // cleared table, then its first 0xF0 bytes copied to 7D2B18).
@@ -377,6 +371,7 @@ void load_flare_table(NativeRuntimeContext& c){
 }
 struct Sun {
     CoursePass& p;
+    NativeSunViewState& view_state;NativeSunView* view{};
     driving::Bytes car,cam;
     float intensity_89bd44{};
     std::uint32_t manager(std::uint32_t pc,std::uint32_t arg){
@@ -449,9 +444,9 @@ struct Sun {
         driving::pc_matrix_push(s);
         driving::pc_matrix_translate_vector(s,{0.0f,0.0f,along});
         auto v=driving::pc_d3dx_vec3_transform_coord({0.0f,0.0f,0.0f},p.current());
-        driving::pc_matrix_load(s,cam.sub(0x140,64));
+        driving::pc_matrix_load(s,driving::Bytes(view->matrix.data(),64));
         v=driving::pc_d3dx_vec3_transform_coord(v,p.current());
-        driving::pc_matrix_load(s,cam.sub(0x1c0,64));
+        driving::pc_matrix_load(s,driving::Bytes(view->screen.data(),64));
         driving::pc_matrix_translate_vector(s,{v[0],v[1],v[2]});
         M scale{};driving::pc_d3dx_matrix_scaling(driving::Bytes(scale.data(),64),size,size,1.0f);
         driving::pc_matrix_multiply_current(s,driving::Bytes(scale.data(),64));
@@ -492,13 +487,13 @@ struct Sun {
     // IDirect3DQuery9::GetData on the occlusion query 89F680 (no device
     // query: always S_FALSE).
     std::uint32_t query_get_data(std::uint32_t& samples){
-        auto& st_=state();
+        auto& st_=view_state;
         if(!st_.query)return 1u;
         return p.d.query_get_data(st_.query,samples);
     }
     // 4113E0(ECX = handle, arg): records the object and the current matrix.
     void record_4113e0(std::uint32_t handle,std::uint32_t arg){
-        auto& sun=sun_state();
+        auto& sun=view_state;
         if(sun.count_89f66c>=1u)return;
         sun.record_89f690.handle=handle;sun.record_89f690.arg=arg;sun.record_89f690.matrix=p.current();
         ++sun.count_89f66c;
@@ -506,7 +501,7 @@ struct Sun {
     // 4114E0(EAX = handle): the object drawn inside the occlusion query
     // once the previous result is in.
     void occlusion_draw_4114e0(std::uint32_t handle){
-        auto& st_=state();auto& d=p.d;
+        auto& st_=view_state;auto& d=p.d;
         std::uint32_t samples=0;
         if(query_get_data(samples)==1u)return;
         if(st_.query)d.query_issue(st_.query,2);                          // D3DISSUE_BEGIN
@@ -521,7 +516,7 @@ struct Sun {
     // alpha blending and colour writes off, world matrix = current (411060),
     // then 4115C0 restores the four states.
     void occlusion_411420(){
-        auto& sun=sun_state();auto& d=p.d;
+        auto& sun=view_state;auto& d=p.d;
         if(sun.count_89f66c==0u)return;
         static constexpr std::uint32_t states[4]{7,0xe,0xf,0xa8};
         for(unsigned k=0;k<4;++k)sun.saved_89f670[k]=d.get_render_state(states[k]);          // 411560
@@ -545,11 +540,11 @@ struct Sun {
 // measured by the previous occlusion query sets 95AEF8 (calibrated
 // against 73E2AC), the sun disc, its occlusion object, the glow and the
 // flare sprites are drawn along the screen axis.
-void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
-    Sun sun{p,driving::Bytes(nullptr,0),driving::Bytes(nullptr,0)};
+NativeSunFrame sun_prepare_40cbc0(CoursePass& p,std::uint32_t object){
+    Sun sun{p,state().sun_view,nullptr,driving::Bytes(nullptr,0),driving::Bytes(nullptr,0)};
     if(!(p.r.vehicle_camera&&p.r.vehicle_camera(sun.car,sun.cam)))throw PcRaceUnmapped(0x79f574u,4);
     load_flare_table(p.c);
-    auto& g=p.fl.g;auto& s=p.s;auto& ss=sun_state();
+    auto& s=p.s;auto& ss=sun_world_state();
     const auto& cam=sun.cam;
     const std::int32_t stage=std::int32_t(sun.stage_44dc50(sun.manager(0x450380u,8)));
     sun.intensity_89bd44=fbits(p.work_u32(object+0xc));
@@ -587,35 +582,50 @@ void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
     const X fov=X(cam.f32(0xa0))*X(fbits(0x42652ee0u))*X(0.01f);                 // degrees / 100
     float size=st(fov);                                                          // F14
     float spread=st(fov*X(0.13f));                                               // F10
-    driving::pc_matrix_push_load(s,cam.sub(0x140,64));                          // the view
+    NativeSunFrame frame;frame.stage=stage;frame.sun_point={S[0],S[1],S[2]};
+    frame.size=size;frame.spread=spread;frame.intensity=sun.intensity_89bd44;frame.paused=sun.paused();
+    for(unsigned i=0;i<16;++i){frame.legacy_view.matrix[i]=cam.f32(0x140+i*4);frame.legacy_view.screen[i]=cam.f32(0x1c0+i*4);}
+    for(unsigned i=0;i<3;++i){frame.legacy_view.eye[i]=cam.f32(0xf8+i*4);frame.legacy_view.target[i]=cam.f32(0x104+i*4);}
+    frame.legacy_view.screen_x=cam.f32(0xb0);frame.legacy_view.screen_y=cam.f32(0xb4);
+    if(sun.i16(object+0x12)>0&&!frame.paused)sun.put16(object+0x12,std::int16_t(sun.i16(object+0x12)-1));
+    return frame;
+}
+void sun_render_40cbc0(CoursePass& p,const NativeSunFrame& frame,const NativeSunView& input,
+                       NativeSunViewState& state,driving::Bytes flicker){
+    flicker.check(0,2);auto view=input;
+    Sun sun{p,state,&view,driving::Bytes(nullptr,0),driving::Bytes(nullptr,0)};
+    sun.intensity_89bd44=frame.intensity;
+    auto& g=p.fl.g;auto& s=p.s;auto& ss=state;
+    const auto& S=frame.sun_point;const auto stage=frame.stage;const float eps=fbits(0x34000000u);
+    float size=frame.size,spread=frame.spread;
+    driving::pc_matrix_push_load(s,driving::Bytes(view.matrix.data(),64));                          // the view
     const auto P=driving::pc_d3dx_vec3_transform_coord({S[0],S[1],S[2]},p.current());
-    if(sun.i16(object+0x12)>0&&!sun.paused())sun.put16(object+0x12,std::int16_t(sun.i16(object+0x12)-1));
     if(X(P[2])<X(0.0f)){
         // 449940 under the view: the screen position (x / 740C94, y / 740C98).
-        driving::pc_matrix_push_load(s,cam.sub(0x140,64));
+        driving::pc_matrix_push_load(s,driving::Bytes(view.matrix.data(),64));
         float sx=0,sy=0;
         {
             const auto l=driving::pc_matrix_point(s,{S[0],S[1],S[2]});
             if(!(X(eps)>driving::x87_abs(X(l.z)))){
                 const float inv=1.0f/(0.0f-l.z);
-                sx=(inv*cam.f32(0xb0))*l.x;
-                sy=l.y*(inv*cam.f32(0xb4));
+                sx=(inv*view.screen_x)*l.x;
+                sy=l.y*(inv*view.screen_y);
             }
         }
         driving::pc_matrix_pop(s);
         sx=st(X(sx)/X(1.0f));                                                    // 740C94 = 1.0
         sy=st(X(sy)/X(g.f(0x740c98)));
         if(!(X(sx)>X(-470.0f)&&X(sx)<X(470.0f)&&X(sy)>X(-440.0f)&&X(sy)<X(440.0f))){
-            sun.put16(object+0x10,0);
+            flicker.put16(0,0);
         }else{
             render_light_ambient_410710(p.fl,{sun.light(0x899c10),sun.light(0x899c14),sun.light(0x899c18),1.0f});
             render_lights_reset_410740(p.fl);
             render_light_add_4107a0(p.fl,sun.lights().sub(0x899cd8u-0x899b98u,0xa0));
             auto sub=[](const float* a,const float* b,float* o){for(unsigned k=0;k<3;++k)o[k]=st(X(a[k])-X(b[k]));};   // 40EFA0
-            const float eye[3]{cam.f32(0xf8),cam.f32(0xfc),cam.f32(0x100)};
-            const float target[3]{cam.f32(0x104),cam.f32(0x108),cam.f32(0x10c)};
+            const float eye[3]{view.eye[0],view.eye[1],view.eye[2]};
+            const float target[3]{view.target[0],view.target[1],view.target[2]};
             float view_dir[3],sun_dir[3];
-            sub(target,eye,view_dir);sub(S,eye,sun_dir);
+            sub(target,eye,view_dir);sub(S.data(),eye,sun_dir);
             const float glow_offset[3]{0.0f,0.0f,-0.2f};                         // F68
             float bright=fbits(0x3f7d70a4u);                                     // 0.99, F18
             const float far=stage==0x17?1300.0f:2500.0f;                         // F44
@@ -626,9 +636,9 @@ void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
             else if(X(sy)>X(100.0f))bright=st((X(520.0f)-X(sy))*X(bright)*X(fbits(0x3b40c0c1u)));
             const float edge=bright;                                             // F40 / F3C
             float flare=0.65f;                                                   // F34
-            if(sun.i16(object+0x10)>0){                                          // flicker countdown: odd frames dark
-                if(!sun.paused())sun.put16(object+0x10,std::int16_t(sun.i16(object+0x10)-1));
-                if(*sun.object(object+0x10,1)&1u){flare=0.0f;bright=0.0f;}
+            if(flicker.i16(0)>0){                                          // flicker countdown: odd frames dark
+                if(!frame.paused)flicker.put16(0,std::int16_t(flicker.i16(0)-1));
+                if(flicker.data()[0]&1u){flare=0.0f;bright=0.0f;}
             }
             flare=st(X(bright)*X(flare));
             const auto vd=driving::pc_d3dx_vec3_normalize({view_dir[0],view_dir[1],view_dir[2]});
@@ -652,7 +662,7 @@ void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
             const X inv_z=X(1.0f)/X(P[2]);
             const float axis[3]{st(X(P[0])*inv_z*X(-1.0f)),st(X(P[1])*inv_z*X(-1.0f)),-1.0f};   // the sun on the z = -1 plane
             float glow_dir[3];sub(glow_offset,axis,glow_dir);
-            driving::pc_matrix_push_load(s,cam.sub(0x1c0,64));                  // screen space
+            driving::pc_matrix_push_load(s,driving::Bytes(view.screen.data(),64));                  // screen space
             if(X(spread)>X(0.0f)){
                 // The sun disc (z off), then its occlusion object for the next
                 // frame's query and the sun objects at the far distance.
@@ -729,6 +739,11 @@ void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
     }
     driving::pc_matrix_pop(s);
 }
+void sun_flare_40cbc0(CoursePass& p,std::uint32_t object){
+    const auto frame=sun_prepare_40cbc0(p,object);
+    auto* flicker=const_cast<std::uint8_t*>(p.work(object+0x10,2));
+    sun_render_40cbc0(p,frame,frame.legacy_view,state().sun_view,driving::Bytes(flicker,2));
+}
 bool native_pass(NativeRuntimeContext& c,PcSceneRenderer& r,std::uint32_t pc,std::uint32_t arg){
     CoursePass p(c,r);
     switch(pc){
@@ -744,6 +759,14 @@ bool native_pass(NativeRuntimeContext& c,PcSceneRenderer& r,std::uint32_t pc,std
     default:return false;
     }
 }
+}
+NativeSunFrame native_sun_prepare_frame(NativeRuntimeContext& context,PcSceneRenderer& renderer,std::uint32_t object){
+    CoursePass pass(context,renderer);return sun_prepare_40cbc0(pass,object);
+}
+void native_sun_render_view(NativeRuntimeContext& context,PcSceneRenderer& renderer,const NativeSunFrame& frame,
+                            const NativeSunView& view,NativeSunViewState& state,driving::Bytes flicker){
+    flicker.check(0,2);sun_query(renderer.device(),state);
+    CoursePass pass(context,renderer);sun_render_40cbc0(pass,frame,view,state,flicker);
 }
 NativeCoursePassStats& native_course_pass_stats(){return stats_;}
 std::uint32_t native_course_pass_work(NativeRuntimeContext& c){return c.race_effects.scene.work_pointer_79f5ec;}
@@ -763,7 +786,7 @@ bool native_course_pass_leaf(NativeRuntimeContext& c,PcSceneRenderer& r,std::uin
     if(!st.data_loaded)st.data_loaded=exe_bytes(0x751b2cu,st.data_751b2c.data(),st.data_751b2c.size());   // 751B2C (.data)
     // The occlusion query 89F680 (41776A creates it with the device).
     auto& dev=r.device();
-    if(st.query_device!=&dev){st.query_device=&dev;st.query=dev.create_occlusion_query();}
+    sun_query(dev,st.sun_view);
     // 422820 without the car or the light records draws nothing: its 422F20
     // has nothing to restore either.
     if(pc==0x422f20u&&st.shadow_skipped){st.shadow_skipped=false;return true;}

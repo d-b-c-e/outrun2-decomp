@@ -12,6 +12,10 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <cmath>
 using namespace outrun;using namespace platform;namespace math=outrun::desktop;
 static unsigned checks,correction_calls;
 #define CHECK(x) do{++checks;if(!(x))throw std::runtime_error("sun gate line "+std::to_string(__LINE__)+": " #x);}while(0)
@@ -20,10 +24,17 @@ struct Device:PcSoftD3D9Device {
     Device():PcSoftD3D9Device(32,32){}
     unsigned draws{},queries{},query_reads{},query_begin{},query_end{};bool query_ready{};
     std::vector<unsigned> primitive_counts;std::vector<PcDrawPhase> phases;
-    unsigned create_occlusion_query()override{++queries;return 42;} // synthetic query identity only
-    unsigned query_get_data(unsigned q,unsigned& samples)override{CHECK(q==42);++query_reads;samples=11500;return query_ready?0:1;}
-    void query_issue(unsigned q,unsigned flags)override{CHECK(q==42);if(flags&2)++query_begin;if(flags&1)++query_end;}
-    unsigned draw_indexed_primitive(unsigned,std::int32_t,unsigned,unsigned,unsigned,unsigned count)override{
+    std::vector<std::uint8_t> packets;std::vector<unsigned> query_begin_ids;
+    std::map<unsigned,unsigned> query_samples;std::map<unsigned,bool> query_ready_by_id;
+    template<class T>void capture(const T& value){const auto* b=reinterpret_cast<const std::uint8_t*>(&value);packets.insert(packets.end(),b,b+sizeof value);}
+    unsigned create_occlusion_query()override{++queries;return 41+queries;} // synthetic query identity only
+    unsigned query_get_data(unsigned q,unsigned& samples)override{CHECK(q>=42&&q<42+queries);++query_reads;const auto sample=query_samples.find(q);samples=sample==query_samples.end()?11500:sample->second;const auto ready=query_ready_by_id.find(q);return (ready==query_ready_by_id.end()?query_ready:ready->second)?0:1;}
+    void query_issue(unsigned q,unsigned flags)override{CHECK(q>=42&&q<42+queries);if(flags&2){++query_begin;query_begin_ids.push_back(q);}if(flags&1)++query_end;}
+    unsigned draw_indexed_primitive(unsigned type,std::int32_t base,unsigned minimum,unsigned vertices,unsigned start,unsigned count)override{
+        capture(type);capture(base);capture(minimum);capture(vertices);capture(start);capture(count);
+        capture(transform_world);capture(transform_view);capture(transform_proj);capture(render);capture(textures);
+        capture(indices);capture(declaration);capture(vertex_shader);capture(pixel_shader);capture(vs_constants);capture(ps_constants);
+        for(const auto& stream:streams){capture(stream.buffer);capture(stream.offset);capture(stream.stride);}
         ++draws;primitive_counts.push_back(count);phases.push_back(draw_phase());return 0;
     }
     void draw_primitive_up(unsigned,unsigned,const void*,unsigned)override{++draws;}
@@ -75,7 +86,7 @@ int main(int argc,char** argv){try{
         CHECK(r.matrices().depth==before_depth&&r.matrices().current_offset==before_stack&&std::memcmp(matrix.data(),r.matrices().current().data(),64)==0);
     }
     CHECK(d.queries==1&&d.errors.empty());g_pc_triple_corrections=nullptr;
-    if(argc==2){
+    if(argc>=2){
         RetailAssetStore store;std::string error;CHECK(retail_asset_store_open(store,argv[1],&error));
         std::vector<std::uint8_t> bytes;CHECK(retail_asset_read_relative_inflated(store,"Common/obj_course_obj_common_pmt.sz",bytes,128u<<20,&error));
         CHECK(r.load_bank(0x57,std::move(bytes),error));CHECK(d.errors.empty());
@@ -99,6 +110,43 @@ int main(int argc,char** argv){try{
         CHECK(d.errors.empty()&&!d.primitive_counts.empty());
         for(unsigned i=0;i<d.phases.size();++i)CHECK(d.phases[i]==PcDrawPhase::World&&d.primitive_counts[i]>0);
         std::printf("sun center: %u indexed packets, query reads%u begin%u/end%u; real bank, synthetic visibility, no rasterization\n",d.draws,d.query_reads,d.query_begin,d.query_end);
+        if(argc==4){
+            const std::filesystem::path file=argv[3];const std::string mode=argv[2];
+            if(mode=="--write-packets"){
+                CHECK(!std::filesystem::exists(file));std::ofstream out(file,std::ios::binary);CHECK(bool(out));out.write(reinterpret_cast<const char*>(d.packets.data()),std::streamsize(d.packets.size()));CHECK(bool(out));
+            }else{
+                CHECK(mode=="--compare-packets");std::ifstream in(file,std::ios::binary);CHECK(bool(in));const std::vector<std::uint8_t> expected{std::istreambuf_iterator<char>(in),std::istreambuf_iterator<char>()};CHECK(expected==d.packets);
+            }
+            std::printf("sun legacy packet bytes: %zu, %s\n",d.packets.size(),mode.c_str());
+        }
+
+        // Prepare once, then reuse the same legacy view in three independent
+        // contexts. This proves state separation, not panel viewport routing.
+        work.put16(0x90+0x10,7);work.put16(0x90+0x12,3);r.pause_780248=false;
+        const auto frame=native_sun_prepare_frame(c,r,Object);CHECK(work.i16(0x90+0x12)==2&&work.i16(0x90+0x10)==7&&!frame.paused);
+        const auto prepared_work=c.race_effects.scene.work;const auto prepared_lights=r.environment().lights_899b98;
+        const auto prepared_camera=camera;const auto prepared_car=car;const auto prepared_point=frame.sun_point;
+        std::array<NativeSunViewState,3> contexts{};std::array<std::array<std::uint8_t,2>,3> flickers{};
+        r.pause_780248=true; // render must use the immutable prepared pause state
+        for(unsigned i=0;i<3;++i){
+            flickers[i][0]=std::uint8_t(3+2*i);const unsigned expected_query=42+d.queries;d.query_samples[expected_query]=(i+1)*1000;
+            const auto begin=d.query_begin,end=d.query_end;const auto depth=r.matrices().depth;const auto offset=r.matrices().current_offset;
+            std::array<std::uint8_t,64> matrix{};std::memcpy(matrix.data(),r.matrices().current().data(),64);
+            native_sun_render_view(c,r,frame,frame.legacy_view,contexts[i],driving::Bytes(flickers[i].data(),2));
+            CHECK(contexts[i].query==expected_query&&contexts[i].samples_89f684==(i+1)*1000&&contexts[i].count_89f66c==0);
+            CHECK(d.query_begin==begin+1&&d.query_end==end+1&&d.query_begin_ids.back()==contexts[i].query);
+            CHECK(flickers[i][0]==2+2*i&&flickers[i][1]==0);
+            CHECK(c.race_effects.scene.work==prepared_work&&r.environment().lights_899b98==prepared_lights&&camera==prepared_camera&&car==prepared_car&&frame.sun_point==prepared_point);
+            CHECK(r.matrices().depth==depth&&r.matrices().current_offset==offset&&std::memcmp(matrix.data(),r.matrices().current().data(),64)==0&&d.get_render_state(7)==1);
+        }
+        CHECK(contexts[0].query!=contexts[1].query&&contexts[1].query!=contexts[2].query&&contexts[0].query!=contexts[2].query);
+        const auto queries=d.queries,begin=d.query_begin;d.query_ready_by_id[contexts[1].query]=false;d.query_samples[contexts[1].query]=9999;
+        native_sun_render_view(c,r,frame,frame.legacy_view,contexts[1],driving::Bytes(flickers[1].data(),2));
+        CHECK(d.queries==queries&&d.query_begin==begin&&contexts[1].samples_89f684==2000&&contexts[0].samples_89f684==1000&&contexts[2].samples_89f684==3000);
+        CHECK(std::abs(r.globals().f(0x95aef8)-2000.f/11500.f)<1e-6f&&c.race_effects.scene.work==prepared_work);
+        CHECK(d.errors.empty());
+        std::printf("sun split: one preparation, independent3 query/flicker contexts; no panel routing or rendering\n");
+
     }
     std::printf("sun gate: %u assertions;8 actual caller rejections, side-visible loss remains; no rendering\n",checks);return 0;
 }catch(const std::exception& e){g_pc_triple_corrections=nullptr;std::fprintf(stderr,"%s\n",e.what());std::fprintf(stderr,"course: %s\n",native_course_pass_stats().last_error.c_str());return 1;}}
