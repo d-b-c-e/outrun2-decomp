@@ -38,7 +38,12 @@ void gs_main(triangle Varying v[3],inout TriangleStream<Panel> s){
  [unroll] for(uint i=0;i<3;++i){
   [unroll] for(uint k=0;k<3;++k){
    float4 q=v[k].p;q.x-=fix.x*q.w;q.y+=fix.y*q.w;q=mul(q,C[i]);q.x+=fix.x*q.w;q.y-=fix.y*q.w;
-   Panel o;o.v=v[k];o.v.p=q;o.vp=i;s.Append(o);}
+   Panel o;o.v=v[k];
+   if(fix.z>0.5){
+    float4 meta=v[k].t7;float4 uv=float4(meta.xy,0,1);
+    q.xy+=float2(meta.x*2-1,1-meta.y*2)*meta.z*fix.xy*q.w;
+    o.v.t0=uv;o.v.t1=uv;o.v.t2=uv;o.v.t3=uv;o.v.t4=uv;o.v.t5=uv;o.v.t6=uv;o.v.t7=uv;}
+   o.v.p=q;o.vp=i;s.Append(o);}
   s.RestartStrip();}
 }
 )HLSL";
@@ -171,6 +176,7 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 (unsigned long long)rgba_levels_decoded_again);
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
+    if(point_sprites_deferred)std::printf("point sprites: %llu submitted for per-panel expansion (visibility deferred to GPU)\n",(unsigned long long)point_sprites_deferred);
     if(platform::g_pc_triple_corrections)
         std::printf("triple views: %llu draws into three viewports over %llu frames (%llu through an affine matrix); single on the centre: "
                     "%llu pretransformed, %llu vertex programs without the projection, %llu projections refused, %llu not triangles, "
@@ -366,6 +372,11 @@ void D3D11D3D9Device::clear(std::uint32_t flags,std::uint32_t c,float z,std::uin
 }
 bool D3D11D3D9Device::defer_triangle_depth_clip()const noexcept{
     return platform::pc_world_gpu_depth_clip(draw_phase(),colour_target_==BackBuffer,platform::g_pc_triple_corrections!=nullptr);
+}
+bool D3D11D3D9Device::begin_deferred_point_sprites(){
+    if(!platform::pc_world_point_sprites(draw_phase(),colour_target_==BackBuffer,platform::g_pc_triple_corrections,
+                                       transform_proj.data(),soft_viewport_.w,soft_viewport_.h))return false;
+    batch_point_sprites_=true;return true;
 }
 void D3D11D3D9Device::raster(const Vertex* vertices,unsigned count){
     if(count<3)return;
@@ -671,8 +682,8 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(world coverage)");}
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(world coverage)");
             std::memcpy(m.pData,c.data(),sizeof c);context_->Unmap(triple_cb_.Get(),0);}
-    }else if(standard&&(!triple_cached_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
-        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;
+    }else if(standard&&(!triple_cached_||triple_point_mode_!=batch_point_sprites_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;triple_point_mode_=batch_point_sprites_;
         TripleCorrections* e=nullptr;
         for(auto& k:triple_corrections_)if(k.used&&k.fix[0]==fx&&k.fix[1]==fy&&std::memcmp(k.p.data(),proj.data(),64)==0){e=&k;break;}
         if(!e){e=&triple_corrections_[triple_corrections_next_];triple_corrections_next_=(triple_corrections_next_+1u)%unsigned(triple_corrections_.size());
@@ -683,7 +694,7 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
             if(!triple_cb_){D3D11_BUFFER_DESC b{};b.ByteWidth=sizeof e->c;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(three views)");}
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(three views)");
-            std::memcpy(m.pData,e->c,sizeof e->c);context_->Unmap(triple_cb_.Get(),0);}
+            std::memcpy(m.pData,e->c,sizeof e->c);static_cast<float*>(m.pData)[50]=batch_point_sprites_?1.f:0.f;context_->Unmap(triple_cb_.Get(),0);}
     }
     const double third=double(back_w_)/3.0,sx=third/back_width_,sy=double(back_h_)/back_height_;
     const auto viewport=[&](unsigned i){return D3D11_VIEWPORT{float(i*third+soft_viewport_.x*sx),float(soft_viewport_.y*sy),
@@ -786,7 +797,7 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
     return !ok?0:p.affine?2:1;
 }
 void D3D11D3D9Device::flush(){
-    if(batch_.empty()||count_only)return;
+    if(batch_.empty()||count_only){batch_point_sprites_=false;return;}
     pixel_pipeline();
     const std::size_t bytes=batch_.size()*sizeof(Vertex);
     if(bytes>vbo_bytes_){vbo_bytes_=std::max<std::size_t>(bytes,std::size_t(1)<<20);vbo_.Reset();
@@ -800,7 +811,7 @@ void D3D11D3D9Device::flush(){
     if(bound_.topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST){context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);bound_.topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;}
     if(bound_.vs!=vertex_.Get()){context_->VSSetShader(vertex_.Get(),nullptr,0);bound_.vs=vertex_.Get();}
     triple_bind(batch_rhw_,true);   // the CPU's clip positions: world x view x projection, the standard form
-    context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;
+    context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;batch_point_sprites_=false;
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.
 void D3D11D3D9Device::pixel_pipeline(){

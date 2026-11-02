@@ -153,7 +153,7 @@ public:
     // equivalent rendering. Points with D3DRS_POINTSPRITEENABLE and the fixed-function XYZ transform are drawn
     // (pc_point_sprite.hpp: the particle sparks and effects); other points still are not.
     std::uint64_t skipped_up[4]{};
-    std::uint64_t point_sprites_drawn{},point_sprites_rejected{};   // squares drawn / not drawn by D3D9's rules
+    std::uint64_t point_sprites_drawn{},point_sprites_rejected{},point_sprites_deferred{};   // squares drawn / not drawn by D3D9's rules
     std::uint64_t draw_hash{0xcbf29ce484222325ull};
     std::uint64_t draws_hashed{};
     std::uint32_t dump_frame{};
@@ -198,6 +198,8 @@ protected:
     // A GPU backend can own depth clipping after its panel correction. The
     // software reference and unqualified paths keep the original CPU clipper.
     virtual bool defer_triangle_depth_clip()const noexcept{return false;}
+    // t[7] carries (cornerU, cornerV, sizePixels, 1) until the panel GS.
+    virtual bool begin_deferred_point_sprites(){return false;}
     virtual void raster(const Vertex*,unsigned n);
     pc_shader::V4 sample(int stage,const pc_shader::V4& c,float dudx,float dvdx,float dudy,float dvdy);
     pc_shader::V4 fixed_function(const pc_shader::V4& diffuse,const pc_shader::V4& specular,const std::array<pc_shader::V4,8>& tc,

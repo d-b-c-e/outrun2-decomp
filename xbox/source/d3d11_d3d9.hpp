@@ -52,6 +52,7 @@ private:
     struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
     bool defer_triangle_depth_clip()const noexcept override;
+    bool begin_deferred_point_sprites()override;
     void flush();void pixel_pipeline();void bind_target();void apply_state();void bind_textures();
     // The GPU vertex path (the PS5 native path's design): DrawIndexedPrimitive with a vertex shader runs the game's
     // vertex program on the GPU (hlsl::native_vs specialized per blob list and input formats) from GPU copies of
@@ -71,7 +72,7 @@ private:
     // The three-view spike (pc_screen.hpp g_pc_triple_corrections): a geometry shader that emits each back-buffer
     // triangle into three viewports with the panel's clip correction; corrections cached per projection.
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
-    std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{};
+    std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{},triple_point_mode_{};
     // Corrections already computed, by projection and pixel-centre fix (six, replaced in turn): draws that alternate
     // between projections reuse them instead of computing again (nene 35084).
     struct TripleCorrections { std::array<float,16> p{};float fix[2]{};bool used{},ok{};float c[52]{}; };
@@ -113,7 +114,7 @@ private:
     void uniform(unsigned slot,const void*,std::size_t);
     ID3D11PixelShader* pixel_program(unsigned kind,const platform::PcShaderProgram*);
     ID3D11Device* device_;ID3D11DeviceContext* context_;
-    std::vector<Vertex> batch_;
+    std::vector<Vertex> batch_;bool batch_point_sprites_{};
     std::map<std::uint32_t,Texture> textures_;
     std::map<std::uint64_t,ComPtr<ID3D11RenderTargetView>> colour_views_;   // texture<<32 | face<<16 | level
     std::map<std::uint32_t,ComPtr<ID3D11DepthStencilView>> depth_views_;

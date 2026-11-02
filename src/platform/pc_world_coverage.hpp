@@ -7,6 +7,14 @@ namespace outrun::platform {
 inline bool pc_world_gpu_depth_clip(PcDrawPhase phase,bool backbuffer,bool angled){
     return angled&&backbuffer&&phase==PcDrawPhase::World;
 }
+inline bool pc_world_point_sprites(PcDrawPhase phase,bool backbuffer,
+                                  bool(*corrections)(const float*,float*),const float* projection,float width,float height){
+    if(!pc_world_gpu_depth_clip(phase,backbuffer,corrections!=nullptr)||!projection||
+       !std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0)return false;
+    float c[48]{};if(!corrections(projection,c))return false;
+    for(float v:c)if(!std::isfinite(v))return false;
+    return true;
+}
 inline bool pc_world_coverage_draw(PcDrawPhase phase,bool rhw,bool backbuffer){
     return phase==PcDrawPhase::WorldCoverage&&rhw&&backbuffer;
 }

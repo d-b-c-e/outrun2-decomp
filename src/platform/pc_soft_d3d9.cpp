@@ -608,19 +608,27 @@ void PcSoftD3D9Device::draw_primitive_up(std::uint32_t type,std::uint32_t count,
         // D3D9 does not cull points: each square is wound so that the current cull mode keeps it (clockwise on screen,
         // y down, for D3DCULL_CCW and NONE; counter-clockwise for D3DCULL_CW).
         const bool ccw=render[d3d9::RS_CULLMODE]==2u;
+        const bool deferred=begin_deferred_point_sprites();
         for(std::uint32_t i=0;i<count;++i){
             const auto* p=bytes+std::size_t(i)*stride;
             const float x=rdf(p),y=rdf(p+4),z=rdf(p+8);
             float eye[3];for(unsigned k=0;k<3;++k)eye[k]=x*wv[k]+y*wv[4+k]+z*wv[8+k]+wv[12+k];
             float size=0.f,corner[4][4];
-            if(!pc_point_sprite_size(sp,eye,soft_viewport_.h,size)||
-               !pc_point_sprite_corners(up_vertices_[i].pos,size,soft_viewport_.w,soft_viewport_.h,corner)){++point_sprites_rejected;continue;}
+            bool valid=pc_point_sprite_size(sp,eye,soft_viewport_.h,size);
+            if(deferred){for(float value:up_vertices_[i].pos)valid=valid&&std::isfinite(value);}
+            else valid=valid&&pc_point_sprite_corners(up_vertices_[i].pos,size,soft_viewport_.w,soft_viewport_.h,corner);
+            if(!valid){++point_sprites_rejected;continue;}
             Vertex q[4];
             for(unsigned k=0;k<4;++k){
-                q[k]=up_vertices_[i];std::memcpy(q[k].pos,corner[k],sizeof corner[k]);
+                q[k]=up_vertices_[i];if(!deferred)std::memcpy(q[k].pos,corner[k],sizeof corner[k]);
                 for(auto& t:q[k].t)t={PcPointSpriteUv[k][0],PcPointSpriteUv[k][1],0.f,1.f};
+                if(deferred)q[k].t[7].z=size;
             }
-            if(ccw){triangle(q[0],q[2],q[1]);triangle(q[1],q[2],q[3]);}
+            if(deferred){
+                const Vertex a[3]{q[0],ccw?q[2]:q[1],ccw?q[1]:q[2]};
+                const Vertex b[3]{q[1],ccw?q[2]:q[3],ccw?q[3]:q[2]};
+                raster(a,3);raster(b,3);++point_sprites_deferred;
+            }else if(ccw){triangle(q[0],q[2],q[1]);triangle(q[1],q[2],q[3]);}
             else{triangle(q[0],q[1],q[2]);triangle(q[1],q[3],q[2]);}
             ++point_sprites_drawn;
         }
