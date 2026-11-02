@@ -177,6 +177,14 @@ int main(int argc,char** argv){
     camera_controls_toggle_set();(void)fov(0);CHECK(std::fabs(mount()[0]-.2f)<1e-5f);
     camera_controls_reset();CHECK(std::fabs(mount()[0])<1e-5f&&std::fabs(mount()[1]-.9f)<1e-5f);
     CHECK(ini.load(path)&&ini.number("Camera","Car0.BonnetGameSideOffset",999.f)==0.f);
+    // F6's commands use the exact keyboard action dispatch and persistence path.
+    for(unsigned action=0;action<8;++action){
+        camera_controls_reset();camera_controls_activate(action);const auto pose=camera_controls_pose();
+        const unsigned axes[]{1,1,2,2,0,0,3,3};const float signs[]{1,-1,1,-1,-1,1,1,-1};
+        for(unsigned axis=0;axis<4;++axis)CHECK(std::fabs(pose[axis]-(axis==axes[action]?signs[action]*camera_controls_step(action<6?0:1):0.f))<1e-6f);
+    }
+    const auto before_invalid=camera_controls_pose();camera_controls_activate(11);camera_controls_activate(~0u);CHECK(camera_controls_pose()==before_invalid);
+    camera_controls_activate(10);for(const auto value:camera_controls_pose())CHECK(value==0.f);
     CHECK(fov(3)==1.1f&&driving::camera_fov_context().near_z==0.f); // native cinematic 3 is not logical Bonnet
     // The actual native view-switch branch reaches the desktop four-view cycle.
     (void)fov(1);camera.put8(0x34a,2);camera.put16(0x340,0);camera.put16(0x344,0);

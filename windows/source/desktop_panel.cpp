@@ -1,3 +1,4 @@
+#include "panel_navigation_imgui.hpp"
 // The F6 panel (desktop_panel.hpp): the toolkit panel's frame sequence on our own D3D11 device, as the toolkit's
 // overlay runs it (dbce_overlay_d3d11.cpp render11 / drawFrame), called from the renderer's present instead of a hook.
 #include "desktop_panel.hpp"
@@ -129,6 +130,7 @@ struct Panel {
 Panel p;
 // Draw publishes visibility to input_filter; keep this atomic outside the resettable Panel.
 std::atomic<bool> binding_visible{false};
+PanelNavigation wheel_navigation;
 // UILetterboxing, outside Panel (desktop_panel_configure resets that): the race state the game thread saw last
 // (input_filter), for the present overlay; and the context's ClearView interface (D3D11.1), queried once per context.
 struct Letterbox {
@@ -274,6 +276,7 @@ bool draw_binding_editor(){
     const auto now=binding_now();const bool can_edit=binding_can_edit();
     state=p.binding_editor->view(now,can_edit);
     dbce::panel::Heading("Edit bindings");
+    dbce::panel::Text("Wheel navigation pauses while editing bindings. Use the keyboard or mouse to finish or cancel.");
     dbce::panel::Text("Edit the saved controls below. Save keeps the draft for the next start; Cancel discards it. Current driving controls stay unchanged.");
     if(state.restart_required){
         dbce::panel::Status("Restart required",state.message.c_str(),dbce::panel::Tone::Error);
@@ -588,6 +591,9 @@ void camera_adjustments(bool advanced){
         if(dbce::panel::Command("Zoom in"))camera_controls_zoom(-camera_controls_step(2));
         if(dbce::panel::Command("Zoom out"))camera_controls_zoom(camera_controls_step(2));
         if(dbce::panel::Command("Reset calculated view"))camera_controls_reset();
+    }
+    if(camera_controls_pose_available()&&ImGui::CollapsingHeader("Position and tilt")){
+        for(unsigned i=0;i<8;++i)if(dbce::panel::Command(CameraKeyLabels[i]))camera_controls_activate(i);
     }
     if(camera_controls_keys_migrated())dbce::panel::Text("Untouched earlier shortcuts use the current numpad layout this session. Custom bindings were kept; loading changed no file bytes.");
     if(ImGui::CollapsingHeader("Adjustment bindings")){
@@ -1150,6 +1156,9 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     p.last=now;
     io.MouseDrawCursor=open;   // the panel's own cursor only while it is open (a badge frame draws none)
     dbce::panel::DrainInput(w,h);   // closed: nothing queued; it keeps the panel's open / close transitions
+    // Binding drafts/capture use their own device samples; wheel navigation pauses throughout editing.
+    if(!open||binding_visible.load(std::memory_order_relaxed)||!ffb_front_check()(xbox_runtime::native_window().hwnd))wheel_navigation.block();
+    panel_navigation_imgui(wheel_navigation.drain());
     ImGui::NewFrame();
     if(open)dbce::panel::Draw(w,h);
     if(!badge.empty())draw_badge(badge,w,h);
@@ -1176,6 +1185,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
 }
 
 void desktop_panel_configure(const Ini& settings,bool latched,const std::string& run_folder,bool playback){
+    wheel_navigation.block();
     p=Panel{};
     binding_visible.store(false,std::memory_order_relaxed);
     p.latched=latched;p.playback=playback;
@@ -1327,6 +1337,12 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
 
 bool desktop_panel_open(){return p.configured&&!p.playback&&dbce::panel::IsOpen();}
 
+void desktop_panel_wheel_navigation(unsigned held){
+    const bool allowed=p.configured&&!p.latched&&!p.playback&&dbce::panel::IsOpen()&&
+        !binding_visible.load(std::memory_order_relaxed)&&ffb_front_check()(xbox_runtime::native_window().hwnd);
+    wheel_navigation.update(held,allowed);
+}
+
 void desktop_panel_wheel_actions(bool menu_held,bool mute_held){
     if(!p.configured||p.latched||p.playback)return;
     const auto edges=p.wheel_shortcuts.step(menu_held,mute_held,ffb_front_check()(xbox_runtime::native_window().hwnd));
@@ -1366,6 +1382,7 @@ void desktop_panel_wrap_input_filter(){
 }
 
 void desktop_panel_shutdown(){
+    wheel_navigation.block();
     if(!p.configured)return;
     xbox_runtime::present_overlay()=nullptr;
     release_backend();

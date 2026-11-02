@@ -401,6 +401,9 @@ void wheel_input_filter(platform::NativeInputState& out,const platform::NativeRu
     }
     if(!g.open.empty()){inject::poll();for(Device* d:g.open)poll(*d);log_activity();}
     desktop_panel_wheel_actions(value("modMenu")>=0.5,value("muteFfb")>=0.5);
+    unsigned navigation=0;unsigned bit=0;
+    for(const char* id:{"navUp","navDown","navLeft","navRight","confirm","back"}){if(value(id)>=0.5)navigation|=1u<<bit;++bit;}
+    desktop_panel_wheel_navigation(navigation);
     std::uint32_t held=keys;
     if(!g.open.empty())for(unsigned i=0;i<ButtonCount;++i)if(value(ButtonActions[i])>=0.5)held|=1u<<i;
     held|=gear_pulses(runtime);

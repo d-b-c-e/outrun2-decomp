@@ -504,6 +504,9 @@ void shim_input_filter_ordinary(platform::NativeInputState& out,const platform::
     const auto pressed=[&](const char* id){const auto& a=frame.action[std::size_t(sh::action_index(id))];
         return a.status==sh::Status::Live&&a.value>=0.5f;};
     desktop_panel_wheel_actions(pressed("modMenu"),pressed("muteFfb"));
+    unsigned navigation=0;unsigned bit=0;
+    for(const char* id:{"navUp","navDown","navLeft","navRight","confirm","back"}){if(pressed(id))navigation|=1u<<bit;++bit;}
+    desktop_panel_wheel_navigation(navigation);
     const auto v=view(runtime);
     o.adapter->apply(frame,v,out,&kb);
     if(o.rec.armed()&&o.host){

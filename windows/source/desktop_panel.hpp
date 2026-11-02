@@ -25,6 +25,7 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
 // True while the panel is open (the input filter neutralises the game's input then).
 bool desktop_panel_open();
 // Ordinary wheel/shim buttons: a fresh focused press toggles F6 or persists Stop FFB Off.
+void desktop_panel_wheel_navigation(unsigned held); // up/down/left/right/confirm/back, bits 0..5
 void desktop_panel_wheel_actions(bool menu_held,bool mute_held);
 // After the game: the ImGui backend and context are released.
 void desktop_panel_shutdown();

@@ -153,6 +153,14 @@ target_compile_definitions(test_panel_input PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN
 target_compile_features(test_panel_input PRIVATE cxx_std_17)
 add_test(NAME panel_input COMMAND test_panel_input)
 
+# Headless wheel navigation: real ImGui context/widgets, no platform or renderer backend.
+add_executable(test_panel_navigation tests/test_panel_navigation.cpp
+    vendor/native/third_party/imgui/imgui.cpp vendor/native/third_party/imgui/imgui_draw.cpp
+    vendor/native/third_party/imgui/imgui_tables.cpp vendor/native/third_party/imgui/imgui_widgets.cpp)
+target_include_directories(test_panel_navigation PRIVATE source vendor/native/third_party/imgui)
+target_compile_features(test_panel_navigation PRIVATE cxx_std_17)
+add_test(NAME panel_navigation COMMAND test_panel_navigation)
+
 # F4b's load gates with the real ffb_live.cpp (romi 30155): a fake WheelFfb.dll (tests/fake_wheelffb.cpp) beside the test
 # in their own folder, never beside OutRunDesktop.exe. Muted, latched, default or unbound: it must never attach.
 add_library(fake_wheelffb SHARED tests/fake_wheelffb.cpp)

@@ -163,16 +163,18 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
         for(unsigned i=0;i<11;++i){bool down=false;for(const auto key:h.bindings[i].keys)down=down||desktop_key(key);
             actions[i]=h.edges[i].step(down,blocked,GetTickCount64(),i!=10);}
     }
-    for(unsigned i=0;i<11;++i)if(actions[i]){
-        const float move=camera_controls_step(0),tilt=camera_controls_step(1),fov=camera_controls_step(2);
-        if(i<2)camera_controls_move(1,i==0?move:-move);
-        else if(i<4)camera_controls_move(2,i==2?move:-move);
-        else if(i<6)camera_controls_move(0,i==4?-move:move);
-        else if(i<8)camera_controls_move(3,i==6?tilt:-tilt);
-        else if(i<10)camera_controls_zoom(i==8?fov:-fov);
-        else camera_controls_reset();
-    }
+    for(unsigned i=0;i<11;++i)if(actions[i])camera_controls_activate(i);
 }
+}
+void camera_controls_activate(unsigned i){
+    if(i>=11)return;
+    const float move=camera_controls_step(0),tilt=camera_controls_step(1),fov=camera_controls_step(2);
+    if(i<2)camera_controls_move(1,i==0?move:-move);
+    else if(i<4)camera_controls_move(2,i==2?move:-move);
+    else if(i<6)camera_controls_move(0,i==4?-move:move);
+    else if(i<8)camera_controls_move(3,i==6?tilt:-tilt);
+    else if(i<10)camera_controls_zoom(i==8?fov:-fov);
+    else camera_controls_reset();
 }
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save

@@ -1,0 +1,21 @@
+# F6 navigation from existing menu bindings
+
+Ordinary Native and Shared input now submit the current `navUp`, `navDown`, `navLeft`, `navRight`, `confirm` and `back` bindings to F6 through internal ImGui gamepad events. This does not simulate keyboard/mouse/OS input or poll another device. The existing `modMenu` binding opens/closes F6 and `muteFfb` still stops force feedback. No default bindings, canonical31 action IDs,64-bit edge masks, observer/replay formats or parallel binding store were added.
+
+Use a direction to show ImGui's navigation highlight, then Confirm to operate the highlighted control. Back maps to ImGui's ordinary cancel action; use modMenu/F6 to close the panel. Existing panel-open gameplay neutralization remains. Camera > Position and tilt exposes eight step commands on both simple and advanced pages, reusing the exact keyboard action dispatch, step sizes, per-model/view/set settings writer and honest save-error behavior. Direct per-adjustment wheel shortcuts are still a separate catalog extension.
+
+The six-key relay holds at most64 state changes. Opening/reopening, focus regain and leaving binding editing require each held action to release before it can operate F6. Overflow discards pending navigation and requires all inputs to release before fresh presses resume. Complete taps between rendered frames are preserved through ImGui's input queue. Focus is checked again before rendering. Wheel navigation pauses throughout binding draft editing/capture; the editor explains that keyboard/mouse finish or cancel the draft. Disabled/test/record/playback sessions cannot submit navigation.
+
+Normal submission uses AddKeyEvent and the documented gamepad navigation flags. Cancellation selectively removes only these six queued gamepad events and resets their held state, cancelling a gamepad-owned active control. This small adapter depends on pinned vendored ImGui1.91.6WIP internals; update its headless fixture when upgrading ImGui. It does not clear unrelated keyboard/mouse events or held state. Context7's current upstream documentation confirmed the public event route; exact APIs and cancellation fields were checked against the local pinned sources because the documentation connector did not provide this old version.
+
+## Verification and boundary
+
+GO493926 CPU-only custody: entered08:12:41, released08:15:54 local, own token removed immediately after checks. Named OutRunDesktop, test_panel_navigation, test_camera_controls and test_camera_hpattern builds passed jobs2 BelowNormal. Focused CTest3/3 passed:
+
+-27 headless checks using actual pinned ImGui context, Button and SliderFloat widgets: held-on-open suppression, blocked/reopen behavior, overflow/recovery, single button activation while held, two complete fast taps between frames, real Dpad navigation/slider editing, selective queued-event cancellation and keyboard/mouse preservation.
+-182 actual camera controller checks using inert runtime records, including all8 dispatch directions/signs, invalid-action no-op and reset. This invocation did not load the optional retail model asset; it is not an additional model-placement qualification.
+-33 actual keyboard/provider/adapter/native H-pattern consumer checks, preserving the existing camera shortcut ownership fix.
+
+Initial fixture failures are retained: the overflow sequence originally continued through recovery, and the Button sequence omitted the ordinary Dpad press needed to reveal ImGui's navigation highlight. Correcting these test setups required no production change. Logs: work/validation-20261102/navigation-{build,rebuild,ctest,debug,widget2,final-build,final-ctest}.log; lease/process receipts navigation-cpu-{enter,exit}.json and navigation-exit-processes.json. A later optional test-edit script stopped on an unmatched anchor before writing; final27 checks are the actual compiled fixture.
+
+No window/backend/GPU/game/audio/input/device initialization, owner installation, rendered panel qualification or physical wheel acceptance occurred. Native and Shared producer wiring compiled in the actual desktop target; physical bindings/focus transitions and navigation across the complete rendered F6 pages still require a separately authorized runtime interval. Curve mesh/shader/source helpers remain unconnected.

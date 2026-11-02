@@ -16,6 +16,7 @@ struct CameraFovValues {float calculated{},current{},offset{};bool valid{};}; //
 CameraFovValues camera_controls_fov();
 void camera_controls_set_fov(float degrees); // absolute current vertical FOV, stored as an offset on its calculation
 void camera_controls_reset();
+void camera_controls_activate(unsigned action); // same eleven actions as CameraKeyLabels
 void camera_controls_move(unsigned axis,float amount); // side / up / forward / pitch
 bool camera_controls_pose_available();
 std::array<float,4> camera_controls_pose();
