@@ -130,6 +130,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
        names it.
 7. Upstream bugs, as pull requests: #2 30-second hang at the end of a race,
    #3 rival drift score stays at zero, #4 level impossible to win.
+   - #4, November 2 offline investigation: actual `477510` course/fraction ranks -> full `496A30` type-6 mission controller -> `477B60` timer/elimination chain passes 50 checks, including overtakes, countdown transfer, guards, rival win/player loss, profile publication and no repeat release. No gameplay rule changed or natural mission defect reproduced; reported Flagman 2 Intermediate selection/AI/scheduler/runtime mapping/HUD remain unqualified. See [GIRLFRIEND-MISSION.md](docs/GIRLFRIEND-MISSION.md) for exact consumers and future capture fields. This fixture needs no retail data or devices.
    - #3, November 2 offline trace: actual trim474D30 -> car drift bit -> racer477090 -> mission477B60 score chain passes 28 checks (straight/both drift directions/fast/inactive/stopped/type guards). Existing score rules were not changed; no natural-mission defect reproduced. Named desktop builds and drift/GOAL fixtures 2/2 pass. Actual AI/scheduling/link/HUD state remains the attended diagnostic gap. See `docs/RIVAL-DRIFT-SCORE.md` for exact fields, service boundaries and bounded capture plan.
    - #2: source pass 2026-10-13 (nene; sana 61501). The symptom is NOT confirmed on this build; nothing changed.
      - Repro: Coast 2 Coast > Flagman 1 > Novice; about 30 s from GOAL to OutRun Miles, and no flagman rank.

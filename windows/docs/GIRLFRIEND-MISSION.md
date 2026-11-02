@@ -1,0 +1,17 @@
+# Girlfriend mission source investigation — November 2, 2026
+
+[Upstream issue 4](https://github.com/r4dius/outrun2-decomp/issues/4) reports Single Player > Coast 2 Coast > Flagman 2 > sixth Intermediate mission, "don't lose your girlfriend": the rival's score stays constant while the player leads. The current bounded source chain passes. No natural mission defect was reproduced and no gameplay rule was changed; the issue remains open.
+
+| Boundary | Existing source behavior |
+|---|---|
+| `477510` in `race_traffic.cpp` | Builds the active racers plus player ranking from course section and fractional progress, sorts descending, publishes racer `+74`, player `+C36`, last-racer index `64E194` and participant count `80FB2C`. An unspawned active racer still participates. `44FF10` can suppress a rank refresh. |
+| `496A30` in `mission_manager.cpp` | For type 6, decrements player `836388` only while player `+C36 == 80FB2C - 1`; zero ends the race as a loss. Paused, non-GAME and already-ended races skip this work. |
+| `477B60`, called by `496A30` | With mission selection active and type 6, decrements rival `+98` only while racer `+74 == 80FB2C - 1`. At zero, publishes the caught message, releases that racer and, with two participants, ends the race as a win. The last-place pressure timer `+9C` is separate from `+98`. |
+| `47CF40` in `racer_setup.cpp` | Initializes a selected type-6 rival's `+98` from `4961F0` (record `+28` seconds times 60). |
+| `race_traffic_runtime.cpp` | `racers_in/out` mirror `80FB2C`; `ints_out` publishes the leading/last racer indices back to the shared `RacerSetupState` consumed by the mission controller. |
+
+`tests/test_girlfriend_mission.cpp` runs the real ranking producer followed by the complete mission controller and its rival timer consumer. **50 checks pass**: section and fractional overtakes, re-overtakes, countdown transfer, inactive selection, pause/non-GAME/end guards, last-tick rival elimination and exact profile/result publication, player loss and repeat-release/underflow prevention. The UI resource/sprite code runs in memory with synthetic timing metadata. Course fractional progress and car release are controlled service boundaries. The fixture uses a synthetic type-6 race record; it does not establish that the reported menu selects type 6, nor execute AI, the event scheduler, the runtime mapping bridge or HUD rendering. No game/cache files, window, GPU, sound or device are needed.
+
+The first fixture assertions used an incorrect caught-message token and grade threshold; those test expectations were corrected against the existing native table/rank calculation. No production behavior changed. Private logs: `work/validation-20261102/girlfriend-{build,build-final,chain,chain-final,ctest}.log`.
+
+A future attended diagnostic should first identify the actual selected `Races.bin` key/sub-key/type and initial player/rival timer. For at most 600 GAME ticks, record the rank-refresh guard, active racer count, course section/fraction, both published rank bytes, `80FB2C`, `64E194`, selection, pause/end state and player/rival timers before and after traffic and mission control, together with the visible HUD. A lead without a published rank change points upstream of scoring; a correct last rank without countdown points to selection/scheduling/state transfer; a changing timer with a fixed display points to HUD consumption. This source fixture does not close the report or prove that mission playable.
