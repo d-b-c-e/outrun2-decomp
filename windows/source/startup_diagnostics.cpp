@@ -5,7 +5,7 @@
 
 namespace outrun::desktop {
 const std::vector<std::string_view>& startup_diagnostic_names() {
-    // Literal environment readers in windows/source, windows/shim, xbox/source and src at a187a947.
+    // Literal environment readers from a187a947, plus subsequently declared diagnostics.
     static const std::vector<std::string_view> names{
         "DBCE_FFB_MUTE", "OR2_680AD4_OLD", "OR2_680AD4_TRACE", "OR2_BLOB_DEBUG", "OR2_BULK_DEBUG",
         "OR2_COURSE_DEBUG", "OR2_CRT_PRINTF", "OR2_CUBE_DEBUG", "OR2_D3D11_CPU_VERTEX", "OR2_DBG_DRAWSTATS",
@@ -18,7 +18,7 @@ const std::vector<std::string_view>& startup_diagnostic_names() {
         "OR2_HOST_MODE", "OR2_HOST_OVERLAY", "OR2_HOST_OWNERDEBUG", "OR2_HOST_PCM", "OR2_HOST_POOL", "OR2_HOST_RACE",
         "OR2_HOST_RACERS", "OR2_HOST_SKIP_ENDING", "OR2_HOST_SOUND", "OR2_HOST_STALL", "OR2_HOST_START_EVENTS",
         "OR2_HOST_TRACE", "OR2_HOST_UNLOCK", "OR2_HOST_VARIANT", "OR2_ICS_TRACE", "OR2_INPUT_DEBUG",
-        "OR2_KEEP_TEXTURE_RGBA", "OR2_LEAVE_DEBUG", "OR2_MATRIX_TRACE", "OR2_MEMORY_BUILD_CHECK", "OR2_NET_DEBUG",
+        "OR2_KEEP_TEXTURE_RGBA", "OR2_LEAVE_DEBUG", "OR2_MATRIX_TRACE", "OR2_MEMORY_BUILD_CHECK", "OR2_MISSION_TRACE", "OR2_NET_DEBUG",
         "OR2_NET_DIFF", "OR2_NET_SCREENS", "OR2_NET_TEXT", "OR2_NET_TR", "OR2_NET_TRACE", "OR2_NET_VLAN", "OR2_NOCOURSE",
         "OR2_NOCUBE", "OR2_NO_OBJECTS", "OR2_OBJECTS_TRACE", "OR2_PAUSE_DEBUG", "OR2_ROUTE_STATE", "OR2_SHADOW_DEBUG",
         "OR2_SHADOW_OFF", "OR2_SMOKE_TAIL", "OR2_TELEMETRY", "OR2_TELEMETRY_PORT", "OR2_TRIPLE_AHEAD",

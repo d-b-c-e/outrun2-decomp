@@ -9,7 +9,7 @@
 using namespace outrun;using namespace platform;
 namespace{unsigned checks;}
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"mission marker runtime line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
-int main(){
+int main(int argc,char** argv){
     if(!exe_image_autoload()){std::printf("SKIP: set OR2_EXE to the game's cache for native runtime constants\n");return 77;}
     auto runtime=std::make_unique<NativeRuntimeContext>();auto& c=*runtime;c.mode_state.current=16;c.game_mode.game_variant=6;
     auto& m=c.mission;auto& cs=c.event_function36.car_select;
@@ -45,5 +45,11 @@ int main(){
     c.game_mode.start_countdown=1;CHECK(native_race_hud_mission_control(c,services));
     CHECK(m.manager.timer_836388==30&&rival.u32(0x98)==130);c.game_mode.start_countdown=0;
     CHECK(c.race_hud->missing.empty());
+    if(argc==2&&std::strcmp(argv[1],"--trace-cap")==0){
+        m.racers.racers_80fb00.resize(10*0xa0);m.racers.count_80fb04=10;
+        rival=driving::Bytes(m.racers.racers_80fb00.data(),m.racers.racers_80fb00.size());
+        for(unsigned i=0;i<610;++i)CHECK(native_race_hud_mission_control(c,services));
+        CHECK(m.manager.timer_836388==6130&&rival.u32(0x98)==6230&&m.missing==0&&cs.camera_79fe10==camera_before&&c.race.manager.state.over_state_7d38f0==0);
+    }
     std::printf("mission marker runtime: %u checks; actual chase wrapper/projection/scoring passed, no natural mission claim\n",checks);
 }

@@ -28,6 +28,7 @@ go upstream as small pull requests (first: `tweaks-exe`).
 - Private manifest now inventories ordinary static PE import DLL names from the exact EXE. Parser/package16 tests pass; the frozen064BC7B3 candidate's62 names match installed LLVM `--coff-imports`. No loader/resolution or delay/transitive/dynamic dependency claim; no module/runtime installation.
 - [Native curve UV/source calculation](docs/CURVE-UV-MAPPING.md): allocation-free real-eye mapping with source-on-rendered-panel placement and native clip-correction consumer.270 canonical rows, dense real/virtual/pitched grids, flat/direct/half-pixel/off-axis/depth checks (34,888 total assertions). Standalone math only: no renderer/settings connection or curve-enabled claim.
 - [Mission-marker runtime binding](docs/MISSION-MARKER-PROJECTION.md): actual wrapper reproduced missing495DF7 in chase because it supplied no matrix stack. Scoped scratch projection stack fixes that source failure;27 actual-wrapper checks and desktop Release build pass. Timers already changed before the old failure, so upstream score issues3/4 remain open; no natural mission or rendered marker claim.
+- [Bounded mission trace](docs/MISSION-TRACE.md): explicit `OR2_MISSION_TRACE=1`, numeric snapshots before/after the real controller, maximum600 eligible calls/eight racer records in the existing log. Actual-wrapper off/strict-opt-in/cap/truncation/state-preservation checks and startup/audit suite5/5 pass; natural mission capture remains pending.
 
 ## Order of work
 

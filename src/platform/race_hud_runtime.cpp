@@ -14,13 +14,70 @@
 #include "platform/race_variant_owners.hpp"
 #include "driving/pc_wall_rebound.hpp"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <sstream>
 namespace outrun::platform {
 namespace {
 using driving::Bytes;
 std::string hex(std::uint32_t v){char t[16];std::snprintf(t,sizeof t,"%x",v);return t;}
 float bf(std::uint32_t u){float f;std::memcpy(&f,&u,4);return f;}
+// Explicit diagnostic only: numeric snapshots, no file/device calls or mission
+// mutations. Budget is process-wide because ordinary control is single-threaded.
+struct MissionTraceSnapshot {
+    struct Rival {std::int32_t car{};std::uint32_t active{},stopped{},flags{},place{},score{},pressure{},section{},fraction{};};
+    std::uint32_t key{},sub{},type{},frame{},stage{},selected{},mode{},end{},score{},grade{},place{},flags{},section{},count{},participants{},missing{};
+    std::int32_t pause{},yaw{},leader{},last{};unsigned stored{};std::array<Rival,8> rivals{};
+};
+std::array<std::uint32_t,3> trace_record(const NativeRuntimeContext& c,const MissionManagerServices& services){
+    const auto index=c.mission.manager.record_83637c;const auto* pack=services.races;
+    if(!pack||index<0||std::uint32_t(index)>=pack->race_count)return {};
+    const auto delta=std::uint64_t(index)*0x44u;
+    if(pack->races_offset>pack->bytes.size()||delta>pack->bytes.size()-pack->races_offset)return {};
+    const auto offset=pack->races_offset+std::size_t(delta);if(pack->bytes.size()-offset<0x44u)return {};
+    std::array<std::uint32_t,3> result{};const auto* record=pack->bytes.data()+std::size_t(offset);
+    std::memcpy(&result[0],record,4);std::memcpy(&result[1],record+4,4);std::memcpy(&result[2],record+0x20,4);return result;
+}
+MissionTraceSnapshot trace_snapshot(const NativeRuntimeContext& c,const MissionManagerServices& services){
+    MissionTraceSnapshot out;const auto record=trace_record(c,services);out.key=record[0];out.sub=record[1];out.type=record[2];
+    const auto& m=c.mission.manager;const auto& rs=c.mission.racers;
+    out.frame=c.completed_frames;out.stage=m.stage_836384;out.selected=m.selection_836374;out.mode=c.mode_state.current;
+    out.end=c.race.manager.state.over_state_7d38f0;out.score=m.timer_836388;out.grade=m.v67e6b0;out.pause=c.game_mode.start_countdown;
+    const auto& bytes=c.event_function36.car_select.car_799d18;const Bytes car(const_cast<std::uint8_t*>(bytes.data()),bytes.size());
+    out.place=car.u8(0xc36);out.flags=car.u32(0xc);out.section=std::uint16_t(car.i16(0x260));out.yaw=car.i16(0x162);
+    out.count=rs.count_80fb04;out.participants=rs.v80fb2c;out.leader=rs.v64e190;out.last=rs.v64e194;out.missing=c.mission.missing;
+    out.stored=unsigned(std::min<std::size_t>({8u,rs.count_80fb04,rs.racers_80fb00.size()/0xa0u}));
+    for(unsigned i=0;i<out.stored;++i){const Bytes r(const_cast<std::uint8_t*>(rs.racers_80fb00.data())+i*0xa0u,0xa0u);
+        out.rivals[i]={r.i32(0x4c),r.u32(0x54),r.u32(0x6c),r.u8(0x71),r.u8(0x74),r.u32(0x98),r.u32(0x9c),r.u32(0x3c),r.u32(0x40)};}
+    return out;
+}
+struct MissionTraceScope {
+    unsigned tick{};std::optional<MissionTraceSnapshot> before;
+    MissionTraceScope(const NativeRuntimeContext& c,const MissionManagerServices& services){
+        static const bool enabled=[](){const char* value=std::getenv("OR2_MISSION_TRACE");return value&&std::strcmp(value,"1")==0;}();
+        static unsigned used=0;
+        if(!enabled||used>=600||c.mode_state.current!=16u||services.variant_780258!=6u||c.mission.manager.stage_836384!=4u)return;
+        const auto type=trace_record(c,services)[2];if(type!=2u&&type!=6u)return;
+        tick=++used;before=trace_snapshot(c,services);
+        if(tick==1)std::fprintf(stderr,"mission-trace begin limit=600 types=2,6\n");
+    }
+    void finish(const NativeRuntimeContext& c,const MissionManagerServices& services,bool ok)const{
+        if(!before)return;const auto& b=*before;const auto a=trace_snapshot(c,services);std::ostringstream s;s.imbue(std::locale::classic());
+        s<<"mission-trace tick="<<tick<<" frame="<<a.frame<<" key="<<b.key<<" sub="<<b.sub<<" type="<<b.type<<" stage="<<b.stage<<":"<<a.stage
+         <<" selected="<<b.selected<<":"<<a.selected<<" mode="<<b.mode<<" pause="<<b.pause<<" end="<<b.end<<":"<<a.end
+         <<" score="<<b.score<<":"<<a.score<<" grade="<<b.grade<<":"<<a.grade<<" rank="<<b.place<<":"<<a.place
+         <<" count="<<b.count<<":"<<a.count<<" participants="<<b.participants<<":"<<a.participants<<" leader="<<a.leader<<" last="<<a.last
+         <<" carFlags="<<b.flags<<" yaw="<<b.yaw<<" section="<<b.section<<" missing="<<b.missing<<":"<<a.missing<<" ok="<<(ok?1:0);
+        for(unsigned i=0;i<std::max(b.stored,a.stored);++i){const auto& x=b.rivals[i];const auto& y=a.rivals[i];
+            s<<" r"<<i<<"{present="<<(i<b.stored?1:0)<<":"<<(i<a.stored?1:0)<<" car="<<x.car<<":"<<y.car<<" active="<<x.active<<":"<<y.active
+             <<" stop="<<x.stopped<<":"<<y.stopped<<" flags="<<x.flags<<":"<<y.flags<<" place="<<x.place<<":"<<y.place
+             <<" score="<<x.score<<":"<<y.score<<" pressure="<<x.pressure<<":"<<y.pressure<<" section="<<x.section<<" fractionBits="<<x.fraction<<"}";}
+        if(b.stored<b.count||a.stored<a.count)s<<" truncated=1";
+        s<<"\n";std::fprintf(stderr,"%s",s.str().c_str());
+        if(tick==600)std::fprintf(stderr,"mission-trace end limit=600\n");
+    }
+};
 // 5E0AC8[(int8)[655B59]]: {x, y, z} model offsets of 495D90 (first 32 rows of the EXE table).
 constexpr std::uint32_t ModelOffset5e0ac8[32][3]={
     {0x3eb0a3d7u,0x3fa51eb8u,0x3d8f5c29u},{0x3ea5e354u,0x3fa45a1du,0x3e3f7ceeu},{0x3eb0a3d7u,0x3fa51eb8u,0x3d8f5c29u},
@@ -645,7 +702,7 @@ bool native_race_hud_mission_control(NativeRuntimeContext& c,MissionManagerServi
     std::array<std::uint8_t,2*64> projection_storage{};
     driving::PcMatrixStack projection_matrices{Bytes(projection_storage.data(),projection_storage.size()),0,0,2};
     driving::pc_matrix_identity(projection_matrices);r.matrices=&projection_matrices;
-    bool ok=false;
+    const MissionTraceScope mission_trace(c,ms);bool ok=false;
     try{ok=mission_manager_control_496a30(m.manager,ms,r);}
     catch(const std::exception& e){o.last_error="496A30: "+what(e);}
     if(!ok){
@@ -653,6 +710,7 @@ bool native_race_hud_mission_control(NativeRuntimeContext& c,MissionManagerServi
         note(o,pc);if(!m.missing)m.missing=pc;
     }
     c.race.manager.state.over_state_7d38f0=r.race_end_7d38f0;
+    mission_trace.finish(c,ms,ok);
     if(ui.missing_pc)note(o,ui.missing_pc);
     if(!row)note(o,0x495db9u);
     ++o.mission_race_parts;

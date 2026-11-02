@@ -1033,6 +1033,8 @@ target_link_libraries(or2setup PRIVATE ZLIB::ZLIB)
 # tools/decomp_empty_services_allow.txt).
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME mission_trace COMMAND ${Python3_EXECUTABLE} -I -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mission_trace.py $<TARGET_FILE:test_mission_marker_runtime>)
+    set_tests_properties(mission_trace PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME no_silent_service_holes
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/decomp_empty_services.py --check --out "")
 endif()
