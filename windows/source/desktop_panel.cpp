@@ -1134,8 +1134,10 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     if(context&&view&&width&&height)letterbox(static_cast<ID3D11DeviceContext*>(context),static_cast<ID3D11RenderTargetView*>(view),width,height);
     // Closed, a recording session still draws its REC badge (shim_input_recording_badge); nothing else is drawn.
     const bool open=!p.playback&&dbce::panel::IsOpen();
+    if(open)camera_controls_end_comparison();
     const auto badge=shim_input_recording_badge();
-    const auto camera_note=camera_controls_notice();
+    const auto comparison_note=camera_controls_comparison_notice();
+    const auto camera_note=comparison_note.empty()?camera_controls_notice():comparison_note;
     if((!open&&badge.empty()&&!v.show_frame_rate&&camera_note.empty())||!device||!context||!view||!width||!height)return;
     auto* dev=static_cast<ID3D11Device*>(device);auto* ctx=static_cast<ID3D11DeviceContext*>(context);
     if(dev!=p.device){   // the first open frame (the device lives for the process)
@@ -1173,7 +1175,7 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     if(!open&&!camera_note.empty()){
         const auto size=ImGui::CalcTextSize(camera_note.c_str());
         const float pad=8.f*dbce::panel::Scale();
-        const ImVec2 at((float(w)-size.x)*0.5f,float(h)-size.y-pad*3.f);
+        const ImVec2 at((float(w)-size.x)*0.5f,comparison_note.empty()?float(h)-size.y-pad*3.f:(float(h)-size.y)*.5f);
         auto* list=ImGui::GetForegroundDrawList();
         list->AddRectFilled(ImVec2(at.x-pad,at.y-pad),ImVec2(at.x+size.x+pad,at.y+size.y+pad),IM_COL32(0,0,0,180));
         list->AddText(at,IM_COL32(245,245,245,255),camera_note.c_str());

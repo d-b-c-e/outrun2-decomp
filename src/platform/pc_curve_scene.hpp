@@ -21,6 +21,7 @@ inline bool pc_curve_mesh_valid(const PcCurveMeshView& v){
 }
 using PcCurveMeshProvider=bool(*)(unsigned width,unsigned height,PcCurveMeshView&);
 inline PcCurveMeshProvider g_pc_curve_mesh_provider=nullptr;
+inline float g_pc_curve_radius_mm=0.f; // readonly admitted developer profile; zero is identity
 enum class PcCurveMode:unsigned {unavailable,active,flat};
 enum class PcCurveRefusal:unsigned {none,projection,resources,resize};
 inline std::atomic<PcCurveMode> g_pc_curve_mode{PcCurveMode::unavailable};

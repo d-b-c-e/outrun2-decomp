@@ -19,6 +19,7 @@
 #include "platform/retail_asset_store.hpp"
 #include "enhancements/frame_rate.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_curve_scene.hpp"
 #include "driving/pc_d3dx.hpp"
 #include <windows.h>
 #include <filesystem>
@@ -111,8 +112,34 @@ int main(int argc,char** argv){
     const auto valid_fov_bytes=read();for(const float invalid:{0.f,-1.f,180.f,std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()})camera_controls_set_fov(invalid);
     CHECK(read()==valid_fov_bytes&&std::fabs(camera_controls_fov().current-40.f)<1e-4f);
     camera_controls_reset();(void)fov(1);
+    platform::g_pc_wide_aspect=5.25f;
     const auto before=read();desktop_keys()[0x2a]=0x80;release(0x41);desktop_keys()[0x2a]=0;
-    CHECK(read()==before); // Shift+F7 must never persist the ordinary set toggle
+    CHECK(read()==before); // Shift+F7 never persists the ordinary set toggle
+    CHECK(platform::pc_comparison_original()&&!platform::g_pc_triple_corrections&&platform::g_pc_wide_aspect==0.f&&platform::pc_configured_aspect()==5.25f);
+    CHECK(fov(1)==.586f&&camera_controls_triples()&&camera_controls_label().find("Realistic FOV")!=std::string::npos);
+    CHECK(camera_controls_comparison_notice().find("Original game view")!=std::string::npos&&camera_controls_comparison_notice().find("not enabled")!=std::string::npos);
+    const auto shifted=[&]{desktop_keys()[0x36]=0x80;release(0x41);desktop_keys()[0x36]=0;};
+    shifted();CHECK(platform::g_pc_screen_comparison==platform::PcScreenComparison::angle&&platform::g_pc_triple_corrections&&platform::g_pc_wide_aspect==5.25f&&read()==before);
+    shifted();CHECK(platform::pc_comparison_original()&&read()==before); // unavailable Curve skipped
+    // Resource readiness is an inert published record; no backend or device is initialized.
+    platform::g_pc_curve_mesh_provider=[](unsigned,unsigned,platform::PcCurveMeshView&){return false;};
+    platform::g_pc_curve_radius_mm=1500;platform::pc_curve_publish(platform::PcCurveMode::active);
+    shifted();shifted();CHECK(platform::g_pc_screen_comparison==platform::PcScreenComparison::curve&&read()==before&&fov(1)==.586f);
+    shifted();CHECK(platform::pc_comparison_original()&&read()==before);
+    for(const unsigned mode:{18u,32u,19u,13u}){
+        rt->mode_state.current=mode;poll();CHECK(platform::g_pc_screen_comparison==platform::PcScreenComparison::normal&&platform::g_pc_triple_corrections&&read()==before);
+        rt->mode_state.current=16;poll();shifted();CHECK(platform::pc_comparison_original());
+    }
+    panel_open=true;poll();CHECK(!platform::pc_comparison_original()&&read()==before);panel_open=false;poll();
+    shifted();CHECK(platform::pc_comparison_original());camera_controls_end_comparison();CHECK(!platform::pc_comparison_original()&&read()==before);
+    shifted();release(0x41);CHECK(!platform::pc_comparison_original()&&fov(1)>1.1f&&camera_controls_label().find("Game FOV")!=std::string::npos);release(0x41);CHECK(fov(1)==.586f); // plain F7 restores first, then owns its usual saved toggle
+    const auto after_plain=read();shifted();desktop_keys()[0x41]=0x80;poll();desktop_keys_clear();poll();CHECK(platform::pc_comparison_original()&&read()==after_plain);
+    camera_controls_end_comparison();poll();platform::g_pc_curve_mesh_provider=nullptr;platform::g_pc_curve_radius_mm=0;platform::pc_curve_publish(platform::PcCurveMode::unavailable);
+    // Ordinary settings updates end comparison even when publication fails.
+    shifted();const auto before_fail=read();const auto publish_before=settings_publish();settings_publish()=[](const std::string&,const std::string&){return false;};camera_controls_zoom(1);settings_publish()=publish_before;
+    CHECK(!platform::pc_comparison_original()&&read()==before_fail);
+    CHECK(read()==before); // comparison never changed bytes; the two ordinary F7 toggles restore the saved choice
+
     desktop_keys()[0x4e]=0x80;poll();desktop_keys_clear();poll();CHECK(read()==before); // focus clear is not a release
     panel_open=true;release(0x4e);panel_open=false;poll();CHECK(read()==before);
     const auto real=settings_publish();settings_publish()=[](const std::string&,const std::string&){return false;};
@@ -120,7 +147,7 @@ int main(int argc,char** argv){
     CHECK(read()==before&&fov(1)==0.586f&&camera_controls_notice().find("not saved")!=std::string::npos);
     settings_publish()=[](const std::string&,const std::string&){return false;};camera_controls_set_fov(60.f);settings_publish()=real;
     CHECK(read()==before&&fov(1)==.586f&&camera_controls_notice().find("not saved")!=std::string::npos);
-    platform::g_pc_triple_corrections=nullptr;
+    platform::g_pc_triple_corrections=nullptr;platform::g_pc_wide_aspect=0;
     CHECK(fov(1)>1.1f); // single-screen uses this camera's Game offset, never the Realistic base
     const auto single=read();release(0x41);CHECK(read()==single);
     CHECK(read().rfind(original,0)==0); // controls, force and owner comments retained
@@ -178,6 +205,11 @@ int main(int argc,char** argv){
     Ini posed;posed.load_text("[Camera]\nBonnetRealistic=false\nCar0.BonnetGameSideOffset=0.2\nCar0.BonnetGameUpOffset=0.1\n",path);
     camera_controls_configure(posed,false,.586f);(void)platform::camera_view_cycle()(0);(void)fov(0);
     const auto tuned=mount();CHECK(std::fabs(tuned[0]-.2f)<1e-5f&&std::fabs(tuned[1]-1.f)<1e-5f);
+    poll();const auto pose_comparison_bytes=read();const auto pose_comparison=camera_controls_pose();const auto pose_fov=fov(0);
+    shifted();CHECK(platform::pc_comparison_original()&&camera_controls_pose()==pose_comparison&&fov(0)==pose_fov&&mount()==tuned&&!platform::camera_body_hidden()()&&read()==pose_comparison_bytes);
+    shifted();CHECK(platform::g_pc_screen_comparison==platform::PcScreenComparison::angle&&camera_controls_pose()==pose_comparison&&mount()==tuned&&read()==pose_comparison_bytes);
+    camera_controls_end_comparison();CHECK(camera_controls_pose()==pose_comparison&&mount()==tuned&&read()==pose_comparison_bytes);
+
     car.put8(0x11,1);CHECK(std::fabs(mount()[0])<1e-5f);car.put8(0x11,0);(void)mount();
     camera_controls_toggle_set();(void)fov(0);CHECK(std::fabs(mount()[0])<1e-5f);
     camera_controls_toggle_set();(void)fov(0);CHECK(std::fabs(mount()[0]-.2f)<1e-5f);

@@ -217,7 +217,7 @@ void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     check(device_->CreateTexture2D(&t,nullptr,&back_depth_tex_),"CreateTexture2D(depth)");
     check(device_->CreateDepthStencilView(back_depth_tex_.Get(),nullptr,&back_dsv_),"CreateDepthStencilView(back)");
     back_w_=w;back_h_=h;
-    if(curve_prepared_&&platform::pc_curve_active())try{prepare_curve_source();}catch(const std::exception& e){
+    if(curve_prepared_&&platform::pc_curve_active()&&!platform::pc_comparison_original())try{prepare_curve_source();}catch(const std::exception& e){
         platform::pc_curve_request_flat(platform::PcCurveRefusal::resize);platform::pc_curve_publish(platform::PcCurveMode::flat);
         std::printf("curve prototype: flat session latch after resize refusal: %s\n",e.what());}
 
@@ -347,10 +347,10 @@ void D3D11D3D9Device::begin_frame(){
     if(msaa_live_)ensure_msaa();
     // The device begins at640x480; the spanning video size arrives between
     // frames. Publish only after requested AA and curve resources are ready.
-    if(!count_only&&!curve_prepared_&&back_w_>=6&&back_w_%3==0&&back_h_>=2)prepare_curve();
-    curve_frame_=curve_prepared_&&platform::pc_curve_active()&&!count_only;curve_world_=false;
+    if(!count_only&&!platform::pc_comparison_original()&&!curve_prepared_&&back_w_>=6&&back_w_%3==0&&back_h_>=2)prepare_curve();
+    curve_frame_=curve_prepared_&&platform::pc_curve_active()&&platform::pc_comparison_curve()&&!count_only;curve_world_=false;
     bound_=Bound{};
-    if(platform::g_pc_triple_corrections){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
+    if(platform::g_pc_triple_corrections||triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
     if(!count_only){
         // A slot three frames old that the GPU has not answered yet: its sample (diagnostics only) is dropped and the
         // query reissued, never waited for; OR2_XBOX_DRAW_STATS waits, for its per-frame log.

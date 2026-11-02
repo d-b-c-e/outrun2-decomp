@@ -286,8 +286,8 @@ struct RendererImpl {
     std::uint32_t loading_scene_index{};
     std::uint32_t loading_scene_offset{};
     bool frontend_visible{true};
-    bool video_pending{},video_fxaa{};       // Options > Settings enhancement rows (xbox_renderer_set_video)
-    unsigned video_width{},video_height{},video_msaa{1};
+    bool video_pending{},video_fxaa{},video_original{};       // Options > Settings enhancement rows (xbox_renderer_set_video)
+    unsigned video_width{640},video_native_width{640},video_height{480},video_msaa{1};
     bool movie_visible{};
     bool start_loading_visible{};
     std::uint32_t primary_frontend_scenes{};
@@ -335,7 +335,8 @@ bool xbox_renderer_initialize(XboxRenderer& renderer,const char* frontend_path,s
 void xbox_renderer_set_video(XboxRenderer& renderer,unsigned width,unsigned height,bool widescreen,unsigned msaa,bool fxaa){
     auto* r=static_cast<RendererImpl*>(renderer.impl);if(!r)return;
     // A planar span (pc_screen.hpp g_pc_wide_aspect): the scene at the chosen height and the window's aspect.
-    if(platform::g_pc_wide_aspect>0.f)width=planar_width(height,platform::g_pc_wide_aspect);
+    r->video_native_width=width;
+    if(platform::pc_configured_aspect()>0.f)width=planar_width(height,platform::pc_configured_aspect());
     g_widescreen=widescreen;r->video_width=width;r->video_height=height;r->video_msaa=msaa;r->video_fxaa=fxaa;r->video_pending=true;
 }
 void xbox_renderer_scene_to_frame(XboxRenderer& renderer){

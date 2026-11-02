@@ -24,6 +24,15 @@ inline float g_pc_wide_aspect=0.0f;
 // back-buffer draws into three viewports (d3d11_d3d9.cpp triple_bind).
 using PcTripleCorrections=bool(*)(const float* projection,float* corrections);
 inline PcTripleCorrections g_pc_triple_corrections=nullptr;
+// Session comparison is switched only by desktop input at a game-thread boundary.
+// Saved framing keeps the configured triple context even while Original uses Off.
+enum class PcScreenComparison {normal,original,angle,curve};
+inline PcScreenComparison g_pc_screen_comparison=PcScreenComparison::normal;
+inline float g_pc_comparison_aspect=0.f;
+inline PcTripleCorrections g_pc_comparison_corrections=nullptr;
+inline bool pc_comparison_original(){return g_pc_screen_comparison==PcScreenComparison::original;}
+inline bool pc_comparison_curve(){return g_pc_screen_comparison==PcScreenComparison::normal||g_pc_screen_comparison==PcScreenComparison::curve;}
+inline float pc_configured_aspect(){return g_pc_screen_comparison==PcScreenComparison::normal?g_pc_wide_aspect:g_pc_comparison_aspect;}
 // Publish an immutable correction-profile change at an owned frame boundary.
 // The callback may stay the same while its session latch/profile changes.
 // This invalidates retained culling/backend matrices; it is not thread custody.

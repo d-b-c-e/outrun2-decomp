@@ -12,7 +12,13 @@ inline bool desktop_any_key(){for(auto k:desktop_keys())if(k&0x80u)return true;r
 // still reach native input when the keyboard already owns driving.
 inline std::array<bool,256>& desktop_camera_shortcut_keys(){static std::array<bool,256> keys{};return keys;}
 inline bool desktop_any_driving_key(){
-    for(unsigned scan=0;scan<256;++scan)if(desktop_key(scan)&&scan!=0x40u&&scan!=0x42u&&scan!=0x57u&&!desktop_camera_shortcut_keys()[scan])return true; // F6/F8/F11 are dedicated desktop controls
+    for(unsigned scan=0;scan<256;++scan){
+        // Shift may arrive a frame before F7. Treat it as a camera modifier for
+        // handover while F7 is registered; raw Shift still reaches native input
+        // whenever the keyboard already owns driving.
+        if(desktop_camera_shortcut_keys()[0x41]&&(scan==0x2a||scan==0x36))continue;
+        if(desktop_key(scan)&&scan!=0x40u&&scan!=0x42u&&scan!=0x57u&&!desktop_camera_shortcut_keys()[scan])return true;
+    }
     return false;
 }
 // How many times every key was released at once (desktop_keys_clear). A reader that compares it can tell such a clear

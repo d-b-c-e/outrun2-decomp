@@ -59,6 +59,15 @@ int main(){try{
     std::printf("F7 held with gate3: keyboard yield %d, native keyboard record %d, consumed steer %d, gear %u\n",int(rt->input_state.pc_overlay_yield),int(rt->input_state.pc_record_used),rt->race.car_world.analog_7d6810.current[0],car.u32(0x208));
     CHECK(!rt->input_state.pc_overlay_yield&&!rt->input_state.pc_record_used&&rt->race.car_world.analog_7d6810.current[0]==steering&&car.u32(0x208)==3);
     desktop_keys()[0x41]=0;tick();CHECK(camera_controls_label().find("Realistic FOV")!=std::string::npos&&car.u32(0x208)==3);
+    for(const unsigned shift_key:{0x2au,0x36u}){
+        desktop_keys()[shift_key]=0x80;tick();CHECK(!rt->input_state.pc_overlay_yield&&desktop_key(shift_key));
+        desktop_keys()[0x41]=0x80;tick();
+        CHECK(!rt->input_state.pc_overlay_yield&&!rt->input_state.pc_record_used&&car.u32(0x208)==3&&rt->race.car_world.analog_7d6810.current[0]==steering);
+        desktop_keys()[0x41]=0;tick();CHECK(!rt->input_state.pc_overlay_yield&&desktop_key(shift_key));
+        tick();CHECK(!desktop_any_driving_key());desktop_keys()[shift_key]=0;tick();
+        camera_controls_end_comparison();
+        desktop_keys()[shift_key]=0x80;CHECK(!desktop_any_driving_key()&&desktop_key(shift_key));desktop_keys()[shift_key]=0;
+    }
     const auto base=platform::camera_fov_adjust()(0,1.1f);desktop_keys()[0x4e]=0x80;tick();desktop_keys()[0x4e]=0;tick();
     CHECK(platform::camera_fov_adjust()(0,1.1f)<base&&car.u32(0x208)==3&&!rt->input_state.pc_overlay_yield);
     // A held gate still changes gear through the actual pressed bits and transmission.

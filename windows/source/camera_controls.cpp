@@ -10,6 +10,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/pc_scene_renderer.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_curve_scene.hpp"
 #include "driving/pc_d3dx.hpp"
 #include "enhancements/frame_rate.hpp"
 #include <windows.h>
@@ -31,11 +32,53 @@ struct State {
     HudToggleEdge set_edge;
     std::array<float,3> steps{{.02f,1.f,2.f}};
     bool configured{},shift_set{},bonnet{},fit_available{};
-    ULONGLONG notice_until{};
+    ULONGLONG notice_until{},comparison_until{};
+    std::string comparison_notice;
     xbox_runtime::InputFilter inner{};
 } h;
 std::mutex camera_mutex;
-bool triples(){return platform::g_pc_triple_corrections!=nullptr;}
+using platform::PcScreenComparison;
+bool comparing(){return platform::g_pc_screen_comparison!=PcScreenComparison::normal;}
+bool triples(){return (comparing()?platform::g_pc_comparison_corrections:platform::g_pc_triple_corrections)!=nullptr;}
+void end_comparison(){
+    if(comparing()){
+        platform::g_pc_wide_aspect=platform::g_pc_comparison_aspect;
+        platform::g_pc_triple_corrections=platform::g_pc_comparison_corrections;
+        platform::g_pc_screen_comparison=PcScreenComparison::normal;
+        platform::pc_triple_profile_changed();
+    }
+    h.comparison_notice.clear();h.comparison_until=0;
+}
+const char* curve_unavailable(){
+    if(!platform::g_pc_curve_mesh_provider)return "curve skipped: developer compositor not enabled";
+    if(!platform::pc_curve_active())return "curve skipped: compositor pending or refused";
+    if(!(platform::g_pc_curve_radius_mm>0.f))return "curve skipped: radius is zero";
+    return nullptr;
+}
+void compare(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    if(!h.configured||h.mode!=16||desktop_panel_open())return;
+    const char* why=curve_unavailable();
+    if(!triples()){
+        h.comparison_notice="Developer comparison unavailable: Angled triples required";
+    }else{
+        if(!comparing()){
+            platform::g_pc_comparison_aspect=platform::g_pc_wide_aspect;
+            platform::g_pc_comparison_corrections=platform::g_pc_triple_corrections;
+        }
+        auto& step=platform::g_pc_screen_comparison;
+        step=step==PcScreenComparison::original?PcScreenComparison::angle:
+             step==PcScreenComparison::angle&&!why?PcScreenComparison::curve:PcScreenComparison::original;
+        const bool original=step==PcScreenComparison::original;
+        platform::g_pc_wide_aspect=original?0.f:platform::g_pc_comparison_aspect;
+        platform::g_pc_triple_corrections=original?nullptr:platform::g_pc_comparison_corrections;
+        platform::pc_triple_profile_changed();
+        h.comparison_notice=std::string(original?"Original game view":step==PcScreenComparison::angle?"Angle correction":"Angle + curve")+
+            " - developer comparison\nSaved framing unchanged; not saved";
+        if(why)h.comparison_notice+=std::string("\n")+why;
+    }
+    h.comparison_until=GetTickCount64()+2500;
+}
 std::string label(){
     if(!CameraFraming::tunable(h.view))return "Camera "+std::to_string(h.view>=4?h.view-4:h.view);
     const bool seat=h.framing.seat(h.view,triples());
@@ -51,13 +94,14 @@ float adjust(std::uint8_t view,float game){
     h.game_fov=game; // unmodified authored/dynamic FOV, not the previous adjusted result
     if(view==1||view==2)h.bonnet=false;
     const unsigned logical=view==0&&h.bonnet?3u:view<=2?view:unsigned(view)+4u;
-    if(h.view!=logical){h.view=logical;h.rotation={};notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
+    if(h.view!=logical){end_comparison();h.view=logical;h.rotation={};notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
     driving::camera_fov_context().near_z=logical==0||logical==3?0.05f:0.f;
     return h.framing.fov(logical,game,h.physical,triples());
 }
 bool save(const std::string&,const std::string&);
 std::uint8_t cycle(std::uint8_t previous){
     const std::lock_guard<std::mutex> lock(camera_mutex);
+    end_comparison();
     const unsigned logical=previous==0&&h.bonnet?3u:previous;
     const unsigned next=logical==0?3u:logical==3?1u:logical==1?2u:0u;
     h.bonnet=next==3;
@@ -69,6 +113,7 @@ std::uint8_t cycle(std::uint8_t previous){
 }
 std::uint8_t restore_view(std::uint8_t native_default){
     const std::lock_guard<std::mutex> lock(camera_mutex);
+    end_comparison();
     h.bonnet=h.last_camera==3;
     h.rotation={};
     return h.last_camera<0?native_default:std::uint8_t(h.bonnet?0:h.last_camera);
@@ -117,6 +162,7 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
     (void)camera;
 }
 bool save_edits(const SettingsEdits& edits){
+    end_comparison();
     std::string error;
     if(write_keys(h.path,"Camera",edits,error))return true;
     notify("Camera setting not saved: "+error);
@@ -147,6 +193,12 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     const bool blocked=!race||desktop_panel_open()||h.clears!=desktop_key_clears();
     h.clears=desktop_key_clears();
     const unsigned mode=rt?rt->mode_state.current:0;
+    {
+        const std::lock_guard<std::mutex> lock(camera_mutex);
+        if(mode!=16||desktop_panel_open())end_comparison();
+        // A real compositor refusal ends Curve rather than mislabelling flat output.
+        if(platform::g_pc_screen_comparison==PcScreenComparison::curve&&curve_unavailable())end_comparison();
+    }
     if(h.mode!=mode){
         h.mode=mode;
         const std::lock_guard<std::mutex> lock(camera_mutex);
@@ -155,7 +207,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     // Release waits inspect only this action's bindings. A held shifter cannot block camera keys.
     const bool set_down=desktop_key(0x41);
     if(set_down)h.shift_set=h.shift_set||desktop_key(0x2a)||desktop_key(0x36);
-    if(h.set_edge.step(set_down,blocked)){if(!h.shift_set)camera_controls_toggle_set();h.shift_set=false;}
+    if(h.set_edge.step(set_down,blocked)){if(h.shift_set)compare();else camera_controls_toggle_set();h.shift_set=false;}
     if(blocked)h.shift_set=false;
     std::array<bool,11> actions{};
     {
@@ -178,6 +230,7 @@ void camera_controls_activate(unsigned i){
 }
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save
+    end_comparison();
     h.path=ini.path();h.physical=physical;h.clears=desktop_key_clears();h.configured=true;
     h.last_camera=-1;h.bonnet=false;h.cycle_save_failed=false;h.rotation={};h.rotation_car=nullptr;
     const auto last=hud_toggle_setting_name(ini.text("Camera","LastCamera"));
@@ -225,8 +278,14 @@ std::string camera_controls_notice(){
     return h.notice+"\n"+camera_key_display(h.keys.names[9])+" / "+camera_key_display(h.keys.names[8])+" zoom; "+
         camera_key_display(h.keys.names[10])+" reset"+(triples()?h.framing.seat(h.view,true)?"; F7 Game set":"; F7 Realistic set":"");
 }
+void camera_controls_end_comparison(){const std::lock_guard<std::mutex> lock(camera_mutex);end_comparison();}
+std::string camera_controls_comparison_notice(){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    return GetTickCount64()<h.comparison_until?h.comparison_notice:std::string{};
+}
 void camera_controls_toggle_set(){
     const std::lock_guard<std::mutex> lock(camera_mutex);
+    end_comparison();
     if(!h.configured||!triples()||!CameraFraming::tunable(h.view))return;
     auto& r=h.framing.realistic[h.view];
     if(save(CameraFraming::set_key(h.view),r?"false":"true")){r=!r;notify(label());}

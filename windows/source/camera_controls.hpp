@@ -10,6 +10,8 @@ bool camera_controls_tunable();
 bool camera_controls_triples();
 std::string camera_controls_label();
 std::string camera_controls_notice();
+std::string camera_controls_comparison_notice();
+void camera_controls_end_comparison();
 void camera_controls_toggle_set();
 void camera_controls_zoom(float degrees); // positive = wider, negative = narrower
 struct CameraFovValues {float calculated{},current{},offset{};bool valid{};}; // vertical degrees

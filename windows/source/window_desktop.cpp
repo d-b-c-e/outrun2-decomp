@@ -78,7 +78,7 @@ bool curve_mesh_view(unsigned width,unsigned height,outrun::platform::PcCurveMes
 // flat) matched to the projection the game used each time it changes (triple_rig.hpp triple_views). With MatchGameFov =
 // false the race camera's projection is already the physical eye's, so the match is that eye.
 bool triple_fixture_corrections(const float* projection,float* out){
-    if(curve_profile&&outrun::platform::pc_curve_active()){
+    if(curve_profile&&outrun::platform::pc_curve_active()&&outrun::platform::pc_comparison_curve()){
         if(outrun::desktop::curve_scene_corrections(*curve_profile,projection,out))return true;
         return false; // only an actual World draw may latch flat; frontend/culling projections can differ
     }
@@ -415,6 +415,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             rig.panel_height_mm=rig.panel_width_mm*9./16.;
             auto profile=std::make_unique<outrun::desktop::CurveSceneProfile>();
             if((raw.empty()||(end!=raw.c_str()&&*end=='\0'))&&outrun::desktop::curve_scene_profile(rig,radius,*profile)){
+                outrun::platform::g_pc_curve_radius_mm=float(radius);
                 outrun::xbox_runtime::curve_profile=std::move(profile);
                 std::printf("curve prototype: requested radius %.9g mm; equal16:9 source, resources pending; developer only\n",radius);
             }else std::printf("curve prototype: refused CurveRadiusMm/geometry; legacy Angled retained\n");

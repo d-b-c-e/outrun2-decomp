@@ -16,7 +16,11 @@ bool present_frame(RendererImpl& r){
         // Count-only is a host integration acceleration only. The real Xbox
         // binary always executes the pixel shaders and presents every frame.
         r.device->count_only=!rasterize;
-        if(r.video_pending){r.video_pending=false;r.device->resize_back_buffer(r.video_width,r.video_height);}
+        const bool original=platform::pc_comparison_original();
+        if(r.video_pending||r.video_original!=original){
+            r.video_pending=false;r.video_original=original;
+            r.device->resize_back_buffer(original?r.video_native_width:r.video_width,r.video_height);
+        }
         const bool span=platform::g_pc_wide_aspect>0.f;
         // The 2D layer's rectangle (display_fit.hpp ui_scaling_rect): the centred 4:3 on 16:9 and on a planar span, or
         // with UIScalingMode 0 stretched over the frame, or over the span's centre panel.
