@@ -315,7 +315,7 @@ void race_camera_start_485250(Bytes c,PcMatrixStack& s,PcCameraDevice& d,const P
     pc_matrix_pop(s);
     race_camera_angles_484df0(c);
     camera_project_484bd0(c,s,d,screen,blend);
-    if(in.timer_8367bc==0x12bu)c.put8(0x34a,in.byte_7c24b8);
+    if(in.timer_8367bc==0x12bu){const auto restore=camera_fov_context().restore;c.put8(0x34a,restore?restore(in.byte_7c24b8):in.byte_7c24b8);}
     else if(in.timer_8367bc==0xb5u)race_camera_save_4833e0(c,0);
 }
 void race_camera_race_4858d0(Bytes c,PcMatrixStack& s,PcCameraDevice& d,const PcCameraScreen& screen,
@@ -374,7 +374,7 @@ void race_camera_start_lan_485300(Bytes c,PcMatrixStack& s,PcCameraDevice& d,con
     pc_matrix_pop(s);
     race_camera_angles_484df0(c);
     camera_project_484bd0(c,s,d,screen,blend);
-    if(in.timer_8367bc==0x167u)c.put8(0x34a,in.byte_7c24b8);
+    if(in.timer_8367bc==0x167u){const auto restore=camera_fov_context().restore;c.put8(0x34a,restore?restore(in.byte_7c24b8):in.byte_7c24b8);}
     else if(in.timer_8367bc==0xb5u)race_camera_save_4833e0(c,0);
 }
 void race_camera_demo_485b40(Bytes c,PcMatrixStack& s,PcCameraDevice& d,const PcCameraScreen& screen,

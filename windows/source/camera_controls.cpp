@@ -22,6 +22,7 @@ struct State {
     std::string path,notice;
     float physical{};
     unsigned view{255},model{255};
+    int last_camera{-1};bool cycle_save_failed{};
     std::uint32_t clears{},mode{};
     CameraKeys keys;std::array<HudToggleKey,11> bindings{};std::array<CameraKeyRepeat,11> edges{};
     HudToggleEdge set_edge;
@@ -44,15 +45,26 @@ float adjust(std::uint8_t view,float game){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     if(view==1||view==2)h.bonnet=false;
     const unsigned logical=view==0&&h.bonnet?3u:view<=2?view:unsigned(view)+4u;
-    if(h.view!=logical){h.view=logical;notify(label());}
+    if(h.view!=logical){h.view=logical;notify(label()+(h.cycle_save_failed?" - last camera not saved":""));h.cycle_save_failed=false;}
     driving::camera_fov_context().near_z=logical==0||logical==3?0.05f:0.f;
     return h.framing.fov(logical,game,h.physical,triples());
 }
+bool save(const std::string&,const std::string&);
 std::uint8_t cycle(std::uint8_t previous){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     const unsigned logical=previous==0&&h.bonnet?3u:previous;
     const unsigned next=logical==0?3u:logical==3?1u:logical==1?2u:0u;
-    h.bonnet=next==3;return std::uint8_t(h.bonnet?0:next);
+    h.bonnet=next==3;
+    if(h.last_camera!=int(next)){
+        if(save("LastCamera",CameraFraming::prefix(next)))h.last_camera=int(next);
+        else h.cycle_save_failed=true; // the view still changes, but a failed preference write is never reported saved
+    }
+    return std::uint8_t(h.bonnet?0:next);
+}
+std::uint8_t restore_view(std::uint8_t native_default){
+    const std::lock_guard<std::mutex> lock(camera_mutex);
+    h.bonnet=h.last_camera==3;
+    return h.last_camera<0?native_default:std::uint8_t(h.bonnet?0:h.last_camera);
 }
 void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::CameraMountFit* fit,driving::PcMatrixStack& s){
     const std::lock_guard<std::mutex> lock(camera_mutex);
@@ -143,6 +155,10 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
 void camera_controls_configure(const Ini& ini,bool disabled,float physical){
     if(disabled)return; // test, recording and playback retain their existing presentation contract; never save
     h.path=ini.path();h.physical=physical;h.clears=desktop_key_clears();h.configured=true;
+    h.last_camera=-1;h.bonnet=false;h.cycle_save_failed=false;
+    const auto last=hud_toggle_setting_name(ini.text("Camera","LastCamera"));
+    for(unsigned view=0;view<4;++view)if(last==hud_toggle_setting_name(CameraFraming::prefix(view)))h.last_camera=int(view);
+    if(!last.empty()&&last!="DEFAULT"&&h.last_camera<0)std::printf("camera: LastCamera = %.32s refused; native stage-start preference retained\n",last.c_str());
     install_keys(camera_keys_load([&](const char* key){return ini.text("Camera",key);},[&](const char* key){return ini.has_value("Camera",key);}));
     if(h.keys.migrated)std::printf("camera: untouched earlier shortcut defaults migrated for this session; custom sets and file bytes retained\n");
     const char* step_keys[]{"MoveStepMetres","TiltStepDegrees","FovStepDegrees"};
@@ -166,7 +182,7 @@ void camera_controls_configure(const Ini& ini,bool disabled,float physical){
         }
     }
     platform::camera_fov_adjust()=adjust;
-    platform::camera_view_cycle()=cycle;platform::camera_mount_adjust()=adjust_view;
+    platform::camera_view_cycle()=cycle;platform::camera_view_restore()=restore_view;platform::camera_mount_adjust()=adjust_view;
 }
 void camera_controls_wrap_input_filter(){
     if(!h.configured)return;

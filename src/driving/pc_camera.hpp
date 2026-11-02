@@ -61,7 +61,7 @@ using CameraViewCycle=std::uint8_t(*)(std::uint8_t previous);
 struct CameraFovContext {
     float fov_y{};CameraFovAdjust adjust{};
     CameraViewAdjust view_adjust{};void* view_user{};
-    CameraViewCycle cycle{};float near_z{};
+    CameraViewCycle cycle{},restore{};float near_z{};
 };
 CameraFovContext& camera_fov_context();
 // Tweaks' rule: 1.0 in the chase or bumper view (+34A 2 or 0) with no camera switch running (+364 == 0) in GAME (0x10)

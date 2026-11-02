@@ -196,6 +196,7 @@ float& triple_fov_y(){static float fov=0.f;return fov;}
 driving::CameraFovAdjust& camera_fov_adjust(){static driving::CameraFovAdjust adjust=nullptr;return adjust;}
 CameraMountAdjust& camera_mount_adjust(){static CameraMountAdjust adjust=nullptr;return adjust;}
 driving::CameraViewCycle& camera_view_cycle(){static driving::CameraViewCycle cycle=nullptr;return cycle;}
+driving::CameraViewCycle& camera_view_restore(){static driving::CameraViewCycle restore=nullptr;return restore;}
 void PcSceneRenderer::adjust_camera_view(void* user,Bytes camera,driving::PcMatrixStack& s){
     auto& renderer=*static_cast<PcSceneRenderer*>(user);Bytes car(nullptr,0),unused(nullptr,0);
     if(!camera_mount_adjust()||!renderer.vehicle_camera||!renderer.vehicle_camera(car,unused)||car.size()<=0x11)return;
@@ -328,6 +329,7 @@ bool PcSceneRenderer::invoke(std::uint32_t callback,std::uint32_t,std::uint32_t,
                            driving::camera_fov_context().fov_y=race?triple_fov_y():0.f;
                            driving::camera_fov_context().adjust=race?camera_fov_adjust():nullptr;
                            driving::camera_fov_context().cycle=race?camera_view_cycle():nullptr;
+                           driving::camera_fov_context().restore=race?camera_view_restore():nullptr;
                            driving::camera_fov_context().view_adjust=race&&camera_mount_adjust()?adjust_camera_view:nullptr;
                            driving::camera_fov_context().view_user=renderer;}
                        ~Arm(){driving::camera_znear_context().armed=false;driving::camera_fov_context()={};}}

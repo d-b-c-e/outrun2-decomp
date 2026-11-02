@@ -163,6 +163,17 @@ int main(int argc,char** argv){
     CHECK(ini.load(path));camera_controls_configure(ini,false,.586f);
     CHECK(!camera_controls_keys_migrated()&&camera_controls_key_names()[4]=="F9"&&camera_controls_key_names()[0]=="NUMPAD8"&&read()==custom_text);
     camera_controls_default_keys();poll();camera_controls_reset();
+    // Last-camera memory is independent of framing/pose. Absence preserves the
+    // game's license choice, and loading/restoring never rewrites the file.
+    CHECK(platform::camera_view_restore()(2)==2);
+    (void)fov(1);CHECK(platform::camera_view_cycle()(0)==0);(void)fov(0);
+    CHECK(ini.load(path)&&ini.text("Camera","LastCamera")=="Bonnet");
+    const auto saved_camera=read();camera_controls_configure(ini,false,.586f);
+    CHECK(platform::camera_view_restore()(2)==0&&fov(0)==1.1f&&camera_controls_label().find("Bonnet Camera")!=std::string::npos&&read()==saved_camera);
+    const auto publish=settings_publish();settings_publish()=[](const std::string&,const std::string&){return false;};
+    CHECK(platform::camera_view_cycle()(0)==1);(void)fov(1);settings_publish()=publish;
+    CHECK(read()==saved_camera&&camera_controls_notice().find("last camera not saved")!=std::string::npos);
+    CHECK(platform::camera_view_restore()(2)==0&&fov(0)==1.1f);
     if(argc==2){
         CHECK(platform::exe_image_autoload());
         platform::RetailAssetStore store;std::string error;CHECK(platform::retail_asset_store_open(store,argv[1],&error));
@@ -184,9 +195,27 @@ int main(int argc,char** argv){
         CHECK(scene.render_view().view_95d860==rendered.view_95d860&&scene.render_view().frustum_95bf40==rendered.frustum_95bf40);
         enhancements::set_display_rate(60);
         for(unsigned i=0;i<3;++i)CHECK(scene.invoke(0x485fe0u,0,385,16,0)&&scene.render_view().view_95d860==rendered.view_95d860&&camera.f32(0xf8)==base_eye);
+        // Restore at the actual native single-player START preference point.
+        scene.pause_780248=0;camera.put8(0x34a,0x1e);
+        scene.race_camera_inputs=[](driving::PcRaceCameraInputs& in){in.timer_8367bc=0x12bu;in.byte_7c24b8=2;return true;};
+        CHECK(scene.invoke(0x485fe0u,0,385,13,0)&&scene.camera_unanswered==0&&camera.u8(0x34a)==0);
+        scene.race_camera_inputs=[](driving::PcRaceCameraInputs& in){in.timer_8367bc=0x12cu;in.byte_7c24b8=2;return true;};
+        CHECK(scene.invoke(0x485fe0u,0,385,13,0)&&scene.camera_unanswered==0&&camera_controls_label().find("Bonnet Camera")!=std::string::npos);
+        CHECK(std::fabs(scene.render_view().eye[2]+expected.bonnet[2])<1e-5f&&read()==saved_camera);
+        // A profile without LastCamera keeps its native chase default, not the previous session's Bonnet flag.
+        Ini fresh;fresh.load_text("[Camera]\n",path);camera_controls_configure(fresh,false,.586f);
+        camera.put8(0x34a,0x1e);scene.race_camera_inputs=[](driving::PcRaceCameraInputs& in){in.timer_8367bc=0x12bu;in.byte_7c24b8=2;return true;};
+        CHECK(scene.invoke(0x485fe0u,0,385,13,0)&&camera.u8(0x34a)==2&&read()==saved_camera);
+        // The LAN START variant reaches the same restore seam; no LAN/game process is started.
+        CHECK(ini.load(path));camera_controls_configure(ini,false,.586f);
+        driving::PcRaceCameraInputs lan{};lan.car=car;lan.timer_8367bc=0x167u;lan.byte_7c24b8=2;
+        driving::PcCameraDevice lan_device;camera.put8(0x34a,0x1e);
+        driving::camera_fov_context().restore=platform::camera_view_restore();
+        driving::race_camera_start_lan_485300(camera,stack,lan_device,{1280,720},{0,0,0,1.f},lan);
+        CHECK(camera.u8(0x34a)==0&&fov(0)==1.1f&&read()==saved_camera);driving::camera_fov_context()={};
     }
     CHECK(std::filesystem::remove(path)&&std::filesystem::remove(dir));
-    platform::camera_fov_adjust()=nullptr;platform::camera_mount_adjust()=nullptr;platform::camera_view_cycle()=nullptr;
+    platform::camera_fov_adjust()=nullptr;platform::camera_mount_adjust()=nullptr;platform::camera_view_cycle()=nullptr;platform::camera_view_restore()=nullptr;
     platform::g_pc_triple_corrections=nullptr;driving::camera_fov_context()={};
     std::printf("camera controls: %u checks\n",checks);
 }
