@@ -23,6 +23,8 @@ Validation: Release desktop builds. Eight focused camera/render/shadow/audit che
 
 ## Pending compositor work and evidence limits
 
+Fixture prerequisite correction: the actual-frame `test_pc_scene_renderer` also needs the verified EXE constants. Running without `OR2_EXE` previously terminated with `0xc0000409`; it now explicitly autoloads the verified image or returns skip77 before constructing the renderer. Both ordinary and optional retail CTest entries recognize that skip. With the read-only cache, the ordinary fixture still passes34 checks and the focused particle/mission/scene suite passes3/3. Without the cache it skips, which is not a pass of those assertions. Logs `work/validation-20261102/scene-cache-*`; no production rendering code changed.
+
 - A future world source needs gameplay/mode admission, a logical-backbuffer identity separate from the physical offscreen texture, matching depth/stencil and MSAA handling, explicit resolve/composite before `42D710`, and restoration of the HUD/frontend target, viewport and shaders. Current triple target checks use the `BackBuffer` sentinel; replacing only the physical target would silently disable replication.
 - World screen particles are still built from the center projection and CPU-rejected at finite `clip.w <= 0`. Classification cannot recover them. Preserve world identity/coordinates through admission and build per-panel/source-eye effects before claiming angled or curved correctness.
 - Shadow darkening must cover the world source and preserve stencil semantics. World RHW is currently kept on the center by the GPU compatibility path; it is still unqualified for corrected side views.

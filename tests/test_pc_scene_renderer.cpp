@@ -5,6 +5,7 @@
 #include "platform/pc_soft_d3d9.hpp"
 #include "platform/retail_asset_store.hpp"
 #include "platform/vehicle_preview_init.hpp"
+#include "system/exe_image.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -16,6 +17,7 @@ unsigned checks=0;
 void require(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",what);std::exit(1);}}
 }
 int main(int argc,char** argv){
+    if(!platform::exe_image_autoload()){std::printf("SKIP: set OR2_EXE to the game's OR2006C2C.cache (scene constants come from it)\n");return 77;}
     platform::PcSoftD3D9Device device(640,480);
     platform::PcSceneRenderer r(device);
     driving::PcEventControlState events{};

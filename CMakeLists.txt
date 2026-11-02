@@ -978,11 +978,13 @@ endif()
 add_executable(test_pc_scene_renderer tests/test_pc_scene_renderer.cpp)
 target_link_libraries(test_pc_scene_renderer PRIVATE outrun_native_runtime)
 add_test(NAME pc_scene_renderer COMMAND test_pc_scene_renderer)
+set_tests_properties(pc_scene_renderer PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(test_race_area_draw_list tests/test_race_area_draw_list.cpp)
 target_link_libraries(test_race_area_draw_list PRIVATE outrun_native_runtime ${OR2_SPRITE_TEST_CLANG_BUILTINS})
 add_test(NAME race_area_draw_list COMMAND test_race_area_draw_list)
 add_test(NAME pc_scene_renderer_retail COMMAND test_pc_scene_renderer
   "${OR2_PC_ASSET_ROOT}")
+set_tests_properties(pc_scene_renderer_retail PROPERTIES SKIP_RETURN_CODE 77)
 
 # Portable D3D9 resource lifetime regression (shared core, from the PS5 fork).
 add_executable(test_d3d9_resource_lifetime tests/test_d3d9_resource_lifetime.cpp)
