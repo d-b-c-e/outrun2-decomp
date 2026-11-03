@@ -64,6 +64,30 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
 
 
+def supervisor_gate(path, stimulus=False):
+    """Optional outer job/LL supervisor. Fail closed on stop, stale heartbeat or unadmitted stimulus."""
+    if path is None: return
+    state = json.loads(path.read_text(encoding="utf-8-sig"))
+    age = time.time() - state["unix"]
+    if not state.get("ok") or not 0 <= age <= 2:
+        raise RuntimeError("outer supervisor stopped or heartbeat stale")
+    if stimulus and (state.get("pending") or not state.get("fenceReady")):
+        raise RuntimeError("outer supervisor has not admitted synthetic stimulus")
+
+
+def supervisor_closing(path):
+    """Acknowledge cleanup with the passive supervisor before changing the foreground by closing."""
+    if path is None: return
+    path.with_suffix('.closing').touch()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        try:
+            if json.loads(path.read_text(encoding='utf-8-sig')).get('cleanup'): return
+        except (OSError, ValueError): pass
+        time.sleep(.05)
+    raise RuntimeError('outer supervisor did not acknowledge cleanup')
+
+
 # Run timing (romi 23861). --seconds is the startup budget, from launch to race entry. From race entry the race has its
 # own budget, so a late race entry never truncates the race phase: R1's two 3.5 s steer holds, or R3's replay bound.
 # The whole run is bounded by startup + race budget, and inject.on expires a cleanup margin after that.
@@ -380,7 +404,7 @@ def retain(proc, receipt):
     """--horn (sana #132311): a process that WM_CLOSE did not end by its deadline is retained and reported, never
     killed: its pid and creation time go in the receipt, the rig lease stays held, and the verdict fails."""
     receipt["retained"] = dict(pid=proc.pid, creationTime=receipt.get("creationTime"),
-                               why="WM_CLOSE did not end the process within its deadline; not killed (--horn run)")
+                               why="WM_CLOSE did not end the process within its deadline; retained for the supervisor")
 
 
 def lease(action, purpose=""):
@@ -424,6 +448,8 @@ def main():
     a.add_argument("--check-only", action="store_true", help="preflight only: no lease, no files, no launch")
     a.add_argument("--lease-held", action="store_true", help="the caller holds the shared rig lease through this run and its "
                    "evidence (seal, replay, frame conversion) and releases it; run.py neither takes nor releases it")
+    a.add_argument("--supervisor-state", type=pathlib.Path, help="outer job/LL guard heartbeat; refuse stale or stopped publication")
+    a.add_argument("--retain-on-close-timeout", action="store_true", help="retain own process and outer lease if WM_CLOSE times out")
     a.add_argument("--horn", action="store_true", help="R1 only: this run binds horn (R12 button 27) with [Audio] AllowHorn = true "
                    "and holds it 1.5 s after the steer holds; the exit result log's race sound line must show the 9BC loop and the "
                    "81BC stop as played (refused or missing is a request only; the command path, not an audible check)")
@@ -552,6 +578,7 @@ def main():
     proc = None; run_root = None; leased = False; created = 0; wrote_ini = False
     published = {}                               # only files this invocation wrote, with their last bytes
     def publish(name, data):
+        supervisor_gate(o.supervisor_state, stimulus=name == "inject.txt")
         if sha(publisher) != plan["publisherSha256"]: raise RuntimeError("control publisher changed after preflight")
         replace_file(DBCE / name, data, publisher); published[name] = data
     try:
@@ -582,6 +609,7 @@ def main():
                 label="synthetic input (inject action, the test profile's bindings), not owner play or a physical trial; the frames "
                       "are the game's own back buffer, written by the latched run into its run folder")
         publish("inject.on",("nonce=%s\nexpires=%d\n" % (nonce, inject_expiry(start, o.seconds, budget))).encode())
+        supervisor_gate(o.supervisor_state)
         proc = subprocess.Popen([str(o.game / "OutRunDesktop.exe")] + ([] if render_span(o.render) else ["--windowed"]), cwd=str(o.game))
         receipt["pid"] = proc.pid; created = creation_time(int(proc._handle)); receipt["creationTime"] = created
         run_root = DBCE / ("run-%s-%d" % (nonce, proc.pid)); log = run_root / "runtime.log"
@@ -594,6 +622,7 @@ def main():
         consumed_deadline = start + o.seconds + (replay_timeout or 0)
         while time.time() < (consumed_deadline if consumed else loop_deadline(start, o.seconds, race_at, budget)) and proc.poll() is None:
             time.sleep(0.2)
+            supervisor_gate(o.supervisor_state)
             if log.exists():
                 text = log.read_text(encoding="utf-8", errors="replace"); new = text.splitlines()[seen:]; seen += len(new); lines += new
                 for l in new:
@@ -648,10 +677,11 @@ def main():
         receipt["raceSeconds"] = round(time.time() - race_at, 3) if race_at is not None and phase == "end" else None
         time.sleep(1.0)
         if proc.poll() is None:
+            supervisor_closing(o.supervisor_state)
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)   # WM_CLOSE: the game's own close path
             try: proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                if o.horn: retain(proc, receipt)
+                if o.horn or o.retain_on_close_timeout: retain(proc, receipt)
                 else:
                     # A latched process whose stop did not resolve parks for its supervisor (P21): this runner ends it.
                     receipt["forced"] = True; proc.kill(); proc.wait(timeout=15)
@@ -659,10 +689,11 @@ def main():
     except Exception as e:
         receipt["errors"].append(repr(e))
         if proc and proc.poll() is None:
+            supervisor_closing(o.supervisor_state)
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)
             try: proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                if o.horn: retain(proc, receipt)
+                if o.horn or o.retain_on_close_timeout: retain(proc, receipt)
                 else: receipt["forced"] = True; proc.kill()
     finally:
         try:

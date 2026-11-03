@@ -1,0 +1,51 @@
+# Standalone provider-free readback preparation — 2026-11-03
+
+This is a bounded first render readback, using the existing latched `shim_first_loop` harness. It does not replace the installed game. Source base is `9a10acef8b5adb4f43cf77719ef19249918fb96e`; frozen executable SHA256 is `D36203770FCEF774DD67F839410A67468349D7F0148DB8AC12BD371503870B7D`. The public fork has no new push authorization: these runner changes stay local.
+
+## Proposed first live interval
+
+One operator (`remi`), named `remi-outrun-live` lease, one standalone launch, no Steam. Fresh raw idle must be at least 180 seconds even if the saved policy waives its own idle check. Passive LL recording starts before launch, captures foreground identity and a pump heartbeat, and permits at most three zero-LL startup raw resets in the first 90 seconds of the exact game birth. Physical/injected input, foreign foreground, late/fourth reset, lost heartbeat, or display identity change stops admission. There is no automatic retry.
+
+The job launches the Python root suspended, assigns it before resuming, and contains the game, command publishers and finalizer. Only an exact job member with the expected game image/birth is adopted. The existing harness writes synthetic actions through the native fenced publisher; it sends no OS keyboard/mouse/gamepad input. A fresh supervisor heartbeat and the runtime's latched/no-output lines are required before synthetic stimulus. Close uses an acknowledged cleanup handshake, then owned-window WM_CLOSE. A close timeout retains custody; this mode never calls the old forced-kill branch.
+
+Runtime: startup <=90 seconds, synthetic driving 30 seconds (race budget 45), total job deadline 240 seconds followed by <=45 seconds normal-close cleanup. Request <=6 minutes including owner inventories and sealing. Separate/Angled, 12 game-owned PPMs, every 6 frames after 120 race frames, scale 2. The camera/rig is the existing fixed fixture (32-inch 16:9, 660 mm eye, 70-degree sides, 8 mm gap, MatchGameFov); this is not the owner's calibrated seating. No display mode/profile/topology changes are requested. The spanning window may cover the rig during the lease.
+
+The private ordinary copy is `build/provider-free/game` (3,443 files, about 1.1 GB). No hardlinks are used. Candidate/profile are the only intentional replacements. Child-only LOCALAPPDATA is `build/provider-free/appdata`; child-only DBCE_FFB_MUTE=1 adds to the latched output fence. All saves/options/controls/recording/cache work stays private. Existing owner EXE, DLL, INI, options and saves are never written. Full inventories before and after compare SHA256, length, exact numeric .NET UTC creation/write ticks, attributes and path presence. Any drift is reported with custody retained rather than overwriting another actor's changes. Inventory does not record directory timestamps or last-access time.
+
+## Remaining gate map
+
+| Gate | Provider-free evidence possible | First interval / remaining dependency |
+|---|---|---|
+| Standalone startup, runtime identity, latched safety, no-output status | Exact job/PID/birth; LL record; game log; shutdown receipt | First interval. Installed build remains unchanged. Physical force absence/feel is not independently measured. |
+| Synthetic menu-to-race, control consumption, recording integrity | Runtime modes/recorded-versus-consumed signals, host shutdown, P21 seal and offline adapter replay | First interval. This is a synthetic fixture profile, not physical wheel/shifter acquisition or an ordinary-player Controls receipt. |
+| Angled scene rendering and freshness | Game-owned backbuffer PPMs correlated with race/frame/log; node/domain/fallback diagnostics where emitted | First interval samples one selected camera/route. Pixel inspection and counters are separate assertions; a file count alone is not a visual pass. |
+| Start-grid wedges, body/shadow/effects, ordinary node culling and visible-panel LOD | Actual pixels plus exact scene/camera and fallback/domain counters; compare baseline 2dd9886 | First interval provides candidate frames only. No baseline run or all-four-camera coverage; scene-specific reproductions remain. |
+| Camera Game/Realistic F7; Shift+F7 Original/Angle/Curve reset; fitted starts; pose/FOV/save/reload/reset; F6/overlay/focus; 11 direct camera bindings and held/release behavior | Game-owned recording/log plus targeted app-owned actions and frames, where a real consumer route is established | Technically provider-free except physical button acquisition and subjective framing. Current latched harness supplies only its declared synthetic menu/drive route; no shortcut stimulus is claimed. Ordinary settings persistence needs a separate private run route. |
+| Curved source/resolve/compositor identity (radius 0), then R1500; seams/depth/source-composite/HUD | Actual source/composite pixels and per-stage diagnostics, GPU cost | Current latch clears all OR2_ flags, including OR2_CURVE_COMPOSITOR. This interval cannot exercise it. Need a separately admitted ordinary-private developer interval or an explicitly supported safe test route; do not bypass the latch. Default remains off. |
+| Sun step 2 per-eye source camera, native GPU occlusion/temporal/edge fade, GS exclusion/no duplicate or queued cross-eye glow | Actual GPU execution, per-eye identity/counters and occluded/unoccluded moving scenes | Provider-free in principle, but the new provider is registered only in the OR2_CURVE_COMPOSITOR=1 Angled developer profile. Current first interval cannot close any sun-step2 GPU gate. CPU 655 assertions are existing offline evidence only. |
+| WorldCoverage darkening and next ordinary XYZ constant/cache reload; type2 particles behind-center inside a side view | Dedicated runtime coverage count, successive real draw/pixel evidence, sparks/gravel/grass scene reproduction | Source/CPU acceptance is insufficient. A suitable diagnostic scene and ordinary/developer route remain. Type0/1 screen quads, point sprites and unmatched custom fallback limitations remain explicit. |
+| Reflections, MSAA/FXAA, HUD spacing/scaling and cost | Repeatable actual pixels/timings, same settings/route, baseline comparison | First interval is an initial sample only; no variant or baseline comparison. MissionTrace is a separate explicit diagnostic, absent here. |
+| Surround versus Separate and physical rig calibration | Window/frame geometry and physical panel mapping; matched independently qualified intervals | Only Separate fixture interval proposed; no topology switch. Physical bezel/seating/comfort remains owner judgment. |
+| Wheel/shifter physical acquisition, H-pattern behavior, producer@2 force sign/strength/feel, owner acceptance | Requires actual physical actions and, for force, an attended admitted output interval | Owner-only/attended physical gates. Unattended muted images and synthetic signals do not establish these. |
+
+## Preparation and evidence
+
+`Prepare.ps1` builds only the native publisher/adapter-replay helpers with ClangCL and the existing P21Finalizer against the toolkit. It reuses the frozen game without rebuilding it, then uses the existing prepare-copy command. A first MSVC helper attempt encountered an existing int64-to-double /WX warning; ClangCL matches the candidate's toolchain and passed. Native output and managed dependencies live in ignored `build/provider-free/helpers`.
+
+Completed offline: 12 tests extract and exercise the actual publication/cleanup gates; 13 existing Python/native publisher integration checks and 5 presentation checks pass; existing `test_run_timing.py` reports zero failures; supervised `-Mode Check` has `problems=[]`; numeric timestamp fixture matches .NET UTC ticks `639292608001234567` exactly. These checks do not run hooks, a game, a device, GPU, desktop provider or Steam. They do not claim a native integration rehearsal of this new outer executor. Existing pinned native job and observer libraries retain their prior qualification receipts.
+
+Pinned dependencies (retain their worktrees):
+
+- Job-only API: `E:/Source/_work/soba-truckful-provider-free/artifacts/provider-free/rehearsal-native-go501049-amend501065/native/Truckful.Live.dll`, SHA256 `725E52B00A36B8189BF4BAF3CF201D1266614B49DB124F2C410884D2D96BE4DD`. Its Truckful observer/XInput methods are never called here.
+- LL observer: `E:/Source/_work/remi-dirt4-loose-map-20261103/build/ReadbackObserver.dll`, SHA256 `2E45A82CD860C5A819D046746C5B1787B4B3939C8D35180498708C161D9BA85D`.
+
+Prepared manifest pins all entry scripts, helper executables/assemblies/config, candidate/profile, Python, observer and job DLL. Live admission also requires its exact SHA from the coordinator GO. Evidence is `build/provider-free/{preflight-supervised.json,rehearsal.txt,timing.txt,timestamp-result.json,prepared.json}`; live evidence will be fresh `live/` and `r1/` folders. Inspect actual PPMs after release. Keep the native run, sealed capture, controller state, final LL record and owner inventories.
+
+```powershell
+# Offline check, no launch/lease/hook/input:
+./windows/tests/provider_free/Invoke-Readback.ps1 -Mode Check
+# Only after the exact coordinator GO, with the manifest SHA in that GO:
+./windows/tests/provider_free/Invoke-Readback.ps1 -Mode Live -Go <id> -PreparedSha256 <sha256>
+```
+
+The preparation CPU/IO interval GO501517 released named token c7ad18f141574a6380b02a7c1cc661e3 after helper builds, SHA copy verification and preflight. No live interval is implied by that grant. See hub `docs/handoffs/2026-11-02-mevu.md`, `docs/handoffs/2026-11-02-guna-restart.md`, profile 07, and this repository's `windows/docs/SUN-FRAME-VIEW-SPLIT.md`.
