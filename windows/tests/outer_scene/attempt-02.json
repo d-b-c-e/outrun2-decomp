@@ -1,0 +1,114 @@
+{
+  "case": "attempt-02-start-gaps",
+  "frames": [
+    {
+      "file": "frame-0000.ppm",
+      "bytes": 8294416,
+      "sha256": "51cad54147cf4f8790555187dde86184b01e8b1b00e0a1cb8f7f4ffb7c01232b",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0001.ppm",
+      "bytes": 8294416,
+      "sha256": "838112e42500bf9bf9b5763c9ba0973f1eb9eb1439dc4244bc7cfe206f16cbf8",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0002.ppm",
+      "bytes": 8294416,
+      "sha256": "3ac35ce7c52be3f340053bbba786a0221bd185a1ee77468e11d4bdd64a002b79",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0003.ppm",
+      "bytes": 8294416,
+      "sha256": "60a773a1300971d6b3ce423ffb8562cada16a79e7c91085f239a2e4a8e6d9265",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0004.ppm",
+      "bytes": 8294416,
+      "sha256": "ffd9b82aa8b94509260bdf0b51830460c9063d58405975fca114df9f1c9cab32",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0005.ppm",
+      "bytes": 8294416,
+      "sha256": "e23a118e4f9a4213ceb97285f56dba0ca1ece4eb1ed2178d61ecb227d9781aa1",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0006.ppm",
+      "bytes": 8294416,
+      "sha256": "f2dff27423b12db789a7ddf374b7a3a744edf3a342552cd2ce2126d05e2b3512",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0007.ppm",
+      "bytes": 8294416,
+      "sha256": "0f466f565289f4ec0e0fcf8be7f58f5a927968c0ff86d5d4f07ebd9869df2469",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0008.ppm",
+      "bytes": 8294416,
+      "sha256": "274393d5322353d9879521c08425b881138de47d57292c08bfeef92a408fb956",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0009.ppm",
+      "bytes": 8294416,
+      "sha256": "9410e72afc65ad8d6f26cbbd70a643693b1cca7cd14fd7d20873229fb4111da2",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0010.ppm",
+      "bytes": 8294416,
+      "sha256": "20b9d584751f2a896bb80b52e24b92ead4fc9ec88d2f3d81b40e10ff0b74dd4d",
+      "size": [
+        3840,
+        720
+      ]
+    },
+    {
+      "file": "frame-0011.ppm",
+      "bytes": 8294416,
+      "sha256": "c5c70d8eca1303c933d0d626226c3d93b30697f38cf1a6081e5860b1d32450f4",
+      "size": [
+        3840,
+        720
+      ]
+    }
+  ],
+  "candidate": "D36203770FCEF774DD67F839410A67468349D7F0148DB8AC12BD371503870B7D"
+}
