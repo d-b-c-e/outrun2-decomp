@@ -4,7 +4,7 @@ import ast, json, pathlib, tempfile, threading, time, unittest
 RUNNER = pathlib.Path(__file__).parents[1] / 'shim_first_loop' / 'run.py'
 tree = ast.parse(RUNNER.read_text())
 functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('supervisor_gate', 'supervisor_closing')]
-scope = dict(time=time, json=json)
+scope = dict(time=time, json=json, read_supervisor_state=lambda p: json.loads(p.read_text(encoding='utf-8-sig')))
 exec(compile(ast.Module(body=functions, type_ignores=[]), str(RUNNER), 'exec'), scope)
 gate, closing = scope['supervisor_gate'], scope['supervisor_closing']
 

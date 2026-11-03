@@ -30,7 +30,7 @@ $stateFile="$live/supervisor.json";$lease=$false;$observer=$false;$cleanup=$fals
 function State([bool]$Ok,[bool]$Fence=$false){
  $s=@{unix=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()/1000.0;ok=$Ok;pending=($observer -and [Dirt4Readback.Observer]::Pending);fenceReady=$Fence;cleanup=$cleanup}
  $s|ConvertTo-Json -Compress|Set-Content "$stateFile.tmp" -Encoding utf8
- [IO.File]::Move("$stateFile.tmp",$stateFile,$true)
+ [OutRunSnapshot]::Publish("$stateFile.tmp",$stateFile)
 }
 function Inventory([string]$Dest){& $python -B "$PSScriptRoot/inventory.py" $OwnerRoot $Dest;if($LASTEXITCODE){throw 'Owner inventory failed'}}
 function ExactGameWindows {
@@ -40,7 +40,7 @@ function ExactGameWindows {
  return @()
 }
 try {
- Add-Type -Path $jobDll;Add-Type -Path $observerDll
+ Add-Type -Path $jobDll;Add-Type -Path $observerDll;Add-Type -Path "$PSScriptRoot/Snapshot.cs"
  if([Dirt4Readback.Observer]::RawIdleSeconds -lt 180){throw 'Fresh raw idle <180 seconds'}
  & E:/Source/dbce-project-mgmt/tools/Rig-Lease.ps1 -Enter -Name remi-outrun-live -Purpose "GO$Go standalone frozen9a10ace angled R1" -IdleMinutes 3
  if(-not $?){throw 'Lease refused'};$lease=$true

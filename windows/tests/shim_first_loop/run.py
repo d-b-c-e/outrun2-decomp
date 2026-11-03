@@ -13,7 +13,7 @@ controls-journal.jsonl (the strict reader) and host-shutdown.json. The capture (
 evidence copy by the reviewed P21 finalizer (--finalizer): the final host report is copied into it and this runner writes
 exit.json only for an exit it observed, with the process identity it held from the spawn.
 """
-import argparse, configparser, ctypes, ctypes.wintypes as wt, hashlib, json, math, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time
+import argparse, configparser, ctypes, ctypes.wintypes as wt, hashlib, json, math, msvcrt, os, pathlib, random, re, shutil, string, subprocess, sys, tempfile, time, traceback
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "control_journal")); import read_journal
@@ -64,10 +64,26 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
 
 
+def read_supervisor_state(path):
+    """Share deletion while reading the immutable snapshot replaced by the Windows supervisor."""
+    create = kernel32.CreateFileW
+    create.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
+    create.restype = wt.HANDLE
+    handle = create(str(path), 0x80000000, 7, None, 3, 0, None)  # READ; share READ|WRITE|DELETE; OPEN_EXISTING
+    if handle == ctypes.c_void_p(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error()); error.filename = str(path); raise error
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel32.CloseHandle.argtypes = [wt.HANDLE]; kernel32.CloseHandle(handle); raise
+    with os.fdopen(fd, 'r', encoding='utf-8-sig') as stream:
+        return json.load(stream)
+
+
 def supervisor_gate(path, stimulus=False):
     """Optional outer job/LL supervisor. Fail closed on stop, stale heartbeat or unadmitted stimulus."""
     if path is None: return
-    state = json.loads(path.read_text(encoding="utf-8-sig"))
+    state = read_supervisor_state(path)
     age = time.time() - state["unix"]
     if not state.get("ok") or not 0 <= age <= 2:
         raise RuntimeError("outer supervisor stopped or heartbeat stale")
@@ -82,7 +98,7 @@ def supervisor_closing(path):
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         try:
-            if json.loads(path.read_text(encoding='utf-8-sig')).get('cleanup'): return
+            if read_supervisor_state(path).get('cleanup'): return
         except (OSError, ValueError): pass
         time.sleep(.05)
     raise RuntimeError('outer supervisor did not acknowledge cleanup')
@@ -688,6 +704,9 @@ def main():
         receipt["exitCode"] = proc.returncode
     except Exception as e:
         receipt["errors"].append(repr(e))
+        receipt["exception"] = dict(type=type(e).__name__, text=str(e), filename=getattr(e, 'filename', None),
+                                    errno=getattr(e, 'errno', None), winerror=getattr(e, 'winerror', None),
+                                    traceback=traceback.format_exc())
         if proc and proc.poll() is None:
             supervisor_closing(o.supervisor_state)
             for h in windows_of(proc.pid): user32.PostMessageW(h, 0x0010, 0, 0)
@@ -695,6 +714,7 @@ def main():
             except subprocess.TimeoutExpired:
                 if o.horn or o.retain_on_close_timeout: retain(proc, receipt)
                 else: receipt["forced"] = True; proc.kill()
+        if proc: receipt["exitCode"] = proc.poll()
     finally:
         try:
             try:
