@@ -1,9 +1,11 @@
-param([ValidateSet('Check','Live')][string]$Mode='Check',[string]$Go,[string]$PreparedSha256,
+param([Parameter(Mandatory)][ValidatePattern('^attempt-[0-9]{2}$')][string]$Attempt,
+ [ValidateSet('Check','Live')][string]$Mode='Check',[string]$Go,[string]$PreparedSha256,
  [string]$OwnerRoot='E:/Source/toolkits/launchbox/Launchbox-Racing/Games/Windows/Outrun 2006 Coast to Coast/OutRun2006 Coast 2 Coast (Decomp)')
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path "$PSScriptRoot/../../..").Path
-$out=Join-Path $root 'build/provider-free'
-$game=Join-Path $out 'game';$result=Join-Path $out 'r1'
+$assets=Join-Path $root 'build/provider-free'
+$out=Join-Path $assets $Attempt
+$game=Join-Path $assets 'game';$result=Join-Path $out 'r1'
 $gameExe=(Get-Item "$game/OutRunDesktop.exe").FullName
 $python='C:/Users/antho/AppData/Local/Programs/Python/Python314/python.exe'
 $jobDll='E:/Source/_work/soba-truckful-provider-free/artifacts/provider-free/rehearsal-native-go501049-amend501065/native/Truckful.Live.dll'
@@ -12,7 +14,7 @@ function Pin([string]$Path,[string]$Hash){if((Get-FileHash -LiteralPath $Path -A
 Pin "$game/OutRunDesktop.exe" 'D36203770FCEF774DD67F839410A67468349D7F0148DB8AC12BD371503870B7D'
 Pin $jobDll '725E52B00A36B8189BF4BAF3CF201D1266614B49DB124F2C410884D2D96BE4DD'
 Pin $observerDll '2E45A82CD860C5A819D046746C5B1787B4B3939C8D35180498708C161D9BA85D'
-$argsRun=@('-B',"$root/windows/tests/shim_first_loop/run.py",'--lease-held','--game',$game,'--candidate',$gameExe,'--result',$result,'--publisher-tool',"$out/helpers/control_publish.exe",'--finalizer',"$out/helpers/P21Finalizer.dll",'--replay-tool',"$out/helpers/capture_replay.exe",'--seconds','90','--drive','30','--render','screens=separate,views=angled,frames=12,every=6,after=120,scale=2','--retain-on-close-timeout')
+$argsRun=@('-B',"$root/windows/tests/shim_first_loop/run.py",'--lease-held','--game',$game,'--candidate',$gameExe,'--result',$result,'--publisher-tool',"$assets/helpers/control_publish.exe",'--finalizer',"$assets/helpers/P21Finalizer.dll",'--replay-tool',"$assets/helpers/capture_replay.exe",'--seconds','90','--drive','30','--render','screens=separate,views=angled,frames=12,every=6,after=120,scale=2','--retain-on-close-timeout')
 $oldAppData=$env:LOCALAPPDATA;$oldMute=$env:DBCE_FFB_MUTE
 if($Mode -eq 'Check'){
  try{$env:LOCALAPPDATA="$out/appdata";& $python @argsRun --check-only;if($LASTEXITCODE){throw 'harness preflight failed'}}finally{$env:LOCALAPPDATA=$oldAppData}
@@ -22,6 +24,7 @@ if(-not $Go){throw 'Live requires a concrete coordinator GO id'}
 if(-not $PreparedSha256){throw 'Live requires the prepared manifest SHA approved in that GO'}
 Pin "$out/prepared.json" $PreparedSha256
 $prepared=Get-Content "$out/prepared.json" -Raw|ConvertFrom-Json
+if([IO.Path]::GetFullPath($out) -ine $prepared.attemptRoot){throw 'Attempt differs from approved preparation'}
 if([IO.Path]::GetFullPath($OwnerRoot) -ine $prepared.ownerRoot){throw 'Owner inventory root differs from approved preparation'}
 foreach($p in $prepared.pins){Pin $p.path $p.sha256}
 if(Test-Path "$out/live"){throw 'Fresh live evidence directory required; never overwrite an attempt'}

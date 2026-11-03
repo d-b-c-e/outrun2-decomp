@@ -51,9 +51,11 @@ Prepared manifest pins all entry scripts, helper executables/assemblies/config, 
 
 ```powershell
 # Offline check, no launch/lease/hook/input:
-./windows/tests/provider_free/Invoke-Readback.ps1 -Mode Check
+./windows/tests/provider_free/Invoke-Readback.ps1 -Attempt attempt-02 -Mode Check
 # Only after the exact coordinator GO, with the manifest SHA in that GO:
-./windows/tests/provider_free/Invoke-Readback.ps1 -Mode Live -Go <id> -PreparedSha256 <sha256>
+./windows/tests/provider_free/Invoke-Readback.ps1 -Attempt attempt-02 -Mode Live -Go <id> -PreparedSha256 <sha256>
 ```
 
 The preparation CPU/IO interval GO501517 released named token c7ad18f141574a6380b02a7c1cc661e3 after helper builds, SHA copy verification and preflight. No live interval is implied by that grant. See hub `docs/handoffs/2026-11-02-mevu.md`, `docs/handoffs/2026-11-02-guna-restart.md`, profile 07, and this repository's `windows/docs/SUN-FRAME-VIEW-SPLIT.md`.
+
+Coordinator request501782 authorizes a new preparation/request for the repaired runner. Explicit `-Attempt attempt-02` places its immutable manifest, AppData, live and R1 outputs in `build/provider-free/attempt-02`; the existing read-only private game and helpers are reused. The original manifest/AppData/live/R1 folders remain preserved. Freeze refuses to overwrite an existing manifest, and admission binds the attempt root. No second game copy or build is needed. The new interval must wait for napo's CPU FINAL-release and its own new grant.
