@@ -44,6 +44,9 @@ bool write_section(const std::string& path,const std::string& section,const std:
 // A test seam: a failing one shows the original survives a refused publish.
 using SettingsPublish=bool(*)(const std::string& temp,const std::string& path);
 SettingsPublish& settings_publish();
+// Startup default creation never replaces an existing destination, including one created during publication.
+// Separate seam keeps ordinary edits' ReplaceFile semantics unchanged.
+SettingsPublish& settings_create_publish();
 // One key of [section] set to `value` in the file as it is now: replace only the value, preserving spelling, spacing,
 // inline comments, each line's ending and UTF-8 BOM state. Add an absent key/section. Duplicate edited keys/sections,
 // malformed syntax and unsupported encodings refuse without writing. UTF-16 is not supported by the game reader.
@@ -58,6 +61,7 @@ bool write_keys(const std::string& path,const std::string& section,const Setting
                 const SettingsEdits* expected=nullptr);
 // OutRunDesktop.ini in `folder`, written with comments when it does not exist. When it is new and the folder has
 // an OutRun2006Tweaks.ini, the new file is left without [Controls] so that the Tweaks bindings get imported.
-// create_if_missing=false (a latched test process): read only; a missing file is simply empty.
+// Existing unreadable/uncertain paths are never overwritten. Missing defaults are staged/flushed and published
+// without replacement; a concurrent creator wins. create_if_missing=false: read only, a missing file stays absent.
 Ini load_desktop_settings(const std::string& folder,bool create_if_missing=true);
 }

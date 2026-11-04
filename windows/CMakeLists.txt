@@ -33,6 +33,12 @@ target_compile_definitions(test_fast_load_config PRIVATE NOMINMAX WIN32_LEAN_AND
 target_compile_options(test_fast_load_config PRIVATE /W4 /WX)
 add_test(NAME fast_load_config COMMAND test_fast_load_config)
 
+add_executable(test_desktop_startup_settings tests/test_desktop_startup_settings.cpp source/desktop_settings.cpp)
+target_include_directories(test_desktop_startup_settings PRIVATE source)
+target_compile_features(test_desktop_startup_settings PRIVATE cxx_std_17)
+target_compile_definitions(test_desktop_startup_settings PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+add_test(NAME desktop_startup_settings COMMAND test_desktop_startup_settings)
+
 # Shared binding drafts, accepted fake Core samples and disposable-file Save/Cancel; no reader or device.
 add_executable(test_desktop_bindings tests/test_desktop_bindings.cpp source/desktop_bindings.cpp source/controls_store.cpp source/desktop_settings.cpp)
 target_include_directories(test_desktop_bindings PRIVATE source shim vendor/controls ${PROJECT_SOURCE_DIR}/src)

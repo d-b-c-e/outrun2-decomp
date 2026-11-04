@@ -165,7 +165,7 @@ bool read_whole(const std::string& path,std::string& text,std::string& error,Set
 }
 // Written whole to a unique sibling temp file, flushed, then atomically published:
 // a failure anywhere leaves the original exactly as it was.
-bool replace_whole(const std::string& path,const std::string& text,std::string& error){
+bool replace_whole(const std::string& path,const std::string& text,std::string& error,SettingsPublish publish=nullptr){
     static std::atomic<unsigned long> serial{};
     std::string temp;HANDLE h=INVALID_HANDLE_VALUE;
     for(unsigned attempt=0;attempt<16;++attempt){
@@ -178,7 +178,7 @@ bool replace_whole(const std::string& path,const std::string& text,std::string& 
     const bool ok=(text.empty()||(WriteFile(h,text.data(),DWORD(text.size()),&written,nullptr)&&written==text.size()))&&FlushFileBuffers(h);
     CloseHandle(h);
     if(!ok){DeleteFileA(temp.c_str());error="cannot write "+temp+"; "+path+" is unchanged";return false;}
-    if(!settings_publish()(temp,path)){
+    if(!(publish?publish:settings_publish())(temp,path)){
         error="cannot replace "+path+" (Win32 "+std::to_string(GetLastError())+"); it is unchanged";DeleteFileA(temp.c_str());return false;}
     return true;
 }
@@ -187,8 +187,13 @@ bool publish_by_move(const std::string& temp,const std::string& path){
         return ReplaceFileA(path.c_str(),temp.c_str(),nullptr,0,nullptr,nullptr)!=0;
     return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=0;
 }
+bool publish_new(const std::string& temp,const std::string& path){
+    // No REPLACE_EXISTING: a file created after the missing-file check belongs to its creator.
+    return MoveFileExA(temp.c_str(),path.c_str(),MOVEFILE_WRITE_THROUGH)!=0;
+}
 }
 SettingsPublish& settings_publish(){static SettingsPublish publish=publish_by_move;return publish;}
+SettingsPublish& settings_create_publish(){static SettingsPublish publish=publish_new;return publish;}
 namespace {
 // [section]'s body replaced by edit(its current lines) in one read and one replacement of the file.
 template<class Edit> bool rewrite_section(const std::string& path,const std::string& section,Edit edit,std::string& error){
@@ -330,9 +335,15 @@ Ini load_desktop_settings(const std::string& folder,bool create_if_missing){
     const auto own=folder+"/OutRunDesktop.ini";
     if(ini.load(own)){std::printf("settings: %s\n",own.c_str());return ini;}
     if(!create_if_missing){std::printf("settings: %s absent (read only in a test process)\n",own.c_str());return ini;}
+    if(GetFileAttributesA(own.c_str())!=INVALID_FILE_ATTRIBUTES||GetLastError()!=ERROR_FILE_NOT_FOUND){
+        std::printf("settings: %s unavailable; existing or uncertain path left unchanged\n",own.c_str());return ini;
+    }
     Ini tweaks;
     const bool legacy=tweaks.load(folder+"/OutRun2006Tweaks.ini")&&tweaks.has_section("DirectInput");
-    if(std::FILE* f=std::fopen(own.c_str(),"wb")){std::fputs(legacy?ImportHeader:Template,f);std::fclose(f);}
+    std::string error;
+    if(!replace_whole(own,legacy?ImportHeader:Template,error,settings_create_publish())){
+        std::printf("settings: defaults not created: %s\n",error.c_str());return ini;
+    }
     ini.load(own);
     std::printf("settings: %s (new%s)\n",own.c_str(),legacy?"; OutRun2006Tweaks.ini bindings to import":"");
     return ini;
