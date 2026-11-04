@@ -27,9 +27,45 @@ deterministic competing creation, a directory sentinel, and owned-temp cleanup.
 The creation publisher uses the same existing function-pointer test-seam pattern
 as ordinary settings publication. No renderer, device, game or owner file is used.
 
-Qualification pending: two tiny real C++ toolchain setup smokes, then separate
-CPU GO for a genuine original startup-loader regression, this new fixture and
-the existing desktop_controls fixture. No full game build, SDL/UI/device,
-owner settings, package, installation, push or live request. Preserve passing
-unrelated renderer/controls evidence. Source and fixtures alone do not establish
-installed behavior or owner acceptance. STD044 remains partial for other writers.
+## Focused qualification complete
+
+Tested production source `adc90dec5615c62a8453cf5d8225f3985cab60bc`.
+Two actual CMake C++ configurations/direct inert G++ links/Ninja dry-runs passed
+under CPU509592 in5.851s. The inert outputs were never executed;71 observed
+identities/11 actual tool pins. Compiler and native fixture work was separately
+admitted. Original and corrected loader were compiled against the same compiler.
+
+| Interval | Actual outcome |
+| --- | --- |
+| CPU509639 / cpu01 | Build refusal before any fixture: added recipe-Werror promoted existing misleading-indentation warning. Raw diagnostics retained; recipe changed to match target policy, all warnings stay visible. |
+| CPU509682 / cpu02 | Genuine original loader regression RED: original48-byte sentinel became998 bytes after a denied read. Fixed startup fixture19 checks PASS. Aggregate desktop_controls compile then refused on unchanged MSVC-specific ifstream(wstring) in test_injection.cpp; full aggregate never ran. |
+| CPU509803 / cpu03 | Remaining-only include wrapper failed link: MinGW PE still required symbols from unused controls/injector sections despite GC. This was a harness assumption; no fixture ran or product defect claimed. |
+| CPU509844 / cpu04 |82 existing settings writer/graphics-preset checks PASS in5.743s. Only these two actual functions were byte-extracted into a minimal harness, with source/span hashes verified. No injector, game/device or substitute writer was run. |
+
+The final interval reused the original RED, fixed startup19 and setup passes;
+none was repeated. Existing unrelated controls/renderer passing evidence is
+preserved. The broad MSVC controls aggregate remains unrun in this batch.
+Baseline misleading-indentation and fixture initializer warnings remain visible
+in raw outputs; this task did not silently repair unrelated source or claim a
+warning-free full build.
+
+All intervals closed normally with own jobs empty/held handles released and
+independent birth-aware ALL-image scoped OS audits BEFORE exact named lease
+release. Observed counts6/31/10/12 for cpu01..04. No forced termination or custody
+remains. Full outer packaged-pwsh descendant-job coverage stays unqualified.
+
+Required retained evidence (outside the finished worktree):
+`E:/Source/game-modding/dbce-mods-outrun-2006/build/startup-settings-qualification-20261103`.
+All155 raw/source files were SHA-256 copied and verified,4,205,882 bytes.
+`relocation-manifest.json` SHA256
+`53B9BDE310FDA8DE68FA18B42CB567815500CFE6A1C8EA062B9A7D897C74DB06`
+maps historical absolute paths to preserved archive files without rewriting raw
+evidence. Original refusals, qualifiers/plans, real toolchain checks, fixture
+executables/output and exact tested source are retained. See qualification.json
+there for full result/audit/binary hashes and evidence limits.
+
+No full game build, SDL/UI/device, owner settings, package, installation, push
+or live request. Source and fixtures alone do not establish installed behavior
+or owner acceptance. STD044 remains partial for other product writers. The
+historical primaryb6b3810/renderer sidecar and frozen runtime candidates remain
+untouched. This source increment is local only in the public repository.
