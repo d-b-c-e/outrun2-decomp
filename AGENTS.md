@@ -1,6 +1,43 @@
-# Project instructions
+# OutRun 2006 Coast 2 Coast — agent guide
 
-Desktop routes (2026-11-03): follow the [route ladder](../../dbce-project-mgmt/skills/automated-testing/references/desktop-routes.md) and run `pwsh E:\Source\dbce-project-mgmt\tools\Test-DesktopRoutes.ps1`; if a route is down, continue on the next route within existing authorization and game safeguards.
+Portfolio rules: `E:\Source\dbce-project-mgmt\HOW-WE-WORK.md` (read first; it replaces older process, lease, review and testing instructions). Current focus: `E:\Source\dbce-project-mgmt\NOW.md`. Feature status lives in the portfolio grid (`python E:\Source\dbce-project-mgmt\tools\portfolio_grid.py plan outrun2decomp`), not in this file. Grid id: `outrun2decomp`.
+
+## Project
+
+Native port of the PC OutRun 2006 Coast 2 Coast, reconstructed in C++ from the PC executable (part still translated from x86 by `tools/x86tr`, the rest hand-written). Platform layers for Switch, macOS, PS5, Xbox and a Windows desktop build (`windows/`, `OutRunDesktop.exe`). Fork of the public `outrun2-decomp` project (`d-b-c-e/outrun2-decomp`, PUBLIC; the owner pushes). Code only; the user's own Steam `OR2006C2C.EXE` and game folder are required.
+
+## Build
+
+- Windows desktop: `cmake -S . -B build-xbox-pc -G "Visual Studio 17 2022" -A x64 -T ClangCL -DOR2_XBOX=ON ...` then `cmake --build build-xbox-pc --config Release --target OutRunDesktop`. The full argument list (zlib, Vorbis, FFmpeg paths) is in `windows/README.md`. Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe`.
+- Other platforms: see `switch/`, `mac/`, `ps5/`, `xbox/` READMEs.
+
+## Test
+
+- Host runner and tests: `cmake -S . -B build -G Ninja -DOR2_EXE=<OR2006C2C.EXE> -DOR2_PC_ASSET_ROOT=<game folder>`, build, then `ctest --test-dir build`.
+- Leak check: `tools/leak_check.py <OR2006C2C.EXE> <built binary> --allow tools/leak_check_allow.txt`.
+- The port writes `OR2006C2C.cache`, `OutRunDesktop.ini`, `options.ini`, `runtime.log` and saves into the game folder. Back up the saves and ini files before a run and restore them after.
+
+## Install / run on the rig
+
+Copy `OutRunDesktop.exe` beside `OR2006C2C.EXE` in the game folder and start it from there (the folder must be writable).
+
+## Shared code
+
+Wheel controls come from the toolkit's `ini-controls-1` (`windows/vendor/controls`). Change shared code in the toolkit and re-sync; never edit the vendored copy. Windows `[Controls]` in `OutRunDesktop.ini` is the only binding store.
+
+## Project-specific rules
+
+- No game data and no bytes of the original executable in the repo or in binaries (run the leak check).
+- Retail DVD copies need the protection-free exe from OutRun2006Tweaks; the DVD's own EXE cannot be read.
+- Keep upstream credits and `THIRD_PARTY_NOTICES.md`.
+
+## Key docs
+
+- `README.md`
+- `windows/README.md`, `windows/ROADMAP.md`
+- `windows/TOOLKIT-ADOPTION.md`
+- `THIRD_PARTY_NOTICES.md`
+
 
 <!-- BEGIN project-file-location -->
 ## Project files and temporary work
