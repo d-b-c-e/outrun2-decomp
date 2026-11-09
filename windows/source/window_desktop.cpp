@@ -629,10 +629,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // [Audio] AllowHorn, the Tweaks key (on unless set false, as there): the controls contract's "horn" action sounds the
     // horn in the race (pc_screen.hpp; race_sound_runtime.cpp native_race_horn).
     outrun::platform::g_pc_allow_horn=settings.flag("Audio","AllowHorn",true);
-    // Experimental qualification defaults off; Tweaks defaults these on.
-    // Read once, no INI writes or per-frame filesystem work.
+    // [Audio] AllowWAV / AllowFLAC, the Tweaks keys (on unless set false, as there): a same-stem .wav/.flac in Sound
+    // replaces the Ogg Vorbis track (FLAC > WAV > Ogg). Read once, no INI writes or per-frame filesystem work.
     const outrun::platform::MusicReplacementPolicy music_policy{
-        settings.flag("Audio","AllowWAV",false),settings.flag("Audio","AllowFLAC",false)};
+        settings.flag("Audio","AllowWAV",true),settings.flag("Audio","AllowFLAC",true)};
     outrun::platform::set_music_replacement_policy(music_policy);
     const bool flac_loop_points=settings.flag("Audio","AllowFLACLoopPoints",false);
     outrun::platform::set_music_flac_loop_points_enabled(flac_loop_points);

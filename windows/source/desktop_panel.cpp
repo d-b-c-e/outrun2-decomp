@@ -177,7 +177,7 @@ struct Values {
     bool disable_countdown{};   // [Misc] DisableCountdownTimer
     bool allow_horn{true},allow_horn_start{true};   // [Audio] AllowHorn
     std::string hud_key,hud_key_start;   // [Misc] HudToggleKey, empty means Off
-    bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{},allow_flac_loop_points{};   // [Audio], default off
+    bool allow_wav{},allow_wav_start{},allow_flac{},allow_flac_start{},allow_flac_loop_points{};   // [Audio] AllowWAV/AllowFLAC (default on as Tweaks); AllowFLACLoopPoints off
     bool cd_switcher{},cd_shuffle{},cd_title{};   // existing [CDSwitcher] startup flags, all default off
     int cd_font{2},cd_scale_x{30},cd_scale_y{50},cd_x{375},cd_y{450};
     bool license_character{},menu_miles{true},hide_signin{};   // existing Misc/Bugfixes menu flags, next start only
@@ -1287,8 +1287,8 @@ void desktop_panel_configure(const Ini& settings,bool latched,const std::string&
      v.vibration=int(rumble.mode);v.vibration_strength=int(rumble.strength);v.impulse=int(rumble.impulse);
      v.impulse_left=int(std::lround(rumble.left_gain*100));v.impulse_right=int(std::lround(rumble.right_gain*100));}
     v.hud_key=v.hud_key_start=settings.text("Misc","HudToggleKey");   // no reconfiguration of the running toggle
-    v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",false);   // same startup-only policy as window_desktop.cpp
-    v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",false);
+    v.allow_wav=v.allow_wav_start=settings.flag("Audio","AllowWAV",true);   // same startup-only policy as window_desktop.cpp
+    v.allow_flac=v.allow_flac_start=settings.flag("Audio","AllowFLAC",true);
     v.allow_flac_loop_points=settings.flag("Audio","AllowFLACLoopPoints",false);
     v.cd_switcher=settings.flag("CDSwitcher","SwitcherEnable",false);
     v.cd_shuffle=settings.flag("CDSwitcher","SwitcherShuffleTracks",false);

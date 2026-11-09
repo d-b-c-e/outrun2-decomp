@@ -107,10 +107,10 @@ u64 dualsense_mapped(){u64 m=0;for(const auto& e:PadMap)m|=e.first;return m;}
 
 // Xbox options live in the game folder. Switch clock controls have no Xbox
 // service. Also set in Options > Settings:
-//   widescreen=0        16:9 (Hor+) instead of the PC's 4:3
+//   widescreen=0        the PC's 4:3 instead of the 16:9 (Hor+) default
 //   resolution=WxH      3D resolution: its height (480 .. 2160); the width follows the aspect
 //   antialiasing=off    off, msaa2, msaa4 or fxaa
-struct Options {bool reflections{true};outrun::enhancements::VideoSettings video{false,outrun::enhancements::host_default_resolution,outrun::enhancements::Antialiasing::Off};
+struct Options {bool reflections{true};outrun::enhancements::VideoSettings video{true,outrun::enhancements::host_default_resolution,outrun::enhancements::Antialiasing::Off};
                bool resolution_chosen{};} g_options;   // options.ini set resolution= (AutoDetectResolution then stays out)
 const char* const OptionsDefault=
     "# OutRun 2006 Xbox options (edit and restart)\n"
