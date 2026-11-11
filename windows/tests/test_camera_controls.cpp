@@ -39,7 +39,7 @@ bool profile_corrections(const float*,float* out){
     return true;
 }}
 
-namespace outrun::desktop {bool desktop_panel_open(){return panel_open;}}
+namespace outrun::desktop {bool wheelkit_panel_open(){return panel_open;}}
 namespace outrun::xbox_runtime {InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}}
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"camera controls line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 int main(int argc,char** argv){

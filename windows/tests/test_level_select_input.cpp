@@ -18,7 +18,7 @@ void backend(outrun::platform::NativeInputState& out,const outrun::platform::Nat
 namespace outrun::xbox_runtime {
 InputFilter& input_filter(){static InputFilter filter=nullptr;return filter;}
 }
-namespace outrun::desktop { bool desktop_panel_open(){return panel_open;} }
+namespace outrun::desktop { bool wheelkit_panel_open(){return panel_open;} }
 int main(){
     using namespace outrun;
     using namespace outrun::desktop;

@@ -1,130 +1,78 @@
 # Windows desktop build
 
 `OutRunDesktop.exe`: the Xbox port's PC configuration (Direct3D 11, XAudio2,
-Windows.Gaming.Input; `xbox/source`) as a desktop game, with wheels, pedals,
-shifters and button boxes through DirectInput. Where this is going:
-[ROADMAP.md](ROADMAP.md).
+Windows.Gaming.Input; `xbox/source`) as a desktop game. Wheels, pedals,
+shifters, the F6 panel and telemetry come from the Wheelkit runtime,
+`wheelkit.dll` beside the program. Where this is going: [ROADMAP.md](ROADMAP.md).
 
 ## Build
 
 Same toolchain and dependencies as the Xbox PC configuration (`xbox/README.md`):
 clang-cl, `-DOR2_XBOX=ON`, zlib, Ogg/Vorbis and the minimal FFmpeg. Visual Studio
 2022 Build Tools work as well as 2026 (generator `"Visual Studio 17 2022"`).
+`WHEELKIT_SDK` names a checkout of the Wheelkit repository whose runtime is built
+(`pwsh build.ps1 -Only runtime/native/sdk` there): the build compiles against its
+`runtime/native/sdk/wheelkit.h` and copies `build/x64/wheelkit.dll` beside the
+program. Nothing of the runtime is committed here.
 
 ```powershell
 cmake -S . -B build-xbox-pc -G "Visual Studio 17 2022" -A x64 -T ClangCL -DOR2_XBOX=ON `
   "-DZLIB_INCLUDE_DIR=<deps>/zlib/include" "-DZLIB_LIBRARY=<deps>/zlib/lib/zlibstatic.lib" `
-  "-DOR2_XBOX_VORBIS_ROOT=<deps>/vorbis" "-DOR2_XBOX_FFMPEG_ROOT=<deps>/ffmpeg"
+  "-DOR2_XBOX_VORBIS_ROOT=<deps>/vorbis" "-DOR2_XBOX_FFMPEG_ROOT=<deps>/ffmpeg" `
+  "-DWHEELKIT_SDK=<wheelkit checkout>"
 cmake --build build-xbox-pc --config Release --target OutRunDesktop
 ```
 
-Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe`.
+Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe` and `wheelkit.dll`.
 
 ## Install and run
 
-Copy `OutRunDesktop.exe` into the game folder (beside `OR2006C2C.EXE`: Steam, or a
-retail copy with the OutRun2006Tweaks EXE) and start it from there. The folder
-must be writable: the port keeps `OR2006C2C.cache`, `options.ini`, `runtime.log`
-and the saves in it.
+Copy `OutRunDesktop.exe` and `wheelkit.dll` into the game folder (beside
+`OR2006C2C.EXE`: Steam, or a retail copy with the OutRun2006Tweaks EXE) and start
+it from there, or start it from anywhere with `--data=<game folder>`. The game
+folder must be writable: the port keeps `OR2006C2C.cache`, `options.ini` and the
+saves in it; `OutRunDesktop.ini` and `runtime.log` are beside the program.
+Without `wheelkit.dll` the game runs with the keyboard and gamepad and says so in
+`runtime.log`.
 
 - A borderless window over the primary monitor; `--windowed` (or
   `[Window] WindowedBorderless = false`) opens a 1280x720 window instead.
-- The borderless client area hides the mouse cursor by default. Set
-  `[Window] WindowedHideMouseCursor = false` for the normal Windows cursor at
-  the next start. This does not change display placement or game input.
+- The borderless client area hides the mouse cursor by default
+  (`[Window] WindowedHideMouseCursor`).
 - Gamepads work as on the Xbox (A / Menu confirm, LB+RB+Menu exits).
 
-## Wheel settings
+## The Wheelkit runtime (`source/wheelkit_runtime.cpp`)
 
-`OutRunDesktop.ini` beside the executable, written with comments on the first
-run. **`[Controls]` is the game's only binding store**, in the wheel toolkit's
-`ini-controls-1` form (STD-033, `vendor/controls`): `Schema = 1`, `Profile`,
-`Revision`, `Transmission` and one line per action, e.g.
+The loader and the call sites; everything else is the runtime's (Wheelkit
+repository, `runtime/native/sdk/README.md`).
 
-```ini
-steer = axis 0 dev={d71b8350-...} prod={0006346e-...} range=0..65535 rest=33265 travel=-1 name="MOZA R12 Base"
-```
-
-Wheelkit writes it when it applies a rig profile. Devices are matched by their
-instance GUID only. Mapped actions: `steer`, `throttle`, `brake`, `shiftUp`,
-`shiftDown`, `gear1`..`gear6` (with `Transmission = H-pattern`), `confirm`,
-`back`, `start`, `navUp/Down/Left/Right`, `camera`, `horn`, `modMenu` and
-`muteFfb`. A fresh press of the last two while the game is focused opens or
-closes F6, or stops force output and saves Off. Other actions report why they
-are unavailable (the game has no clutch, handbrake, neutral or reverse). At start
-`runtime.log` gets the standard line
-`controls: profile "<name>" revision <rev> via ini-controls-1: applied n (...); unsupported m (...); invalid k (...)`.
-
-Without a `[Controls]` section, the OutRun2006Tweaks `[DirectInput]`,
-`[DirectInput.Shifter]` and `[DirectInput.Aux]` keys (this file's, else the
-folder's `OutRun2006Tweaks.ini`) are imported **once** at the first start with
-their devices connected: a copy of the file is kept as
-`OutRunDesktop.ini.pre-controls-import` and `[ControlsImport]` records it. Tweaks'
-`ButtonX` / `ButtonY` have no contract action and are not imported. `[Wheel]
-SteeringSensitivity` and `SteeringDeadZone` (0..0.9) shape the steering after the
-binding.
-
-`runtime.log` lists every controller (instance and product GUIDs, name, type,
-axes, buttons, hats, force feedback); for the first two minutes it also logs
-every button pressed and the axes moved on the opened devices.
-The ordinary wheel path rescans controllers when Windows reports a device change,
-and every two seconds only while a bound control has no open, connected device
-(a rescan stalls the frame it runs in; source/wheel_rescan.hpp). A configured
-device connected after launch opens under its saved instance GUID; disconnects
-release its handle and neutralize its actions. Live rig qualification is pending.
-
-H-pattern on either backend: exactly one held gate selects a gear. The build
-pulses shift up / down until the car's gear (+208) matches the gate, releases for
-at least one tick and waits up to 250 ms for a response before retrying twice. Ambiguous
-gates and gear words outside 1–6 send no shift; pause spends no retries. A scene
-change releases the pulse and starts a fresh sequence on the following tick.
-Physical H-pattern acceptance remains pending.
-
-**Input backend** (`[Input] Backend`, default `Native`):
-- `Native` is the wheel path described above.
-- `Shim` (in development; not yet the owner's default) reads the `[Controls]` profile through the shared input shim:
-  the same Core, DirectInput provider and `ini-controls-1` profile Wheelkit writes for DRIVE's shim. The native wheel
-  path is then not started, so the profile's devices are read by the shim alone.
-- On either backend the gamepad and the desktop keyboard keep their own native paths: in the race the last device used
-  drives, and Enter, Esc and the arrows work the menus.
-- `runtime.log` gets the shim's start line (`controls: profile ... via shim-ini-controls-1: applied ...`), and the
-  game folder gets `host-shutdown.json` at exit.
-
-**Telemetry** (`[Telemetry]`, on by default; toolkit STD-016 / STD-009):
-- A Forza "Data Out" packet to `127.0.0.1:Port` (default 8000) every game tick during START, GAME, the pause menu,
-  GOAL and TIMEUP, and a parked packet (IsRaceOn 0, the same engine constants) at about 10 Hz in the menus. The
-  layout is Forza Horizon's 324 bytes (SimHub: a Forza Horizon 5 game on that port); `Layout = FM7` sends the
-  311-byte FM7 Dash of the OutRun 2006 mod instead.
-- Speed is the HUD's (car +0x1F8 km/h; mph only changes the display). Gear 0 is sent as 1. RPM defaults to a
-  speed/gear approximation. Opt-in `[Telemetry] EngineRpm = Game` reads the game's HUD tachometer follower;
-  see [field provenance and remaining live checks](docs/TELEMETRY-FIELDS.md). In GAME, steering, accelerator and brake are the game's
-  consumed 7D6810 channels, whichever device drives. START/pause/goal/time-up inputs are neutral. Forza's lateral
-  acceleration stays zero (unavailable): the previously used car +0x264/+0x268 fields are road-edge distances.
-- The mod's 76-byte shared-memory block (`OutRun2006TelemetryData`, version 1) under `SharedMemName`
-  (`OutRun2006Telemetry`; `none` turns it off), for its SimHub plugin. The decomp has no pad rumble, so the two
-  vibration fields stay 0. Version 1 preserves the mod's raw-offset bytes, including legacy names that are misleading:
-  `steeringAngle` is speed delta, `lateralG1/2` are road-edge distances, and `impactForce` is prior speed. Consumers
-  must not treat those three fields as physical steering, lateral acceleration or impacts. See [the field review](docs/TELEMETRY-FIELDS.md).
-- `Enabled = false` (or the mod's `Enable = false`) turns it off. A latched test process never sends. `OR2_TELEMETRY=0`
-  turns it off for unattended runs (`tests/perf/run_perf.py` sets it unless a run asks otherwise), and
-  `OR2_TELEMETRY_PORT=N` sends to another port for a test's own listener. `runtime.log` names the layout and port at
-  start, and the packet counts at exit.
-
-Test injection (development only, for Wheelkit's closed-loop tests): see
-`source/test_injection.hpp`. It arms only with a valid
-`%LOCALAPPDATA%\dbce\outrun2006-decomp\inject.on` session and an applied
-`[Controls]`, and this build sends no force.
-
-In the race the wheel feeds the device record of 453BB0 directly: the
-full-range steering word (index 0x0E), the 0..255 accelerator (0x0D) and brake
-(0x0C), shift up / down and view, as joystick configuration 5A7B50[0] reads
-them. The original game then applies its own small dead zone and quantises the
-steering to -127..127.
-
-Telemetry is described above. For the F6 panel, the triple screens and force feedback, see the roadmap (steps 2a, 3
-and 4). Force feedback is built and tested offline. No owner package ships WheelFfb.dll yet, so no installed build
-sends force. Standards adoption: [TOOLKIT-ADOPTION.md](TOOLKIT-ADOPTION.md); product
-record for Wheelkit: [product.json](product.json).
+- **Input.** `[Controls]` in `OutRunDesktop.ini` is the Wheelkit profile (Wheelkit
+  writes it). The runtime reads the devices and hands the game a snapshot each
+  input tick; the game maps it as before: the full-range steering word (index
+  0x0E), the 0..255 accelerator (0x0D) and brake (0x0C), shift up / down, view,
+  start, the menu edges and features, the horn, and the camera actions.
+  `[Wheel] SteeringSensitivity` and `SteeringDeadZone` shape the steering. With
+  `Transmission = H-pattern` the gearbox (`source/hpattern.hpp`) pulses shift up
+  / down toward the held gate; OutRun has gears 1-6 only. The keyboard and pad
+  keep their own paths; the last device used drives the race.
+- **F6.** The runtime's panel, drawn on the game's own Direct3D 11 device in the
+  present overlay, with the pages in `source/wheelkit_panel.inc`; each row the
+  game owns saves one key of `OutRunDesktop.ini` and applies at the next start.
+  While it is open the game gets a neutral input sample.
+- **Telemetry.** The runtime sends the Forza Horizon packet to
+  `127.0.0.1:[Telemetry] Port` (8000); `[Telemetry] Enabled` turns it off. The
+  game fills the car state each tick: the HUD speed (car +0x1F8 km/h), the gear
+  (+0x208), the engine speed (synthesised from speed and gear, or with
+  `[Telemetry] EngineRpm = Game` the HUD tachometer +0x20C with the car's idle and
+  redline), and in GAME the consumed steering, accelerator and brake (7D6810).
+  Field provenance: [docs/TELEMETRY-FIELDS.md](docs/TELEMETRY-FIELDS.md).
+- **Force feedback** is not built on this branch: the decompiled car exposes the
+  consumed steering command, the HUD speed and the gear, but no steering load,
+  front lateral force or slip, and its surface words can be stale
+  ([docs/FFB-PRODUCER2.md](docs/FFB-PRODUCER2.md)).
+- **Unattended tests** use the runtime's switches in
+  `%LOCALAPPDATA%\dbce\outrun-2006\`: `ffb-fence.on`, and `inject.on` with
+  `inject.txt` for test input; F6's dev channel is `panel-dev.txt` there.
 
 ## Research references
 
@@ -134,5 +82,4 @@ Decomp, recomp and reimplementation directories, saved at the owner's request (2
   `outrun-2006-coast-2-coast` entry (matching decomp) points at this repository's upstream, `r4dius/outrun2-decomp`.
 - [recomp.fyi](https://recomp.fyi/), a similar directory. On 2026-10-17 it had no OutRun 2006 entry.
 
-Both are discovery leads: check any project claim at its upstream repository. The portfolio's OutRun profile
-(`E:\Source\dbce-project-mgmt\profiles\07-outrun-2006-coast-2-coast.md`, hub `4084d7f4`) records the same links.
+Both are discovery leads: check any project claim at its upstream repository.

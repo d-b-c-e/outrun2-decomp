@@ -1,18 +1,16 @@
 // Windows desktop build: the Xbox port's Direct3D 11, XAudio2 and gamepad
 // layers (xbox/source) as a desktop game. A borderless window over the
-// primary monitor (--windowed: 1280x720), and wheels, pedals and shifters
-// through DirectInput (wheel_input.hpp). The executable goes in the game
-// folder, like the original one; settings in OutRunDesktop.ini beside it.
+// primary monitor (--windowed: 1280x720), and wheels, pedals, shifters, the F6
+// panel and telemetry through the Wheelkit runtime (wheelkit_runtime.hpp). The
+// executable goes in the game folder, like the original one (or anywhere, with
+// --data=<game folder>); settings in OutRunDesktop.ini beside it.
 #include "native_window.hpp"
 #include "d3d11_display.hpp"
 #include "enhancements/fast_load.hpp"
 #include "enhancements/general_presentation.hpp"
-#include "telemetry_forza.hpp"
-#include "ffb_live.hpp"
 #include "gamepad_vibration_live.hpp"
 #include "login_protection.hpp"
-#include "ffb_shadow_live.hpp"
-#include "desktop_panel.hpp"
+#include "wheelkit_runtime.hpp"
 #include "camera_controls.hpp"
 #include "hud_toggle.hpp"
 #include "level_select_input.hpp"
@@ -37,16 +35,11 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
-#include "render_test.hpp"
 #include "startup_monitor.hpp"
 #include "startup_diagnostics.hpp"
 #include "triple_rig.hpp"
 #include "curve_scene_profile.hpp"
 #include <memory>
-#include "wheel_input.hpp"
-#include "shim_input.hpp"
-#include "startup_state.hpp"
-#include "test_fence.hpp"
 #include <sstream>
 #include "desktop_keyboard.hpp"
 #include "platform/pc_input_devices.hpp"
@@ -122,9 +115,6 @@ LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
         if(scan)outrun::desktop::desktop_keys()[scan|((unsigned(l)>>24)&1u?0x80u:0u)]=message==WM_KEYDOWN||message==WM_SYSKEYDOWN?0x80u:0u;
     }
     if(message==WM_KILLFOCUS){outrun::desktop::desktop_keys_clear();outrun::desktop::gamepad_vibration_stop();}
-    // A device arrived or left (DBT_DEVNODES_CHANGED reaches every top-level window): the native wheel path rescans at
-    // its next input sample instead of on a 2 s timer (wheel_rescan.hpp).
-    if(message==WM_DEVICECHANGE)outrun::desktop::wheel_input_devices_changed();
     if(message==WM_SETCURSOR&&borderless&&hide_mouse_cursor&&LOWORD(l)==HTCLIENT){SetCursor(nullptr);return TRUE;}
     return DefWindowProcW(hwnd,message,w,l);
 }
@@ -296,108 +286,30 @@ static LONG WINAPI crash_report(EXCEPTION_POINTERS* e){
 }
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     SetUnhandledExceptionFilter(crash_report);
-    // The test fence decides first, before anything writes (INPUT-SHIM.md section 15): a test-requested process gets
-    // its own run folder as home (saves, options, logs), the game folder only read, no OR2_ switches; or it refuses.
-    namespace fence=outrun::desktop::fence;
+    // Unattended tests use the Wheelkit runtime's switches (ffb-fence.on, inject.on in its log folder) and the launch
+    // check's backups; this process has no test or playback mode of its own.
     const auto folder=outrun::xbox_runtime::launch_folder();
-    const auto dbce=fence::dbce_folder();
-    fence::Plan plan;
-    outrun::desktop::RenderTest render_test;   // a latched run's opt-in rendering test (render_test.hpp); none otherwise
-    std::vector<std::string> cleared;
-    if(fence::latch_requested(dbce)){
-        std::wstring game(folder.size(),L'\0');
-        game.resize(std::size_t(MultiByteToWideChar(CP_UTF8,0,folder.data(),int(folder.size()),game.data(),int(game.size()))));
-        plan=fence::prepare_run(dbce,game,GetCurrentProcessId());
-        if(plan.refusal.empty()){std::string why;
-            if(!outrun::desktop::load_render_test(plan.dbce_folder,plan.run_root,plan.nonce,render_test,why))plan.refusal="render-test.txt: "+why;}
-        if(!plan.refusal.empty())return fence::write_refusal(plan,GetCurrentProcessId())?3:4;   // 4: refused, not recorded (a linked folder)
-        cleared=fence::clear_development_switches();
-        outrun::xbox_runtime::latched_home()=fence::utf8(plan.run_root);
-        outrun::xbox_runtime::latched_game_root()=folder;   // application_home refuses any other data root
-    }
-    // Play with Recording and playback (session_request.hpp): an ordinary process takes the one-shot session request
-    // first, before anything writes. The owner's settings are only read here (the backend for a record request). An
-    // admitted playback runs in its own home under its result folder, seeded from the recording's startup snapshot (saves
-    // and options), offline and with the game folder only read, as a latched run's home; its log goes to the result
-    // folder; the owner's SaveGame, options.ini and OutRunDesktop.ini are never written (sana 37135/37176).
-    namespace session=outrun::desktop::session;
-    session::Intake intake;
-    if(!plan.latched){
-        outrun::desktop::Ini owner;(void)owner.load(folder+"/OutRunDesktop.ini");   // absent: the Native backend
-        intake=session::take(session::request_path(),std::filesystem::u8path(folder),outrun::desktop::shim_backend_selected(owner),
-                             std::uint64_t(std::time(nullptr)));
-    }
-    // A refused playback or an unreadable request is never ordinary play, and leaves the owner's files alone (sana 37845):
-    // it ends here, before the game folder's runtime.log is opened or a settings file made. Its reason is the status.json
-    // in its own result folder, or the .refused-<pid>-<n> request kept beside the request file.
-    if(intake.kind==session::Intake::Kind::Exit)return 4;
-    const bool playback=intake.kind==session::Intake::Kind::Playback;
-    if(playback){
-        cleared=fence::clear_development_switches();
-        outrun::xbox_runtime::latched_home()=session::utf8(intake.home);
-        outrun::xbox_runtime::latched_game_root()=folder;
-    }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);   // real pixels for the borderless window
     winrt::init_apartment();   // Windows.Gaming.Input
-    const auto log=plan.latched?fence::utf8(fence::log_path(plan,{})):   // the fixture tests log_path
-                   playback?session::utf8(intake.request.result/L"runtime.log"):folder+"/runtime.log";
+    const auto log=folder+"/runtime.log";
     if(std::freopen(log.c_str(),"w",stdout))std::setvbuf(stdout,nullptr,_IONBF,0);
     if(std::freopen(log.c_str(),"a",stderr))std::setvbuf(stderr,nullptr,_IONBF,0);
-    if(plan.latched){
-        std::printf("TEST PROCESS: inject.on was present at start. Wheel input is off; saves, options and logs are in %s; the game "
-                    "folder %s is only read; %zu OR2_ switch(es) cleared; %zu file(s) seeded (%llu bytes).\n",
-                    fence::utf8(plan.run_root).c_str(),folder.c_str(),cleared.size(),plan.seeded.size(),(unsigned long long)plan.seeded_bytes);
-    }
-    if(playback){
-        std::printf("PLAYBACK PROCESS: request %s admitted (recording seal %.16s). Saves and options are in %s, seeded from the "
-                    "recording's startup snapshot; the game folder %s is only read; the owner's settings are only read (this rig's "
-                    "[Window] and [Triple]); %zu OR2_ switch(es) cleared; offline.\n",intake.request.request_id.c_str(),
-                    intake.request.package_seal_sha256.c_str(),session::utf8(intake.home).c_str(),folder.c_str(),cleared.size());
-    }
     std::vector<std::string> args;int count=0;
     if(wchar_t** argv=CommandLineToArgvW(GetCommandLineW(),&count)){
         for(int i=0;i<count;++i)args.push_back(outrun::xbox_runtime::utf8(argv[i]));LocalFree(argv);}
-    // A latched process creates nothing; a playback process reads the recording's settings with this rig's presentation.
-    outrun::desktop::Ini settings;
-    if(playback){
-        std::string owner;
-        if(std::ifstream f(folder+"/OutRunDesktop.ini",std::ios::binary);f){std::ostringstream all;all<<f.rdbuf();owner=all.str();}
-        settings.load_text(outrun::desktop::startup::playback_settings(intake.recorded_settings,owner),
-                           session::utf8(intake.request.startup/L"OutRunDesktop.ini")+" with this rig's [Window] and [Triple]");
-        std::printf("settings: %s%s\n",settings.path().c_str(),intake.has_recorded_settings?"":" (the recording had no settings file: defaults)");
-    }else settings=outrun::desktop::load_desktop_settings(folder,!plan.latched);
+    const outrun::desktop::Ini settings=outrun::desktop::load_desktop_settings(folder,true);
     std::printf("%s\n",outrun::desktop::startup_diagnostics().c_str());
-    // The session request's outcome (taken above; a refused playback or an unreadable request already ended the process).
-    if(!plan.latched){
-        switch(intake.kind){
-        case session::Intake::Kind::None:break;
-        case session::Intake::Kind::Playback:
-            std::printf("session: playback request %s admitted (tape %s)\n",intake.request.request_id.c_str(),session::utf8(intake.request.tape).c_str());
-            break;
-        case session::Intake::Kind::Record:
-            std::printf("session: record request %s admitted\n",intake.request.request_id.c_str());
-            outrun::desktop::shim_input_arm_recording(intake.request,intake.exe_sha256);
-            break;
-        case session::Intake::Kind::Refused:
-            std::printf("session: record request refused (%s); ordinary play without a capture\n",intake.why.c_str());break;
-        case session::Intake::Kind::Exit:return 4;   // ended above, before anything was written
-        }
-    }
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
     outrun::xbox_runtime::set_borderless(borderless);
     outrun::xbox_runtime::set_hide_mouse_cursor(settings.flag("Window","WindowedHideMouseCursor",true));
-    // Presentation only, including playback's existing owner-[Window] merge. Test processes never enumerate displays.
-    outrun::desktop::configure_startup_monitor(settings.text("Window","MonitorDevicePath"),!plan.latched);
+    outrun::desktop::configure_startup_monitor(settings.text("Window","MonitorDevicePath"),true);
     // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
-    // start (the window opens once). Anything else is logged and Off applies. A latched (test) process keeps Off: a
-    // display preference must not reach the harness, as with FrameLatency. windows/docs/TRIPLE-SCREENS.md.
+    // start (the window opens once). Anything else is logged and Off applies. windows/docs/TRIPLE-SCREENS.md.
     {   const auto text=settings.text("Triple","Screens");
         const auto mode=outrun::desktop::parse_triple_screens(text);
-        if(mode&&!plan.latched)outrun::xbox_runtime::set_triple_screens(*mode);
-        else if(mode&&*mode!=outrun::desktop::TripleScreens::off)std::printf("settings: [Triple] Screens = %s not applied in a test process; Off\n",
-                                                                       outrun::desktop::triple_screens_name(*mode));
-        else if(!mode&&!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
+        if(mode)outrun::xbox_runtime::set_triple_screens(*mode);
+        else if(!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
     // [Triple] Views (below the selector): Planar (the default, also when the key is absent) or Angled, three projected
     // views (experimental; the window applies it only over a span). Anything else is logged and Planar applies. The
     // development switch OR2_TRIPLE_VIEWS=1 asks for Angled too. One request for both its users (the lods.ini read below
@@ -406,27 +318,16 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const auto projection=outrun::desktop::parse_triple_projection(text);
         if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
         const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
-        outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),plan.latched);}
-    // A latched run's rendering test (render_test.hpp) sets this run's presentation from its own request instead: the
-    // process stays latched in every other respect, and the rig below stays the fixture's (the read needs an unlatched
-    // process).
-    if(render_test.requested){
-        outrun::xbox_runtime::set_triple_screens(render_test.screens);
-        outrun::xbox_runtime::set_triple_projection(render_test.views==outrun::desktop::TripleProjection::angled,false);
-        std::printf("render test: [Triple] Screens = %s, Views = %s from render-test.txt; %u frame(s) every %u after %u at 1/%u "
-                    "scale into the run's frames folder\n",outrun::desktop::triple_screens_name(render_test.screens),
-                    render_test.views==outrun::desktop::TripleProjection::angled?"Angled":"Planar",render_test.frames,
-                    render_test.every,render_test.after,render_test.scale);
-    }
+        outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),false);}
     // [Triple] PanelWidthMm / PanelHeightMm / EyeDistanceMm / SideAngle / BezelMm and MatchGameFov (the portfolio's rig
-    // keys, as Wheelkit writes them): read when Angled is asked for in a normal process. A refused value is logged and its
-    // default applies; the window logs the rig in use.
-    if(outrun::xbox_runtime::triple_angled_requested&&!plan.latched){
+    // keys, as Wheelkit writes them): read when Angled is asked for. A refused value is logged and its default applies;
+    // the window logs the rig in use.
+    if(outrun::xbox_runtime::triple_angled_requested){
         std::vector<std::string> notes;
         outrun::xbox_runtime::triple_rig=outrun::desktop::parse_triple_rig([&](const char* key){return settings.text("Triple",key);},notes);
         for(const auto& n:notes)std::printf("settings: [Triple] %s\n",n.c_str());
         const char* opt=std::getenv("OR2_CURVE_COMPOSITOR");
-        if(opt&&std::string(opt)=="1"&&!playback&&intake.kind!=session::Intake::Kind::Record&&!render_test.requested){
+        if(opt&&std::string(opt)=="1"){
             const auto raw=settings.text("Triple","CurveRadiusMm");char* end=nullptr;
             const double radius=raw.empty()?0.:std::strtod(raw.c_str(),&end);
             auto rig=outrun::desktop::triple_rig_from(outrun::xbox_runtime::triple_rig);
@@ -447,18 +348,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const auto text=settings.text("Window","FrameLatency");unsigned frames=2u;
         if(text.size()==1u&&text[0]>='0'&&text[0]<='3')frames=unsigned(text[0]-'0');
         else if(!text.empty())std::printf("settings: [Window] FrameLatency = %.32s refused (0, 1, 2 or 3); 2 applies\n",text.c_str());
-        // A latched (test) process keeps the plain chain: its tapes were recorded on it, and a display preference must not
-        // reach the harness (nene 26924). OR2_FRAME_LATENCY still overrides for tests.
-        if(plan.latched)frames=0u;
         outrun::xbox_runtime::set_frame_latency(frames);}
     // [Window] AutoDetectResolution, the Tweaks key (on unless set false, as there): while options.ini holds no resolution,
     // the render resolution takes the display's height instead of the fixed 1920x1440 default (xbox/source/main.cpp). The
-    // height is the selected monitor's, or the primary's by default (a span has the same height), or the bordered client. A
-    // latched (test) process keeps the fixed default, as a display preference must not reach the harness. No display mode
-    // is changed.
+    // height is the selected monitor's, or the primary's by default (a span has the same height), or the bordered client.
+    // No display mode is changed.
     {   const bool on=settings.flag("Window","AutoDetectResolution",true);
         unsigned height=0u;
-        if(on&&!plan.latched){
+        if(on){
             const auto* monitor=outrun::desktop::startup_monitor_state().selected();
             if(monitor)height=outrun::desktop::selected_monitor_render_height(borderless);
             else if(!borderless)height=720u;
@@ -489,13 +386,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // Experimental loading-only Tweaks mode 2; no INI writes or mode-3 streaming.
     {
         const bool requested=settings.flag("Performance","FramerateUnlockExperimental",false);
-        const bool ordinary=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;
         if(!outrun::enhancements::general_presentation().configure(requested,
-            settings.text("Performance","FramerateLimit","0"),ordinary))
+            settings.text("Performance","FramerateLimit","0"),true))
             std::printf("settings: experimental FramerateLimit refused (0 or 60..1000); ordinary 60/120 policy applies\n");
-        if(requested&&!ordinary)std::printf("settings: experimental presentation ignored in test/record/playback\n");
         if(!outrun::enhancements::presentation_controls().configure(
-            settings.text("Performance","FramerateLimitMode","0"),settings.text("Performance","VSync",""),ordinary))
+            settings.text("Performance","FramerateLimitMode","0"),settings.text("Performance","VSync",""),true))
             std::printf("settings: invalid presentation control; FramerateLimitMode needs 0/1, VSync empty/0/1/2; invalid key uses its default\n");
     }
     {   const auto value=settings.text("Performance","FramerateFastLoad","0");
@@ -557,13 +452,10 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::platform::g_pc_fix_full_pedal_checks=settings.flag("Bugfixes","FixFullPedalChecks",true);
     if(!outrun::platform::g_pc_fix_full_pedal_checks)std::printf("settings: full pedal check fix off (the PC's own 255-only full-press checks)\n");
     // [Misc] FineSteering (not a Tweaks key; off unless set true): the car's steering word at the analogue steering's full
-    // resolution instead of 255 steps (race_input.hpp). It changes the handling, so its value is logged either way; a
-    // recording's startup INI names it, so its playback reproduces it. A latched (test) process keeps the PC's steps: its
-    // tapes were recorded on them.
+    // resolution instead of 255 steps (race_input.hpp). It changes the handling, so its value is logged either way.
     {   const bool requested=settings.flag("Misc","FineSteering",false);
-        outrun::platform::g_pc_fine_steering=requested&&!plan.latched;
-        if(requested&&plan.latched)std::printf("settings: [Misc] FineSteering not applied in a test process; the PC's 255 steps\n");
-        else std::printf("settings: steering %s\n",outrun::platform::g_pc_fine_steering?
+        outrun::platform::g_pc_fine_steering=requested;
+        std::printf("settings: steering %s\n",outrun::platform::g_pc_fine_steering?
             "FINE ([Misc] FineSteering = true: the analogue steering unstepped, not stock handling)":"in the PC's 255 steps (stock)");}
     // [Bugfixes] FixIncorrectShading and FixLensFlarePath, the Tweaks keys (on unless set false, as there): double-sided
     // lighting linked as the DOUBLE fragments, and the lens flare offsets read from Media\ (pc_screen.hpp).
@@ -679,10 +571,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const bool extract_requested=settings.flag("Graphics","SceneTextureExtract",false);
         const bool ui_extract_requested=settings.flag("Graphics","UITextureExtract",false);
         const bool cache_requested=settings.flag("Graphics","EnableTextureCache",false);
-        const bool extraction_allowed=!plan.latched&&!playback&&intake.kind!=session::Intake::Kind::Record;
-        const bool extract=extract_requested&&extraction_allowed,ui_extract=ui_extract_requested&&extraction_allowed;
-        if((extract_requested||ui_extract_requested)&&!extraction_allowed)std::printf("settings: texture extraction off in test, playback or recording process\n");
-        if(cache_requested&&!extraction_allowed)std::printf("settings: EnableTextureCache off in test, playback or recording process\n");
+        const bool extraction_allowed=true;
+        const bool extract=extract_requested,ui_extract=ui_extract_requested;
         std::string base=settings.text("Graphics","TextureBaseFolder","textures");
         if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
             if(on||ui||extract||ui_extract)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
@@ -690,83 +580,35 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::platform::texture_replacement_configure(on,ui,folder+"/"+base+"/load",any,extract,ui_extract,cache_requested&&extraction_allowed);
         if(cache_requested&&extraction_allowed&&(on||ui))std::printf("settings: replacement DDS cache on (128 MiB, next ordinary start; no hot reload)\n");
         if(any&&(on||ui))std::printf("settings: [Graphics] TextureMatchAnyFolder: same-name files from other pack folders when unambiguous\n");}
-    // The 35a8aa3 wheel path can write OutRunDesktop.ini (its legacy import). A latched process runs without it until
-    // the shim is wired (slice 3); the shim's own test path replaces it.
-    if(playback){
-        // Playback (shim_input.hpp): no device and no keyboard source; the tape drives every tick. A tape that cannot
-        // play never becomes ordinary play.
-        if(!outrun::desktop::shim_input_configure_playback(intake,settings)){std::fflush(stdout);return 4;}
-        outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter_playback;
-    }else if(!plan.latched){
-        // Ordinary play: the game's own keyboard (the reconstructed PC keyboard device and its key tables), on either backend.
-        outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
-            const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
-        if(outrun::desktop::shim_backend_selected(settings)){
-            // [Input] Backend = Shim: the profile's devices through the shared shim (shim_input.hpp). wheel_input is never
-            // configured, so no DirectInput device is opened twice; the keyboard and any pad the profile does not bind
-            // keep their native paths. A pad of a bound product is left out of the native pad path (gamepad_choice).
-            outrun::desktop::shim_input_configure_ordinary(settings,folder);
-            outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter_ordinary;
-        }else{
-            outrun::desktop::wheel_input_configure(settings);
-            outrun::xbox_runtime::input_filter()=outrun::desktop::wheel_input_filter;
-        }
-    }else{
-        // The fenced test process: the input shim (Core, the control worker over inject.txt, the OutRun adapter).
-        outrun::desktop::shim_input_configure(plan,settings);
-        outrun::xbox_runtime::input_filter()=outrun::desktop::shim_input_filter;
-    }
-    // Forza telemetry and the mod's shared-memory block, one frame per tick after the input filter (telemetry_forza.hpp).
-    // Off in a latched process; OR2_TELEMETRY=0 turns it off for unattended runs.
-    // A playback process is as a latched one here: no telemetry, the software force stream into its home, no device
-    // output, no saves; and its panel never opens (the badge only).
-    const bool test_like=plan.latched||playback;
-    const bool ordinary_network=!test_like&&intake.kind!=session::Intake::Kind::Record;
-    const auto server=ordinary_network?settings.text("Misc","DemonwareServerOverride"):std::string();
+    // The game's own keyboard (the reconstructed PC keyboard device and its key tables).
+    outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
+        const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
+    // The Wheelkit runtime (wheelkit_runtime.hpp): the wheel, pedals and shifter from the Wheelkit profile, the F6 panel
+    // and telemetry; its filter is the first, so every later one sees the wheel's sample (or a neutral one under F6).
+    outrun::desktop::wheelkit_configure(settings);
+    outrun::desktop::wheelkit_wrap_input_filter();
+    const auto server=settings.text("Misc","DemonwareServerOverride");
     if(!outrun::platform::native_network_set_server_override(server))
         std::printf("network: invalid server override refused; Windows transport remains off\n");
     else if(!server.empty())std::printf("network: opt-in IPv4 DNS/UDP server override configured; online play unqualified\n");
-    outrun::desktop::login_protection_configure(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
-    // Preserve the native records: the level menu's Shift modifier is separate
-    // final input, captured in ordinary recordings and supplied by consumed replay.
-    outrun::desktop::level_select_input_configure(outrun::platform::g_pc_enable_level_select,test_like);
+    outrun::desktop::login_protection_configure(settings,true);
+    outrun::desktop::level_select_input_configure(outrun::platform::g_pc_enable_level_select,false);
     outrun::desktop::level_select_wrap_input_filter();
-    const std::string private_home=plan.latched?fence::utf8(plan.run_root):playback?session::utf8(intake.home):std::string();
-    outrun::desktop::telemetry_configure(settings,test_like);
-    outrun::desktop::telemetry_wrap_input_filter();
-    // Force feedback F2 (ffb_live.hpp): the software force stream (always in a latched run, into its run folder; with
-    // OR2_FFB_TRACE in ordinary play); no device output at all.
-    outrun::desktop::ffb_configure(settings,test_like,private_home);
-    outrun::desktop::ffb_wrap_input_filter();
-    outrun::desktop::gamepad_vibration_configure(settings,!test_like&&intake.kind!=session::Intake::Kind::Record);
+    outrun::desktop::gamepad_vibration_configure(settings,true);
     outrun::desktop::gamepad_vibration_wrap_input_filter();
-    // Optional producer@2 trace: ordinary, non-recording diagnostic only.
-    // Test and playback processes already cleared all OR2_ switches above.
-    if(const wchar_t* trace=_wgetenv(L"OR2_FFB_PRODUCER2_SHADOW_TRACE")){
-        if(*trace)outrun::desktop::ffb_shadow_configure(trace,!test_like&&intake.kind!=session::Intake::Kind::Record);
-    }
-    outrun::desktop::ffb_shadow_wrap_input_filter();
-    // [Misc] HudToggleKey (hud_toggle.hpp): ordinary play that is not recording only; the key still reaches the game.
-    outrun::desktop::hud_toggle_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
+    // [Misc] HudToggleKey (hud_toggle.hpp): the key still reaches the game.
+    outrun::desktop::hud_toggle_configure(settings,false,false);
     outrun::desktop::hud_toggle_wrap_input_filter();
-    outrun::desktop::cd_switcher_configure(settings,test_like,intake.kind==session::Intake::Kind::Record);
+    outrun::desktop::cd_switcher_configure(settings,false,false);
     outrun::desktop::cd_switcher_wrap_input_filter();
-    outrun::desktop::camera_controls_configure(settings,test_like||intake.kind==session::Intake::Kind::Record||playback,
+    outrun::desktop::camera_controls_configure(settings,false,
         float(outrun::desktop::triple_physical_fov_y(outrun::xbox_runtime::triple_rig,16./9.)));
     outrun::desktop::camera_controls_wrap_input_filter();
-    // A rendering test's frame burst (render_test.hpp): into the run folder, armed at the race entry. Nothing otherwise.
-    outrun::desktop::render_test_start_capture(render_test,plan.run_root);
-    // The F6 panel (desktop_panel.hpp, docs/F6-PANEL.md): the toolkit panel drawn at present; a test run saves nothing.
-    outrun::desktop::desktop_panel_configure(settings,test_like,private_home,playback);
-    outrun::desktop::desktop_panel_wrap_input_filter();   // outermost: a neutral sample while the panel is open
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     struct PadOutputCleanup {~PadOutputCleanup(){outrun::desktop::gamepad_vibration_shutdown();}} pad_output_cleanup;
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::gamepad_vibration_shutdown();
-    outrun::desktop::desktop_panel_shutdown();
-    outrun::desktop::ffb_shadow_shutdown();
-    outrun::desktop::telemetry_shutdown();
-    outrun::desktop::ffb_shutdown();
+    outrun::desktop::wheelkit_shutdown();
     // Texture replacement summaries, scene then UI: totals, the banks the pack covers one line each, the others named once
     // (a stage variant the pack lacks shows up here).
     for(const bool ui:{false,true}){
@@ -805,9 +647,5 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             static_cast<unsigned long long>(smoke.full_tails),static_cast<unsigned long long>(smoke.skipped));}
     if(const auto dropped=outrun::platform::render_queue_dropped())
         std::printf("render queues: %llu draws dropped (queue full)\n",static_cast<unsigned long long>(dropped));
-    outrun::desktop::wheel_input_shutdown();
-    if(plan.latched)outrun::desktop::shim_input_shutdown();   // close, final tick, host stop; unresolved parks (P21)
-    else if(playback)outrun::desktop::shim_input_shutdown_playback();   // the replay capture's stop and save
-    else outrun::desktop::shim_input_shutdown_ordinary();     // the ordinary shim backend's final tick and stop; never parks
     return result;
 }

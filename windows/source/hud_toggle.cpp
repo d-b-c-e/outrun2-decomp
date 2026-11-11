@@ -2,7 +2,7 @@
 // consumed or changed in the game's input; a release of the key posts one toggle (platform/pc_screen.hpp).
 #include "hud_toggle.hpp"
 #include "desktop_keyboard.hpp"
-#include "desktop_panel.hpp"
+#include "wheelkit_runtime.hpp"
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "platform/pc_screen.hpp"
@@ -23,7 +23,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     if(h.inner)h.inner(out,rt);
     bool down=false;
     for(const unsigned key:h.keys)down=down||desktop_key(key);
-    const bool blocked=hud_toggle_blocked(desktop_panel_open(),desktop_key_clears(),h.clears);
+    const bool blocked=hud_toggle_blocked(wheelkit_panel_open(),desktop_key_clears(),h.clears);
     if(h.edge.step(down,blocked))platform::g_pc_hud_toggle_requests.fetch_add(1u);
 }
 }

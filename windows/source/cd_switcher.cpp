@@ -1,6 +1,6 @@
 #include "cd_switcher.hpp"
 #include "desktop_keyboard.hpp"
-#include "desktop_panel.hpp"
+#include "wheelkit_runtime.hpp"
 #include "desktop_settings.hpp"
 #include "native_window.hpp"
 #include "platform/cd_switcher.hpp"
@@ -20,7 +20,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     if(s.inner)s.inner(out,rt);
     const bool race=rt&&rt->mode_state.current==16u;
     const bool cleared=desktop_key_clears()!=s.clears;s.clears=desktop_key_clears();
-    const bool blocked=!race||!s.in_race||desktop_panel_open()||cleared;
+    const bool blocked=!race||!s.in_race||wheelkit_panel_open()||cleared;
     s.in_race=race;
     if(!platform::cd_title_race_owned(rt?rt->mode_state.current:0u,blocked,true))platform::cd_switcher().title.clear();
     const auto action=s.edges.step(desktop_key(s.z),desktop_key(s.x),pad.held,pad.connected,

@@ -13,23 +13,16 @@
   "architecture": "x64",
   "gameData": "the game folder's own files; OR2006C2C.EXE (Steam build, or the OutRun2006Tweaks retail EXE) is read for tables and never launched",
   "settings": "OutRunDesktop.ini",
-  "controlsStore": "ini-controls-1: [Controls] in OutRunDesktop.ini, canonical (the game's only binding store)",
+  "controlsStore": "ini-controls-1/2: [Controls] in OutRunDesktop.ini, read by the Wheelkit runtime (wheelkit.dll)",
   "log": "runtime.log",
-  "testInjection": "%LOCALAPPDATA%\\dbce\\outrun2006-decomp\\ (inject.on, inject.txt); observer Local\\DbceOutRunDecompInjectObserve-<nonce>",
+  "testInjection": "the Wheelkit runtime's switches in %LOCALAPPDATA%\\dbce\\outrun-2006\\ (ffb-fence.on, inject.on, inject.txt)",
   "distribution": "none: the upstream repository has no licence file",
   "features": {
-    "wheel": { "implemented": true, "accepted": false, "status": "DirectInput, canonical [Controls]; not driven at the wheel" },
-    "separateDevices": { "implemented": true, "accepted": false, "status": "each binding read from its own device instance; unverified" },
+    "wheel": { "implemented": true, "accepted": false, "status": "the Wheelkit runtime's snapshot (wheelkit.dll); not driven at the wheel" },
     "hPattern": { "implemented": true, "accepted": false, "status": "gear pulses toward the held gate; gears 1-6, no neutral or reverse in the game; unverified" },
-    "forceFeedback": { "implemented": false, "accepted": false, "status": "planned: toolkit force model + wheelffb" },
-    "telemetry": { "implemented": false, "accepted": false, "status": "planned: Forza Horizon layout (STD-016)" },
+    "forceFeedback": { "implemented": false, "accepted": false, "status": "planned: the car exposes no steering load, lateral force or slip" },
+    "telemetry": { "implemented": true, "accepted": false, "status": "the Wheelkit runtime's Forza Horizon packet from the game's car state" },
     "tripleScreen": { "implemented": false, "accepted": false, "status": "planned: per-panel off-centre projection" },
-    "f6Panel": { "implemented": false, "accepted": false, "status": "planned next (STD-030)" },
-    "testInjection": { "implemented": true, "accepted": false, "status": "development only; review pending" }
-  },
-  "legacy": {
-    "settingsImport": "the OutRun2006Tweaks [DirectInput] keys (this file's, else the folder's OutRun2006Tweaks.ini) are imported once into [Controls]; backup OutRunDesktop.ini.pre-controls-import, marker [ControlsImport]",
-    "relation": "a separate product from dbce-mods-outrun-2006 (the Tweaks fork) for now; owner decision 2026-10-10: it will eventually replace the Tweaks mod entirely (STD-001)",
-    "successorOf": "outrun-2006"
+    "f6Panel": { "implemented": true, "accepted": false, "status": "the Wheelkit runtime's panel on the game's Direct3D 11 device" }
   }
 }

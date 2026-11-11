@@ -4,7 +4,7 @@
 #include "mounted_camera_rotation.hpp"
 #include "desktop_settings.hpp"
 #include "desktop_keyboard.hpp"
-#include "desktop_panel.hpp"
+#include "wheelkit_runtime.hpp"
 #include "hud_toggle.hpp"
 #include "native_window.hpp"
 #include "platform/native_runtime.hpp"
@@ -58,7 +58,7 @@ const char* curve_unavailable(){
 }
 void compare(){
     const std::lock_guard<std::mutex> lock(camera_mutex);
-    if(!h.configured||h.mode!=16||desktop_panel_open())return;
+    if(!h.configured||h.mode!=16||wheelkit_panel_open())return;
     const char* why=curve_unavailable();
     if(!triples()){
         h.comparison_notice="Developer comparison unavailable: Angled triples required";
@@ -191,12 +191,12 @@ void install_keys(const CameraKeys& keys){
 void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(h.inner)h.inner(out,rt);
     const bool race=rt&&(driving::race_camera_mode_48618d(std::int32_t(rt->mode_state.current))||rt->mode_state.current==19u);
-    const bool blocked=!race||desktop_panel_open()||h.clears!=desktop_key_clears();
+    const bool blocked=!race||wheelkit_panel_open()||h.clears!=desktop_key_clears();
     h.clears=desktop_key_clears();
     const unsigned mode=rt?rt->mode_state.current:0;
     {
         const std::lock_guard<std::mutex> lock(camera_mutex);
-        if(mode!=16||desktop_panel_open())end_comparison();
+        if(mode!=16||wheelkit_panel_open())end_comparison();
         // A real compositor refusal ends Curve rather than mislabelling flat output.
         if(platform::g_pc_screen_comparison==PcScreenComparison::curve&&curve_unavailable())end_comparison();
     }
@@ -233,7 +233,7 @@ void camera_controls_resolved_actions(const std::array<CameraResolvedAction,11>&
     std::array<bool,11> actions{};
     {
         const std::lock_guard<std::mutex> lock(camera_mutex);
-        blocked=blocked||!h.configured||!CameraFraming::tunable(h.view)||desktop_panel_open()||h.resolved_clears!=desktop_key_clears();
+        blocked=blocked||!h.configured||!CameraFraming::tunable(h.view)||wheelkit_panel_open()||h.resolved_clears!=desktop_key_clears();
         h.resolved_clears=desktop_key_clears();
         for(unsigned i=0;i<11;++i)actions[i]=h.resolved_edges[i].step(input[i].held,blocked||!input[i].live,milliseconds,i!=10);
     }

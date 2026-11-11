@@ -8,7 +8,7 @@ Native port of the PC OutRun 2006 Coast 2 Coast, reconstructed in C++ from the P
 
 ## Build
 
-- Windows desktop: `cmake -S . -B build-xbox-pc -G "Visual Studio 17 2022" -A x64 -T ClangCL -DOR2_XBOX=ON ...` then `cmake --build build-xbox-pc --config Release --target OutRunDesktop`. The full argument list (zlib, Vorbis, FFmpeg paths) is in `windows/README.md`. Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe`.
+- Windows desktop: `cmake -S . -B build-xbox-pc -G "Visual Studio 17 2022" -A x64 -T ClangCL -DOR2_XBOX=ON -DWHEELKIT_SDK=<wheelkit checkout> ...` then `cmake --build build-xbox-pc --config Release --target OutRunDesktop`. The full argument list (zlib, Vorbis, FFmpeg paths) is in `windows/README.md`. Output: `build-xbox-pc\windows\Release\OutRunDesktop.exe`.
 - Other platforms: see `switch/`, `mac/`, `ps5/`, `xbox/` READMEs.
 
 ## Test
@@ -23,7 +23,7 @@ Copy `OutRunDesktop.exe` beside `OR2006C2C.EXE` in the game folder and start it 
 
 ## Shared code
 
-Wheel controls come from the toolkit's `ini-controls-1` (`windows/vendor/controls`). Change shared code in the toolkit and re-sync; never edit the vendored copy. Windows `[Controls]` in `OutRunDesktop.ini` is the only binding store.
+Wheel input, the F6 panel and telemetry come from the Wheelkit runtime: `wheelkit.dll` loaded beside the program through `wheelkit.h` (the `d-b-c-e/wheelkit` repository, `runtime/native/sdk`; the build takes both from `-DWHEELKIT_SDK=<checkout>`). Only `windows/source/wheelkit_runtime.cpp` (the loader and call sites) and the F6 pages (`wheelkit_panel.inc`) are ours here; change the runtime in Wheelkit. `[Controls]` in `OutRunDesktop.ini` is the only binding store.
 
 ## Project-specific rules
 

@@ -1,16 +1,73 @@
 #include "gamepad_vibration_live.hpp"
 #include "enhancements/gamepad_vibration.hpp"
 #include "native_window.hpp"
-#include "desktop_panel.hpp"
-#include "ffb_live.hpp"
+#include "wheelkit_runtime.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/race_area_runtime.hpp"
+#include <windows.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 namespace outrun::desktop {
 namespace {
 namespace en=enhancements;
+// The game window is this process's and the foreground window.
+bool own_front(void* hwnd){
+    const HWND h=static_cast<HWND>(hwnd);
+    if(!h||GetForegroundWindow()!=h)return false;
+    DWORD pid=0;GetWindowThreadProcessId(h,&pid);
+    return pid==GetCurrentProcessId();
+}
+// The game's surface LUT (the OutRun 2006 mod's sub_1149C0, decompiled there from the game's Xbox vibration code; the
+// constants are the game's floats): the rumble of a tyre's surface mask, with the stage for the water stages.
+double surface_roughness(std::uint32_t a1,int a2,int stage_unique,std::uint32_t* a3){
+    double result=1.f;
+    if(a1>0x400){
+        if(a1>0x100000){
+            switch(a1){
+            case 0x200000u:return 0.80000001;
+            case 0x400000u:
+                if(a2)return 0.25;
+                if(stage_unique==0x12||stage_unique==0x30)return 0.25;
+                return 0.89999998;
+            case 0x800000u:return 0.5;
+            }
+        }else{
+            if(a1==0x100000)return 0.70999998;
+            if(a1>0x2000){
+                if(a1==0x8000)return 0.40000001;
+            }else if(a1==0x2000||a1==0x800||a1==0x1000){
+                return 0.34999999;
+            }
+        }
+        return 0.31;
+    }
+    if(a1==0x400)return 0.30000001;
+    if(a1>0x10){
+        if(a1==0x80)return 0.85000002;
+        if(a1==0x100)return 0.44999999;
+        if(a1!=0x200)return 0.31;
+        return 0.34999999;
+    }
+    if(a1==0x10)return 0.89999998;
+    switch(a1){
+    case 1u:result=0.0;break;
+    case 2u:
+        if(a2)return 0.25;
+        switch(stage_unique){
+        case 0xB:case 0x29:result=0.72999996;*a3|=1u;break;
+        case 0xD:case 0x2B:result=0.78999996;*a3|=1u;break;
+        case 0xE:case 0x2C:result=0.75999999;*a3|=1u;break;
+        default:return 0.25;
+        }
+        break;
+    case 4u:result=0.69999999;break;
+    case 8u:return 0.85000002;
+    default:return 0.31;
+    }
+    return result;
+}
 en::PadVibrationSettings settings;
 en::PadVibrationModel model;
 xbox_runtime::InputFilter inner{};
@@ -26,7 +83,7 @@ en::PadVibrationCar car_signals(const platform::NativeRuntimeContext& rt){
     c.prior_gear=field<std::uint32_t>(b,0x1d8);c.gear=field<std::uint32_t>(b,0x208);
     c.road_left=field<float>(b,0x264);c.road_right=field<float>(b,0x268);c.slip=field<std::int16_t>(b,0xd34);
     const auto stage=platform::native_race_area_player_stage_unique(rt);std::uint32_t water=0;
-    for(unsigned k=0;k<4;++k)c.roughness=std::max(c.roughness,float(ffb::surface_roughness(
+    for(unsigned k=0;k<4;++k)c.roughness=std::max(c.roughness,float(surface_roughness(
         field<std::uint32_t>(b,0x24c+k*4u),int(field<std::uint32_t>(b,0x5c)),stage,&water)));
     c.water=water!=0;
     const auto other=field<std::uint32_t>(b,0xdd4);
@@ -44,7 +101,7 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     const auto current=xbox_runtime::gamepad_vibration_generation();
     if(current!=generation){model.reset();generation=current;}
     en::PadVibrationGate gate;gate.ordinary=ordinary_process;gate.muted=muted();
-    gate.focused=ffb_front_check()(xbox_runtime::native_window().hwnd);gate.panel=desktop_panel_open();
+    gate.focused=own_front(xbox_runtime::native_window().hwnd);gate.panel=wheelkit_panel_open();
     gate.connected=xbox_runtime::gamepad_vibration_available();gate.mode=rt?rt->mode_state.current:0;
     gate.pause_depth=rt?rt->event_state.pause_depth:1;gate.car_ready=rt&&(rt->event_state.slots[8].flags&2u)&&rt->event_function36.car_select.car_799d18.size()>=0xdd8u;
     if(!gate.eligible()||blocked){gamepad_vibration_stop();return;}

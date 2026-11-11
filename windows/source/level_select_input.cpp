@@ -1,6 +1,6 @@
 #include "level_select_input.hpp"
 #include "desktop_keyboard.hpp"
-#include "desktop_panel.hpp"
+#include "wheelkit_runtime.hpp"
 #include "native_window.hpp"
 #include "platform/level_select.hpp"
 #include "platform/runtime_input.hpp"
@@ -12,7 +12,7 @@ void input_filter(platform::NativeInputState& out,const platform::NativeRuntimeC
     if(inner)inner(out,rt);
     // The snapshot belongs to the game's window and is cleared on focus loss.
     // Keep all original records intact; only 4E7800 consumes this separate bit.
-    out.level_select_shift=platform::level_select_shift_sample(enabled,desktop_panel_open(),desktop_keys());
+    out.level_select_shift=platform::level_select_shift_sample(enabled,wheelkit_panel_open(),desktop_keys());
 }
 }
 void level_select_input_configure(bool on,bool test_or_playback){enabled=on&&!test_or_playback;}
