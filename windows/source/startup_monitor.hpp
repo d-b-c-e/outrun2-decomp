@@ -39,13 +39,6 @@ inline StartupMonitorSelection select_startup_monitor(const std::vector<StartupM
     if(!found)return {{},"saved gameplay display is unavailable; default placement applies"};
     return {found,"selected gameplay display: "+monitors[*found].label};
 }
-inline bool startup_monitor_span(const std::vector<StartupMonitor>& monitors,std::size_t center,
-                                 ScreenRect& span,std::string* reason=nullptr){
-    if(center>=monitors.size())return false;
-    std::vector<ScreenRect> rects;rects.reserve(monitors.size());
-    for(std::size_t n=0;n<monitors.size();++n){auto r=monitors[n].bounds;r.primary=n==center;rects.push_back(r);}
-    return triple_span_from_monitors(rects,span,reason); // unchanged shared geometry, local anchor only
-}
 inline ScreenRect center_startup_window(const ScreenRect& work,long width,long height){
     width=std::min(width,work.right-work.left);height=std::min(height,work.bottom-work.top);
     const auto x=work.left+(work.right-work.left-width)/2,y=work.top+(work.bottom-work.top-height)/2;

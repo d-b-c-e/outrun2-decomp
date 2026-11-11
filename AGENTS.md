@@ -23,7 +23,9 @@ Copy `OutRunDesktop.exe` beside `OR2006C2C.EXE` in the game folder and start it 
 
 ## Shared code
 
-Wheel input, the F6 panel and telemetry come from the Wheelkit runtime: `wheelkit.dll` loaded beside the program through `wheelkit.h` (the `d-b-c-e/wheelkit` repository, `runtime/native/sdk`; the build takes both from `-DWHEELKIT_SDK=<checkout>`). Only `windows/source/wheelkit_runtime.cpp` (the loader and call sites) and the F6 pages (`wheelkit_panel.inc`) are ours here; change the runtime in Wheelkit. `[Controls]` in `OutRunDesktop.ini` is the only binding store.
+The rig's build of this branch is kept outside the weekly-cleaned `_work`: configure with `-B E:\Source\temp\outrun-2006\build-wheelkit-runtime` (the Wheelkit launch check `games/outrun-2006/launch-check.json` starts `windows\Release\OutRunDesktop.exe` there); the source worktree can be recreated at any time.
+
+Wheel input, the F6 panel, telemetry, the triple-screen layout and view matrices, and the cameras' framing and offsets come from the Wheelkit runtime: `wheelkit.dll` loaded beside the program through `wheelkit.h` (the `d-b-c-e/wheelkit` repository, `runtime/native/sdk`; the build takes both from `-DWHEELKIT_SDK=<checkout>`). Only `windows/source/wheelkit_runtime.cpp` (the loader and call sites) and the F6 pages (`wheelkit_panel.inc`) are ours here; change the runtime in Wheelkit. `[Controls]` in `OutRunDesktop.ini` is the only binding store.
 
 ## Project-specific rules
 

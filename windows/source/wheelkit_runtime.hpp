@@ -7,8 +7,21 @@
 #include <string>
 namespace outrun::desktop {
 class Ini;
-// Once, before the game runs: loads and starts the runtime, gives it the F6 pages and installs the present overlay.
+// Once, before the window is created: loads and starts the runtime, gives it the F6 pages and the game's camera views,
+// and installs the present overlay.
 void wheelkit_configure(const Ini& settings);
+// Triple screens (wk_triples_get): where the borderless window opens, whether screens are on at all (wide), whether
+// the window spans three screens and whether their measurements can be used (rig). on is false without the runtime:
+// the caller then opens on the primary display, one screen.
+struct WheelkitLayout { bool on{},wide{},span{},rig{}; long x{},y{},width{},height{}; float realistic_fov{}; std::string text; };
+WheelkitLayout wheelkit_layout();
+// The three views' clip corrections for the centre projection the game used (wk_triples_views; pc_screen.hpp
+// PcTripleCorrections: 3 x 16 floats). False: that draw stays single.
+bool wheelkit_view_corrections(const float* projection,float* out);
+// The camera on screen (wk_cameras_frame): view is the index in the list given at start (Bumper, Cockpit, Chase,
+// Bonnet) or -1 when not driving. What the runtime attaches to it; view is -1 in the answer when nothing applies.
+struct WheelkitCamera { int view{-1}; bool realistic{}; float fov_offset{},right_cm{},up_cm{},forward_cm{}; };
+WheelkitCamera wheelkit_camera(int view,const char* car,bool projected_views);
 // After every other input filter: the wheel snapshot into the game's input, telemetry, the panel's changes; while F6
 // is open the game gets a neutral sample.
 void wheelkit_wrap_input_filter();

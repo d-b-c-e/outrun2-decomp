@@ -1,38 +1,13 @@
 #pragma once
-#include <string>
-#include <array>
-#include <cstdint>
+// The race cameras, the game's side. The game's own views stay as they are (bumper, cockpit, chase), and a Bonnet view
+// the game lacks is added to its cycle after the bumper. What is attached to each view (Game or Realistic framing with
+// F7, the zoom and position offsets with the numpad, their saved keys and the on-screen name) is the Wheelkit runtime's
+// (wheelkit.h wk_cameras_frame); this file applies it to the view the game calculated.
+namespace outrun::platform { struct NativeRuntimeContext; }
 namespace outrun::desktop {
 class Ini;
-void camera_controls_configure(const Ini&,bool disabled,float physical_fov);
-void camera_controls_wrap_input_filter();
-bool camera_controls_available();
-bool camera_controls_tunable();
-bool camera_controls_triples();
-std::string camera_controls_label();
-std::string camera_controls_notice();
-std::string camera_controls_comparison_notice();
-void camera_controls_end_comparison();
-void camera_controls_toggle_set();
-void camera_controls_zoom(float degrees); // positive = wider, negative = narrower
-struct CameraFovValues {float calculated{},current{},offset{};bool valid{};}; // vertical degrees
-CameraFovValues camera_controls_fov();
-void camera_controls_set_fov(float degrees); // absolute current vertical FOV, stored as an offset on its calculation
-void camera_controls_reset();
-void camera_controls_activate(unsigned action); // same eleven actions as CameraKeyLabels
-inline constexpr std::array<const char*,11> CameraControlActions{{"cameraUp","cameraDown","cameraForward","cameraBack","cameraLeft","cameraRight","cameraTiltDown","cameraTiltUp","cameraZoomOut","cameraZoomIn","cameraReset"}};
-struct CameraResolvedAction {bool held{},live{};};
-// Resolved-frame input, same action order as activate(); no polling or keyboard injection.
-void camera_controls_resolved_actions(const std::array<CameraResolvedAction,11>&,bool blocked,std::uint64_t milliseconds);
-void camera_controls_move(unsigned axis,float amount); // side / up / forward / pitch
-bool camera_controls_pose_available();
-std::array<float,4> camera_controls_pose();
-std::array<std::string,11> camera_controls_key_names();
-std::array<std::string,11> camera_controls_key_errors();
-bool camera_controls_keys_migrated();
-void camera_controls_set_key(unsigned,const std::string&);
-void camera_controls_default_keys();
-float camera_controls_step(unsigned); // move metres / tilt degrees / FOV degrees
-void camera_controls_set_step(unsigned,float);
-void camera_controls_default_steps();
+// realistic_fov: the runtime's vertical field of view for the seat's true view (radians; 0 without measured screens).
+void camera_controls_configure(const Ini&,float realistic_fov);
+// Once per input tick, from the Wheelkit filter: tells the runtime which view is on screen and takes what applies to it.
+void camera_controls_tick(const platform::NativeRuntimeContext*);
 }

@@ -15,11 +15,11 @@ R"json({"settings":{
   {"id":"ffb.status","kind":"status","label":"Force feedback","text":"Not available for OutRun 2006 yet"}
  ],
  "display":[
-  {"id":"display.screens","kind":"choice","label":"Screens","choices":["Off","Surround","Separate monitors"],"default":"Off","apply":"next-start","help":"Separate monitors spans one window over three screens."},
+  {"id":"display.screens","kind":"choice","label":"Screens","choices":["Off","Surround","Separate monitors"],"default":"Off","apply":"next-start","help":"Three screens are used when you have them. Menus stay on the center screen."},
   {"id":"display.latency","kind":"choice","label":"Frame latency","choices":["0 (plain)","1","2","3"],"default":"2","apply":"next-start","help":"Frames that may wait for the display; 2 is the default."},
   {"id":"display.ui-scaling","kind":"choice","label":"UI scaling","choices":["Stretch 2D","Wide HUD (partial)","Centered 4:3"],"default":"Centered 4:3","apply":"next-start","help":"How menus and the HUD fit a wide screen."},
   {"id":"display.letterbox","kind":"choice","label":"Black bars","choices":["Off","Outside the race","Always"],"default":"Outside the race","apply":"next-start","help":"Black bars beside the centered 4:3 picture."},
-  {"id":"display.views","kind":"choice","label":"Projection","choices":["Planar","Angled"],"default":"Planar","level":"advanced","apply":"next-start","help":"Angled draws one view per screen over a span."},
+  {"id":"display.views","kind":"choice","label":"Projection","choices":["Planar","Angled"],"default":"Planar","level":"advanced","apply":"next-start","help":"Angled draws one view per screen at its real angle. F7 then switches a camera between Game and Realistic."},
   {"id":"display.borderless","kind":"toggle","label":"Borderless window","default":true,"level":"advanced","apply":"next-start","help":"Off opens a 1280x720 window instead."},
   {"id":"display.cursor","kind":"toggle","label":"Hide the mouse cursor","default":true,"level":"advanced","apply":"next-start","help":"Hides the Windows cursor over the game."},
   {"id":"display.aniso","kind":"choice","label":"Anisotropic filtering","choices":["Game","2x","4x","8x","16x"],"default":"Game","level":"advanced","apply":"next-start","help":"Sharper textures at an angle."},

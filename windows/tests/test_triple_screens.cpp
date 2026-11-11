@@ -2,7 +2,6 @@
 // names, the Separate-monitors span rule (the Tweaks fork's TripleSpanFromMonitors) and the centred 16:9 frame.
 #include "triple_screens.hpp"
 #include "triple_rig.hpp"
-#include "camera_framing.hpp"
 #include "display_fit.hpp"
 #include "platform/ui_spacing.hpp"
 #include "platform/c2c_ui_spacing.hpp"
@@ -26,24 +25,10 @@ using outrun::xbox_runtime::planar_width;
 namespace outrun::platform { extern const TranslatedFunction bulk_functions[]; }
 static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"triple screens line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
-static bool same(const ScreenRect& a,const ScreenRect& b){return a.left==b.left&&a.top==b.top&&a.right==b.right&&a.bottom==b.bottom;}
 static bool fit_is(unsigned cw,unsigned ch,unsigned fw,unsigned fh,unsigned x,unsigned y,unsigned w,unsigned h){
     const auto f=display_fit(cw,ch,fw,fh);return f.x==x&&f.y==y&&f.width==w&&f.height==h;
 }
 int main(){
-    // The selector: the three names, any case, blanks around; "Separate" alone; nothing else.
-    CHECK(parse_triple_screens("Off")==TripleScreens::off);
-    CHECK(parse_triple_screens(" surround ")==TripleScreens::surround);
-    CHECK(parse_triple_screens("Separate monitors")==TripleScreens::separate);
-    CHECK(parse_triple_screens("SEPARATE MONITORS\t")==TripleScreens::separate);
-    CHECK(parse_triple_screens("separate")==TripleScreens::separate);
-    CHECK(!parse_triple_screens(""));
-    CHECK(!parse_triple_screens("on"));
-    CHECK(!parse_triple_screens("1"));
-    CHECK(!parse_triple_screens("Separate  monitors"));
-    CHECK(!parse_triple_screens("Surround2"));
-    CHECK(std::string(triple_screens_name(TripleScreens::separate))=="Separate monitors");
-    CHECK(std::string(triple_screens_name(TripleScreens::off))=="Off");
     // [Graphics] UIScalingMode (display_fit.hpp): "0" / "1" / "2" (blanks around; empty = 2); anything else gives 2 with a
     // note, and 1 notes that it is partial (step 2a). The 2D rectangle: 2 = the centred 4:3 on 16:9 and on a span, as
     // before (none on a 4:3 frame), no spacing; 0 = none (stretched) on 16:9, the centre panel on a span (a third of its
@@ -174,15 +159,6 @@ int main(){
     CHECK(!parse_triple_projection("Angled views"));
     CHECK(std::string(triple_projection_name(TripleProjection::angled))=="Angled");
     CHECK(std::string(triple_projection_name(TripleProjection::planar))=="Planar");
-    CHECK(triple_projection_refusal(false,true,TripleScreens::separate,true,48.f/9.f)==nullptr);     // three monitors spanned
-    CHECK(triple_projection_refusal(false,true,TripleScreens::surround,false,48.f/9.f)==nullptr);    // a Surround desktop
-    CHECK(std::string(triple_projection_refusal(true,true,TripleScreens::separate,true,48.f/9.f))=="not applied in a test session");
-    CHECK(std::string(triple_projection_refusal(false,false,TripleScreens::separate,false,0.f))=="needs the borderless window");
-    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::off,false,0.f))=="needs Surround or Separate monitors");
-    // sana 35719: Separate monitors whose span failed fell back to the primary monitor; an ultrawide primary (21:9)
-    // still gives a planar aspect, but no three panels.
-    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::separate,false,21.f/9.f))=="Separate monitors found no three-monitor span");
-    CHECK(std::string(triple_projection_refusal(false,true,TripleScreens::surround,false,0.f))=="needs a window wider than 16:9");
     // The Angled default union: 64 / 64 where [Graphics] leaves a key at 0. A set key is kept and the environment never
     // replaces it; an environment value in range (strtol: leading blanks pass) replaces only a default, 0 included;
     // anything else is ignored.
@@ -198,99 +174,6 @@ int main(){
         CHECK(same(triple_default_union(0,0,"64x"," 32"),64,32));
         CHECK(same(triple_default_union(0,0,"abc","1e2"),64,64));
     }
-    // The [Triple] rig keys: defaults are the fixture exactly; values in range are taken, blanks around ignored; anything
-    // else is refused with a note naming the key, and its default applies.
-    {   using Map=std::vector<std::pair<std::string,std::string>>;
-        auto parse=[](const Map& m,std::vector<std::string>& notes){
-            return parse_triple_rig([&](const char* key){for(const auto& [k,v]:m)if(k==key)return v;return std::string();},notes);};
-        std::vector<std::string> notes;
-        const auto d=parse({},notes);const auto f=fixture_rig(8.);
-        CHECK(notes.empty()&&d.panel_width_mm==f.panel_width_mm&&d.panel_height_mm==f.panel_height_mm&&d.eye_distance_mm==660.&&
-              d.side_angle_deg==70.&&d.bezel_mm==8.&&d.match_game_fov);
-        const auto r=triple_rig_from(d);
-        CHECK(r.panel_width_mm==f.panel_width_mm&&r.panel_height_mm==f.panel_height_mm&&r.eye_distance_mm==f.eye_distance_mm&&
-              r.left_angle_deg==f.left_angle_deg&&r.right_angle_deg==f.right_angle_deg&&r.eye_height_mm==0.&&r.bezel_gap_mm==f.bezel_gap_mm);
-        const auto o=parse({{"PanelWidthMm"," 700 "},{"PanelHeightMm","393.75"},{"EyeDistanceMm","800"},{"SideAngle","89.5"},
-                            {"BezelMm","0"},{"MatchGameFov"," FALSE "}},notes);
-        CHECK(notes.empty()&&o.panel_width_mm==700.&&o.panel_height_mm==393.75&&o.eye_distance_mm==800.&&o.side_angle_deg==89.5&&
-              o.bezel_mm==0.&&!o.match_game_fov);
-        CHECK(parse({{"MatchGameFov","true"}},notes).match_game_fov&&notes.empty());
-        const auto bad=parse({{"PanelWidthMm","99"},{"PanelHeightMm","2001"},{"EyeDistanceMm","inf"},{"SideAngle","90"},
-                              {"BezelMm","8mm"},{"MatchGameFov","0"}},notes);
-        CHECK(notes.size()==6&&bad.panel_width_mm==f.panel_width_mm&&bad.panel_height_mm==f.panel_height_mm&&bad.eye_distance_mm==660.&&
-              bad.side_angle_deg==70.&&bad.bezel_mm==8.&&bad.match_game_fov);
-        CHECK(notes[0].rfind("PanelWidthMm = 99 refused (100 to 3000)",0)==0&&notes[3].rfind("SideAngle = 90 refused (0 to below 90); 70 applies",0)==0&&
-              notes[5]=="MatchGameFov = 0 refused (true or false); true applies");
-        notes.clear();CHECK(parse({{"EyeDistanceMm","nan"},{"SideAngle","-1"}},notes).eye_distance_mm==660.&&notes.size()==2);
-        // PanelHeightMm is named as not used only when saved (nene 40406): Wheelkit's Apply writes a width and no height.
-        notes.clear();
-        CHECK(!d.panel_height_set&&o.panel_height_set&&!bad.panel_height_set);
-        CHECK(!triple_height_unused(d)&&!triple_height_unused(o));   // the default; 700 x 393.75 is exactly 16:9
-        const auto width_only=parse({{"PanelWidthMm","600"}},notes);
-        CHECK(notes.empty()&&!width_only.panel_height_set&&!triple_height_unused(width_only));
-        const auto both=parse({{"PanelWidthMm","600"},{"PanelHeightMm","400"}},notes);
-        CHECK(notes.empty()&&both.panel_height_set&&triple_height_unused(both));
-        CHECK(!triple_height_unused(parse({{"PanelWidthMm","600"},{"PanelHeightMm","337.75"}},notes)));   // within 0.5 mm of 337.5
-        // MatchGameFov = true with the defaults: the corrections are bit for bit the fixture's (the views as before), for
-        // the game's own race projection (F11: P[0] 0.893815, P[5] 1.589).
-        {   const Mat4 p_game=perspective_off_center_rh(-0.1/0.893815,0.1/0.893815,-0.1/1.589,0.1/1.589,0.1,5000.);
-            TripleViews a{},b{};CHECK(triple_views(p_game,triple_rig_from(d),a)&&triple_views(p_game,fixture_rig(8.),b));
-            bool equal=true;for(int i=0;i<3;++i)for(int k=0;k<16;++k)equal=equal&&a.correction[i][k]==b.correction[i][k];
-            CHECK(equal);
-        }
-        // MatchGameFov = false: the race camera at triple_physical_fov_y gives the physical rig's own per-panel views (eye
-        // at EyeDistanceMm, panels and angles as set), to 1e-9; at the defaults 33.6 degrees vertical, 56.4 horizontal.
-        for(const auto& s:{d,o}){
-            const double aspect=16./9.,fov=triple_physical_fov_y(s,aspect),n=0.1,t=n*std::tan(fov/2.),rr=t*aspect;
-            const Mat4 p_c=perspective_off_center_rh(-rr,rr,-t,t,n,5000.);
-            TripleViews v{};CHECK(triple_views(p_c,triple_rig_from(s),v));
-            TripleRig phys=triple_rig_from(s);phys.panel_height_mm=s.panel_width_mm/aspect;
-            const auto panels=rig_panels(phys);
-            for(int i=0;i<3;++i){
-                PanelBounds b{};CHECK(panel_bounds(panels[std::size_t(i)],{},b)==RigError::none);
-                const Mat4 direct=perspective_off_center_rh(b.left*n,b.right*n,b.bottom*n,b.top*n,n,5000.);
-                for(int k=0;k<16;++k)CHECK(std::fabs(v.projection[i][k]-direct[k])<=1e-9*(1.+std::fabs(direct[k])));
-            }
-        }
-        CHECK(std::fabs(triple_physical_fov_y(d,16./9.)*180./3.14159265358979323846-33.6)<0.05);
-        CHECK(std::fabs(2.*std::atan(std::tan(triple_physical_fov_y(d,16./9.)/2.)*16./9.)*180./3.14159265358979323846-56.4)<0.05);
-    }
-    // Separate spans only the toolkit's primary-centered racing row; a dashboard above/below it is not in its band.
-    const ScreenRect l{-2560,0,0,1440},c{0,0,2560,1440,true},r{2560,0,5120,1440};
-    const ScreenRect dashboard{314,-1080,2234,0},below{0,1440,1920,2520};
-    ScreenRect out{};
-    std::string reason;
-    CHECK(triple_span_from_monitors({l,c,r},out)&&same(out,{-2560,0,5120,1440}));
-    out={};CHECK(triple_span_from_monitors({c,r,l},out)&&same(out,{-2560,0,5120,1440}));
-    out={};CHECK(triple_span_from_monitors({r,l,c},out)&&same(out,{-2560,0,5120,1440}));
-    out={};CHECK(triple_span_from_monitors({l,c,r,dashboard},out,&reason)&&same(out,{-2560,0,5120,1440})&&
-                 reason.find("primary in the center")!=std::string::npos);
-    out={};CHECK(triple_span_from_monitors({dashboard,r,l,c},out)&&same(out,{-2560,0,5120,1440})); // primary enumerated last
-    out={};CHECK(triple_span_from_monitors({l,below,c,r},out)&&same(out,{-2560,0,5120,1440}));
-    CHECK(triple_span_from_monitors({{0,0,1920,1080},{1920,0,3840,1080,true},{3840,0,5760,1080}},out)&&
-          same(out,{0,0,5760,1080}));
-    // Refused: a gap, overlap, unequal or same-band extra display, missing side or primary, or Surround's wide primary.
-    const ScreenRect before{9,9,9,9};
-    out=before;CHECK(!triple_span_from_monitors({l,c,{2568,0,5128,1440}},out)&&same(out,before));
-    CHECK(!triple_span_from_monitors({l,c,{2552,0,5112,1440}},out));
-    CHECK(!triple_span_from_monitors({l,c,{2560,0,4480,1440}},out));
-    CHECK(!triple_span_from_monitors({l,c,{2560,0,5120,1600}},out));
-    CHECK(!triple_span_from_monitors({l,c,{2560,100,5120,1540}},out));
-    CHECK(!triple_span_from_monitors({l,c},out));
-    CHECK(!triple_span_from_monitors({l,c,r,{5120,0,7680,1440}},out,&reason)&&
-          reason.find("shares the racing row's band")!=std::string::npos);
-    CHECK(!triple_span_from_monitors({l,c,r,{314,-1080,2234,1}},out,&reason)&&
-          reason.find("shares the racing row's band")!=std::string::npos); // dashboard crosses the row boundary
-    CHECK(!triple_span_from_monitors({{0,0,2560,1440,true},r,{5120,0,7680,1440}},out,&reason)&&
-          reason.find("the left")!=std::string::npos); // physical primary at the end is not a row center
-    CHECK(!triple_span_from_monitors({l,{0,0,2560,1440},r},out,&reason)&&reason=="no primary display");
-    CHECK(!triple_span_from_monitors({l,{0,0,2560,1440,true},{2560,0,5120,1440,true}},out,&reason)&&
-          reason=="more than one primary display");
-    CHECK(!triple_span_from_monitors({},out));
-    CHECK(!triple_span_from_monitors({{0,0,0,0},{0,0,0,0},{0,0,0,0}},out));
-    CHECK(!triple_span_from_monitors({{0,0,7680,1440,true}},out,&reason)&&
-          reason.find("at least 4:1 wide")!=std::string::npos); // Surround is the single-window path
-    CHECK(!triple_span_from_monitors({{0,0,7680,1440,true},dashboard},out));
     // The display fit: never a stretch. 16:9 fills; wider gets centred columns (a three-monitor span: exactly the centre
     // monitor; an ultrawide); taller gets centred rows (16:10); 4:3 frames (the setup screen) likewise.
     CHECK(fit_is(2560,1440,1280,720,0,0,2560,1440));
@@ -305,13 +188,13 @@ int main(){
     CHECK(fit_is(0,0,1280,720,0,0,0,0));
     CHECK(fit_is(1280,720,0,0,0,0,1280,720));
     // The planar span (step 2): only when not Off and wider than 16:9; the scene width at the chosen height.
-    CHECK(planar_aspect(TripleScreens::separate,7680,1440)==float(7680.0/1440.0));
-    CHECK(planar_aspect(TripleScreens::surround,7680,1440)==float(7680.0/1440.0));
-    CHECK(planar_aspect(TripleScreens::surround,3440,1440)>0.f);            // Surround on an ultrawide: planar 21:9
-    CHECK(planar_aspect(TripleScreens::off,7680,1440)==0.f);
-    CHECK(planar_aspect(TripleScreens::separate,2560,1440)==0.f);           // refused span: the 16:9 primary
-    CHECK(planar_aspect(TripleScreens::surround,2560,1600)==0.f);
-    CHECK(planar_aspect(TripleScreens::surround,0,0)==0.f);
+    CHECK(planar_aspect(true,7680,1440)==float(7680.0/1440.0));
+    CHECK(planar_aspect(true,7680,1440)==float(7680.0/1440.0));
+    CHECK(planar_aspect(true,3440,1440)>0.f);            // Surround on an ultrawide: planar 21:9
+    CHECK(planar_aspect(false,7680,1440)==0.f);
+    CHECK(planar_aspect(true,2560,1440)==0.f);           // refused span: the 16:9 primary
+    CHECK(planar_aspect(true,2560,1600)==0.f);
+    CHECK(planar_aspect(true,0,0)==0.f);
     CHECK(planar_width(1440,float(7680.0/1440.0))==7680u);
     CHECK(planar_width(1080,float(5760.0/1080.0))==5760u);
     CHECK(planar_width(1440,float(3440.0/1440.0))==3440u);
@@ -531,25 +414,6 @@ int main(){
             CHECK(!visible(40.f,0.f,10.f)&&visible(0.f,0.f,-50.f));CHECK(lod==center_lod);
             CHECK(!visible(0.f,0.f,-6000.f)&&!visible(0.f,100.f,-10.f));
         }
-    }
-    {
-        CameraFraming framing;
-        constexpr float game=1.1f,seat=0.586f;
-        CHECK(framing.fov(0,game,seat,true)==seat&&framing.fov(1,game,seat,true)==seat&&framing.fov(2,game,seat,true)==game);
-        for(unsigned view=0;view<3;++view)CHECK(framing.fov(view,game,seat,false)==game); // single screen keeps the game
-        framing.offsets[0][1]=-2.f; // numpad + narrows, isolated to this camera/set
-        CHECK(framing.fov(0,game,seat,true)<seat&&framing.fov(1,game,seat,true)==seat);
-        framing.realistic[0]=false;
-        CHECK(framing.fov(0,game,seat,true)==game&&framing.offsets[0][1]==-2.f);
-        framing.offsets[2][0]=3.f;
-        const float expected_delta=3.f*0.017453292519943295f;
-        CHECK(std::fabs(framing.fov(2,game,seat,true)-game-expected_delta)<1e-6f);
-        CHECK(std::fabs(framing.fov(2,1.3f,seat,true)-1.3f-expected_delta)<1e-6f); // dynamic chase FOV plus offset, no accumulation
-        framing.offsets[2][0]=0.f;CHECK(framing.fov(2,game,seat,true)==game); // reset returns to calculation
-        framing.offsets[0][0]=std::numeric_limits<float>::infinity();CHECK(framing.fov(0,game,seat,true)==game);
-        CHECK(framing.fov(30,game,seat,true)==game); // cinematic/start views remain authored
-        CHECK(CameraFraming::set_key(0)=="BumperRealistic"&&CameraFraming::set_key(1)=="CockpitRealistic"&&CameraFraming::set_key(2)=="ChaseRealistic");
-        CHECK(CameraFraming::offset_key(0,false)=="BumperGameFovOffset"&&CameraFraming::offset_key(0,true)=="BumperRealisticFovOffset");
     }
     std::printf("triple screens: %u checks\n",checks);
     return 0;

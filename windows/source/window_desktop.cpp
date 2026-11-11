@@ -37,8 +37,6 @@
 #include "triple_screens.hpp"
 #include "startup_monitor.hpp"
 #include "startup_diagnostics.hpp"
-#include "triple_rig.hpp"
-#include "curve_scene_profile.hpp"
 #include <memory>
 #include <sstream>
 #include "desktop_keyboard.hpp"
@@ -55,57 +53,9 @@
 namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true,hide_mouse_cursor=true;
-outrun::desktop::TripleScreens triple=outrun::desktop::TripleScreens::off;   // [Triple] Screens (set_triple_screens)
-// [Triple] Views = Angled asked for (set_triple_projection), or the development switch OR2_TRIPLE_VIEWS=1 (cleared in
-// test processes like every OR2_ switch). Both the lods.ini read and the window use this one request.
+// [Triple] Views = Angled asked for, or the development switch OR2_TRIPLE_VIEWS=1. Both the lods.ini read and the window
+// use this one request.
 bool triple_angled_requested=false;
-bool triple_latched=false;   // a latched (test) process: no [Triple] keys applied
-outrun::desktop::TripleStatus triple_status;                                    // triple_screens_status()
-// The [Triple] rig keys (triple_screens.hpp parse_triple_rig), read when Angled is asked for in a normal process; the
-// toolkit's fixture rig (32-inch 16:9, eye 660 mm, sides 70 degrees, 8 mm gap) and MatchGameFov = true otherwise.
-outrun::desktop::TripleRigSettings triple_rig;
-std::unique_ptr<const outrun::desktop::CurveSceneProfile> curve_profile;
-bool curve_mesh_view(unsigned width,unsigned height,outrun::platform::PcCurveMeshView& out){return curve_profile&&outrun::desktop::curve_scene_mesh_view(*curve_profile,width,height,out);}
-
-// The three-view corrections (pc_screen.hpp g_pc_triple_corrections): that rig (the owner's 1500R curve approximated
-// flat) matched to the projection the game used each time it changes (triple_rig.hpp triple_views). With MatchGameFov =
-// false the race camera's projection is already the physical eye's, so the match is that eye.
-bool triple_fixture_corrections(const float* projection,float* out){
-    if(curve_profile&&outrun::platform::pc_curve_active()&&outrun::platform::pc_comparison_curve()){
-        if(outrun::desktop::curve_scene_corrections(*curve_profile,projection,out))return true;
-        return false; // only an actual World draw may latch flat; frontend/culling projections can differ
-    }
-    outrun::desktop::Mat4 p{};for(std::size_t k=0;k<16;++k)p[k]=double(projection[k]);
-    outrun::desktop::TripleViews v{};
-    if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),v))return false;
-    for(std::size_t i=0;i<3;++i)for(std::size_t k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
-    return true;
-}
-bool sun_fixture_views(const float* projection,outrun::platform::PcSunViews& out){
-    if(!curve_profile||!outrun::platform::g_pc_triple_corrections)return false;
-    outrun::desktop::TripleViews views;
-    if(outrun::platform::pc_curve_active()&&outrun::platform::pc_comparison_curve()){
-        if(!outrun::desktop::curve_scene_views(*curve_profile,projection,views))return false;
-    }else{
-        outrun::desktop::Mat4 p{};for(unsigned k=0;k<16;++k)p[k]=projection[k];
-        if(!outrun::desktop::triple_views(p,outrun::desktop::triple_rig_from(triple_rig),views))return false;
-    }
-    outrun::platform::PcSunViews candidate;
-    for(unsigned i=0;i<3;++i)for(unsigned k=0;k<16;++k){
-        candidate.rotation[i][k]=float(views.rotation[i][k]);candidate.projection[i][k]=float(views.projection[i][k]);
-        if(!std::isfinite(candidate.rotation[i][k])||!std::isfinite(candidate.projection[i][k]))return false;
-    }
-    out=candidate;return true;
-}
-struct MonitorScan { std::vector<outrun::desktop::ScreenRect> rects; bool failed{}; };
-BOOL CALLBACK add_monitor(HMONITOR h,HDC,LPRECT,LPARAM state){
-    auto& scan=*reinterpret_cast<MonitorScan*>(state);
-    MONITORINFO i{};i.cbSize=sizeof i;
-    if(!GetMonitorInfoW(h,&i)){scan.failed=true;return FALSE;}
-    scan.rects.push_back({i.rcMonitor.left,i.rcMonitor.top,i.rcMonitor.right,i.rcMonitor.bottom,
-                          (i.dwFlags&MONITORINFOF_PRIMARY)!=0});
-    return TRUE;
-}
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){outrun::desktop::gamepad_vibration_stop();closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
@@ -133,56 +83,30 @@ NativeWindow& native_window(){
     namespace td=outrun::desktop;
     const auto& monitor_state=td::startup_monitor_state();
     const auto* selected_monitor=monitor_state.selected();
-    std::string span_note;
     if(borderless){
         MONITORINFO m{};m.cbSize=sizeof m;
         GetMonitorInfoW(MonitorFromPoint(POINT{0,0},MONITOR_DEFAULTTOPRIMARY),&m);
         RECT r=m.rcMonitor;
-        std::string monitor_note="the primary monitor";
-        if(selected_monitor){
-            const auto& chosen=selected_monitor->bounds;r={chosen.left,chosen.top,chosen.right,chosen.bottom};
-            monitor_note="the selected gameplay display";
-        }
-        // Separate monitors (STD-015): the primary-centered racing row in physical pixels (the process is per-monitor
-        // DPI aware; the left monitor's x is negative). A dashboard outside the row is ignored. No mode/layout changes.
-        bool separate_span=false;   // Separate monitors found its three-monitor span
-        if(triple==td::TripleScreens::separate){
-            MonitorScan scan{};
-            const bool enumerated=selected_monitor||EnumDisplayMonitors(nullptr,nullptr,add_monitor,reinterpret_cast<LPARAM>(&scan))!=FALSE;
-            td::ScreenRect span{};std::string reason;
-            const bool found=selected_monitor?
-                td::startup_monitor_span(monitor_state.monitors,*monitor_state.selection.index,span,&reason):
-                enumerated&&!scan.failed&&td::triple_span_from_monitors(scan.rects,span,&reason);
-            if(found){
-                r={span.left,span.top,span.right,span.bottom};
-                span_note=selected_monitor?"over three monitors centered on the selected gameplay display":"over three monitors";separate_span=true;
-            }else{
-                if(!enumerated||scan.failed)reason="Windows did not report all monitors";
-                span_note="refused: "+reason+" ("+std::to_string(selected_monitor?monitor_state.monitors.size():scan.rects.size())+
-                    " found); "+monitor_note;
-            }
-        }
+        std::string where="the primary monitor";
+        // Which screens apply and where the window opens are the Wheelkit runtime's (wk_triples_get: three screens are
+        // used without being asked for, in physical pixels; the process is per-monitor DPI aware). A display chosen with
+        // [Window] MonitorDevicePath is used alone. No mode or layout changes.
+        const auto layout=td::wheelkit_layout();
+        if(selected_monitor){const auto& chosen=selected_monitor->bounds;r={chosen.left,chosen.top,chosen.right,chosen.bottom};where="the selected gameplay display";}
+        else if(layout.on){r={layout.x,layout.y,layout.x+layout.width,layout.y+layout.height};where=layout.text;}
+        const bool span=!selected_monitor&&layout.span;
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
-        if(span_note.empty())span_note=monitor_note;
-        // The planar span (step 2): wider than 16:9 and not Off gives one wide frustum over the whole window.
-        outrun::platform::g_pc_wide_aspect=td::planar_aspect(triple,w.width,w.height);
-        triple_status={triple,{r.left,r.top,r.right,r.bottom},span_note,outrun::platform::g_pc_wide_aspect};
-        // [Triple] Views = Angled (or OR2_TRIPLE_VIEWS=1) turns a planar span into three projected views (TRIPLE-SCREENS.md
-        // step 4, experimental): stage culling off while it is on.
-        const char* refused=triple_angled_requested?td::triple_projection_refusal(triple_latched,true,triple,separate_span,
-                                                                                   outrun::platform::g_pc_wide_aspect):nullptr;
-        triple_status.requested=triple_angled_requested?td::TripleProjection::angled:td::TripleProjection::planar;
-        triple_status.applied=triple_angled_requested&&!refused?td::TripleProjection::angled:td::TripleProjection::planar;
-        triple_status.projection_note=refused?refused:"";
-        if(refused)std::printf("triple screens: Angled views not applied: %s\n",refused);
-        if(triple_status.applied==td::TripleProjection::angled){
-            outrun::platform::g_pc_triple_corrections=triple_fixture_corrections;
-            if(curve_profile){
-                outrun::platform::g_pc_curve_mesh_provider=curve_mesh_view;
-                outrun::platform::g_pc_sun_views_provider=sun_fixture_views;
-            }
+        // The planar span: wider than 16:9 with screens on gives one wide frustum over the whole window.
+        outrun::platform::g_pc_wide_aspect=td::planar_aspect(!selected_monitor&&layout.wide,w.width,w.height);
+        // [Triple] Views = Angled (or OR2_TRIPLE_VIEWS=1) turns the span into three projected views, with the runtime's
+        // matrices for the measured screens (wk_triples_views).
+        const bool angled=triple_angled_requested&&span&&layout.rig&&outrun::platform::g_pc_wide_aspect>0.f;
+        if(triple_angled_requested&&!angled)
+            std::printf("triple screens: Angled views not applied: %s\n",span?"the screen measurements cannot be used":"needs three screens");
+        if(angled){
+            outrun::platform::g_pc_triple_corrections=td::wheelkit_view_corrections;
             // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
             // 44DE10) draw nothing behind the car and add objects beside it only a few sections on. Where [Graphics]
             // leaves a key at 0, the views union 64 sections ahead and 64 behind (td::triple_default_union). Tweaks'
@@ -190,36 +114,17 @@ NativeWindow& native_window(){
             auto& dd=outrun::platform::draw_distance();
             const auto u=td::triple_default_union(dd.increase,dd.behind,std::getenv("OR2_TRIPLE_AHEAD"),std::getenv("OR2_TRIPLE_BEHIND"));
             dd.increase=u.ahead;dd.behind=u.behind;if(dd.active())outrun::platform::render_queues_extended()=true;
-            // MatchGameFov = false: the race camera takes the physical eye's vertical FOV (the views' 16:9 screen) in race and
-            // goal modes; the front end keeps the game's. True (the default): the eye follows the game's FOV, as before.
-            char eye[160];
-            // The views take each panel's height from its width and the 16:9 render (triple_views); a saved PanelHeightMm
-            // that differs is named as not used, so arbitrary settings are not reported as exact geometry (sana 38280).
-            // An absent one is not named (triple_height_unused; nene 40406).
-            const double used_h=triple_rig.panel_width_mm*9./16.;
-            char height[120]="";
-            if(td::triple_height_unused(triple_rig))
-                std::snprintf(height,sizeof height," (PanelHeightMm %.1f not used: the height follows the width and the 16:9 render)",
-                              triple_rig.panel_height_mm);
-            if(triple_rig.match_game_fov)std::snprintf(eye,sizeof eye,"eye matched to the game's FOV");
-            else{const double fov=td::triple_physical_fov_y(triple_rig,16./9.);outrun::platform::triple_fov_y()=float(fov);
-                std::snprintf(eye,sizeof eye,"eye %.0f mm (MatchGameFov = false: the race camera's vertical FOV %.1f deg)",
-                              triple_rig.eye_distance_mm,fov*180./3.14159265358979323846);}
-            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; THREE PROJECTED VIEWS ([Triple] Views = Angled, experimental): the rig "
-                        "(panels %.1f x %.1f mm%s, sides %.1f deg, gap %.1f mm, %s), one game render replicated into three "
-                        "viewports; ordinary nodes culled against all panel frusta (unless DisableStageCulling); stage sections "
-                        "drawn +%d ahead and %d behind the car; the HUD, menus and screen-space particles on the center only\n",td::triple_screens_name(triple),
-                        w.width,w.height,r.left,r.top,span_note.c_str(),triple_rig.panel_width_mm,used_h,height,
-                        triple_rig.side_angle_deg,triple_rig.bezel_mm,eye,dd.increase,dd.behind);
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld); THREE PROJECTED VIEWS ([Triple] Views = Angled): one game render "
+                        "replicated into three viewports with the runtime's views; ordinary nodes culled against all panel frusta (unless "
+                        "DisableStageCulling); stage sections drawn +%d ahead and %d behind the car; the HUD, menus and screen-space particles "
+                        "on the center only\n",where.c_str(),w.width,w.height,r.left,r.top,dd.increase,dd.behind);
         }else if(outrun::platform::g_pc_wide_aspect>0.f)
-            std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; planar view %.3f:1 over the window (one wide frustum, "
-                        "not three views); 2D, menus and movies on the center 16:9\n",td::triple_screens_name(triple),w.width,w.height,
-                        r.left,r.top,span_note.c_str(),double(outrun::platform::g_pc_wide_aspect));
-        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld), %s; one 16:9 view, centered\n",td::triple_screens_name(triple),
-                         w.width,w.height,r.left,r.top,span_note.c_str());
+            std::printf("triple screens: %s; window %ux%u at (%ld, %ld); planar view %.3f:1 over the window (one wide frustum, "
+                        "not three views); 2D, menus and movies on the center 16:9\n",where.c_str(),w.width,w.height,
+                        r.left,r.top,double(outrun::platform::g_pc_wide_aspect));
+        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld); one 16:9 view, centered\n",where.c_str(),
+                         w.width,w.height,r.left,r.top);
     }else{
-        if(triple!=td::TripleScreens::off)std::printf("triple screens: %s needs the borderless window ([Window] WindowedBorderless, "
-                                                      "no --windowed); one 16:9 view\n",td::triple_screens_name(triple));
         RECT r{0,0,1280,720};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);
         int x=CW_USEDEFAULT,y=CW_USEDEFAULT;
         w.width=1280;w.height=720;
@@ -234,10 +139,6 @@ NativeWindow& native_window(){
         }
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_OVERLAPPEDWINDOW|WS_VISIBLE,x,y,
                              r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,nullptr);
-        triple_status={triple,{},selected_monitor?"a bordered window on the selected gameplay display":"a 1280x720 window (not borderless)",0.f};
-        if(triple_angled_requested){triple_status.requested=outrun::desktop::TripleProjection::angled;
-            triple_status.projection_note=outrun::desktop::triple_projection_refusal(triple_latched,false,triple,false,0.f);
-            std::printf("triple screens: Angled views not applied: %s\n",triple_status.projection_note.c_str());}
     }
     SetForegroundWindow(static_cast<HWND>(w.hwnd));
     return w;
@@ -261,10 +162,7 @@ unsigned select_refresh_rate(unsigned){
 }
 void set_borderless(bool on){borderless=on;}
 void set_hide_mouse_cursor(bool on){hide_mouse_cursor=on;}
-void set_triple_screens(outrun::desktop::TripleScreens mode){triple=mode;}
-void set_triple_projection(bool angled,bool latched){triple_angled_requested=angled;triple_latched=latched;}
 }
-const outrun::desktop::TripleStatus& outrun::desktop::triple_screens_status(){return outrun::xbox_runtime::triple_status;}
 // A crash writes its address and the return addresses on the stack (as
 // offsets in the executable, for llvm-symbolizer with the PDB) to runtime.log.
 static LONG WINAPI crash_report(EXCEPTION_POINTERS* e){
@@ -304,44 +202,17 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::xbox_runtime::set_borderless(borderless);
     outrun::xbox_runtime::set_hide_mouse_cursor(settings.flag("Window","WindowedHideMouseCursor",true));
     outrun::desktop::configure_startup_monitor(settings.text("Window","MonitorDevicePath"),true);
-    // [Triple] Screens (STD-022): Off (the default, also when the key is absent), Surround or Separate monitors, read at
-    // start (the window opens once). Anything else is logged and Off applies. windows/docs/TRIPLE-SCREENS.md.
-    {   const auto text=settings.text("Triple","Screens");
-        const auto mode=outrun::desktop::parse_triple_screens(text);
-        if(mode)outrun::xbox_runtime::set_triple_screens(*mode);
-        else if(!text.empty())std::printf("settings: [Triple] Screens = %.40s refused (Off, Surround or Separate monitors); Off applies\n",text.c_str());}
-    // [Triple] Views (below the selector): Planar (the default, also when the key is absent) or Angled, three projected
-    // views (experimental; the window applies it only over a span). Anything else is logged and Planar applies. The
-    // development switch OR2_TRIPLE_VIEWS=1 asks for Angled too. One request for both its users (the lods.ini read below
-    // and the window); a latched process records it but applies nothing (the status says why).
+    // The Wheelkit runtime (wheelkit_runtime.hpp), before the window: the wheel, pedals and shifter from the Wheelkit
+    // profile, the F6 panel, telemetry, and which screens the window opens on (three are used without being asked for).
+    outrun::desktop::wheelkit_configure(settings);
+    // [Triple] Views: Planar (the default, also when the key is absent) or Angled, three projected views (the window
+    // applies it only over three screens the runtime could measure). Anything else is logged and Planar applies. The
+    // development switch OR2_TRIPLE_VIEWS=1 asks for Angled too.
     {   const auto text=settings.text("Triple","Views");
         const auto projection=outrun::desktop::parse_triple_projection(text);
         if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
         const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
-        outrun::xbox_runtime::set_triple_projection(projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1"),false);}
-    // [Triple] PanelWidthMm / PanelHeightMm / EyeDistanceMm / SideAngle / BezelMm and MatchGameFov (the portfolio's rig
-    // keys, as Wheelkit writes them): read when Angled is asked for. A refused value is logged and its default applies;
-    // the window logs the rig in use.
-    if(outrun::xbox_runtime::triple_angled_requested){
-        std::vector<std::string> notes;
-        outrun::xbox_runtime::triple_rig=outrun::desktop::parse_triple_rig([&](const char* key){return settings.text("Triple",key);},notes);
-        for(const auto& n:notes)std::printf("settings: [Triple] %s\n",n.c_str());
-        const char* opt=std::getenv("OR2_CURVE_COMPOSITOR");
-        if(opt&&std::string(opt)=="1"){
-            const auto raw=settings.text("Triple","CurveRadiusMm");char* end=nullptr;
-            const double radius=raw.empty()?0.:std::strtod(raw.c_str(),&end);
-            auto rig=outrun::desktop::triple_rig_from(outrun::xbox_runtime::triple_rig);
-            // This first prototype preserves the admitted equal16:9 native layout.
-            rig.panel_height_mm=rig.panel_width_mm*9./16.;
-            auto profile=std::make_unique<outrun::desktop::CurveSceneProfile>();
-            if((raw.empty()||(end!=raw.c_str()&&*end=='\0'))&&outrun::desktop::curve_scene_profile(rig,radius,*profile)){
-                outrun::platform::g_pc_curve_radius_mm=float(radius);
-                outrun::xbox_runtime::curve_profile=std::move(profile);
-                std::printf("curve prototype: requested radius %.9g mm; equal16:9 source, resources pending; developer only\n",radius);
-            }else std::printf("curve prototype: refused CurveRadiusMm/geometry; legacy Angled retained\n");
-        }
-
-    }
+        outrun::xbox_runtime::triple_angled_requested=projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1");}
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
@@ -422,7 +293,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             return int(v);};
         dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
         // Angled views may set sections ahead and behind later (native_window): their exclusions are read here too.
-        const bool spike=outrun::xbox_runtime::triple_angled_requested&&!outrun::xbox_runtime::triple_latched;
+        const bool spike=outrun::xbox_runtime::triple_angled_requested;
         const char* from=nullptr;std::size_t excluded=0;
         if(dd.active()||spike)
             for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
@@ -583,9 +454,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // The game's own keyboard (the reconstructed PC keyboard device and its key tables).
     outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
         const auto& k=outrun::desktop::desktop_keys();std::copy(k.begin(),k.end(),keys);};
-    // The Wheelkit runtime (wheelkit_runtime.hpp): the wheel, pedals and shifter from the Wheelkit profile, the F6 panel
-    // and telemetry; its filter is the first, so every later one sees the wheel's sample (or a neutral one under F6).
-    outrun::desktop::wheelkit_configure(settings);
+    // The Wheelkit runtime's filter is the first, so every later one sees the wheel's sample (or a neutral one under F6).
     outrun::desktop::wheelkit_wrap_input_filter();
     const auto server=settings.text("Misc","DemonwareServerOverride");
     if(!outrun::platform::native_network_set_server_override(server))
@@ -601,9 +470,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     outrun::desktop::hud_toggle_wrap_input_filter();
     outrun::desktop::cd_switcher_configure(settings,false,false);
     outrun::desktop::cd_switcher_wrap_input_filter();
-    outrun::desktop::camera_controls_configure(settings,false,
-        float(outrun::desktop::triple_physical_fov_y(outrun::xbox_runtime::triple_rig,16./9.)));
-    outrun::desktop::camera_controls_wrap_input_filter();
+    outrun::desktop::camera_controls_configure(settings,outrun::desktop::wheelkit_layout().realistic_fov);
     std::vector<char*> argv;for(auto& a:args)argv.push_back(a.data());argv.push_back(nullptr);
     struct PadOutputCleanup {~PadOutputCleanup(){outrun::desktop::gamepad_vibration_shutdown();}} pad_output_cleanup;
     const int result=or2_xbox_main(int(args.size()),argv.data());

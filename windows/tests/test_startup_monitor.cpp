@@ -29,12 +29,7 @@ int main(){
     selection=select_startup_monitor(monitors,"path-center");
     CHECK(selection.index&&*selection.index==0u);
     CHECK(same(monitors[*selection.index].bounds,saved_rect));
-    ScreenRect span{};std::string reason;
-    CHECK(startup_monitor_span(monitors,*selection.index,span,&reason));
-    CHECK(same(span,{-2560,0,5120,1440,false}));
     CHECK(monitors.back().bounds.primary&&!monitors.front().bounds.primary); // original OS-primary flags intact
-    CHECK(!startup_monitor_span(monitors,monitors.size(),span));
-    CHECK(!startup_monitor_span(monitors,3u,span)); // dashboard is not a three-display row
     auto duplicate=monitors;duplicate.push_back(monitors.front());
     CHECK(!select_startup_monitor(duplicate,"path-center").index);
     auto clone=monitors;clone.front().paths.push_back("second-physical-target");
@@ -46,10 +41,6 @@ int main(){
     CHECK(!select_startup_monitor(unusable,"path-center").index);
     unusable=monitors;unusable.front().bounds.bottom=unusable.front().bounds.top;
     CHECK(!select_startup_monitor(unusable,"path-center").index);
-    auto no_right=monitors;no_right.erase(no_right.begin()+2);
-    CHECK(!startup_monitor_span(no_right,0u,span,&reason));
-    auto in_band=monitors;in_band.push_back({{5120,0,6400,1440,false},{5120,0,6400,1400,false},{"extra"},"Extra"});
-    CHECK(!startup_monitor_span(in_band,0u,span,&reason));
     CHECK(same(center_startup_window({-2560,0,0,1400,false},1300,760),{-1930,320,-630,1080,false}));
     CHECK(same(center_startup_window({-800,-600,0,0,false},1300,760),{-800,-600,0,0,false}));
     CHECK(same(center_startup_window({100,50,1100,850,false},1000,800),{100,50,1100,850,false}));

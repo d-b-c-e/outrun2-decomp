@@ -53,8 +53,7 @@ struct State {
     std::chrono::steady_clock::time_point t0;
     bool keyboard_drives{};std::int32_t keyboard_anchor{};
     std::uint32_t previous{};
-    int camera_index[11]{};
-    std::string camera_note;
+    double load_product{},load_size{};float load_peak{};unsigned load_samples{};   // the force feedback probe
 };
 State s;
 void WK_CALL log_line(const char* line,void*){std::printf("%s\n",line);std::fflush(stdout);}
@@ -105,7 +104,24 @@ void telemetry(const platform::NativeRuntimeContext* rt){
         c.race_on=1;c.speed=car.hud_kmh_1f8/3.6f;c.gear=int(car.gear_208);
         if(!(s.game_rpm&&telemetry_game_rpm(car,c.rpm,c.rpm_idle,c.rpm_max)))c.rpm=telemetry_synthetic_rpm(car);
         if(mode==16u){const auto& a=rt->race.car_world.analog_7d6810.current;   // what the game consumed
-            c.steer=float(std::clamp(a[0],-127,127))/127.f;c.throttle=float(std::clamp(a[1],0,255))/255.f;c.brake=float(std::clamp(a[2],0,255))/255.f;}
+            c.steer=float(std::clamp(a[0],-127,127))/127.f;c.throttle=float(std::clamp(a[1],0,255))/255.f;c.brake=float(std::clamp(a[2],0,255))/255.f;
+            // Force feedback's input, measured and logged only (no force is sent yet; windows/README.md): the front
+            // tyres' side force after the friction circle (body work 82E7F0, wheel records +0x258 and +0x34C, field
+            // +0xAC; SideForce 5019C0, 5026F0) over their grip limit (+0xC0), so -1..1, against the consumed steering.
+            // One drive tells its sign against the steering and its size.
+            const auto& b=cs.body_82e7f0;
+            if(b.size()>=0x440u&&std::fabs(c.steer)>0.2f&&c.speed>16.f){
+                auto f=[&](std::size_t wheel,std::size_t at){float v;std::memcpy(&v,b.data()+0x258u+wheel*0xf4u+at,4);return v;};
+                const float grip=f(0,0xc0)+f(1,0xc0),load=grip>0.f?(f(0,0xac)+f(1,0xac))/grip:0.f;
+                if(std::isfinite(load)){
+                    s.load_product+=double(load)*c.steer;s.load_size+=std::fabs(load);s.load_peak=std::max(s.load_peak,std::fabs(load));
+                    if(++s.load_samples%600u==0u){char line[200];
+                        std::snprintf(line,sizeof line,"ffb probe: front side force over grip while steering above 20%% past 58 km/h: %u samples, "
+                            "mean (load x steer) %+.4f, mean size %.4f, peak %.4f",s.load_samples,s.load_product/s.load_samples,s.load_size/s.load_samples,double(s.load_peak));
+                        wk.wk_log(line);}
+                }
+            }
+        }
     }
     wk.wk_telemetry_frame(&c);
 }
@@ -122,11 +138,9 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     const bool open=(in.flags&WK_INPUT_PANEL)!=0;
     if(open!=s.was_open){desktop_keys_clear();s.was_open=open;}
     if(open){   // the panel has the input: a neutral sample, the presence flags kept
-        camera_controls_end_comparison();
         const bool connected=out.connected;out=platform::NativeInputState{};out.connected=connected;out.pc_input_layer=true;return;
     }
-    const auto camera_note=camera_controls_notice();   // a camera change is a toast on the runtime's panel
-    if(camera_note!=s.camera_note){s.camera_note=camera_note;if(!camera_note.empty())wk.wk_panel_toast(camera_note.c_str(),nullptr,1500);}
+    camera_controls_tick(rt);   // the view on screen to the runtime, its framing and offsets back
     const std::uint32_t mode=rt?rt->mode_state.current:0u;
     const bool race=mode==16u||mode==18u;
     // Outside the race the menus read these edges: the game's own default menu keys (61E678) count as the buttons.
@@ -135,9 +149,6 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
               if(desktop_key(0xd0))held|=1u<<NavDown;if(desktop_key(0xcb))held|=1u<<NavLeft;if(desktop_key(0xcd))held|=1u<<NavRight;}
     const std::uint32_t keys=held;
     for(unsigned i=0;i<ButtonCount;++i)if(in.held[ButtonActions[i]])held|=1u<<i;
-    std::array<CameraResolvedAction,11> cameras{};
-    for(unsigned i=0;i<cameras.size();++i)cameras[i]={s.camera_index[i]>=0&&in.held[s.camera_index[i]]!=0,(in.flags&WK_INPUT_PROFILE)!=0};
-    camera_controls_resolved_actions(cameras,mode!=16u,GetTickCount64());
     if(in.transmission==WK_TRANSMISSION_H_PATTERN){   // OutRun shifts sequentially: pulses toward the held gate
         bool gates[6];for(int i=0;i<6;++i)gates[i]=in.held[WK_ACTION_GEAR1+i]!=0;
         const bool car=rt&&race;std::uint32_t gear=0;
@@ -205,13 +216,16 @@ void wheelkit_configure(const Ini& settings){
     }
     const std::string ini=settings.path();
     wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.2.0";
-    id.settings_file=ini.c_str();id.window=xbox_runtime::native_window().hwnd;id.log=log_line;
+    id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;
-    for(unsigned i=0;i<CameraControlActions.size();++i){
-        s.camera_index[i]=-1;for(int a=0;a<WK_ACTION_COUNT;++a)if(std::strcmp(wk.wk_action_name(a),CameraControlActions[i])==0)s.camera_index[i]=a;}
+    // The game's own views in its cycle, and the Bonnet view it lacks (camera_controls.cpp adds it after the bumper).
+    const wk_camera_view views[]{{"Bumper","Bumper",1},{"Cockpit","Cockpit",1},{"Chase","Chase",0},{"Bonnet","Bonnet",0}};
+    if(!wk.wk_cameras_configure(views,4))std::printf("wheelkit: camera views refused: %s\n",wk.wk_last_error());
     if(!wk.wk_panel_configure(kDescriptor,sizeof kDescriptor-1)){std::printf("wheelkit: F6 pages refused: %s\n",wk.wk_last_error());return;}
     show_values(settings);
+    wk_triples t{};t.size=sizeof t;   // the Screens row shows what applies, also when it came from the displays
+    if(wk.wk_triples_get(&t))wk.wk_panel_set_choice("display.screens",t.screens);
 }
 
 void wheelkit_wrap_input_filter(){
@@ -221,6 +235,26 @@ void wheelkit_wrap_input_filter(){
 }
 
 bool wheelkit_panel_open(){return s.on&&wk.wk_panel_wants_input();}
+
+WheelkitLayout wheelkit_layout(){
+    wk_triples t{};t.size=sizeof t;
+    if(!s.on||!wk.wk_triples_get(&t))return {};
+    return {true,t.screens!=WK_SCREENS_OFF,t.span!=0,t.rig!=0,t.x,t.y,t.width,t.height,float(t.realistic_fov_y),t.text};
+}
+
+bool wheelkit_view_corrections(const float* projection,float* out){
+    double p[16];for(int k=0;k<16;++k)p[k]=double(projection[k]);
+    wk_triple_views v{};v.size=sizeof v;
+    if(!s.on||!wk.wk_triples_views(p,&v))return false;
+    for(int i=0;i<3;++i)for(int k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+    return true;
+}
+
+WheelkitCamera wheelkit_camera(int view,const char* car,bool projected_views){
+    wk_camera c{};c.size=sizeof c;
+    if(!s.on||!wk.wk_cameras_frame(view,car,projected_views?1:0,&c))return {};
+    return {view,c.realistic!=0,c.fov_offset_degrees,c.right_cm,c.up_cm,c.forward_cm};
+}
 
 void wheelkit_shutdown(){
     xbox_runtime::present_overlay()=nullptr;
