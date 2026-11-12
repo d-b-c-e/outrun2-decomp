@@ -2,7 +2,7 @@
 // (wheelkit runtime/native/panel/dbce_panel_descriptor.h). Rows the game handles are listed in wheelkit_runtime.cpp's
 // table with the OutRunDesktop.ini key each one saves; telemetry.enabled is the runtime's own.
 R"json({"settings":{
- "product":"OutRun 2006 Coast 2 Coast","version":"0.5.0-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
+ "product":"OutRun 2006 Coast 2 Coast","version":"0.5.1-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
  "keys":"F6 settings","pages":{
  "controls":[
   {"id":"controls.profile","kind":"status","label":"Wheel profile","text":"No profile from Wheelkit"},
