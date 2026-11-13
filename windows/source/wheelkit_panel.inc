@@ -3,7 +3,7 @@
 // table with the OutRunDesktop.ini key each one saves; ffb.enabled and ffb.steering are the runtime's own. No row for
 // the screens or telemetry (the rig profile says them), the graphics preset (Wheelkit's app option) or the texture packs.
 R"json({"settings":{
- "product":"OutRun 2006 Coast 2 Coast","version":"0.9.0-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
+ "product":"OutRun 2006 Coast 2 Coast","version":"0.9.1-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
  "keys":"F6 settings","pages":{
  "controls":[
   {"id":"controls.profile","kind":"status","label":"Wheel profile","text":"No profile from Wheelkit"},

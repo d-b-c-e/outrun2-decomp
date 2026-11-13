@@ -26,11 +26,11 @@
 #include <cstring>
 #include <string>
 namespace outrun::desktop {
-// The factor from load to the wheel's force at Steering strength 50 (the runtime multiplies by strength / 50). Chosen
-// so that the grip limit (load 1) gives 0.30, art of rally's 95th percentile (0.29 of the wheel above 12 km/h, Wheelkit
-// docs/recording-and-playback.md section 11), and a corner at a third of the grip gives 0.09, its median. That a typical
-// corner uses about a third of the front grip is an assumption until the probe's p50 is read from a drive: then the
-// factor is 0.09 / p50.
+// The game's force level (wk_ffb_set_level, Wheelkit's games/outrun-2006/force-level.json): the wheel's force at Steering
+// strength 50 is the load times this (the runtime multiplies by it, then by strength / 50). The grip limit (load 1)
+// gives 0.30, art of rally's 95th percentile (0.29 of the wheel above 12 km/h, Wheelkit docs/recording-and-playback.md
+// section 11). Measured in an injected race of 2026-11-13: the load's p50 above 12 km/h was 0.32, so 0.096 of the wheel
+// against art of rally's median 0.09.
 inline constexpr float ForceFactor=0.30f;
 // Below 5 km/h the slip angle has no meaning (the velocity is tiny); the force fades in to full at 20 km/h.
 inline float force_fade(float kmh){return std::clamp((kmh-5.f)/15.f,0.f,1.f);}
@@ -48,10 +48,10 @@ inline FrontLoad front_load(const std::uint8_t* body,std::size_t size){
     out.grip=f(0,0xe4)>=0.999f&&f(1,0xe4)>=0.999f;
     return out;
 }
-// The force to hold, -1..1 of the wheel, before Steering strength.
+// The force to send (wk_ffb_set_force), -1..1, before the game's level (ForceFactor) and Steering strength.
 inline float steering_force(float load,float kmh){
     if(!std::isfinite(load)||!std::isfinite(kmh))return 0.f;
-    return std::clamp(load*ForceFactor*force_fade(kmh),-1.f,1.f);
+    return std::clamp(load*force_fade(kmh),-1.f,1.f);
 }
 
 // What one drive says about the load: its size above 12 km/h (as art of rally's distribution is measured) and its sign
@@ -63,8 +63,8 @@ struct ForceProbe {
     void add(float load,float steer,float kmh,bool grip){
         if(!std::isfinite(load)||!std::isfinite(steer)||!std::isfinite(kmh))return;
         if(kmh>12.f){++size[std::min<std::size_t>(99,std::size_t(std::fabs(load)*100.f))];++moving;peak=std::max(peak,std::fabs(load));}
-        if(kmh>30.f&&steer>0.05f){force_right+=steering_force(load,kmh);++right;}
-        if(kmh>30.f&&steer< -0.05f){force_left+=steering_force(load,kmh);++left;}
+        if(kmh>30.f&&steer>0.05f){force_right+=steering_force(load,kmh)*ForceFactor;++right;}
+        if(kmh>30.f&&steer< -0.05f){force_left+=steering_force(load,kmh)*ForceFactor;++left;}
         if(grip&&kmh>30.f&&std::fabs(steer)>0.05f&&load!=0.f){++corners;if((load<0.f)!=(steer<0.f))++opposite;}
     }
     float percentile(double p)const{

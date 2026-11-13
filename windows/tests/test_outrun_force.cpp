@@ -34,10 +34,10 @@ int main(){
         check(l.valid&&near(l.load,1.f)&&!l.grip,"past the grip: 1, and a sliding front wheel is not grip");}
     {   Body b(0.f,0.f);check(!front_load(b.bytes.data(),0x400).valid,"a short body is not read");
         b.put(0,0xc0,0.f);b.put(1,0xc0,0.f);check(!front_load(b.bytes.data(),b.bytes.size()).valid,"no grip (airborne): no load");}
-    // The mapping: +load x 0.30, faded in from 5 to 20 km/h, clamped.
-    check(near(steering_force(-115.f/grip,120.f),-115.f/grip*0.30f),"a typical corner: about -0.09");
-    check(near(steering_force(1.f,200.f),0.30f)&&near(steering_force(-1.f,200.f),-0.30f),"the grip limit: 0.30 each way");
-    check(steering_force(1.f,4.f)==0.f&&near(steering_force(1.f,12.5f),0.15f)&&near(steering_force(1.f,20.f),0.30f),"the fade at low speed");
+    // The mapping: +load, faded in from 5 to 20 km/h, clamped; the runtime applies the level 0.30 (wk_ffb_set_level).
+    check(near(steering_force(-115.f/grip,120.f)*ForceFactor,-115.f/grip*0.30f),"a typical corner at the level: about -0.09");
+    check(near(steering_force(1.f,200.f),1.f)&&near(steering_force(-1.f,200.f),-1.f)&&near(ForceFactor,0.30f),"the grip limit: the whole force, 0.30 of the wheel at the level");
+    check(steering_force(1.f,4.f)==0.f&&near(steering_force(1.f,12.5f),0.5f)&&near(steering_force(1.f,20.f),1.f),"the fade at low speed");
     check(steering_force(std::nanf(""),100.f)==0.f&&steering_force(1.f,std::nanf(""))==0.f,"nothing finite, no force");
     // The sign: in a right-hand grip corner (steer > 0) the load is negative, so the force pulls the rim left, to the center.
     check(steering_force(-0.3f,100.f)<0.f,"steering right, the force pulls left");

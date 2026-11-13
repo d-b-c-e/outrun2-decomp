@@ -242,10 +242,11 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.0-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.1-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;
+    wk.wk_ffb_set_level(ForceFactor);   // the game's force level (outrun_force.hpp), before Steering strength
     // The game's own views in its cycle, and the Bonnet view it lacks (camera_controls.cpp adds it after the bumper).
     const wk_camera_view views[]{{"Bumper","Bumper",1},{"Cockpit","Cockpit",1},{"Chase","Chase",0},{"Bonnet","Bonnet",0}};
     if(!wk.wk_cameras_configure(views,4))std::printf("wheelkit: camera views refused: %s\n",wk.wk_last_error());
