@@ -7,9 +7,11 @@
 #include "hpattern.hpp"
 #include "letterbox.hpp"
 #include "native_window.hpp"
+#include "outrun_force.hpp"
 #include "telemetry_forza.hpp"
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
+#include "platform/pc_pmt_loader.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
@@ -28,19 +30,17 @@ const char kDescriptor[]=
 #include "wheelkit_panel.inc"
 ;
 // The rows the game saves itself: one key of OutRunDesktop.ini each. values: the saved text of each choice ("|"),
-// "%" for a percent saved as a fraction, "" for a toggle (true / false).
+// "%" for a percent saved as a fraction, "" for a toggle (true / false). No row for what the rig profile says (the
+// screens, telemetry), for the graphics preset (Wheelkit's app option, graphics_options.hpp) or for the texture packs
+// (on when present).
 struct Row { const char *id,*section,*key,*values; };
 constexpr Row Rows[]{
     {"controls.sensitivity","Wheel","SteeringSensitivity","%"},{"controls.deadzone","Wheel","SteeringDeadZone","%"},
     {"controls.manual","Misc","DefaultManualTransmission",""},{"controls.horn","Audio","AllowHorn",""},
-    {"display.screens","Triple","Screens","Off|Surround|Separate monitors"},{"display.latency","Window","FrameLatency","0|1|2|3"},
+    {"display.latency","Window","FrameLatency","0|1|2|3"},
     {"display.ui-scaling","Graphics","UIScalingMode","0|1|2"},{"display.letterbox","Graphics","UILetterboxing","0|1|2"},
-    {"display.views","Triple","Views","Planar|Angled"},{"display.borderless","Window","WindowedBorderless",""},
-    {"display.cursor","Window","WindowedHideMouseCursor",""},{"display.aniso","Graphics","AnisotropicFiltering","0|2|4|8|16"},
-    {"display.reflection","Graphics","ReflectionResolution","128|256|512|1024|2048"},{"display.lods","Graphics","DisableVehicleLODs",""},
-    {"display.culling","Graphics","DisableStageCulling",""},{"display.transparency","Graphics","TransparencySupersampling",""},
-    {"display.scene-textures","Graphics","SceneTextureReplacement",""},{"display.ui-textures","Graphics","UITextureReplacement",""},
-    {"telemetry.rpm","Telemetry","EngineRpm","Synthetic|Game"}};
+    {"display.borderless","Window","WindowedBorderless",""},
+    {"display.cursor","Window","WindowedHideMouseCursor",""},{"display.culling","Graphics","DisableStageCulling",""}};
 // The game's buttons, by the contract action that drives each.
 enum Button : unsigned { Confirm,Back,Start,ShiftUp,ShiftDown,Camera,NavUp,NavDown,NavLeft,NavRight,Horn,ButtonCount };
 constexpr int ButtonActions[ButtonCount]{WK_ACTION_CONFIRM,WK_ACTION_BACK,WK_ACTION_START,WK_ACTION_SHIFT_UP,WK_ACTION_SHIFT_DOWN,
@@ -53,7 +53,8 @@ struct State {
     std::chrono::steady_clock::time_point t0;
     bool keyboard_drives{};std::int32_t keyboard_anchor{};
     std::uint32_t previous{};
-    double load_product{},load_size{};float load_peak{};unsigned load_samples{};   // the force feedback probe
+    ForceProbe probe;unsigned probe_logged{};bool force_stopped{},racing{};   // force feedback (outrun_force.hpp)
+    unsigned status_ticks{};int status_state{-1};
 };
 State s;
 void WK_CALL log_line(const char* line,void*){std::printf("%s\n",line);std::fflush(stdout);}
@@ -93,6 +94,46 @@ void overlay(void* device,void* context,void* view,unsigned width,unsigned heigh
     if(!s.attached&&device)s.attached=wk.wk_panel_d3d11_attach(device,xbox_runtime::native_window().hwnd)!=0;
     if(s.attached)wk.wk_panel_d3d11_frame(view);
 }
+// The F6 Force feedback page's status line, from the runtime's state when it changes (checked about once a second).
+void force_status(){
+    if(++s.status_ticks%60u!=1u)return;
+    wk_ffb_status st{};st.size=sizeof st;
+    if(!wk.wk_ffb_get_status(&st)||(st.state==s.status_state&&!s.force_stopped))return;
+    s.status_state=st.state;
+    const char* text=s.force_stopped?"Stopped: the steering load pushed into the turns (see the log)":st.text;
+    wk.wk_panel_set_text("ffb.status",text,st.state==WK_FFB_ON&&!s.force_stopped?WK_TONE_GOOD:WK_TONE_NORMAL);
+}
+// The race's force (outrun_force.hpp): the front tyres' steering load, every tick in GAME; the runtime applies the
+// player's on or off, Steering strength, F8, the mute, the fence and the hold watchdog. The probe checks the sign on
+// every drive and stops the force for the run if grip corners show it reversed.
+void force(const std::uint8_t* body,std::size_t size,float steer,float kmh){
+    const auto l=front_load(body,size);
+    if(!l.valid)return;
+    if(!s.racing){   // each race's start: what the texture packs replaced so far (the menus, the HUD, this stage)
+        const auto& scene=platform::pmt_texture_replacement_stats();const auto& ui=platform::ui_texture_replacement_stats();
+        if(scene.files||ui.files){char line[260];
+            std::snprintf(line,sizeof line,"textures: %u stage, car and object textures and %u menu and HUD textures replaced from the pack "
+                "so far (%u and %u looked up)",unsigned(scene.replaced),unsigned(ui.replaced),unsigned(scene.looked),unsigned(ui.looked));
+            wk.wk_log(line);}
+    }
+    s.racing=true;
+    s.probe.add(l.load,steer,kmh,l.grip);
+    if(!s.force_stopped&&s.probe.sign()<0){
+        s.force_stopped=true;
+        wk.wk_log(("ffb: stopped for this run: in grip corners the steering load pushed the same way as the steering, so the force "
+                   "would pull into the turn; "+s.probe.line()).c_str());
+    }
+    wk.wk_ffb_set_force(s.force_stopped?0.f:steering_force(l.load,kmh));
+    if(s.probe.moving>=s.probe_logged+1800u){s.probe_logged=s.probe.moving;wk.wk_log(s.probe.line().c_str());}   // every 30 s
+    force_status();
+}
+// Out of the race: the force is not renewed (the runtime's watchdog zeroes it), and the probe is logged once more.
+void force_end(){
+    force_status();
+    if(!s.racing)return;
+    s.racing=false;
+    if(s.probe.moving>s.probe_logged){s.probe_logged=s.probe.moving;wk.wk_log(s.probe.line().c_str());}
+}
 void telemetry(const platform::NativeRuntimeContext* rt){
     wk_car c{};c.size=sizeof c;
     c.rpm_max=TelemetryMaxRpm;c.rpm_idle=c.rpm=TelemetryIdleRpm;c.gear=1;
@@ -105,24 +146,10 @@ void telemetry(const platform::NativeRuntimeContext* rt){
         if(!(s.game_rpm&&telemetry_game_rpm(car,c.rpm,c.rpm_idle,c.rpm_max)))c.rpm=telemetry_synthetic_rpm(car);
         if(mode==16u){const auto& a=rt->race.car_world.analog_7d6810.current;   // what the game consumed
             c.steer=float(std::clamp(a[0],-127,127))/127.f;c.throttle=float(std::clamp(a[1],0,255))/255.f;c.brake=float(std::clamp(a[2],0,255))/255.f;
-            // Force feedback's input, measured and logged only (no force is sent yet; windows/README.md): the front
-            // tyres' side force after the friction circle (body work 82E7F0, wheel records +0x258 and +0x34C, field
-            // +0xAC; SideForce 5019C0, 5026F0) over their grip limit (+0xC0), so -1..1, against the consumed steering.
-            // One drive tells its sign against the steering and its size.
-            const auto& b=cs.body_82e7f0;
-            if(b.size()>=0x440u&&std::fabs(c.steer)>0.2f&&c.speed>16.f){
-                auto f=[&](std::size_t wheel,std::size_t at){float v;std::memcpy(&v,b.data()+0x258u+wheel*0xf4u+at,4);return v;};
-                const float grip=f(0,0xc0)+f(1,0xc0),load=grip>0.f?(f(0,0xac)+f(1,0xac))/grip:0.f;
-                if(std::isfinite(load)){
-                    s.load_product+=double(load)*c.steer;s.load_size+=std::fabs(load);s.load_peak=std::max(s.load_peak,std::fabs(load));
-                    if(++s.load_samples%600u==0u){char line[200];
-                        std::snprintf(line,sizeof line,"ffb probe: front side force over grip while steering above 20%% past 58 km/h: %u samples, "
-                            "mean (load x steer) %+.4f, mean size %.4f, peak %.4f",s.load_samples,s.load_product/s.load_samples,s.load_size/s.load_samples,double(s.load_peak));
-                        wk.wk_log(line);}
-                }
-            }
+            force(cs.body_82e7f0.data(),cs.body_82e7f0.size(),c.steer,car.hud_kmh_1f8);
         }
     }
+    if(!(rt&&mode==16u))force_end();
     wk.wk_telemetry_frame(&c);
 }
 void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
@@ -215,7 +242,7 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.5.1-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.0-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;
@@ -224,8 +251,11 @@ void wheelkit_configure(const Ini& settings){
     if(!wk.wk_cameras_configure(views,4))std::printf("wheelkit: camera views refused: %s\n",wk.wk_last_error());
     if(!wk.wk_panel_configure(kDescriptor,sizeof kDescriptor-1)){std::printf("wheelkit: F6 pages refused: %s\n",wk.wk_last_error());return;}
     show_values(settings);
-    wk_triples t{};t.size=sizeof t;   // the Screens row shows what applies, also when it came from the displays
-    if(wk.wk_triples_get(&t))wk.wk_panel_set_choice("display.screens",t.screens);
+}
+
+void wheelkit_log(const char* line){
+    if(s.on)wk.wk_log(line);   // the runtime's log, and runtime.log through log_line
+    else{std::printf("%s\n",line);std::fflush(stdout);}
 }
 
 void wheelkit_wrap_input_filter(){
@@ -260,6 +290,7 @@ void wheelkit_shutdown(){
     xbox_runtime::present_overlay()=nullptr;
     letterbox_release();
     if(!s.on)return;
+    force_end();
     wk.wk_panel_d3d11_detach();
     wk.wk_stop();
     s.on=false;

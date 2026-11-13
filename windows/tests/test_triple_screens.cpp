@@ -148,17 +148,13 @@ int main(){
         }
         CHECK(plain[5].pc==0x4653c0u); // 4FC971 is not a Tweaks hook; it remains bit-identical.
     }
-    // [Triple] Views: Planar or Angled, strictly (anything else gives nothing: logged, Planar applies); Angled applies
-    // only in a normal process with the borderless window over a span, each refusal named.
-    CHECK(parse_triple_projection("Planar")==TripleProjection::planar);
-    CHECK(parse_triple_projection(" angled\t")==TripleProjection::angled);
-    CHECK(parse_triple_projection("ANGLED")==TripleProjection::angled);
-    CHECK(!parse_triple_projection(""));
-    CHECK(!parse_triple_projection("Three"));
-    CHECK(!parse_triple_projection("on"));
-    CHECK(!parse_triple_projection("Angled views"));
-    CHECK(std::string(triple_projection_name(TripleProjection::angled))=="Angled");
-    CHECK(std::string(triple_projection_name(TripleProjection::planar))=="Planar");
+    // Three screens are three projected views, with no setting: a span the runtime measured, wider than 16:9. Anything
+    // else is one 16:9 view; never one wide picture (issue outrun-2006-0003).
+    CHECK(triple_draw(true,true,planar_aspect(true,7680,1440))==TripleDraw::angled);
+    CHECK(triple_draw(true,true,planar_aspect(true,5760,1080))==TripleDraw::angled);
+    CHECK(triple_draw(true,false,planar_aspect(true,7680,1440))==TripleDraw::single);   // measurements unusable
+    CHECK(triple_draw(false,true,planar_aspect(false,2560,1440))==TripleDraw::single);  // one screen
+    CHECK(triple_draw(true,true,planar_aspect(true,2560,1440))==TripleDraw::single);    // not wider than 16:9
     // The Angled default union: 64 / 64 where [Graphics] leaves a key at 0. A set key is kept and the environment never
     // replaces it; an environment value in range (strtol: leading blanks pass) replaces only a default, 0 included;
     // anything else is ignored.

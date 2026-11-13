@@ -60,7 +60,8 @@ repository, `runtime/native/sdk/README.md`).
   game owns saves one key of `OutRunDesktop.ini` and applies at the next start.
   While it is open the game gets a neutral input sample.
 - **Telemetry.** The runtime sends the Forza Horizon packet to
-  `127.0.0.1:[Telemetry] Port` (8000); `[Telemetry] Enabled` turns it off. The
+  `127.0.0.1:[Telemetry] Port` (8000); `[Telemetry] Enabled` (written by
+  Wheelkit from My rig's Telemetry; no F6 row) turns it off. The
   game fills the car state each tick: the HUD speed (car +0x1F8 km/h), the gear
   (+0x208), the engine speed (synthesised from speed and gear, or with
   `[Telemetry] EngineRpm = Game` the HUD tachometer +0x20C with the car's idle and
@@ -70,12 +71,15 @@ repository, `runtime/native/sdk/README.md`).
   window opens (`wk_triples_get`): `[Triple] Screens` when the player saved a
   choice (Off, Surround, Separate monitors), otherwise what the displays are, so
   three screens are used without being asked for. Menus, the HUD, movies and F6
-  stay on the center screen. `[Triple] Views = Angled` draws three projected
-  views with the runtime's matrices (`wk_triples_views`) for the screens'
-  measurements (`PanelWidthMm`, `PanelHeightMm`, `EyeDistanceMm`,
+  stay on the center screen. Three screens are always three projected views,
+  with no setting (issue outrun-2006-0003: the one wide view the build used to
+  default to is gone): the runtime's matrices (`wk_triples_views`) for the
+  screens' measurements (`PanelWidthMm`, `PanelHeightMm`, `EyeDistanceMm`,
   `LeftYawDegrees`, `RightYawDegrees`, `BezelMm`, as Wheelkit writes them; unset
   keys take the size Windows reports, eye 660 mm, bezel 8 mm and sides facing
-  the seat); Planar, the default, is one wide view. How the views are drawn
+  the seat). A span whose measurements cannot be used gets one 16:9 view on the
+  center screen (`source/triple_screens.hpp` `triple_draw`). The screens are
+  flat in the views: `CurveRadiusMm` is not applied. How the views are drawn
   (one render replicated into three viewports, the culling and the stage
   sections) is this game's (`source/triple_screens.hpp`, `xbox/source`). A
   display chosen with `[Window] MonitorDevicePath` is used alone. The curve
@@ -88,20 +92,29 @@ repository, `runtime/native/sdk/README.md`).
   by 2 degrees, 8/2 9/3 4/6 move by 1 cm per car, 5 resets) in `[Cameras]` and
   `[CameraPoses]`, and names the view in a toast (`wk_cameras_frame`). The tilt
   keys, the key rebinding and the Shift+F7 comparison are gone.
-- **Force feedback** is not built on this branch, and no force is sent. The
-  steering load it needs is in the car: DrivingControl's SideForce (5019C0) and
-  friction circle (5026F0) leave each wheel's side force at wheel record +0xAC
-  and its grip limit at +0xC0, in the player's body work 82E7F0 (wheel records
-  of 0xF4 bytes at +0x258 front left, +0x34C front right, +0x440, +0x534; +0
-  bit 0 clear = on the ground). The front pair's side force over its grip is a
-  load of -1..1 with no constant of ours. Not yet known: its sign against the
-  steering and its size in ordinary driving. In GAME the runtime's log gets a
-  line every 600 samples ("ffb probe: ...") with the mean of load x steering
-  and the mean and peak size, taken while steering past 20% above 58 km/h; one
-  driven stage answers both. Then: `wk_ffb_set_force(-sign x load)` each tick
-  (the runtime owns the device, the fence and the direction per wheel), with
-  the strength the owner picks. The older centring spring from steering and
-  speed ([docs/FFB-PRODUCER2.md](docs/FFB-PRODUCER2.md)) is not carried.
+- **Force feedback** is the car's own steering load (`source/outrun_force.hpp`):
+  DrivingControl's SideForce (5019C0) and friction circle (5026F0) leave each
+  wheel's side force at wheel record +0xAC, its grip at +0xC0 and its sliding
+  scale at +0xE4, in the player's body work 82E7F0 (wheel records of 0xF4 bytes
+  at +0x258 front left, +0x34C front right, +0x440, +0x534). The front pair's
+  side force over its grip, times 0.30 and faded in from 5 to 20 km/h, goes to
+  `wk_ffb_set_force` each tick in GAME; the runtime owns the device, the
+  player's on/off (F6, F8), Steering strength, the fence and the direction per
+  wheel. The sign comes from the source (the header says how) and is checked on
+  every drive; force is on by default. Every drive logs "ffb probe: ..." lines
+  (every 30 s of driving and at the end of a race): the load's p50, p95 and
+  peak above 12 km/h, and in grip corners how often the load is against the
+  steering, which is the sign check: reversed over 300 such corners, the force
+  stops for the run. The older centring spring from steering and speed
+  ([docs/FFB-PRODUCER2.md](docs/FFB-PRODUCER2.md)) is not carried.
+- **Graphics.** One option, Wheelkit's app option Graphics (`[Options]
+  graphics`: off, low, medium, high (the default), ultra, custom), sets four
+  Tweaks keys of `[Graphics]` for the run (`source/graphics_options.hpp`); custom
+  keeps the file's own. Tweaks texture packs in `<game folder>/textures/load`
+  load whenever present (the `spr_*` folders for menus and the HUD, the others
+  for stages, cars and objects); a saved `SceneTextureReplacement` or
+  `UITextureReplacement` decides where set. The runtime's log says how many
+  pictures the pack has at the start and how many were replaced at the end.
 - **Unattended tests** use the runtime's switches in
   `%LOCALAPPDATA%\dbce\outrun-2006\`: `ffb-fence.on`, and `inject.on` with
   `inject.txt` for test input; F6's dev channel is `panel-dev.txt` there.

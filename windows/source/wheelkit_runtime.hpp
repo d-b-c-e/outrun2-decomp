@@ -27,5 +27,7 @@ WheelkitCamera wheelkit_camera(int view,const char* car,bool projected_views);
 void wheelkit_wrap_input_filter();
 // True while F6 is open (the game's own shortcuts stay quiet).
 bool wheelkit_panel_open();
+// One line into the runtime's log (wheelkit.log) and runtime.log; runtime.log alone without the runtime.
+void wheelkit_log(const char* line);
 void wheelkit_shutdown();
 }

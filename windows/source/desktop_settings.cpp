@@ -107,6 +107,7 @@ std::string Ini::text(const std::string& section,const std::string& key,const st
     const auto i=values_.find(lower(section)+"/"+lower(key));
     return i==values_.end()?fallback:i->second;
 }
+void Ini::set(const std::string& section,const std::string& key,const std::string& value){values_[lower(section)+"/"+lower(key)]=value;}
 bool Ini::has_value(const std::string& section,const std::string& key)const{
     return values_.count(lower(section)+"/"+lower(key))!=0;
 }

@@ -25,6 +25,8 @@ public:
     int integer(const std::string& section,const std::string& key,int fallback)const;
     float number(const std::string& section,const std::string& key,float fallback)const;
     bool flag(const std::string& section,const std::string& key,bool fallback)const;
+    // A value for this run only (graphics_options.hpp's preset): the file is never written.
+    void set(const std::string& section,const std::string& key,const std::string& value);
 private:
     std::map<std::string,std::string> values_;                 // "section/key", lower case
     std::map<std::string,std::vector<std::string>> sections_;  // lower-case section -> raw lines

@@ -35,6 +35,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "graphics_options.hpp"
 #include "startup_monitor.hpp"
 #include "startup_diagnostics.hpp"
 #include <memory>
@@ -53,9 +54,6 @@
 namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true,hide_mouse_cursor=true;
-// [Triple] Views = Angled asked for, or the development switch OR2_TRIPLE_VIEWS=1. Both the lods.ini read and the window
-// use this one request.
-bool triple_angled_requested=false;
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){outrun::desktop::gamepad_vibration_stop();closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
@@ -98,13 +96,15 @@ NativeWindow& native_window(){
         w.hwnd=CreateWindowW(L"OutRunDesktop",L"OutRun 2006 Coast 2 Coast",WS_POPUP|WS_VISIBLE,r.left,r.top,r.right-r.left,r.bottom-r.top,
                              nullptr,nullptr,instance,nullptr);
         w.width=unsigned(r.right-r.left);w.height=unsigned(r.bottom-r.top);
-        // The planar span: wider than 16:9 with screens on gives one wide frustum over the whole window.
-        outrun::platform::g_pc_wide_aspect=td::planar_aspect(!selected_monitor&&layout.wide,w.width,w.height);
-        // [Triple] Views = Angled (or OR2_TRIPLE_VIEWS=1) turns the span into three projected views, with the runtime's
-        // matrices for the measured screens (wk_triples_views).
-        const bool angled=triple_angled_requested&&span&&layout.rig&&outrun::platform::g_pc_wide_aspect>0.f;
-        if(triple_angled_requested&&!angled)
-            std::printf("triple screens: Angled views not applied: %s\n",span?"the screen measurements cannot be used":"needs three screens");
+        // Three screens are three projected views, each at its screen's angle, with the runtime's matrices for the
+        // measured screens (wk_triples_views): no setting. The scene covers the whole window (g_pc_wide_aspect); a span
+        // whose measurements cannot be used gets one 16:9 view on the center screen, never one wide picture stretched
+        // over angled screens (td::triple_draw).
+        const float wide=td::planar_aspect(!selected_monitor&&layout.wide,w.width,w.height);
+        const bool angled=td::triple_draw(span,layout.rig,wide)==td::TripleDraw::angled;
+        outrun::platform::g_pc_wide_aspect=angled?wide:0.f;
+        if(!angled&&span)std::printf("triple screens: %s; window %ux%u at (%ld, %ld); one 16:9 view on the center screen: the screens' "
+                                     "measurements cannot be used\n",where.c_str(),w.width,w.height,r.left,r.top);
         if(angled){
             outrun::platform::g_pc_triple_corrections=td::wheelkit_view_corrections;
             // The side panels look past 90 degrees, where the stage's section lists (the game's own forward visibility,
@@ -114,16 +114,14 @@ NativeWindow& native_window(){
             auto& dd=outrun::platform::draw_distance();
             const auto u=td::triple_default_union(dd.increase,dd.behind,std::getenv("OR2_TRIPLE_AHEAD"),std::getenv("OR2_TRIPLE_BEHIND"));
             dd.increase=u.ahead;dd.behind=u.behind;if(dd.active())outrun::platform::render_queues_extended()=true;
-            std::printf("triple screens: %s; window %ux%u at (%ld, %ld); THREE PROJECTED VIEWS ([Triple] Views = Angled): one game render "
-                        "replicated into three viewports with the runtime's views; ordinary nodes culled against all panel frusta (unless "
-                        "DisableStageCulling); stage sections drawn +%d ahead and %d behind the car; the HUD, menus and screen-space particles "
-                        "on the center only\n",where.c_str(),w.width,w.height,r.left,r.top,dd.increase,dd.behind);
-        }else if(outrun::platform::g_pc_wide_aspect>0.f)
-            std::printf("triple screens: %s; window %ux%u at (%ld, %ld); planar view %.3f:1 over the window (one wide frustum, "
-                        "not three views); 2D, menus and movies on the center 16:9\n",where.c_str(),w.width,w.height,
-                        r.left,r.top,double(outrun::platform::g_pc_wide_aspect));
-        else std::printf("triple screens: %s; window %ux%u at (%ld, %ld); one 16:9 view, centered\n",where.c_str(),
-                         w.width,w.height,r.left,r.top);
+            char line[600];
+            std::snprintf(line,sizeof line,"triple screens: three projected views, one per screen at its angle (the rig profile's "
+                        "measurements); window %ux%u at (%ld, %ld); one game render replicated into three viewports with the runtime's "
+                        "views; stage sections drawn +%d ahead and %d behind the car; the HUD, menus and movies on the center screen",
+                        w.width,w.height,r.left,r.top,dd.increase,dd.behind);
+            td::wheelkit_log(line);
+        }else if(!span)std::printf("triple screens: %s; window %ux%u at (%ld, %ld); one 16:9 view, centered\n",where.c_str(),
+                                   w.width,w.height,r.left,r.top);
     }else{
         RECT r{0,0,1280,720};AdjustWindowRect(&r,WS_OVERLAPPEDWINDOW,FALSE);
         int x=CW_USEDEFAULT,y=CW_USEDEFAULT;
@@ -195,7 +193,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     std::vector<std::string> args;int count=0;
     if(wchar_t** argv=CommandLineToArgvW(GetCommandLineW(),&count)){
         for(int i=0;i<count;++i)args.push_back(outrun::xbox_runtime::utf8(argv[i]));LocalFree(argv);}
-    const outrun::desktop::Ini settings=outrun::desktop::load_desktop_settings(folder,true);
+    outrun::desktop::Ini settings=outrun::desktop::load_desktop_settings(folder,true);
     std::printf("%s\n",outrun::desktop::startup_diagnostics().c_str());
     bool borderless=settings.flag("Window","WindowedBorderless",true);
     for(const auto& a:args)if(a=="--windowed")borderless=false;
@@ -205,14 +203,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // The Wheelkit runtime (wheelkit_runtime.hpp), before the window: the wheel, pedals and shifter from the Wheelkit
     // profile, the F6 panel, telemetry, and which screens the window opens on (three are used without being asked for).
     outrun::desktop::wheelkit_configure(settings);
-    // [Triple] Views: Planar (the default, also when the key is absent) or Angled, three projected views (the window
-    // applies it only over three screens the runtime could measure). Anything else is logged and Planar applies. The
-    // development switch OR2_TRIPLE_VIEWS=1 asks for Angled too.
-    {   const auto text=settings.text("Triple","Views");
-        const auto projection=outrun::desktop::parse_triple_projection(text);
-        if(!projection&&!text.empty())std::printf("settings: [Triple] Views = %.40s refused (Planar or Angled); Planar applies\n",text.c_str());
-        const char* dev=std::getenv("OR2_TRIPLE_VIEWS");
-        outrun::xbox_runtime::triple_angled_requested=projection==outrun::desktop::TripleProjection::angled||(dev&&std::string(dev)=="1");}
+    // [Options] graphics, Wheelkit's app option (graphics_options.hpp): its four [Graphics] values for this run, before
+    // any of them is read below. The file is not written.
+    outrun::desktop::wheelkit_log(outrun::desktop::apply_graphics_preset(settings).c_str());
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.
@@ -292,15 +285,16 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
             if(end==t.c_str()||*end||v<0||v>max){std::printf("settings: [Graphics] %s = %.32s refused (0..%d); 0 applies\n",key,t.c_str(),max);return 0;}
             return int(v);};
         dd.increase=sections("DrawDistanceIncrease",1024);dd.behind=sections("DrawDistanceBehind",256);
-        // Angled views may set sections ahead and behind later (native_window): their exclusions are read here too.
-        const bool spike=outrun::xbox_runtime::triple_angled_requested;
+        // Three projected views set sections ahead and behind later (native_window): their exclusions are read here too.
+        const auto layout=outrun::desktop::wheelkit_layout();
+        const bool spike=layout.span&&layout.rig;
         const char* from=nullptr;std::size_t excluded=0;
         if(dd.active()||spike)
             for(const char* name:{"OutRunDesktop.lods.ini","OutRun2006Tweaks.lods.ini"}){
                 std::ifstream f(folder+"/"+name,std::ios::binary);if(!f)continue;
                 const std::string text((std::istreambuf_iterator<char>(f)),std::istreambuf_iterator<char>());
                 excluded=outrun::platform::draw_distance_read_exclusions(text,dd);from=name;break;}
-        if(spike&&!dd.active())std::printf("settings: three-view spike: %zu excluded nodes for its sections ahead and behind (%s)\n",excluded,
+        if(spike&&!dd.active())std::printf("settings: three projected views: %zu excluded nodes for their sections ahead and behind (%s)\n",excluded,
             from?from:"no lods.ini");
         if(dd.active()){
             outrun::platform::render_queues_extended()=true;
@@ -434,11 +428,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         outrun::platform::fix_znear()=true;std::printf("settings: z-buffer precision fix (race camera near plane by view)\n");}
     // [Graphics] SceneTextureReplacement / UITextureReplacement / TextureBaseFolder, the Tweaks keys: stage, car and
     // object textures, and the menu and HUD sprite textures (the pack's spr_*_xst folders), replaced from
-    // <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Each off when absent; the folder defaults to
-    // "textures". A path that leaves the game folder is refused. TextureMatchAnyFolder (not a Tweaks key, off when
-    // absent): a texture with no file under Tweaks' names takes an unambiguous same-name file from another pack folder.
-    {   const bool on=settings.flag("Graphics","SceneTextureReplacement",false),ui=settings.flag("Graphics","UITextureReplacement",false);
-        const bool any=settings.flag("Graphics","TextureMatchAnyFolder",false);
+    // <game folder>/<TextureBaseFolder>/load in the Tweaks pack layout. Each, when the file does not set it, on when the
+    // pack has pictures of its kind (graphics_options.hpp); the folder defaults to "textures". A path that leaves the game
+    // folder is refused. TextureMatchAnyFolder (not a Tweaks key, off when absent): a texture with no file under Tweaks'
+    // names takes an unambiguous same-name file from another pack folder.
+    {   const bool any=settings.flag("Graphics","TextureMatchAnyFolder",false);
         const bool extract_requested=settings.flag("Graphics","SceneTextureExtract",false);
         const bool ui_extract_requested=settings.flag("Graphics","UITextureExtract",false);
         const bool cache_requested=settings.flag("Graphics","EnableTextureCache",false);
@@ -446,9 +440,31 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         const bool extract=extract_requested,ui_extract=ui_extract_requested;
         std::string base=settings.text("Graphics","TextureBaseFolder","textures");
         if(base.empty()||base.find("..")!=std::string::npos||base.find(':')!=std::string::npos||base[0]=='\\'||base[0]=='/'){
-            if(on||ui||extract||ui_extract)std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
+            std::printf("settings: [Graphics] TextureBaseFolder = %.64s refused (a folder inside the game folder); \"textures\" applies\n",base.c_str());
             base="textures";}
-        outrun::platform::texture_replacement_configure(on,ui,folder+"/"+base+"/load",any,extract,ui_extract,cache_requested&&extraction_allowed);
+        // The pack is in the game folder: --data= when the program runs from elsewhere (Wheelkit's Play), else beside it.
+        std::string game=folder;
+        for(const auto& a:args)if(a.rfind("--data=",0)==0&&a.size()>7)game=a.substr(7);
+        const std::string load=game+"/"+base+"/load";
+        outrun::desktop::TexturePack pack;
+        {   std::error_code ec;
+            for(std::filesystem::recursive_directory_iterator i(std::filesystem::u8path(load),ec),end;!ec&&i!=end;i.increment(ec)){
+                if(!i->is_regular_file(ec))continue;
+                const auto ext=i->path().extension().wstring();
+                if(_wcsicmp(ext.c_str(),L".dds")!=0)continue;
+                const auto rel=std::filesystem::relative(i->path(),std::filesystem::u8path(load),ec);
+                const auto top=rel.begin()!=rel.end()&&std::next(rel.begin())!=rel.end()?outrun::xbox_runtime::utf8(rel.begin()->wstring()):std::string();
+                if(outrun::desktop::texture_folder_is_ui(top))++pack.ui;else ++pack.scene;
+            }}
+        const bool on=outrun::desktop::texture_replacement_on(settings,"SceneTextureReplacement",pack.scene);
+        const bool ui=outrun::desktop::texture_replacement_on(settings,"UITextureReplacement",pack.ui);
+        {   char line[700];
+            std::snprintf(line,sizeof line,"textures: %u stage, car and object pictures and %u menu and HUD pictures in %s; replacement %s for "
+                "the stages, %s for the menus (%s)",pack.scene,pack.ui,load.c_str(),on?"on":"off",ui?"on":"off",
+                settings.has_value("Graphics","SceneTextureReplacement")||settings.has_value("Graphics","UITextureReplacement")?
+                "a saved [Graphics] key decides where set, else a pack present":"on wherever a pack is present");
+            outrun::desktop::wheelkit_log(line);}
+        outrun::platform::texture_replacement_configure(on,ui,load,any,extract,ui_extract,cache_requested&&extraction_allowed);
         if(cache_requested&&extraction_allowed&&(on||ui))std::printf("settings: replacement DDS cache on (128 MiB, next ordinary start; no hot reload)\n");
         if(any&&(on||ui))std::printf("settings: [Graphics] TextureMatchAnyFolder: same-name files from other pack folders when unambiguous\n");}
     // The game's own keyboard (the reconstructed PC keyboard device and its key tables).
@@ -475,6 +491,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     struct PadOutputCleanup {~PadOutputCleanup(){outrun::desktop::gamepad_vibration_shutdown();}} pad_output_cleanup;
     const int result=or2_xbox_main(int(args.size()),argv.data());
     outrun::desktop::gamepad_vibration_shutdown();
+    {   const auto& scene=outrun::platform::pmt_texture_replacement_stats();const auto& ui=outrun::platform::ui_texture_replacement_stats();
+        if(scene.files||ui.files){char line[300];
+            std::snprintf(line,sizeof line,"textures: %u stage, car and object textures and %u menu and HUD textures replaced from the pack this "
+                "run (%u and %u looked up; runtime.log has each bank)",scene.replaced,ui.replaced,scene.looked,ui.looked);
+            outrun::desktop::wheelkit_log(line);}}
     outrun::desktop::wheelkit_shutdown();
     // Texture replacement summaries, scene then UI: totals, the banks the pack covers one line each, the others named once
     // (a stage variant the pack lacks shows up here).
