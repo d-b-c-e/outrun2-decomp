@@ -40,7 +40,7 @@ constexpr Row Rows[]{
     {"display.latency","Window","FrameLatency","0|1|2|3"},
     {"display.ui-scaling","Graphics","UIScalingMode","0|1|2"},{"display.letterbox","Graphics","UILetterboxing","0|1|2"},
     {"display.borderless","Window","WindowedBorderless",""},
-    {"display.cursor","Window","WindowedHideMouseCursor",""},{"display.culling","Graphics","DisableStageCulling",""}};
+    {"display.cursor","Window","WindowedHideMouseCursor",""}};
 // The game's buttons, by the contract action that drives each.
 enum Button : unsigned { Confirm,Back,Start,ShiftUp,ShiftDown,Camera,NavUp,NavDown,NavLeft,NavRight,Horn,ButtonCount };
 constexpr int ButtonActions[ButtonCount]{WK_ACTION_CONFIRM,WK_ACTION_BACK,WK_ACTION_START,WK_ACTION_SHIFT_UP,WK_ACTION_SHIFT_DOWN,
@@ -242,7 +242,7 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.1-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.2-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;
@@ -278,6 +278,19 @@ bool wheelkit_view_corrections(const float* projection,float* out){
     wk_triple_views v{};v.size=sizeof v;
     if(!s.on||!wk.wk_triples_views(p,&v))return false;
     for(int i=0;i<3;++i)for(int k=0;k<16;++k)out[i*16+k]=float(v.correction[i][k]);
+    return true;
+}
+
+bool wheelkit_curve_grid(int screen,int columns,int rows,float* uv,double& radius_mm){
+    wk_triples t{};t.size=sizeof t;
+    if(!s.on||!wk.wk_triples_get(&t)||!t.rig||!(t.curve_radius_mm>0)||!(t.panel_width_mm>0)||!(t.panel_height_mm>0)||!(t.eye_distance_mm>0))
+        return false;
+    // The centre projection through which the seat sees the centre screen (the rig matched to it is the measured one), so
+    // the grid is the seat's: the same in either framing.
+    const double half_w=t.panel_width_mm/2/t.eye_distance_mm,half_h=t.panel_height_mm/2/t.eye_distance_mm,n=1,f=1000;
+    double p[16]{};p[0]=1/half_w;p[5]=1/half_h;p[10]=f/(n-f);p[11]=-1;p[14]=n*f/(n-f);
+    if(!wk.wk_triples_curve_grid(p,screen,columns,rows,uv))return false;
+    radius_mm=t.curve_radius_mm;
     return true;
 }
 

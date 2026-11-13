@@ -18,6 +18,12 @@ WheelkitLayout wheelkit_layout();
 // The three views' clip corrections for the centre projection the game used (wk_triples_views; pc_screen.hpp
 // PcTripleCorrections: 3 x 16 floats). False: that draw stays single.
 bool wheelkit_view_corrections(const float* projection,float* out);
+// Curved screens ([Triple] CurveRadiusMm above 0): for one screen (0 left, 1 centre, 2 right), where each point of a
+// (columns + 1) x (rows + 1) grid on its curved glass, seen from the seat, takes its picture from in that screen's flat
+// view; u, v pairs row by row from the top (wk_triples_curve_grid, the runtime's warp). The seat's eye, whatever the
+// camera's framing: a view drawn for another eye (Game framing) keeps the seat's curve correction (Wheelkit STD-041).
+// radius_mm gets the screens' curve. False: flat screens, no usable measurements or no runtime.
+bool wheelkit_curve_grid(int screen,int columns,int rows,float* uv,double& radius_mm);
 // The camera on screen (wk_cameras_frame): view is the index in the list given at start (Bumper, Cockpit, Chase,
 // Bonnet) or -1 when not driving. What the runtime attaches to it; view is -1 in the answer when nothing applies.
 struct WheelkitCamera { int view{-1}; bool realistic{}; float fov_offset{},right_cm{},up_cm{},forward_cm{}; };

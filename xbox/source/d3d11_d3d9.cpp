@@ -219,7 +219,7 @@ void D3D11D3D9Device::allocate_back(unsigned w,unsigned h){
     back_w_=w;back_h_=h;
     if(curve_prepared_&&platform::pc_curve_active()&&!platform::pc_comparison_original())try{prepare_curve_source();}catch(const std::exception& e){
         platform::pc_curve_request_flat(platform::PcCurveRefusal::resize);platform::pc_curve_publish(platform::PcCurveMode::flat);
-        std::printf("curve prototype: flat session latch after resize refusal: %s\n",e.what());}
+        std::printf("curve: off for this run (flat views) after a resize: %s\n",e.what());}
 
 }
 void D3D11D3D9Device::resize_back_buffer(unsigned w,unsigned h){if(w!=back_w_||h!=back_h_)allocate_back(w,h);}
@@ -273,11 +273,11 @@ void D3D11D3D9Device::prepare_curve(){
         check(device_->CreateBuffer(&b,&data,&curve_scale_cb_),"CreateBuffer(curve source scale)");
         prepare_curve_source();curve_prepared_=true;
         platform::pc_curve_publish(platform::PcCurveMode::active);
-        std::printf("curve prototype: resources ready %ux%u; developer opt-in, runtime qualification pending\n",back_w_,back_h_);
+        std::printf("curve: the curve correction is ready for a %ux%u back buffer\n",back_w_,back_h_);
     }catch(const std::exception& e){
         curve_vb_.Reset();curve_ib_.Reset();curve_cb_.Reset();curve_scale_cb_.Reset();curve_vs_.Reset();curve_ps_.Reset();curve_layout_.Reset();
         platform::pc_curve_request_flat(platform::PcCurveRefusal::resources);platform::pc_curve_publish(platform::PcCurveMode::flat);
-        std::printf("curve prototype: flat session latch before first source draw: %s\n",e.what());
+        std::printf("curve: off for this run (flat views) before the first frame: %s\n",e.what());
     }
 }
 void D3D11D3D9Device::curve_before_draw(){
@@ -310,7 +310,7 @@ void D3D11D3D9Device::composite_curve(){
     // The next layer gets the same empty-depth contract as the existing MSAA path.
     context_->ClearDepthStencilView(back_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1.f,0);
     restore_state();
-    if(++curve_frames_==1)std::printf("curve prototype: first world composite submitted, 3mesh draws; no rendered acceptance\n");
+    if(++curve_frames_==1)std::printf("curve: first frame bent onto the three curved screens\n");
 }
 void D3D11D3D9Device::finish_scene(){
     if(scene_finished_||count_only||colour_target_!=BackBuffer)return;
@@ -383,7 +383,7 @@ void D3D11D3D9Device::end_frame(){
     if(curve_frame_&&platform::g_pc_curve_refusal.load(std::memory_order_acquire)!=platform::PcCurveRefusal::none){
         const auto reason=platform::g_pc_curve_refusal.load(std::memory_order_acquire);
         platform::pc_curve_publish(platform::PcCurveMode::flat);curve_frame_=false;
-        std::printf("curve prototype: flat session latch from next frame, refusal %u; first-frame transition remains experimental\n",unsigned(reason));
+        std::printf("curve: off for this run (flat views) from the next frame, refusal %u\n",unsigned(reason));
     }
     if(!query_live_)return;context_->End(queries_[query_index_].Get());query_live_=false;
     query_pending_[query_index_]=true;query_index_=(query_index_+1)%3;

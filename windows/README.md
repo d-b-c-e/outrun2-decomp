@@ -78,13 +78,17 @@ repository, `runtime/native/sdk/README.md`).
   `LeftYawDegrees`, `RightYawDegrees`, `BezelMm`, as Wheelkit writes them; unset
   keys take the size Windows reports, eye 660 mm, bezel 8 mm and sides facing
   the seat). A span whose measurements cannot be used gets one 16:9 view on the
-  center screen (`source/triple_screens.hpp` `triple_draw`). The screens are
-  flat in the views: `CurveRadiusMm` is not applied. How the views are drawn
+  center screen (`source/triple_screens.hpp` `triple_draw`). On curved screens
+  (`CurveRadiusMm` above 0) each screen's view is bent onto its arc as the seat
+  sees it, with the runtime's curve correction (`wk_triples_curve_grid`,
+  `source/curve_runtime.hpp`), after the world and before the HUD; on flat
+  screens nothing is bent. How the views are drawn
   (one render replicated into three viewports, the culling and the stage
   sections) is this game's (`source/triple_screens.hpp`, `xbox/source`). A
-  display chosen with `[Window] MonitorDevicePath` is used alone. The curve
-  prototype (`source/curve_*.hpp`, `source/triple_rig.hpp`) has no switch any
-  more and is left for removal with its renderer half.
+  display chosen with `[Window] MonitorDevicePath` is used alone. The older curve
+  prototype's own math (`source/curved_panel_warp.hpp`, `curve_scene_profile.hpp`,
+  `curve_inner_rect.hpp`) is not used and is left for removal; its renderer pass is
+  the one the runtime's curve now draws through.
 - **Cameras.** The game's views stay the game's (bumper, cockpit, chase), and a
   Bonnet view is added to its cycle after the bumper
   (`source/camera_controls.cpp`). The runtime keeps, per view, the framing (Game
@@ -108,8 +112,9 @@ repository, `runtime/native/sdk/README.md`).
   stops for the run. The older centring spring from steering and speed
   ([docs/FFB-PRODUCER2.md](docs/FFB-PRODUCER2.md)) is not carried.
 - **Graphics.** One option, Wheelkit's app option Graphics (`[Options]
-  graphics`: off, low, medium, high (the default), ultra, custom), sets four
-  Tweaks keys of `[Graphics]` for the run (`source/graphics_options.hpp`); custom
+  graphics`: off, low, medium, high (the default), ultra, custom), sets six
+  Tweaks keys of `[Graphics]` for the run (High and Ultra include the z-buffer
+  fix and the whole stage drawn) (`source/graphics_options.hpp`); custom
   keeps the file's own. Tweaks texture packs in `<game folder>/textures/load`
   load whenever present (the `spr_*` folders for menus and the HUD, the others
   for stages, cars and objects); a saved `SceneTextureReplacement` or

@@ -35,6 +35,7 @@
 #include <algorithm>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
+#include "curve_runtime.hpp"
 #include "graphics_options.hpp"
 #include "startup_monitor.hpp"
 #include "startup_diagnostics.hpp"
@@ -120,6 +121,18 @@ NativeWindow& native_window(){
                         "views; stage sections drawn +%d ahead and %d behind the car; the HUD, menus and movies on the center screen",
                         w.width,w.height,r.left,r.top,dd.increase,dd.behind);
             td::wheelkit_log(line);
+            // Curved screens: the runtime's curve correction (curve_runtime.hpp), drawn after the world and before the HUD.
+            static std::array<std::array<float,2*td::CurveMesh::VertexCount>,3> grids{};static td::CurveMesh mesh{};
+            double radius=0;bool curved=true;
+            for(int i=0;i<3&&curved;++i)curved=td::wheelkit_curve_grid(i,int(td::CurveMesh::Columns),int(td::CurveMesh::Rows),grids[std::size_t(i)].data(),radius);
+            if(curved&&td::curve_mesh_from_grids({grids[0].data(),grids[1].data(),grids[2].data()},mesh)){
+                outrun::platform::g_pc_curve_radius_mm=float(radius);
+                outrun::platform::g_pc_curve_mesh_provider=[](unsigned width,unsigned height,outrun::platform::PcCurveMeshView& out){
+                    return td::curve_mesh_view(mesh,width,height,out);};
+                std::snprintf(line,sizeof line,"triple screens: curved screens (%.0f mm): the views are bent onto each screen's arc as the "
+                              "seat sees it (the runtime's curve correction)",radius);
+                td::wheelkit_log(line);
+            }else if(curved)td::wheelkit_log("triple screens: the runtime's curve grid was refused; the views stay flat");
         }else if(!span)std::printf("triple screens: %s; window %ux%u at (%ld, %ld); one 16:9 view, centered\n",where.c_str(),
                                    w.width,w.height,r.left,r.top);
     }else{

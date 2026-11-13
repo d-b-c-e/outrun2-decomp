@@ -1,9 +1,9 @@
 // The F6 pages (wheelkit_runtime.cpp hands them to the runtime): the runtime's descriptor format
 // (wheelkit runtime/native/panel/dbce_panel_descriptor.h). Rows the game handles are listed in wheelkit_runtime.cpp's
 // table with the OutRunDesktop.ini key each one saves; ffb.enabled and ffb.steering are the runtime's own. No row for
-// the screens or telemetry (the rig profile says them), the graphics preset (Wheelkit's app option) or the texture packs.
+// the screens or telemetry (the rig profile says them), the graphics preset (Wheelkit's app option, which also draws the whole stage at High and Ultra) or the texture packs.
 R"json({"settings":{
- "product":"OutRun 2006 Coast 2 Coast","version":"0.9.1-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
+ "product":"OutRun 2006 Coast 2 Coast","version":"0.9.2-alpha","modPage":"https://github.com/d-b-c-e/outrun2-decomp",
  "keys":"F6 settings","pages":{
  "controls":[
   {"id":"controls.profile","kind":"status","label":"Wheel profile","text":"No profile from Wheelkit"},
@@ -22,8 +22,7 @@ R"json({"settings":{
   {"id":"display.ui-scaling","kind":"choice","label":"UI scaling","choices":["Stretch 2D","Wide HUD (partial)","Centered 4:3"],"default":"Centered 4:3","apply":"next-start","help":"How menus and the HUD fit a wide screen."},
   {"id":"display.letterbox","kind":"choice","label":"Black bars","choices":["Off","Outside the race","Always"],"default":"Outside the race","apply":"next-start","help":"Black bars beside the centered 4:3 picture."},
   {"id":"display.borderless","kind":"toggle","label":"Borderless window","default":true,"level":"advanced","apply":"next-start","help":"Off opens a 1280x720 window instead."},
-  {"id":"display.cursor","kind":"toggle","label":"Hide the mouse cursor","default":true,"level":"advanced","apply":"next-start","help":"Hides the Windows cursor over the game."},
-  {"id":"display.culling","kind":"toggle","label":"Draw the whole stage","default":false,"level":"advanced","apply":"next-start","help":"No pop-in; more drawing work."}
+  {"id":"display.cursor","kind":"toggle","label":"Hide the mouse cursor","default":true,"level":"advanced","apply":"next-start","help":"Hides the Windows cursor over the game."}
  ],
  "help":[
   {"id":"help.log","kind":"status","label":"Log","text":"runtime.log beside the game"},

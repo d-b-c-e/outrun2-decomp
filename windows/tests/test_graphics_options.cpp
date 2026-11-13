@@ -18,10 +18,17 @@ int main(){
         const auto line=apply_graphics_preset(i);
         check(i.text("Graphics","AnisotropicFiltering")=="8"&&i.text("Graphics","ReflectionResolution")=="512"&&
               i.flag("Graphics","TransparencySupersampling",false)&&!i.flag("Graphics","DisableVehicleLODs",true),"high's four values");
+        check(i.flag("Graphics","FixZBufferPrecision",false)&&i.flag("Graphics","DisableStageCulling",false),
+              "high: the z-buffer fix and the whole stage drawn (decision 0027)");
         check(line.rfind("graphics: high:",0)==0,"the log line names the level");}
     // Each saved level, any case; Off is the game as it shipped.
     {   auto i=ini("[Options]\ngraphics = Ultra\n");apply_graphics_preset(i);
-        check(i.text("Graphics","AnisotropicFiltering")=="16"&&i.text("Graphics","ReflectionResolution")=="1024"&&i.flag("Graphics","DisableVehicleLODs",false),"ultra");}
+        check(i.text("Graphics","AnisotropicFiltering")=="16"&&i.text("Graphics","ReflectionResolution")=="1024"&&i.flag("Graphics","DisableVehicleLODs",false)&&
+              i.flag("Graphics","FixZBufferPrecision",false)&&i.flag("Graphics","DisableStageCulling",false),"ultra");}
+    {   auto i=ini("[Options]\ngraphics = medium\n");apply_graphics_preset(i);
+        check(!i.flag("Graphics","FixZBufferPrecision",true)&&!i.flag("Graphics","DisableStageCulling",true),"medium: neither");}
+    {   auto i=ini("[Graphics]\nDisableStageCulling = true\n");
+        check(graphics_level(i,note)==-1&&note.find("DisableStageCulling")!=std::string::npos,"a saved whole-stage key without a choice is custom");}
     {   auto i=ini("[Options]\ngraphics = off\n[Graphics]\nAnisotropicFiltering = 16\n");apply_graphics_preset(i);
         check(i.text("Graphics","AnisotropicFiltering")=="0"&&i.text("Graphics","ReflectionResolution")=="128"&&
               !i.flag("Graphics","TransparencySupersampling",true),"a chosen level wins over the file's keys for the run");}

@@ -3,11 +3,11 @@
 // key is read. Tested offline (windows/tests/test_graphics_options.cpp).
 //
 // Graphics: Wheelkit's app option "Graphics" (games/outrun-2006/wheelkit-mod.json in the Wheelkit repository), saved as
-// [Options] graphics in OutRunDesktop.ini. off / low / medium / high / ultra set four Tweaks keys of [Graphics] for this
+// [Options] graphics in OutRunDesktop.ini. off / low / medium / high / ultra set six Tweaks keys of [Graphics] for this
 // run, in memory (the file keeps what it holds); custom keeps the file's own [Graphics] values. Absent: high, the
-// descriptor's default, unless the file itself sets one of the four keys: saved values are never overridden unasked,
+// descriptor's default, unless the file itself sets one of the six keys: saved values are never overridden unasked,
 // so that is custom. The levels are the old desktop panel's preset (desktop_quality.hpp, removed with that panel in 692e090)
-// without its two texture rows, which the packs now decide.
+// without its two texture rows, which the packs now decide, and with the z-buffer fix and the whole stage drawn at High and Ultra.
 //
 // Texture packs: SceneTextureReplacement / UITextureReplacement that the file does not set are on when the pack folder
 // (<game folder>/<TextureBaseFolder>/load, Tweaks' layout) has pictures for them: the spr_* folders are the menus and
@@ -17,15 +17,17 @@
 #include <cctype>
 #include <string>
 namespace outrun::desktop {
-inline constexpr std::array<const char*,4> GraphicsKeys{"AnisotropicFiltering","ReflectionResolution","TransparencySupersampling",
-                                                       "DisableVehicleLODs"};
-struct GraphicsLevel { const char* id; std::array<const char*,4> values; };
+// High and Ultra also stop far scenery flickering (FixZBufferPrecision) and draw the whole stage (DisableStageCulling:
+// no pop-in, more draws): the owner's Tweaks setup had both on (Wheelkit decision 0027, 2026-11-13).
+inline constexpr std::array<const char*,6> GraphicsKeys{"AnisotropicFiltering","ReflectionResolution","TransparencySupersampling",
+                                                       "DisableVehicleLODs","FixZBufferPrecision","DisableStageCulling"};
+struct GraphicsLevel { const char* id; std::array<const char*,6> values; };
 inline constexpr std::array<GraphicsLevel,5> GraphicsLevels{{
-    {"off",{"0","128","false","false"}},      // the game as it shipped
-    {"low",{"2","128","false","false"}},
-    {"medium",{"4","256","false","false"}},
-    {"high",{"8","512","true","false"}},      // the default
-    {"ultra",{"16","1024","true","true"}}}};  // also every other car at its full model
+    {"off",{"0","128","false","false","false","false"}},      // the game as it shipped
+    {"low",{"2","128","false","false","false","false"}},
+    {"medium",{"4","256","false","false","false","false"}},
+    {"high",{"8","512","true","false","true","true"}},        // the default
+    {"ultra",{"16","1024","true","true","true","true"}}}};    // also every other car at its full model
 // Which level applies: 0..4, or -1 for custom (the file's own values). `note` says why when that is not what was saved.
 inline int graphics_level(const Ini& ini,std::string& note){
     note.clear();
@@ -47,7 +49,8 @@ inline std::string apply_graphics_preset(Ini& ini){
         const auto& l=GraphicsLevels[std::size_t(level)];
         for(std::size_t k=0;k<GraphicsKeys.size();++k)ini.set("Graphics",GraphicsKeys[k],l.values[k]);
         line+=std::string(l.id)+": anisotropic filtering "+l.values[0]+"x, car reflection "+l.values[1]+
-              ", transparency supersampling "+l.values[2]+", other cars always full detail "+l.values[3];
+              ", transparency supersampling "+l.values[2]+", other cars always full detail "+l.values[3]+
+              ", z-buffer fix "+l.values[4]+", whole stage drawn "+l.values[5];
     }
     if(!note.empty())line+=" ("+note+")";
     return line;
