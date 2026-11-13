@@ -18,7 +18,7 @@ Local baseline, source/blob provenance and logs: work/validation-20261102/sun-sp
 
 ## Step2 developer routing checkpoint
 
-The desktop sun provider reuses `triple_views` for Angle/flat fallback and `curve_scene_views`/`curved_source_views` for the active curved source. These are the exact rotations/projections whose product forms the world GS correction. CPU sun view = native view * source rotation. Its inverse supplies eye/target and the flare screen matrix; source projection supplies focal scales and off-axis offsets for the sun gate/fade.
+The desktop sun provider reuses `triple_views` (the curved-source views of the old curve prototype were removed on 2026-11-13: curved screens now draw the flat views and bend them afterwards). These are the exact rotations/projections whose product forms the world GS correction. CPU sun view = native view * source rotation. Its inverse supplies eye/target and the flare screen matrix; source projection supplies focal scales and off-axis offsets for the sun gate/fade.
 
 `SunView` remains a world-source phase for the compositor, but never admits GS replication. D3D11 binds only the named panel viewport/scissor; the CPU and native GPU vertex paths apply the matching widened-source pixel-centre scale. This avoids finishing/compositing the world before the flare. A renderer-owned scope sets/restores the native View/Projection, derived shader matrices and CPU culling view. Its culling frustum describes only that source eye, not the three-eye union. Before switching views, unrelated queued work is drained; every view also drains its final queued glow before camera/phase restoration.
 

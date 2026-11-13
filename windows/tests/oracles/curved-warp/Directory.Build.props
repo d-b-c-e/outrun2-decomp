@@ -1,3 +1,0 @@
-<Project><PropertyGroup>
-  <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../../../../work/validation-20261102/curve-oracle/obj/</BaseIntermediateOutputPath>
-</PropertyGroup></Project>

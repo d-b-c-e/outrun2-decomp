@@ -1,6 +1,6 @@
 // Packed shader inputs and a CPU sampling reference. Does not execute HLSL.
 #include "curve_compositor_shader.hpp"
-#include "curved_panel_mesh.hpp"
+#include "curve_runtime.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -14,7 +14,7 @@ std::array<float,2> sample_uv(const CurveSampleRect& r,float u,float v){return {
     std::clamp(u*r.map[0]+r.map[2],r.limits[0],r.limits[2]),
     std::clamp(v*r.map[1]+r.map[3],r.limits[1],r.limits[3])};}
 int main(){try{
-    CHECK(sizeof(CurveMeshVertex)==16&&offsetof(CurveMeshVertex,x)==0&&offsetof(CurveMeshVertex,u)==8);
+    CHECK(sizeof(CurveVertex)==16&&offsetof(CurveVertex,x)==0&&offsetof(CurveVertex,u)==8);
     CHECK(sizeof(CurveSampleRect)==32&&offsetof(CurveSampleRect,map)==0&&offsetof(CurveSampleRect,limits)==16);
     const std::array<std::array<unsigned,2>,6> sizes{{{{6,2}},{{1920,1080}},{{3840,720}},{{7680,1440}},{{8190,2160}},{{16383,16384}}}};
     for(const auto& size:sizes)for(unsigned p=0;p<3;++p){

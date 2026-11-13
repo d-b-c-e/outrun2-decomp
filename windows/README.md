@@ -86,9 +86,8 @@ repository, `runtime/native/sdk/README.md`).
   (one render replicated into three viewports, the culling and the stage
   sections) is this game's (`source/triple_screens.hpp`, `xbox/source`). A
   display chosen with `[Window] MonitorDevicePath` is used alone. The older curve
-  prototype's own math (`source/curved_panel_warp.hpp`, `curve_scene_profile.hpp`,
-  `curve_inner_rect.hpp`) is not used and is left for removal; its renderer pass is
-  the one the runtime's curve now draws through.
+  prototype's own math is gone; its renderer pass is the one the runtime's curve now
+  draws through.
 - **Cameras.** The game's views stay the game's (bumper, cockpit, chase), and a
   Bonnet view is added to its cycle after the bumper
   (`source/camera_controls.cpp`). The runtime keeps, per view, the framing (Game
