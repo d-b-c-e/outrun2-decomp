@@ -12,6 +12,7 @@
 #include "platform/native_runtime.hpp"
 #include "platform/runtime_input.hpp"
 #include "platform/pc_pmt_loader.hpp"
+#include "platform/pc_curve_scene.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
@@ -41,10 +42,16 @@ constexpr Row Rows[]{
     {"display.ui-scaling","Graphics","UIScalingMode","0|1|2"},{"display.letterbox","Graphics","UILetterboxing","0|1|2"},
     {"display.borderless","Window","WindowedBorderless",""},
     {"display.cursor","Window","WindowedHideMouseCursor",""}};
-// The game's buttons, by the contract action that drives each.
-enum Button : unsigned { Confirm,Back,Start,ShiftUp,ShiftDown,Camera,NavUp,NavDown,NavLeft,NavRight,Horn,ButtonCount };
+// The game's buttons, by the contract action that drives each. The last four are the menus' X, RT, Y and LT, which the
+// rig profile has no actions for: the game's own controls (games/outrun-2006/wheelkit-mod.json "controls" in the Wheelkit
+// repository), each written by the app onto a shared action this game has no other use for (its "carrier"). A control the
+// player has not set keeps the profile's own button for that action: Select is Change class, Look back is Y, Reset is LT.
+// Color also comes from Camera, as X does both on the pad and the view button did both in the PC game.
+enum Button : unsigned { Confirm,Back,Start,ShiftUp,ShiftDown,Camera,NavUp,NavDown,NavLeft,NavRight,Horn,
+                         Color,ChangeClass,MenuY,MenuLT,ButtonCount };
 constexpr int ButtonActions[ButtonCount]{WK_ACTION_CONFIRM,WK_ACTION_BACK,WK_ACTION_START,WK_ACTION_SHIFT_UP,WK_ACTION_SHIFT_DOWN,
-    WK_ACTION_CAMERA,WK_ACTION_NAV_UP,WK_ACTION_NAV_DOWN,WK_ACTION_NAV_LEFT,WK_ACTION_NAV_RIGHT,WK_ACTION_HORN};
+    WK_ACTION_CAMERA,WK_ACTION_NAV_UP,WK_ACTION_NAV_DOWN,WK_ACTION_NAV_LEFT,WK_ACTION_NAV_RIGHT,WK_ACTION_HORN,
+    WK_ACTION_NEUTRAL,WK_ACTION_SELECT,WK_ACTION_LOOK_BACK,WK_ACTION_RESET};
 struct State {
     bool on{},attached{},was_open{},game_rpm{};
     xbox_runtime::InputFilter inner{};
@@ -157,6 +164,8 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     // The keyboard reaches the race only through the PC layer (406FA0), set only for a connected pad otherwise.
     out.pc_input_layer=true;
     letterbox_note(rt);
+    // The curve correction bends the race only; the menus and the car select stay flat (pc_curve_scene.hpp).
+    if(rt)platform::g_pc_curve_in_race.store(platform::pc_letterbox_in_race(rt->mode_state.current,rt->start_mode.stage),std::memory_order_relaxed);
     if(!s.on)return;
     panel_events();
     telemetry(rt);
@@ -175,7 +184,14 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     if(!race){if(desktop_key(0x1c))held|=1u<<Confirm;if(desktop_key(0x01))held|=1u<<Back;if(desktop_key(0xc8))held|=1u<<NavUp;
               if(desktop_key(0xd0))held|=1u<<NavDown;if(desktop_key(0xcb))held|=1u<<NavLeft;if(desktop_key(0xcd))held|=1u<<NavRight;}
     const std::uint32_t keys=held;
-    for(unsigned i=0;i<ButtonCount;++i)if(in.held[ButtonActions[i]])held|=1u<<i;
+    // The paddles are the menus' LB and RB with every gearbox (the app writes them whatever the profile's transmission);
+    // in the race they shift only for a Sequential profile, as before.
+    const bool paddles_shift=in.transmission==WK_TRANSMISSION_SEQUENTIAL;
+    for(unsigned i=0;i<ButtonCount;++i){
+        if(race&&!paddles_shift&&(i==ShiftUp||i==ShiftDown))continue;
+        if(race&&i>=Color)continue;   // the menus' X, RT, Y and LT do nothing in the race
+        if(in.held[ButtonActions[i]])held|=1u<<i;
+    }
     if(in.transmission==WK_TRANSMISSION_H_PATTERN){   // OutRun shifts sequentially: pulses toward the held gate
         bool gates[6];for(int i=0;i<6;++i)gates[i]=in.held[WK_ACTION_GEAR1+i]!=0;
         const bool car=rt&&race;std::uint32_t gear=0;
@@ -218,6 +234,13 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     if(on(down,NavDown))f|=0x800u;if(on(down,NavLeft))f|=0x1000u;if(on(down,NavRight))f|=0x2000u;
     if(!race){if(on(down,ShiftDown))f|=0x10u;if(on(down,ShiftUp))f|=0x20u;}
     if(on(down,Camera))f|=0x40000u;
+    if(!race){   // the menus' X, Y, LT and RT, as the pad adapter (game_host.cpp map_pad) sets them
+        if(on(held,Color)||on(held,Camera))out.frontend.device_held|=0x10u;   // 4536C0(0x10): Color on Car Select, a random track
+        if(on(down,Color)||on(down,Camera))f|=0x8000u;                         // X
+        if(on(down,MenuY))f|=0x4000u;                                          // Y
+        if(on(down,MenuLT))out.frontend.device_held|=0x1000u;                  // LT, one frame per press
+        if(on(down,ChangeClass))out.frontend.device_held|=0x2000u;             // RT: the car class (4C9290), the music list (4C9940)
+    }
 }
 }
 
@@ -242,7 +265,7 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.2-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.3-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;

@@ -27,6 +27,13 @@ enum class PcCurveRefusal:unsigned {none,projection,resources,resize};
 inline std::atomic<PcCurveMode> g_pc_curve_mode{PcCurveMode::unavailable};
 inline std::atomic<PcCurveRefusal> g_pc_curve_refusal{PcCurveRefusal::none};
 inline bool pc_curve_active(){return g_pc_curve_mode.load(std::memory_order_acquire)==PcCurveMode::active;}
+// The curve bends the race only. Menus, the car select and the title stay flat on the center screen: their frames mix 2D
+// and 3D in an order that changes (a car change flushes the 2D background before the car), so bending them made the
+// picture jump (Wheelkit issue outrun-2006-0007). Set by the desktop host from the game's mode every input poll.
+inline std::atomic<bool> g_pc_curve_in_race{false};
+inline bool pc_curve_frame_admitted(bool prepared,bool count_only){
+    return prepared&&pc_curve_active()&&pc_comparison_curve()&&!count_only&&g_pc_curve_in_race.load(std::memory_order_relaxed);
+}
 inline void pc_curve_request_flat(PcCurveRefusal why){auto empty=PcCurveRefusal::none;g_pc_curve_refusal.compare_exchange_strong(empty,why,std::memory_order_release);}
 // Resource owner calls these only after preparation or at an owned frame boundary.
 inline void pc_curve_publish(PcCurveMode mode){g_pc_curve_mode.store(mode,std::memory_order_release);pc_triple_profile_changed();}

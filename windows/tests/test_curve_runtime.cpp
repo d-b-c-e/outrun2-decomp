@@ -43,6 +43,16 @@ int main(){
     bad=flat;bad[11]=std::nanf("");
     check(!curve_mesh_from_grids({bad.data(),flat.data(),flat.data()},mesh),"not finite: refused");
     check(!curve_mesh_from_grids({flat.data(),nullptr,flat.data()},mesh),"a missing grid: refused");
+    // A frame is bent only in the race: the menus and the car select stay flat (Wheelkit issue outrun-2006-0007).
+    namespace pf=outrun::platform;
+    pf::g_pc_curve_mode.store(pf::PcCurveMode::active);
+    pf::g_pc_curve_in_race.store(false);
+    check(!pf::pc_curve_frame_admitted(true,false),"a menu frame (the car select) is not bent");
+    pf::g_pc_curve_in_race.store(true);
+    check(pf::pc_curve_frame_admitted(true,false),"a race frame is bent");
+    check(!pf::pc_curve_frame_admitted(false,false)&&!pf::pc_curve_frame_admitted(true,true),"not before the resources, not in a counting pass");
+    pf::g_pc_curve_mode.store(pf::PcCurveMode::flat);
+    check(!pf::pc_curve_frame_admitted(true,false),"a run the curve was turned off for stays flat in the race");
     std::printf("curve runtime: %d checks passed\n",checks);
     return 0;
 }

@@ -166,6 +166,8 @@ D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_OCCLUSION;for(auto& query:queries_)check(device_->CreateQuery(&q,&query),"CreateQuery");
 }
 D3D11D3D9Device::~D3D11D3D9Device(){
+    if(curve_prepared_)std::printf("curve: %llu race frames bent onto the curved screens (menus and the car select stay flat)\n",
+                                   (unsigned long long)curve_frames_);
     if(curve_prepared_&&platform::pc_curve_active())platform::pc_curve_publish(platform::PcCurveMode::unavailable);
     if(query_live_){context_->End(queries_[query_index_].Get());query_pending_[query_index_]=true;}
     collect_queries(false);   // what the GPU has finished; the rest of the diagnostic count is not waited for
@@ -310,7 +312,7 @@ void D3D11D3D9Device::composite_curve(){
     // The next layer gets the same empty-depth contract as the existing MSAA path.
     context_->ClearDepthStencilView(back_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1.f,0);
     restore_state();
-    if(++curve_frames_==1)std::printf("curve: first frame bent onto the three curved screens\n");
+    if(++curve_frames_==1)std::printf("curve: first race frame bent onto the three curved screens\n");
 }
 void D3D11D3D9Device::finish_scene(){
     if(scene_finished_||count_only||colour_target_!=BackBuffer)return;
@@ -348,7 +350,7 @@ void D3D11D3D9Device::begin_frame(){
     // The device begins at640x480; the spanning video size arrives between
     // frames. Publish only after requested AA and curve resources are ready.
     if(!count_only&&!platform::pc_comparison_original()&&!curve_prepared_&&back_w_>=6&&back_w_%3==0&&back_h_>=2)prepare_curve();
-    curve_frame_=curve_prepared_&&platform::pc_curve_active()&&platform::pc_comparison_curve()&&!count_only;curve_world_=false;
+    curve_frame_=platform::pc_curve_frame_admitted(curve_prepared_,count_only);curve_world_=false;
     bound_=Bound{};
     if(platform::g_pc_triple_corrections||triple_gs_bound_){context_->GSSetShader(nullptr,nullptr,0);triple_gs_bound_=false;}
     if(!count_only){
@@ -839,8 +841,8 @@ bool D3D11D3D9Device::triple_bind(bool rhw,bool standard,bool affine){
                 b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;check(device_->CreateBuffer(&b,nullptr,&triple_cb_),"CreateBuffer(world coverage)");}
             D3D11_MAPPED_SUBRESOURCE m{};check(context_->Map(triple_cb_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m),"Map(world coverage)");
             std::memcpy(m.pData,c.data(),sizeof c);context_->Unmap(triple_cb_.Get(),0);}
-    }else if(standard&&(!triple_cached_||triple_point_mode_!=batch_point_sprites_||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
-        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;triple_point_mode_=batch_point_sprites_;
+    }else if(standard&&(!triple_cached_||triple_point_mode_!=batch_point_sprites_||triple_curve_mode_!=curve_source_world()||std::memcmp(triple_proj_.data(),proj.data(),64)!=0||fx!=triple_fix_[0]||fy!=triple_fix_[1])){
+        triple_proj_=proj;triple_fix_[0]=fx;triple_fix_[1]=fy;triple_cached_=true;triple_point_mode_=batch_point_sprites_;triple_curve_mode_=curve_source_world();
         TripleCorrections* e=nullptr;
         for(auto& k:triple_corrections_)if(k.used&&k.fix[0]==fx&&k.fix[1]==fy&&std::memcmp(k.p.data(),proj.data(),64)==0){e=&k;break;}
         if(!e){e=&triple_corrections_[triple_corrections_next_];triple_corrections_next_=(triple_corrections_next_+1u)%unsigned(triple_corrections_.size());

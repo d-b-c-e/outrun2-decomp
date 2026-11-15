@@ -80,7 +80,8 @@ private:
     // triangle into three viewports with the panel's clip correction; corrections cached per projection.
     ComPtr<ID3D11GeometryShader> triple_gs_;ComPtr<ID3D11Buffer> triple_cb_;
     platform::PcTripleCorrections triple_provider_{};std::uint64_t triple_revision_{};
-    std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{},triple_point_mode_{};
+    std::array<float,16> triple_proj_{};float triple_fix_[2]{};bool triple_cached_{},triple_ok_{},triple_gs_bound_{},triple_logged_{},triple_point_mode_{},
+        triple_curve_mode_{};   // the cached constants' curve-source flag: a frame in or out of the race's curve reloads them
     // Corrections already computed, by projection and pixel-centre fix (six, replaced in turn): draws that alternate
     // between projections reuse them instead of computing again (nene 35084).
     struct TripleCorrections { std::array<float,16> p{};float fix[2]{};bool used{},ok{};float c[52]{}; };
