@@ -27,11 +27,11 @@
 #include <string>
 namespace outrun::desktop {
 // The game's force level (wk_ffb_set_level, Wheelkit's games/outrun-2006/force-level.json): the wheel's force at Steering
-// strength 50 is the load times this (the runtime multiplies by it, then by strength / 50). The grip limit (load 1)
-// gives 0.30, art of rally's 95th percentile (0.29 of the wheel above 12 km/h, Wheelkit docs/recording-and-playback.md
-// section 11). Measured in an injected race of 2026-11-13: the load's p50 above 12 km/h was 0.32, so 0.096 of the wheel
-// against art of rally's median 0.09.
-inline constexpr float ForceFactor=0.30f;
+// strength 50 is the load times this (the runtime multiplies by it, then by strength / 50). 0.50: the owner drove 0.9.2
+// at 0.30 and had to raise Steering strength to 85 for the right feel (Wheelkit issues outrun-2006-0009 and 0010), so
+// his 85 is the new 50 (0.30 x 85 / 50 = 0.51; 0.50 keeps the grip limit inside the gate's band). His drive at 85 read
+// p50 0.066 and p95 0.44 of the wheel above 12 km/h against art of rally's 0.091 and 0.284 at 50.
+inline constexpr float ForceFactor=0.50f;
 // Below 5 km/h the slip angle has no meaning (the velocity is tiny); the force fades in to full at 20 km/h.
 inline float force_fade(float kmh){return std::clamp((kmh-5.f)/15.f,0.f,1.f);}
 

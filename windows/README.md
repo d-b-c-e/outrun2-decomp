@@ -100,7 +100,7 @@ repository, `runtime/native/sdk/README.md`).
   wheel's side force at wheel record +0xAC, its grip at +0xC0 and its sliding
   scale at +0xE4, in the player's body work 82E7F0 (wheel records of 0xF4 bytes
   at +0x258 front left, +0x34C front right, +0x440, +0x534). The front pair's
-  side force over its grip, times 0.30 and faded in from 5 to 20 km/h, goes to
+  side force over its grip, times 0.50 and faded in from 5 to 20 km/h, goes to
   `wk_ffb_set_force` each tick in GAME; the runtime owns the device, the
   player's on/off (F6, F8), Steering strength, the fence and the direction per
   wheel. The sign comes from the source (the header says how) and is checked on

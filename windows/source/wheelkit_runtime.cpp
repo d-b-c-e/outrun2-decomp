@@ -271,7 +271,9 @@ void wheelkit_configure(const Ini& settings){
     s.on=true;
     wk.wk_ffb_set_level(ForceFactor);   // the game's force level (outrun_force.hpp), before Steering strength
     // The game's own views in its cycle, and the Bonnet view it lacks (camera_controls.cpp adds it after the bumper).
-    const wk_camera_view views[]{{"Bumper","Bumper",1},{"Cockpit","Cockpit",1},{"Chase","Chase",0},{"Bonnet","Bonnet",0}};
+    // Every view starts in Game framing on triple screens; F7 switches one to Realistic (the owner, Wheelkit issue
+    // outrun-2006-0011).
+    const wk_camera_view views[]{{"Bumper","Bumper",0},{"Cockpit","Cockpit",0},{"Chase","Chase",0},{"Bonnet","Bonnet",0}};
     if(!wk.wk_cameras_configure(views,4))std::printf("wheelkit: camera views refused: %s\n",wk.wk_last_error());
     if(!wk.wk_panel_configure(kDescriptor,sizeof kDescriptor-1)){std::printf("wheelkit: F6 pages refused: %s\n",wk.wk_last_error());return;}
     show_values(settings);
