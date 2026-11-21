@@ -10,10 +10,12 @@
 #include "enhancements/frame_rate.hpp"
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <thread>
 namespace outrun::desktop {
 namespace {
 // Native slots: bumper 0, in-car 1, chase 2. Logical Bonnet 3 uses slot 0 with a model-derived render transform; the
@@ -30,11 +32,27 @@ struct State {
 } h;
 std::mutex camera_mutex;
 bool triples(){return platform::g_pc_triple_corrections!=nullptr;}
-bool save_last(unsigned view){
-    std::string error;
-    if(write_keys(h.path,"Camera",{{"LastCamera",std::string(ViewNames[view])}},error))return true;
-    std::printf("camera: LastCamera not saved: %s\n",error.c_str());return false;
-}
+// LastCamera is written by a worker, never on the game's thread: write_keys flushes the settings file to the disk, and on
+// the rig's hard disk that held the race for 60 to 400 ms at every Camera press (Wheelkit issue outrun-2006-0012). Presses
+// in quick succession write once; the last choice is written before the program ends.
+struct LastCameraWriter {
+    std::mutex m;std::condition_variable cv;std::thread worker;std::string path;int pending{-1};bool stop{};
+    void request(const std::string& file,unsigned view){
+        {std::lock_guard<std::mutex> lock(m);path=file;pending=int(view);}
+        if(!worker.joinable())worker=std::thread([this]{run();});
+        cv.notify_one();
+    }
+    void run(){
+        for(;;){
+            int view;std::string file;
+            {std::unique_lock<std::mutex> lock(m);cv.wait(lock,[&]{return stop||pending>=0;});
+             if(pending<0)return;view=pending;pending=-1;file=path;}
+            std::string error;
+            if(!write_keys(file,"Camera",{{"LastCamera",std::string(ViewNames[view])}},error))std::printf("camera: LastCamera not saved: %s\n",error.c_str());
+        }
+    }
+    ~LastCameraWriter(){{std::lock_guard<std::mutex> lock(m);stop=true;}cv.notify_one();if(worker.joinable())worker.join();}
+} last_camera_writer;
 float adjust(std::uint8_t view,float game){
     const std::lock_guard<std::mutex> lock(camera_mutex);
     if(view==1||view==2)h.bonnet=false;
@@ -53,7 +71,7 @@ std::uint8_t cycle(std::uint8_t previous){
     const unsigned logical=previous==0&&h.bonnet?3u:previous;
     const unsigned next=logical==0?3u:logical==3?1u:logical==1?2u:0u;
     h.bonnet=next==3;
-    if(h.last_camera!=int(next)&&save_last(next))h.last_camera=int(next);
+    if(h.last_camera!=int(next)){h.last_camera=int(next);last_camera_writer.request(h.path,next);}
     return std::uint8_t(h.bonnet?0:next);
 }
 std::uint8_t restore_view(std::uint8_t native_default){
