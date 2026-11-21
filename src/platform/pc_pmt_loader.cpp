@@ -315,7 +315,9 @@ void texture_replacement_configure(bool scene,bool ui,const std::string& load_fo
                 scene_extract?"on":"off",ui_extract?"on":"off",load_folder.c_str());}
     }
     if(!scene&&!ui)return;
-    if(cache)try{r.file_cache=std::make_unique<TextureFileCache>(128u<<20);}catch(...){}
+    // 512 MiB of pack files: a stage's end streams the next stage's course, sky and object banks (about 150 MB of the
+    // owner's pack) through the prefetch worker before their textures are made.
+    if(cache)try{r.file_cache=std::make_unique<TextureFileCache>(512u<<20);}catch(...){}
     std::error_code e;r.root=std::filesystem::u8path(load_folder);
     for(std::filesystem::recursive_directory_iterator it(r.root,e),end;!e&&it!=end;it.increment(e)){
         if(!it->is_regular_file(e))continue;

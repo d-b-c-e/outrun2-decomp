@@ -119,6 +119,11 @@ repository, `runtime/native/sdk/README.md`).
   for stages, cars and objects); a saved `SceneTextureReplacement` or
   `UITextureReplacement` decides where set. The runtime's log says how many
   pictures the pack has at the start and how many were replaced at the end.
+  A bank streamed in during a race (a stage's end loads the next stage's
+  course, sky and objects) has its pack files read ahead on a worker
+  (`[Graphics] EnableTextureCache`, on unless set false; 512 MiB), and the
+  DXT pictures go to the GPU as BC1/2/3 without being decoded on the CPU
+  (Wheelkit issue outrun-2006-0012).
 - **Unattended tests** use the runtime's switches in
   `%LOCALAPPDATA%\dbce\outrun-2006\`: `ffb-fence.on`, and `inject.on` with
   `inject.txt` for test input; F6's dev channel is `panel-dev.txt` there.

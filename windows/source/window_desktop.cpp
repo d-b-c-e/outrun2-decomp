@@ -33,6 +33,9 @@
 #include <fstream>
 #include <iterator>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <thread>
 #include "desktop_settings.hpp"
 #include "triple_screens.hpp"
 #include "curve_runtime.hpp"
@@ -55,6 +58,31 @@
 namespace outrun::xbox_runtime {
 namespace {
 bool closed=false,borderless=true,hide_mouse_cursor=true;
+// The texture pack read once in the background at the start, at the lowest I/O priority, so the system's file cache
+// holds it when the game asks for a picture: a menu or HUD picture (made at its first draw) or a stage bank streamed in
+// a race reads from memory, not from the disk on the game's thread (Wheelkit issue outrun-2006-0012: the owner's pack
+// is on a hard disk, where a cold read of a 20 MB HUD picture held a race frame for 360 ms). Stopped and joined at exit.
+struct PackReadAhead {
+    std::thread worker;std::atomic<bool> stop{};
+    ~PackReadAhead(){stop=true;if(worker.joinable())worker.join();}
+    void start(std::vector<std::filesystem::path> files){
+        worker=std::thread([this,files=std::move(files)]{
+            SetThreadPriority(GetCurrentThread(),THREAD_MODE_BACKGROUND_BEGIN);
+            const auto t0=std::chrono::steady_clock::now();
+            std::vector<char> buffer(1u<<20);std::uint64_t bytes=0;unsigned read=0;
+            for(const auto& path:files){
+                if(stop)break;
+                const HANDLE h=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+                if(h==INVALID_HANDLE_VALUE)continue;
+                DWORD got=0;while(!stop&&ReadFile(h,buffer.data(),DWORD(buffer.size()),&got,nullptr)&&got)bytes+=got;
+                CloseHandle(h);++read;
+            }
+            if(!stop)std::printf("textures: the pack's %u files (%.0f MB) read ahead into the system's file cache in %.1f s\n",read,
+                double(bytes)/1048576.0,std::chrono::duration<double>(std::chrono::steady_clock::now()-t0).count());
+        });
+    }
+};
+PackReadAhead pack_read_ahead;
 LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l){
     if(message==WM_CLOSE){outrun::desktop::gamepad_vibration_stop();closed=true;return 0;}
     // The keyboard as DirectInput reports it (DIK = scan code, 0x80 for the extended keys); every key up when the
@@ -448,7 +476,9 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     {   const bool any=settings.flag("Graphics","TextureMatchAnyFolder",false);
         const bool extract_requested=settings.flag("Graphics","SceneTextureExtract",false);
         const bool ui_extract_requested=settings.flag("Graphics","UITextureExtract",false);
-        const bool cache_requested=settings.flag("Graphics","EnableTextureCache",false);
+        // EnableTextureCache (the Tweaks key, off there) is on unless set false: the pack's files are read ahead on a
+        // worker, not on the game's thread as a bank streams in during a race (Wheelkit issue outrun-2006-0012).
+        const bool cache_requested=settings.flag("Graphics","EnableTextureCache",true);
         const bool extraction_allowed=true;
         const bool extract=extract_requested,ui_extract=ui_extract_requested;
         std::string base=settings.text("Graphics","TextureBaseFolder","textures");
@@ -459,12 +489,13 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         std::string game=folder;
         for(const auto& a:args)if(a.rfind("--data=",0)==0&&a.size()>7)game=a.substr(7);
         const std::string load=game+"/"+base+"/load";
-        outrun::desktop::TexturePack pack;
+        outrun::desktop::TexturePack pack;std::vector<std::filesystem::path> pack_files;
         {   std::error_code ec;
             for(std::filesystem::recursive_directory_iterator i(std::filesystem::u8path(load),ec),end;!ec&&i!=end;i.increment(ec)){
                 if(!i->is_regular_file(ec))continue;
                 const auto ext=i->path().extension().wstring();
                 if(_wcsicmp(ext.c_str(),L".dds")!=0)continue;
+                pack_files.push_back(i->path());
                 const auto rel=std::filesystem::relative(i->path(),std::filesystem::u8path(load),ec);
                 const auto top=rel.begin()!=rel.end()&&std::next(rel.begin())!=rel.end()?outrun::xbox_runtime::utf8(rel.begin()->wstring()):std::string();
                 if(outrun::desktop::texture_folder_is_ui(top))++pack.ui;else ++pack.scene;
@@ -478,7 +509,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
                 "a saved [Graphics] key decides where set, else a pack present":"on wherever a pack is present");
             outrun::desktop::wheelkit_log(line);}
         outrun::platform::texture_replacement_configure(on,ui,load,any,extract,ui_extract,cache_requested&&extraction_allowed);
-        if(cache_requested&&extraction_allowed&&(on||ui))std::printf("settings: replacement DDS cache on (128 MiB, next ordinary start; no hot reload)\n");
+        if((on||ui)&&!pack_files.empty())outrun::xbox_runtime::pack_read_ahead.start(std::move(pack_files));
+        if(cache_requested&&extraction_allowed&&(on||ui))std::printf("settings: replacement DDS cache on (512 MiB, read ahead per bank; next ordinary start; no hot reload)\n");
         if(any&&(on||ui))std::printf("settings: [Graphics] TextureMatchAnyFolder: same-name files from other pack folders when unambiguous\n");}
     // The game's own keyboard (the reconstructed PC keyboard device and its key tables).
     outrun::platform::native_pc_keyboard_source()=[](std::uint8_t keys[256]){
@@ -535,8 +567,8 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     }
     {const auto cache=outrun::platform::texture_file_cache_stats();
      if(cache.reads||cache.hits||cache.failed)
-         std::printf("replacement DDS cache: %llu reads, %llu hits, %llu failed, %llu evictions; %zu bytes/%zu files retained\n",
-             static_cast<unsigned long long>(cache.reads),static_cast<unsigned long long>(cache.hits),
+         std::printf("replacement DDS cache: %llu reads (%llu read ahead), %llu hits, %llu failed, %llu evictions; %zu bytes/%zu files retained\n",
+             static_cast<unsigned long long>(cache.reads),static_cast<unsigned long long>(cache.prefetched),static_cast<unsigned long long>(cache.hits),
              static_cast<unsigned long long>(cache.failed),static_cast<unsigned long long>(cache.evicted),cache.bytes,cache.entries);}
     if(const auto& smoke=outrun::platform::tire_smoke_emit_stats();smoke.loops){
         // The record names the car and tire: 934448 + tire*5C (player), 9345B8 + (car-1)*170 + tire*5C (rivals).

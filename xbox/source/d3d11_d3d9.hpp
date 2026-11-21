@@ -56,7 +56,9 @@ public:
 private:
     struct SunQuery {ComPtr<ID3D11Query> query;bool active{},pending{};};
     std::map<std::uint32_t,SunQuery> sun_queries_;
-    struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{};unsigned levels{}; };
+    // compressed: created from a file texture's DXT1/3/5 levels as BC1/2/3, never decoded on the CPU; written on the CPU
+    // later (unlock_rect, or a render target), it is created again as R8G8B8A8 from the decoded levels.
+    struct Texture { ComPtr<ID3D11Texture2D> texture;ComPtr<ID3D11ShaderResourceView> srv;bool cube{},compressed{};unsigned levels{}; };
     void raster(const Vertex*,unsigned)override;
     bool defer_triangle_depth_clip()const noexcept override;
     bool begin_deferred_point_sprites()override;
@@ -113,11 +115,14 @@ public:
     // Texture CPU copies (texture(); OR2_KEEP_TEXTURE_RGBA=1 keeps them): file textures released after their upload,
     // the RGBA bytes released, and file textures kept because they were written on the CPU.
     std::uint64_t rgba_released_textures{},rgba_released_bytes{},rgba_kept_written{};
+    // File textures created from their encoded levels (BC1/2/3), their bytes, and those created again as RGBA8 when written.
+    std::uint64_t compressed_textures{},compressed_bytes{},compressed_recreated{};
 private:
     bool native_enabled_{true};
     struct { std::uint64_t draws{},cpu_draws{},uploads{},upload_bytes{}; unsigned compiled{},loaded{},failed{}; double ms{};
              std::map<std::string,std::uint64_t> refused; } native_stats_;
     Texture* texture(std::uint32_t);
+    void drop_compressed(std::uint32_t texture);   // a BC texture now written on the CPU: created again as RGBA8
     ID3D11RenderTargetView* colour_view();
     ID3D11DepthStencilView* depth_view(std::uint32_t);
     void uniform(unsigned slot,const void*,std::size_t);

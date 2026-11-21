@@ -1,8 +1,12 @@
 #pragma once
-// Read-only DDS bytes, never device handles. One owned prefetch job; its destructor joins before storage dies.
+// Read-only DDS bytes, never device handles. One owned prefetch worker; its destructor joins before storage dies.
+// Each bank queued for loading hands its pack files to prefetch(); the worker reads them in order, so a race that streams
+// several banks at once (a stage's end: the next stage's course, sky and objects) reads none of them on the game's
+// thread (Wheelkit issue outrun-2006-0012: the pack is on a hard disk, about 20 ms a file when it is not in the cache).
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -19,7 +23,7 @@ class TextureFileCache {
 public:
     static constexpr std::size_t MaxFileBytes=128u<<20;
     explicit TextureFileCache(std::size_t capacity):capacity_(capacity){}
-    ~TextureFileCache(){finish();}
+    ~TextureFileCache(){{std::lock_guard<std::mutex> lock(queue_mutex_);queue_.clear();}finish();}
     TextureFileCache(const TextureFileCache&)=delete;
     TextureFileCache& operator=(const TextureFileCache&)=delete;
     static bool read_file(const std::filesystem::path& path,std::vector<std::uint8_t>& out){
@@ -34,22 +38,19 @@ public:
     bool read(const std::filesystem::path& path,std::vector<std::uint8_t>& out){
         try{return fetch(path,&out);}catch(...){return read_file(path,out);} // optional caching must not refuse a read
     }
-    // Only this bank's indexed files, at most one capacity of input bytes per job. No unbounded directory scan.
-    // A prior in-flight bank is retained instead of blocking a new object-load step.
+    // Only this bank's indexed files, at most one capacity of input bytes per bank. No unbounded directory scan. A bank
+    // queued while another is being read waits its turn in the same worker; the object-load step is never blocked.
     void prefetch(std::vector<std::filesystem::path> paths){
-        if(!ready())return;
-        try{job_=std::async(std::launch::async,[this,paths=std::move(paths)]{
-            std::size_t remaining=capacity_;
-            try{for(const auto& path:paths){
-                std::error_code error;const auto n=std::filesystem::file_size(path,error);
-                if(error||n<128u||n>MaxFileBytes||n>remaining)continue;
-                if(fetch(path,nullptr)){remaining-=std::size_t(n);std::lock_guard<std::mutex> lock(mutex_);++stats_.prefetched;}
-            }}catch(...){} // read/cache failures are handled again by the ordinary loader
-        });}catch(...){} // unable to start: ordinary synchronous reads remain available
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        queue_.push_back(std::move(paths));
+        if(running_)return;   // the worker takes it after the banks before it
+        finish();
+        try{running_=true;job_=std::async(std::launch::async,[this]{work();});}
+        catch(...){running_=false;queue_.clear();} // unable to start: ordinary synchronous reads remain available
     }
+    // Every bank handed to prefetch() has been read (or the worker could not start).
     bool ready(){
-        if(!job_.valid())return true;
-        if(job_.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        {std::lock_guard<std::mutex> lock(queue_mutex_);if(running_)return false;}
         finish();return true;
     }
     void finish(){if(job_.valid())try{job_.get();}catch(...){} }
@@ -58,14 +59,33 @@ public:
     }
 private:
     struct Entry {std::vector<std::uint8_t> bytes;std::uint64_t age{};};
-    bool fetch(const std::filesystem::path& path,std::vector<std::uint8_t>* out){
-        std::lock_guard<std::mutex> lock(mutex_);
-        if(const auto it=entries_.find(path);it!=entries_.end()){
-            if(out)*out=it->second.bytes;
-            it->second.age=++clock_;++stats_.hits;return true;
+    void work(){
+        for(;;){
+            std::vector<std::filesystem::path> paths;
+            {std::lock_guard<std::mutex> lock(queue_mutex_);
+             if(queue_.empty()){running_=false;return;}
+             paths=std::move(queue_.front());queue_.pop_front();}
+            std::size_t remaining=capacity_;
+            try{for(const auto& path:paths){
+                std::error_code error;const auto n=std::filesystem::file_size(path,error);
+                if(error||n<128u||n>MaxFileBytes||n>remaining)continue;
+                if(fetch(path,nullptr)){remaining-=std::size_t(n);std::lock_guard<std::mutex> lock(mutex_);++stats_.prefetched;}
+            }}catch(...){} // read/cache failures are handled again by the ordinary loader
         }
+    }
+    bool fetch(const std::filesystem::path& path,std::vector<std::uint8_t>* out){
+        {   std::lock_guard<std::mutex> lock(mutex_);
+            if(const auto it=entries_.find(path);it!=entries_.end()){
+                if(out)*out=it->second.bytes;
+                it->second.age=++clock_;++stats_.hits;return true;
+            }
+        }
+        // The disk read outside the lock: a reader on the game's thread never waits for the worker's file.
         std::vector<std::uint8_t> bytes;
-        if(!read_file(path,bytes)){++stats_.failed;return false;}
+        const bool read=read_file(path,bytes);
+        std::lock_guard<std::mutex> lock(mutex_);
+        if(!read){++stats_.failed;return false;}
+        if(entries_.count(path)){if(out)*out=std::move(bytes);return true;}   // the other thread read it meanwhile
         ++stats_.reads;
         if(out)*out=bytes; // retain successful caller bytes even if optional cache allocation fails
         const auto size=bytes.size();if(size>capacity_)return true;
@@ -81,6 +101,9 @@ private:
     std::map<std::filesystem::path,Entry> entries_;
     TextureFileCacheStats stats_;
     std::uint64_t clock_{};
+    std::mutex queue_mutex_;
+    std::deque<std::vector<std::filesystem::path>> queue_;
+    bool running_{};
     std::future<void> job_;
 };
 }

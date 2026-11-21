@@ -302,7 +302,9 @@ int main(){
         q.width=q.height=0xffffffffu;q.mip_levels=0;q.pool=1;q.filter=1;q.mip_filter=1;
         const auto tex=u.create_texture_from_file(q);
         const char* keep_env=std::getenv("OR2_KEEP_TEXTURE_RGBA");const bool keep=keep_env&&std::strcmp(keep_env,"1")==0;   // as the runtime
-        check(tex!=0&&u.texture_rgba_bytes(tex)==84u,"D3D11: file texture created with its RGBA copy");
+        // Without OR2_KEEP_TEXTURE_RGBA nothing is decoded at creation (Wheelkit issue outrun-2006-0012): the level is decoded
+        // for its upload only.
+        check(tex!=0&&u.texture_rgba_bytes(tex)==(keep?84u:0u),keep?"D3D11: file texture created with its RGBA copy":"D3D11: file texture created without an RGBA copy");
         u.reset_state();u.set_render_state(RS_CULLMODE,CULL_NONE);u.set_render_state(RS_ZENABLE,0);u.set_viewport(0,0,64,48,0.f,1.f);
         u.set_texture_stage_state(0,1,2);u.set_texture_stage_state(0,2,2);u.set_texture_stage_state(0,4,2);u.set_texture_stage_state(0,5,2);
         u.set_sampler_state(0,SAMP_MAGFILTER,1);u.set_sampler_state(0,SAMP_MINFILTER,1);u.set_sampler_state(0,SAMP_MIPFILTER,0);
@@ -324,6 +326,31 @@ int main(){
         const auto made=u.create_texture(4,4,1,1,21,0);
         u.set_texture(0,made);u.set_texture(0,0);
         check(!u.release_rgba(made)&&u.texture_rgba_bytes(made)==64u,"D3D11: a created texture keeps its copy");
+        // A DXT1 file texture goes to the GPU as BC1 from its encoded block, never decoded on the CPU, and draws what the
+        // CPU decoder gives (within rounding of the 5:6:5 colours).
+        if(!keep){
+            std::vector<std::uint8_t> dxt(0x80,0);std::memcpy(dxt.data(),"DDS ",4);
+            const auto put=[&](std::size_t at,std::uint32_t v){std::memcpy(dxt.data()+at,&v,4);};
+            put(4,124);put(12,4);put(16,4);put(28,3);put(76,32);put(80,4);put(84,0x31545844u);
+            const std::uint8_t block[8]{0x00,0xf8,0x1f,0x00,0xe4,0x1b,0x4e,0xb1};   // red 0xF800 > blue 0x001F: four colours
+            for(unsigned level=0;level<3;++level)dxt.insert(dxt.end(),block,block+8);   // 4x4, 2x2 and 1x1: one block each
+            PcTextureFileRequest d{};d.data=dxt.data();d.size=std::uint32_t(dxt.size());
+            d.width=d.height=0xffffffffu;d.mip_levels=0;d.pool=1;d.filter=1;d.mip_filter=1;
+            const auto bc=u.create_texture_from_file(d);
+            check(bc!=0&&u.texture_rgba_bytes(bc)==0u,"D3D11: a DXT1 file texture created without an RGBA copy");
+            const auto drawn=[&]{u.begin_frame();u.clear(1,0xff000000,1,0);u.set_texture(0,bc);
+                const V v[4]{{8,8,0,1,0,0},{16,8,0,1,1,0},{8,16,0,1,0,1},{16,16,0,1,1,1}};u.draw_primitive_up(5,2,v,sizeof(V));
+                u.set_texture(0,0);u.end_frame();return readback(tg.device.Get(),tg.context.Get(),u.back_texture());}();
+            PcDdsTexture cpu;std::string error;const bool parsed=pc_d3dx_texture_from_file(d,cpu,error);
+            const auto want=parsed?pc_dds_rgba(cpu,0,0):std::vector<std::uint8_t>{};
+            bool same=drawn.size()==64u*48u*4u&&want.size()==64u;
+            for(unsigned k=0;k<16&&same;++k){const unsigned at=((9+(k/4)*2)*64+(9+(k%4)*2))*4;
+                for(unsigned c=0;c<3&&same;++c)same=std::abs(int(drawn[at+c])-int(want[k*4+c]))<=2;}
+            check(same,"D3D11: the BC1 texture draws the CPU decoder's texels");
+            check(u.compressed_textures==1u&&u.compressed_bytes==24u&&u.texture_rgba_bytes(bc)==0u&&u.rgba_levels_decoded_again==0u,
+                  "D3D11: the DXT1 texture went to the GPU compressed and was never decoded");
+            u.release(bc);
+        }
         u.release(tex);u.release(made);
         check(u.errors.empty(),"D3D11: no errors in the texture lifetime fixture");
     }

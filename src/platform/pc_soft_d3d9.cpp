@@ -155,8 +155,11 @@ std::uint32_t PcSoftD3D9Device::create_texture_from_file(const PcTextureFileRequ
     if(!pc_d3dx_texture_from_file(q,o.texture,error)){errors.push_back(error);return 0;}
     for(const auto& f:o.texture.faces)for(const auto& l:f)texture_bytes+=l.data.size();
     o.rgba.resize(o.texture.faces.size());
-    for(unsigned f=0;f<o.texture.faces.size();++f)for(unsigned l=0;l<o.texture.faces[f].size();++l)o.rgba[f].push_back(pc_dds_rgba(o.texture,f,l));
-    o.from_file=true;
+    for(unsigned f=0;f<o.texture.faces.size();++f){
+        if(lazy_file_rgba_){o.rgba[f].resize(o.texture.faces[f].size());continue;}   // rgba_level decodes when asked
+        for(unsigned l=0;l<o.texture.faces[f].size();++l)o.rgba[f].push_back(pc_dds_rgba(o.texture,f,l));
+    }
+    o.from_file=true;o.rgba_released=lazy_file_rgba_;
     objects_.push_back(std::move(o));return std::uint32_t(objects_.size());}
 std::vector<std::uint8_t>& PcSoftD3D9Device::rgba_level(Object& o,unsigned face,unsigned level){
     auto& l=o.rgba.at(face).at(level);

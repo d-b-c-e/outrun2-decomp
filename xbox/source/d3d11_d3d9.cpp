@@ -126,6 +126,9 @@ void write_shader_cache(const std::string& path,const void* data,std::size_t siz
 }
 D3D11D3D9Device::D3D11D3D9Device(ID3D11Device* device,ID3D11DeviceContext* context,unsigned w,unsigned h)
     :PcSoftD3D9Device(w,h),device_(device),context_(context){
+    // File textures go to the GPU from their encoded levels (texture()) and are decoded only for a CPU reader;
+    // OR2_KEEP_TEXTURE_RGBA=1 keeps the old way (every level decoded at creation and kept).
+    lazy_file_rgba_=!keep_texture_rgba();
     const auto vs=compile(hlsl::ffp,"vs_main","vs_4_1");
     check(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_),"CreateVertexShader");
     const auto ps=compile(hlsl::ffp,"ps_main","ps_4_1");
@@ -179,6 +182,8 @@ D3D11D3D9Device::~D3D11D3D9Device(){
                 "%llu levels decoded again\n",(unsigned long long)rgba_released_textures,double(rgba_released_bytes)/1048576.0,
                 keep_texture_rgba()?" [OR2_KEEP_TEXTURE_RGBA: all kept]":"",(unsigned long long)rgba_kept_written,
                 (unsigned long long)rgba_levels_decoded_again);
+    std::printf("compressed textures: %llu file textures on the GPU from their DXT levels (%.1f MB, not decoded), %llu made again as RGBA8 after a CPU write\n",
+                (unsigned long long)compressed_textures,double(compressed_bytes)/1048576.0,(unsigned long long)compressed_recreated);
     std::printf("point sprites: %llu drawn, %llu not drawn by D3D9's rules (depth or viewport)\n",
                 (unsigned long long)point_sprites_drawn,(unsigned long long)point_sprites_rejected);
     if(point_sprites_deferred)std::printf("point sprites: %llu submitted for per-panel expansion (visibility deferred to GPU)\n",(unsigned long long)point_sprites_deferred);
@@ -401,26 +406,56 @@ D3D11D3D9Device::Texture* D3D11D3D9Device::texture(std::uint32_t handle){
     if(auto it=textures_.find(handle);it!=textures_.end())return &it->second;
     Texture t{};t.cube=o->texture.cube;t.levels=std::max(1u,o->texture.levels);
     const auto& top=o->texture.faces[0][0];
+    // A file texture nobody wrote, in DXT1/3/5 with a top level of whole 4x4 blocks: the GPU takes its encoded levels as
+    // BC1/2/3, the same texels the CPU decoder gives, with no decode and a quarter to an eighth of the upload (Wheelkit
+    // issue outrun-2006-0012: decoding each streamed texture to RGBA8 here cost about 30 ms of a race frame).
+    using F=platform::PcDdsTexture::Format;const auto format=o->texture.format;
+    const bool whole=std::all_of(o->texture.faces.begin(),o->texture.faces.end(),[&](const auto& f){return f.size()>=t.levels;});
+    if(lazy_file_rgba_&&o->from_file&&!o->cpu_written&&format!=F::rgba8&&top.width%4==0&&top.height%4==0&&whole){
+        const unsigned block=format==F::bc1?8u:16u;
+        std::vector<D3D11_SUBRESOURCE_DATA> init;std::uint64_t bytes=0;
+        for(unsigned face=0;face<o->texture.faces.size();++face)for(unsigned level=0;level<t.levels;++level){
+            const auto& l=o->texture.faces[face][level];
+            init.push_back({l.data.data(),std::max(1u,(l.width+3)/4)*block,0});bytes+=l.data.size();
+        }
+        D3D11_TEXTURE2D_DESC d{};d.Width=top.width;d.Height=top.height;d.MipLevels=t.levels;d.ArraySize=t.cube?6:1;
+        d.Format=format==F::bc1?DXGI_FORMAT_BC1_UNORM:format==F::bc2?DXGI_FORMAT_BC2_UNORM:DXGI_FORMAT_BC3_UNORM;
+        d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;d.MiscFlags=t.cube?D3D11_RESOURCE_MISC_TEXTURECUBE:0;
+        check(device_->CreateTexture2D(&d,init.data(),&t.texture),"CreateTexture2D (BC)");
+        check(device_->CreateShaderResourceView(t.texture.Get(),nullptr,&t.srv),"CreateShaderResourceView");
+        t.compressed=true;++compressed_textures;compressed_bytes+=bytes;
+        return &(textures_[handle]=std::move(t));
+    }
     D3D11_TEXTURE2D_DESC d{};d.Width=top.width;d.Height=top.height;d.MipLevels=t.levels;d.ArraySize=t.cube?6:1;d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
     d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;d.MiscFlags=t.cube?D3D11_RESOURCE_MISC_TEXTURECUBE:0;
     check(device_->CreateTexture2D(&d,nullptr,&t.texture),"CreateTexture2D");
+    std::size_t uploaded=0;
     for(unsigned face=0;face<o->rgba.size();++face)for(unsigned level=0;level<o->rgba[face].size()&&level<t.levels;++level){
-        const auto& rgba=rgba_level(*o,face,level);if(rgba.empty())continue;
+        // A file texture not decoded yet (lazy_file_rgba_) is decoded for the upload only, never kept.
+        std::vector<std::uint8_t> decoded;
+        const bool lazy=o->rgba[face][level].empty()&&o->rgba_released&&!o->cpu_written&&level<o->texture.faces[face].size();
+        if(lazy){decoded=platform::pc_dds_rgba(o->texture,face,level);uploaded+=decoded.size();}
+        const auto& rgba=lazy?decoded:rgba_level(*o,face,level);if(rgba.empty())continue;
         context_->UpdateSubresource(t.texture.Get(),D3D11CalcSubresource(level,face,t.levels),nullptr,rgba.data(),o->texture.faces[face][level].width*4,0);
     }
     // The GPU now holds the texels (UpdateSubresource copies pSrcData before it returns). A file texture nobody wrote
     // on the CPU keeps only its encoded DDS levels; rgba_level decodes a level again for any CPU reader. Written, render-
     // target and created textures keep their copies. Not a device-loss path: none exists.
     if(o->from_file&&!keep_texture_rgba()){
-        const auto bytes=texture_rgba_bytes(handle);
+        const auto bytes=texture_rgba_bytes(handle)+uploaded;
         if(release_rgba(handle)){++rgba_released_textures;rgba_released_bytes+=bytes;}else ++rgba_kept_written;
     }
     check(device_->CreateShaderResourceView(t.texture.Get(),nullptr,&t.srv),"CreateShaderResourceView");
     return &(textures_[handle]=std::move(t));
 }
+void D3D11D3D9Device::drop_compressed(std::uint32_t handle){
+    const auto it=textures_.find(handle);if(it==textures_.end()||!it->second.compressed)return;
+    textures_.erase(it);bound_=Bound{};++compressed_recreated;   // texture() makes it again, as RGBA8, at its next use
+}
 ID3D11RenderTargetView* D3D11D3D9Device::colour_view(){
     if(colour_target_==BackBuffer)return msaa_live_?msaa_rtv_.Get():back_rtv_.Get();   // the multisampled scene (port enhancement)
     auto* s=object(colour_target_);if(!s||!s->parent)throw std::runtime_error("invalid GPU colour surface");
+    drop_compressed(s->parent);   // a file texture drawn into: SetRenderTarget marked it written
     auto* t=texture(s->parent);if(!t)throw std::runtime_error("GPU surface has no parent");
     const std::uint64_t k=std::uint64_t(s->parent)<<32|std::uint64_t(s->face)<<16|s->level;
     if(auto it=colour_views_.find(k);it!=colour_views_.end())return it->second.Get();
@@ -479,6 +514,7 @@ void D3D11D3D9Device::release(std::uint32_t handle){
 }
 void D3D11D3D9Device::unlock_rect(std::uint32_t handle){
     auto* s=object(handle);const auto parent=s?s->parent:0;PcSoftD3D9Device::unlock_rect(handle);
+    if(parent)drop_compressed(parent);   // its RGBA levels, written now, go to the GPU at the next use
     if(!parent||!textures_.count(parent))return;
     s=object(handle);auto* p=object(parent);auto& t=textures_.at(parent);
     context_->UpdateSubresource(t.texture.Get(),D3D11CalcSubresource(s->level,s->face,t.levels),nullptr,p->rgba[s->face][s->level].data(),s->width*4,0);

@@ -171,6 +171,8 @@ protected:
         // (D3D11D3D9Device::texture); rgba_level decodes a level again from `texture` for a CPU reader. A CPU write
         // (unlock_rect, or the texture as a soft render target) retains it for good, so a later decode can never
         // bring back the file's texels over the written ones. The face/level structure always stays.
+        // On a device that uploads the encoded levels itself (lazy_file_rgba_, D3D11D3D9Device) a file texture starts
+        // released: no level is decoded until a CPU reader or writer asks for it.
         bool from_file{},rgba_released{},cpu_written{};
         // Textures created empty: D3DFORMAT. Surfaces: parent texture (0 for
         // a stand-alone depth-stencil surface), face, level, locked texels.
@@ -189,6 +191,10 @@ protected:
     // The RGBA texels of a texture level for a CPU reader or writer: a released file texture's level is decoded again
     // from its DDS levels first (pc_dds_rgba, the decoder used at creation).
     std::vector<std::uint8_t>& rgba_level(Object& texture,unsigned face,unsigned level);
+    // Set by a GPU device that creates file textures from their encoded DDS levels: create_texture_from_file then
+    // decodes nothing (Wheelkit issue outrun-2006-0012: each texture streamed in a race was decoded to RGBA8 on the
+    // game's thread, about 30 ms for a pack texture).
+    bool lazy_file_rgba_{};
     Object* object(std::uint32_t h){return h&&h<=objects_.size()&&objects_[h-1].refs?&objects_[h-1]:nullptr;}
     void rebind(std::uint32_t& slot,std::uint32_t handle);
     struct Vertex { float pos[4]; pc_shader::V4 d[2],t[8];float fog; };
