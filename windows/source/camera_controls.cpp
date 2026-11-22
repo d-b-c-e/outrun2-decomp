@@ -91,6 +91,11 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
     if(mounted&&fit&&fit->valid){
         const auto& mount=h.view==0?fit->bumper:fit->bonnet;
         driving::PcMatrix16 parent{};std::memcpy(parent.data(),car.sub(0xb0,64).data(),64);
+        // The Bonnet view sits on the body as it is drawn: +F0 (the body's posture: its lift, pitch and roll on the
+        // springs, 46AE70 with view bits 1) times +B0. On +B0 alone the bonnet pitched and rolled in the picture at
+        // every bump and change of speed (Wheelkit issue outrun-2006-0013). The Bumper view keeps +B0: no body is drawn.
+        if(h.view==3){driving::PcMatrix16 body{};std::memcpy(body.data(),car.sub(0xf0,64).data(),64);
+            parent=driving::pc_d3dx_matrix_multiply(body,parent);}
         driving::PcMatrix16 inverse{};
         if(driving::pc_d3dx_matrix_inverse(inverse,parent)){
             const auto eye=driving::pc_d3dx_vec3_transform_coord({mount[0],mount[1],-mount[2]},parent);
