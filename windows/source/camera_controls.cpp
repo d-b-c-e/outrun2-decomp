@@ -107,7 +107,12 @@ void adjust_view(driving::Bytes camera,driving::Bytes car,const platform::Camera
         driving::pc_matrix_translate_vector(s,{-h.set.right_cm*.01f,-h.set.up_cm*.01f,h.set.forward_cm*.01f});
         driving::pc_matrix_multiply_current(s,driving::Bytes(base.data(),base.size()));
     }
-    if(h.view==0||h.view==1||h.view==3){
+    // Bumper and Cockpit turn about 0.06 s behind the car (art of rally's BonnetCamera.Smooth); the body is not in those
+    // pictures, so the lag only steadies the world. The Bonnet view draws the bonnet, which is rigid on the car: a view
+    // turning behind it made the bonnet sway in the picture at every bump, as if the whole car shook (Wheelkit issue
+    // outrun-2006-0013), so that view is rigid on the car, as the eye already is. The step is one game tick (1/60 s of
+    // game time): only a tick's camera control steps; a display-only frame between ticks blends the last two results.
+    if(h.view==0||h.view==1){
         driving::PcMatrix16 view{},world{};std::memcpy(view.data(),s.current().data(),64);
         if(driving::pc_d3dx_matrix_inverse(world,view)){
             const auto& context=driving::camera_fov_context();const auto target=camera_rotation_from_world(world);
