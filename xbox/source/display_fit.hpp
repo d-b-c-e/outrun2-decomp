@@ -51,6 +51,16 @@ inline UiScalingRect ui_scaling_rect(unsigned mode,bool widescreen,float span_as
     }
     return {on,4./3.,0.,0.};
 }
+// [Graphics] WideMenus (menu_layout.hpp): outside the race, with the 2D in the centred 4:3 (UIScalingMode 1 or 2), the
+// menus take the frame's 16:9 (or a span's centre panel): the device widens the 2D mapping by the full margin, and
+// `hud` is how far the header and the button prompts move (Tweaks' HUD amount, as mode 1). Off: {} (nothing changes).
+struct MenuWide { bool on{}; double spacing{}; double hud{}; };
+inline MenuWide menu_wide(bool wide_menus,bool in_race,const UiScalingRect& ui,float span_aspect,double frame_aspect=16./9.){
+    if(!wide_menus||in_race||!ui.on||ui.aspect!=4./3.)return {};
+    const double a=span_aspect>0.f?double(span_aspect)/3.:frame_aspect,spacing=(a*480.-640.)/2.;
+    if(!(spacing>0.))return {};
+    return {true,spacing,320.*(1.-4./(3.*a))};
+}
 // The key's value: "0", "1" or "2" (blanks around ignored; empty = 2); anything else gives 2, and `note` says why. 1 is
 // partial for now (step 2a), and `note` says so.
 inline unsigned parse_ui_scaling_mode(std::string_view text,std::string& note){

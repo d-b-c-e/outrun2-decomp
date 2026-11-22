@@ -467,6 +467,11 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         if(!note.empty())std::printf("settings: [Graphics] %s\n",note.c_str());
         if(outrun::xbox_runtime::g_ui_scaling_mode==0u)
             std::printf("settings: UI scaling 0: the 2D stretched over the 16:9 frame (over the center panel on a span)\n");}
+    // [Graphics] WideMenus (on unless set false; Wheelkit issue outrun-2006-0015): the menus fill the 16:9 screen, the
+    // center screen on three (xbox/source/menu_layout.hpp): the backgrounds widened, the header and the button prompts
+    // at the sides, the menu's own text and pictures as they were. False keeps the 4:3 menus with black beside them.
+    outrun::xbox_runtime::g_wide_menus=settings.flag("Graphics","WideMenus",true);
+    std::printf("settings: menus %s\n",outrun::xbox_runtime::g_wide_menus?"fill the 16:9 screen (WideMenus)":"4:3 with black beside them (WideMenus = false)");
     // [Graphics] UILetterboxing, the Tweaks key (1 by default, as there; clamped to 0..2 as Tweaks reads it): black bars
     // outside the centered 4:3, 1 outside the race, 2 always, 0 none; only with UIScalingMode 1 or 2 (pc_screen.hpp).
     {   const int v=settings.integer("Graphics","UILetterboxing",1);

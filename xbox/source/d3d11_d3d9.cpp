@@ -12,6 +12,7 @@
 #include <limits>
 #include <vector>
 #include <cfloat>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,21 @@ constexpr unsigned KBuffer=1,KDecl=2,KVs=3,KTexture=5,KSurface=6;
 // OR2_KEEP_TEXTURE_RGBA=1 (A/B and rollback): file textures keep their RGBA copies after the GPU upload, as before.
 bool keep_texture_rgba(){static const bool on=[]{const char* v=std::getenv("OR2_KEEP_TEXTURE_RGBA");return v&&std::string(v)=="1";}();return on;}
 void check(HRESULT hr,const char* what){if(FAILED(hr))throw std::runtime_error(std::string(what)+" failed (HRESULT "+std::to_string(unsigned(hr))+")");}
+// Development: the 2D layer's draws of one frame, on request (UI-SCALING.md, menus at 16:9). A file
+// %LOCALAPPDATA%\Wheelkit\outrun-2006\ui-dump.txt (its text a label) asks for the next frame; it is looked for every 30
+// frames, deleted, and the frame's pretransformed draws go to ui-dump-<label>.txt beside it.
+std::FILE* g_ui_dump=nullptr;unsigned g_ui_dump_tick=0;
+std::filesystem::path ui_dump_folder(){const char* l=std::getenv("LOCALAPPDATA");return l?std::filesystem::path(l)/"Wheelkit"/"outrun-2006":std::filesystem::path{};}
+void ui_dump_begin(){
+    if(g_ui_dump||(g_ui_dump_tick++%30u)!=0u)return;
+    const auto folder=ui_dump_folder();if(folder.empty())return;
+    std::error_code ec;const auto request=folder/"ui-dump.txt";if(!std::filesystem::exists(request,ec))return;
+    std::string label;if(auto* f=std::fopen(request.string().c_str(),"rb")){char b[64]{};const auto n=std::fread(b,1,63,f);std::fclose(f);
+        for(std::size_t k=0;k<n;++k)if(std::isalnum((unsigned char)b[k])||b[k]=='-')label+=b[k];}
+    std::filesystem::remove(request,ec);if(label.empty())label="frame";
+    g_ui_dump=std::fopen((folder/("ui-dump-"+label+".txt")).string().c_str(),"wb");
+}
+void ui_dump_end(){if(g_ui_dump){std::fclose(g_ui_dump);g_ui_dump=nullptr;}}
 constexpr UINT CompileFlags=D3DCOMPILE_OPTIMIZATION_LEVEL3;   // also part of the shader cache key
 // The three-view geometry shader (TRIPLE-SCREENS.md step 4): each triangle three times, panel i in viewport i with its
 // clip correction C[i], applied before the D3D9 pixel-centre fix (undone, then re-applied: every viewport is the same
@@ -350,6 +366,7 @@ void D3D11D3D9Device::finish_scene(){
     composite_curve();
 }
 void D3D11D3D9Device::begin_frame(){
+    ui_dump_begin();menu_run_=MenuRun{};
     scene_finished_=false;msaa_live_=msaa_>1&&!count_only;
     if(msaa_live_)ensure_msaa();
     // The device begins at640x480; the spanning video size arrives between
@@ -373,6 +390,7 @@ void D3D11D3D9Device::collect_queries(bool wait_all){
     }
 }
 void D3D11D3D9Device::end_frame(){
+    ui_dump_end();
     triple_unbind();if(triple_frame_draws_){++triple_frames;triple_frame_draws_=0;}
     // Development: OR2_TRIPLE_TRACE=1 logs each frame's three-view counts (its time, draws replicated, kept single by
     // reason, into other targets), to line up with a clip of the window (sana 35918 / 35955: localization only, equal
@@ -992,6 +1010,7 @@ int D3D11D3D9Device::triple_native_standard(const void* program,const std::strin
 void D3D11D3D9Device::flush(){
     if(batch_.empty()||count_only){batch_point_sprites_=false;return;}
     pixel_pipeline();
+    if(menu_on_&&batch_rhw_)if(const float ex=ui_extension();ex>0.f)menu_layout(ex);
     const std::size_t bytes=batch_.size()*sizeof(Vertex);
     if(bytes>vbo_bytes_){vbo_bytes_=std::max<std::size_t>(bytes,std::size_t(1)<<20);vbo_.Reset();
         D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(vbo_bytes_);d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_VERTEX_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
@@ -1003,8 +1022,33 @@ void D3D11D3D9Device::flush(){
     if(bound_.layout!=layout_.Get()){context_->IASetInputLayout(layout_.Get());bound_.layout=layout_.Get();}
     if(bound_.topology!=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST){context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);bound_.topology=D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;}
     if(bound_.vs!=vertex_.Get()){context_->VSSetShader(vertex_.Get(),nullptr,0);bound_.vs=vertex_.Get();}
+    if(g_ui_dump&&batch_rhw_){float x0=1e9f,x1=-1e9f,y0=1e9f,y1=-1e9f;
+        for(const auto& v:batch_){const float x=v.pos[0]/v.pos[3],y=v.pos[1]/v.pos[3];x0=std::min(x0,x);x1=std::max(x1,x);y0=std::min(y0,y);y1=std::max(y1,y);}
+        const float ex=ui_extension(),w=soft_viewport_.w+2*ex,h=soft_viewport_.h;std::uint32_t tw=0,th=0;texture_level_size(textures[0],0,tw,th);
+        std::fprintf(g_ui_dump,"x %.1f..%.1f y %.1f..%.1f v %zu tex %u %ux%u target %u phase %u vp %.0fx%.0f\n",(x0+1)/2*w-ex,(x1+1)/2*w-ex,(1-y1)/2*h,(1-y0)/2*h,
+                     batch_.size(),textures[0],tw,th,unsigned(colour_target_),unsigned(draw_phase()),soft_viewport_.w,soft_viewport_.h);}
     triple_bind(batch_rhw_,true);   // the CPU's clip positions: world x view x projection, the standard form
     context_->Draw(UINT(batch_.size()),0);++frame_draws_;frame_vertices_+=unsigned(batch_.size());batch_.clear();batch_rhw_=false;batch_point_sprites_=false;
+}
+// [Graphics] WideMenus (menu_layout.hpp): the draw's rectangle in 640x480 UI units decides where its x goes; a draw kept
+// in place is clipped to the 4:3 as before (the scissor), the others to the 16:9 the 2D mapping spans.
+void D3D11D3D9Device::menu_layout(float ex){
+    const float W=soft_viewport_.w,H=soft_viewport_.h;if(!(W>0.f&&H>0.f))return;
+    const float sx=640.f/W,sy=480.f/H,span=W+2.f*ex;
+    auto ux=[&](float ndc){return ((ndc+1.f)*.5f*span-ex)*sx;};
+    float x0=1e9f,x1=-1e9f,y0=1e9f,y1=-1e9f;
+    for(const auto& v:batch_){if(!(v.pos[3]!=0.f))return;const float x=ux(v.pos[0]/v.pos[3]),y=(1.f-v.pos[1]/v.pos[3])*.5f*H*sy;
+        x0=std::min(x0,x);x1=std::max(x1,x);y0=std::min(y0,y);y1=std::max(y1,y);}
+    const unsigned texture=textures[0];
+    MenuDraw d;
+    if(x1-x0<=40.f&&menu_run_.continues(texture,y0,y1,x0))d=menu_run_.draw;else d=menu_place(x0,x1,y0,y1,menu_shift_);
+    menu_run_=MenuRun{texture,y0,y1,x0,x1,d,true};
+    if(d.place!=MenuPlace::keep){const float margin=ex*sx;
+        for(auto& v:batch_){const float w=v.pos[3],x=menu_x(d.place,d.dx,ux(v.pos[0]/w),margin);
+            v.pos[0]=(((x/sx+ex)/span)*2.f-1.f)*w;}}
+    const auto& vp=bound_.viewport;D3D11_RECT r=bound_.scissor;
+    if(d.place==MenuPlace::keep){r.left=LONG(std::lround(vp.TopLeftX+vp.Width*ex/span));r.right=LONG(std::lround(vp.TopLeftX+vp.Width*(W+ex)/span));}
+    if(std::memcmp(&r,&bound_.scissor,sizeof r)!=0){context_->RSSetScissorRects(1,&r);bound_.scissor=r;}
 }
 // The pixel side of a draw: target, states, textures, pixel program and its constants.
 void D3D11D3D9Device::pixel_pipeline(){

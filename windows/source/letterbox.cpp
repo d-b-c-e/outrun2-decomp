@@ -22,7 +22,12 @@ void letterbox_draw(ID3D11DeviceContext* ctx,ID3D11RenderTargetView* view,unsign
     if(!platform::pc_letterbox_now(platform::g_pc_ui_letterboxing,g_ui_scaling_mode,in_race.load(std::memory_order_relaxed)))return;
     const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect,double(width)/double(height));
     if(!ui.on||ui.aspect!=4./3.)return;   // the 2D is not in the centred 4:3 (4:3 output, or UIScalingMode 0)
-    const auto bars=platform::pc_letterbox_bars(std::int32_t(width),std::int32_t(height));
+    // [Graphics] WideMenus: the menus fill the 16:9, so the bars only keep a span's side screens black (the centre panel's
+    // 16:9 is the menu's); on one screen there is nothing to cover.
+    const bool wide=menu_wide(g_wide_menus,in_race.load(std::memory_order_relaxed),ui,platform::g_pc_wide_aspect,double(width)/double(height)).on;
+    if(wide&&!(platform::g_pc_wide_aspect>0.f))return;
+    const auto bars=wide?platform::PcLetterboxBars{std::int32_t(width/3u),std::int32_t(width-width/3u),std::int32_t(width)}
+                        :platform::pc_letterbox_bars(std::int32_t(width),std::int32_t(height));
     if(!bars.any())return;
     if(ctx!=context_for){
         if(context1){context1->Release();context1=nullptr;}

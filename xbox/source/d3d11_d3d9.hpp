@@ -1,3 +1,4 @@
+#include "menu_layout.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/pc_curve_scene.hpp"
 #pragma once
@@ -48,6 +49,9 @@ public:
     // scale, so the spaced HUD is not clipped; 0 keeps the plain rectangle.
     void set_ui_rect(bool on,double aspect=4./3.,double spacing=0.){
         ui_rect_=on;ui_aspect_=aspect>0.?aspect:4./3.;ui_spacing_=spacing>0.?spacing:0.;}
+    // [Graphics] WideMenus (menu_layout.hpp): this frame's menu draws are placed across the 16:9 (margin: the 2D
+    // mapping's extension each side, in UI units; shift: the prompts' and header's move). Off in the race.
+    void set_menu_layout(bool on,double shift){menu_on_=on;menu_shift_=float(shift);}
     void set_fxaa(bool on){fxaa_=on;}
     void set_msaa(unsigned samples){msaa_=samples==2||samples==4?samples:1;}
     void finish_scene();
@@ -186,6 +190,8 @@ private:
     ComPtr<ID3D11RasterizerState> fxaa_rasterizer_;ComPtr<ID3D11DepthStencilState> fxaa_depth_;ComPtr<ID3D11BlendState> fxaa_blend_;
     bool msaa_live_{},ui_rect_{},fxaa_{},scene_finished_{},batch_rhw_{};
     double ui_aspect_{4./3.},ui_spacing_{};
+    bool menu_on_{};float menu_shift_{};MenuRun menu_run_{};
+    void menu_layout(float ex);
     // The 2D mapping extends by ui_spacing_ only for back-buffer draws under the full-screen soft viewport, all four
     // edges (sana 39535); any game sub-viewport, a full-width partial-height one included, keeps its own clipping.
     float ui_extension()const{

@@ -1,6 +1,7 @@
 #include "d3d11_display.hpp"
 #include "display_fit.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/pc_curve_scene.hpp"
 #include "d3d11_d3d9.hpp"
 #include <memory>
 #include <stdexcept>

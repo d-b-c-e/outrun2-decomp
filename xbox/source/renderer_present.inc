@@ -29,6 +29,11 @@ bool present_frame(RendererImpl& r){
         const auto ui=ui_scaling_rect(g_ui_scaling_mode,g_widescreen,platform::g_pc_wide_aspect,
                                       double(FramebufferWidth)/double(FramebufferHeight));
         r.device->set_ui_rect(ui.on,ui.aspect,ui.spacing);platform::g_pc_ui_spacing=float(ui.hud);
+        // [Graphics] WideMenus: outside the race the menus take the 16:9 (menu_layout.hpp); the race keeps the above.
+        const auto wide=menu_wide(g_wide_menus,platform::g_pc_curve_in_race.load(std::memory_order_relaxed),ui,platform::g_pc_wide_aspect,
+                                  double(FramebufferWidth)/double(FramebufferHeight));
+        if(wide.on)r.device->set_ui_rect(true,4./3.,wide.spacing);
+        r.device->set_menu_layout(wide.on,wide.hud);
         r.device->set_fxaa(r.video_fxaa);r.device->set_msaa(r.video_msaa);
         r.device->begin_frame();
         if(!r.start_loading_visible&&r.scene){

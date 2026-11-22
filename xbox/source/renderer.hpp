@@ -18,6 +18,9 @@ inline bool g_widescreen=false;
 // [Graphics] UIScalingMode as parsed (display_fit.hpp parse_ui_scaling_mode / ui_scaling_rect): 2, keep centred, unless
 // the desktop host reads 0 or 1.
 inline unsigned g_ui_scaling_mode=2u;
+// [Graphics] WideMenus (menu_layout.hpp; on unless set false): outside the race the menus fill the 16:9 (on a span,
+// the center panel); false keeps them in the centered 4:3 with black beside them, as before.
+inline bool g_wide_menus=true;
 // [Window] AutoDetectResolution (set by the desktop before the game starts): the display's height in pixels, used while
 // options.ini holds no resolution (enhancements/video.hpp auto_detect_resolution); 0 keeps the fixed 1920x1440 default.
 inline unsigned g_auto_detect_height=0u;

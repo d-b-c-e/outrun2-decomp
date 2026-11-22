@@ -3,6 +3,7 @@
 #include "triple_screens.hpp"
 #include "triple_rig.hpp"
 #include "display_fit.hpp"
+#include "menu_layout.hpp"
 #include "platform/ui_spacing.hpp"
 #include "platform/c2c_ui_spacing.hpp"
 #include "platform/race_translated.hpp"
@@ -29,6 +30,36 @@ static bool fit_is(unsigned cw,unsigned ch,unsigned fw,unsigned fh,unsigned x,un
     const auto f=display_fit(cw,ch,fw,fh);return f.x==x&&f.y==y&&f.width==w&&f.height==h;
 }
 int main(){
+    // [Graphics] WideMenus (menu_layout.hpp, display_fit.hpp menu_wide): outside the race the menus take the 16:9 (a span's
+    // centre panel); the race, UIScalingMode 0 and the key off keep everything as before. The draws of the main menu as
+    // measured on the rig (run 20261122-150609): the panels, header bar, rule and button strip stretch about the centre;
+    // the tab under the header lengthens from its outer end; the status line and title go left, the badge right; the
+    // prompts by their half; a word moves as one; everything else (the carousel, cars, the parked next car) stays.
+    {   using namespace outrun::xbox_runtime;
+        const auto ui=ui_scaling_rect(2u,true,0.f,16./9.);
+        const auto w=menu_wide(true,false,ui,0.f,16./9.);
+        CHECK(w.on&&std::fabs(w.spacing-320./3.)<1e-9&&std::fabs(w.hud-80.)<1e-9);
+        CHECK(!menu_wide(false,false,ui,0.f).on&&!menu_wide(true,true,ui,0.f).on);
+        CHECK(!menu_wide(true,false,ui_scaling_rect(0u,true,0.f,16./9.),0.f).on);           // stretched already
+        const auto span=menu_wide(true,false,ui_scaling_rect(2u,true,16.f/3.f,16./3.),16.f/3.f,16./3.);
+        CHECK(span.on&&std::fabs(span.spacing-320./3.)<1e-4);                                 // the centre panel's 16:9
+        const float m=float(w.spacing),s=float(w.hud);
+        auto place=[&](float x0,float x1,float y0,float y1){return menu_place(x0,x1,y0,y1,s);};
+        CHECK(place(2,514,1,481).place==MenuPlace::stretch&&place(514,642,1,481).place==MenuPlace::stretch);
+        CHECK(std::fabs(menu_x(MenuPlace::stretch,0,0,m)+m)<1e-3f&&std::fabs(menu_x(MenuPlace::stretch,0,640,m)-640-m)<1e-3f);
+        CHECK(menu_x(MenuPlace::stretch,0,320,m)==320.f);                                     // about the centre
+        CHECK(place(1,513,-3,80).place==MenuPlace::stretch&&place(-9.7f,650.8f,69,80).place==MenuPlace::stretch);
+        CHECK(place(295,344,407,481).place==MenuPlace::stretch);                                // a strip tile
+        const auto tab=place(-76,340,71,90);CHECK(tab.place==MenuPlace::extend);
+        CHECK(menu_x(MenuPlace::extend,0,-76,m)==-76-m&&menu_x(MenuPlace::extend,0,340,m)==340);
+        CHECK(place(330,380,71,90).place==MenuPlace::keep);                                    // the tab's end cap
+        CHECK(place(.5f,16.5f,.5f,17.5f).dx==-s&&place(50,562,34.5f,73.5f).dx==-s&&place(556,592,36,93).dx==s);
+        CHECK(place(55,83,415,443).dx==-s&&place(457,485,415,443).dx==s&&place(389.5f,405.5f,420.5f,437.5f).dx==s);
+        CHECK(place(343,599,142,398).place==MenuPlace::keep&&place(426,642,120,411).place==MenuPlace::keep);   // car, person
+        CHECK(place(519.5f,837.5f,361,383).place==MenuPlace::keep&&place(644,807,112,140).place==MenuPlace::keep);
+        MenuRun run{173,420.5f,437.5f,300,316,{MenuPlace::shift,-s},true};
+        CHECK(run.continues(173,420.5f,437.5f,309)&&!run.continues(173,420.5f,437.5f,340)&&!run.continues(24,420.5f,437.5f,309));
+    }
     // [Graphics] UIScalingMode (display_fit.hpp): "0" / "1" / "2" (blanks around; empty = 2); anything else gives 2 with a
     // note, and 1 notes that it is partial (step 2a). The 2D rectangle: 2 = the centred 4:3 on 16:9 and on a span, as
     // before (none on a 4:3 frame), no spacing; 0 = none (stretched) on 16:9, the centre panel on a span (a third of its

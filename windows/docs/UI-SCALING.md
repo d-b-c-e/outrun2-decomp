@@ -331,3 +331,23 @@ ints.
 | 481A86 / 481A8B C2C fruit, 481B76 C2C hearts | canonical native request display 481A40, reached from GAD GOAL 46C220 | hand + existing translated children | Source connects the existing reconstruction, captures off/detect/off scopes per deferred submission, and reuses NAVI/GAD draw services. Affected Release build and owned_request_course_phase pass at e4d9886; rendered placement unqualified. |
 
 - **Open:** C2C rendered positions and goal-result acceptance. The canonical reconstruction, GOAL route, deferred fruit/heart scopes and translated positional bridge are in source; the affected build and one owned course fixture pass, with no rendered-result claim.
+
+## WideMenus: the menus at 16:9 (Wheelkit issue outrun-2006-0015, 2026-11-22)
+
+The owner asked for 16:9 menus. Neither Tweaks key gives them: the menus are 640x480 pictures (runs 20261122-003033,
+-003535, -004107). `[Graphics] WideMenus` (on unless set false) lays them out across the 16:9 (a span's centre panel)
+outside the race, from each 2D draw's rectangle in the 640x480 UI (`xbox/source/menu_layout.hpp`; the draws of every
+menu were measured on the rig with the development dump below, run 20261122-150609):
+- stretched about the centre: the full-height panels (two tiles, 512 + 128), the header bar (y -3..80, at an edge), the
+  header's rule (660 wide), the button strip's 49-wide tiles (y 407..481). They hold no text or cars;
+- lengthened from its outer end: the dark tab under the header (drawn from x -76; its end cap stays);
+- moved by Tweaks' HUD amount (80 at 16:9): the status line and the title (left), the badge (right), the button prompts
+  (by their half); a glyph run moves as one;
+- everything else stays where the 4:3 menu had it, at its size, clipped to the 4:3 as before (the game parks the next
+  car's name and the carousel's far items beyond its edges).
+The device widens the 2D mapping by the full margin in those frames (as mode 1 does), and UILetterboxing's bars then
+keep only a span's side screens black. The race (Tweaks' is_in_game, `g_pc_curve_in_race`) keeps UIScalingMode.
+Tests: `test_triple_screens` (the rules on the measured draws, `menu_wide`).
+
+Development: a file `%LOCALAPPDATA%\Wheelkit\outrun-2006\ui-dump.txt` (its text a label) makes the next frame's 2D
+draws go to `ui-dump-<label>.txt` beside it: each draw's rectangle in UI units (after the layout), texture and size.
