@@ -23,6 +23,7 @@
 #include "platform/race_ghosts.hpp"
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_scene_renderer.hpp"
+#include "platform/frontend_profiles.hpp"
 #include "platform/pc_screen.hpp"
 #include "platform/pc_network.hpp"
 #include "platform/race_draw_distance.hpp"
@@ -247,6 +248,20 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     // [Options] graphics, Wheelkit's app option (graphics_options.hpp): its four [Graphics] values for this run, before
     // any of them is read below. The file is not written.
     outrun::desktop::wheelkit_log(outrun::desktop::apply_graphics_preset(settings).c_str());
+    // [Options] unlockAll, Wheelkit's app option (off by default): every menu unlock check answers "open"; the license is
+    // never changed (frontend_profiles.hpp). The first start with it on keeps a copy of the game folder's SaveGame in
+    // SaveGame-before-unlock-all, once, so the progress as it was stays at hand.
+    outrun::platform::g_pc_unlock_all=settings.flag("Options","unlockAll",false);
+    if(outrun::platform::g_pc_unlock_all){
+        std::string game=folder;
+        for(const auto& a:args)if(a.rfind("--data=",0)==0&&a.size()>7)game=a.substr(7);
+        const auto saves=std::filesystem::u8path(game)/"SaveGame",copy=std::filesystem::u8path(game)/"SaveGame-before-unlock-all";
+        std::error_code ec;std::string kept="kept before";
+        if(std::filesystem::is_directory(saves,ec)&&!std::filesystem::exists(copy,ec)){
+            std::filesystem::copy(saves,copy,std::filesystem::copy_options::recursive,ec);
+            kept=ec?"NOT copied ("+ec.message()+")":"copied now";}
+        outrun::desktop::wheelkit_log(("options: unlock all content on: every car, course, mission and track open in the menus; the license is not changed (SaveGame-before-unlock-all: "+kept+")").c_str());
+    }
     // [Window] FrameLatency: frames queued ahead of the display. 2 by default (also when the key is absent): about 33 ms
     // less from Present to scan-out than the plain chain, with one frame of slack. 1 is the lowest latency, 0 the plain
     // chain as before. Exactly one digit 0..3; anything else is logged and 2 applies.

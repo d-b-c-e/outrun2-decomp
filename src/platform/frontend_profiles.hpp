@@ -18,6 +18,11 @@ struct FrontendLoginProtection {
 // Installed before the frontend starts. Empty disables sidecar access.
 void frontend_profiles_set_login_protection(FrontendLoginProtection);
 using PcLicense = std::array<std::uint8_t,PcLicenseBytes>;
+// [Options] unlockAll (Wheelkit's "Unlock all content", off by default; not in the PC game): every unlock check of the
+// menus answers "open" (cars, colours, music, showroom, course sets, mission groups and races, Coast 2 Coast stages).
+// The license's own bits and grades are never changed, so nothing the switch opens is saved; turned off, the license
+// is as it was, plus what was earned in races. The LAN lobby keeps the license's own state.
+inline bool g_pc_unlock_all=false;
 struct FrontendProfiles {
     std::array<std::array<std::uint8_t,PcLicenseBytes>,4> licenses{};
     std::array<std::uint8_t,PcCommonSaveBytes> common{};

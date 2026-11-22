@@ -48,7 +48,7 @@ int track_4c9750(const FrontendMusicServices& s){
 }
 // 4474E0 on 7C23E0, only asked above track 6.
 bool unlocked(const FrontendMusicServices& s,int track){
-    if(track<=6)return true;
+    if(track<=6||g_pc_unlock_all)return true;
     const unsigned bit=Unlocks5c9ab0[unsigned(track)];
     return (s.profile[0x28+bit/8]&(1u<<(bit%8)))!=0;
 }

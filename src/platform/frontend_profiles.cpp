@@ -199,11 +199,12 @@ bool frontend_category_unlocked_4e8410(const PcLicense& p,const LicenseProgressT
         // EnableHollyCourse2 (Tweaks' 4E8414 / 4E8537): group 7 takes group 6's test (the previous group's grade, 5)
         // in mode 1; in modes 2 and 3 Holly 1's own grade (group 6) must reach A. An absent or malformed fourth lane
         // (race_asset_pack.cpp) keeps it locked in every mode, so the menu never offers courses it cannot request.
+        if(g_pc_unlock_all){unlocked=tables.championship_present[3];return true;}
         int grade{};if(!frontend_group_grade_4e82a0(p,tables,g_pc_enable_holly_course2==1?5u:6u,grade))return false;
         unlocked=tables.championship_present[3]&&grade!=7&&grade>=4;return true;
     }
     if(group>=7)return true;
-    if(group==0||group==4){unlocked=true;return true;}
+    if(group==0||group==4||g_pc_unlock_all){unlocked=true;return true;}
     int grade{};if(!frontend_group_grade_4e82a0(p,tables,group-1,grade))return false;
     unlocked=grade!=7&&grade>=4;return true;
 }

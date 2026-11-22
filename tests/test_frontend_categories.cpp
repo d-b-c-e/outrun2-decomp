@@ -1,5 +1,6 @@
 #include "platform/frontend_categories.hpp"
 #include "platform/pc_screen.hpp"
+#include "platform/frontend_vehicle_data.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -117,5 +118,18 @@ int main(){
     c.selected_84b7f0=0;CHECK(frontend_categories_construct_4e8130(c,repeat));CHECK(frontend_categories_init_4e8760(c,s));
     ui.effect_4249f0=nullptr;input.feature_mask=0x2000;
     CHECK(!frontend_categories_control_4e8780(c,s,result)&&s.missing==0x4249f0);
+    {   // [Options] unlockAll: a fresh license opens every group (MIX 2 only with its lane), car and colour that exists;
+        // the license bytes are never changed.
+        PcLicense fresh;frontend_license_reset_4471a0(fresh,1);const auto before=fresh;
+        g_pc_enable_holly_course2=3;tables.championship_present.fill(true);g_pc_unlock_all=true;
+        for(unsigned group=0;group<8;++group){bool open{};CHECK(frontend_category_unlocked_4e8410(fresh,tables,group,open)&&open);}
+        tables.championship_present[3]=false;{bool open{true};CHECK(frontend_category_unlocked_4e8410(fresh,tables,7,open)&&!open);}
+        tables.championship_present[3]=true;
+        for(unsigned car=0;car<30;++car){CHECK(vehicle_unlocked_4c8f90(fresh,car));
+            for(unsigned colour=0;colour<8;++colour)CHECK(vehicle_colour_unlocked_4c8fc0(fresh,car,colour)==(VehicleColourUnlocks[car][colour]!=-2));}
+        CHECK(fresh==before);
+        g_pc_unlock_all=false;
+        {bool open{true};CHECK(frontend_category_unlocked_4e8410(fresh,tables,1,open)&&!open);}CHECK(!vehicle_unlocked_4c8f90(fresh,29));
+    }
     std::puts("category unlocks, selected mode bits, navigation, rejection sound and resource lifecycle pass");
 }

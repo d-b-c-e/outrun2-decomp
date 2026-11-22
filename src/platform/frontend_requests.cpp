@@ -63,6 +63,7 @@ unsigned result(FrontendRequestServices& s,unsigned type,unsigned j){
 }
 // 4EA030(stage, type): one past the last result of the stage's results.
 unsigned done_4ea030(FrontendRequestServices& s,unsigned stage,unsigned type){
+    if(g_pc_unlock_all)return results_5ce954[stage];   // every result slot of every stage open
     unsigned n=0;
     for(unsigned j=0;j<results_5ce954[stage];++j)if(result(s,type,j)!=7)n=j+1;
     return n;

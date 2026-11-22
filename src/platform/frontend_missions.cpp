@@ -44,7 +44,7 @@ bool type(FrontendMissionServices& s,unsigned category,unsigned race,unsigned& v
 }
 bool frontend_mission_unlocked_4e90e0(FrontendMissionServices& s,unsigned node,bool& unlocked){
     unsigned group{},category{};if(!location(s,group,category)||node>=mission_tables::counts[group])return fail(s,0x4e90e0);
-    unlocked=node==0;if(unlocked)return true;
+    unlocked=node==0||g_pc_unlock_all;if(unlocked)return true;
     for(int neighbor:mission_tables::neighbors[group][node])if(neighbor>=0){int grade{};
         if(!frontend_category_grade_4e81d0(s.profile,s.progress,mission_tables::offsets[group]+unsigned(neighbor),grade))return fail(s,0x4e81d0);
         if(grade!=7&&grade>=4){unlocked=true;break;}}
@@ -87,7 +87,7 @@ bool frontend_missions_control_4e9360(FrontendMissionState& c,FrontendMissionSer
             unsigned n{};if(!count(s,category,n))return false;
             if(action==3){if(!cursor)return true;b.put32(0x38,cursor-1);}
             else {const auto grade=s.profile[0x1dd+category*5+cursor];
-                if(!n||cursor>=n-1||grade==7||grade<4)return true;
+                if(!n||cursor>=n-1||(!g_pc_unlock_all&&(grade==7||grade<4)))return true;
                 b.put32(0x38,cursor+1);}
         }else{
             constexpr unsigned columns[]{0,3,1,2};
@@ -118,7 +118,7 @@ bool frontend_missions_display_4e95a0(FrontendMissionState& c,FrontendMissionSer
     for(unsigned i=0;i<n;++i){const auto grade=s.profile[0x1dd+category*5+i];
         const auto previous=i?s.profile[0x1dc+category*5+i]:7;
         if(grade>7||previous>7)return fail(s,0x4e95a0);
-        const bool locked=i&&(previous==7||previous<4);auto d=buttons[group];if(locked)d.first=d.last=5;
+        const bool locked=i&&!g_pc_unlock_all&&(previous==7||previous<4);auto d=buttons[group];if(locked)d.first=d.last=5;
         if(!configure(c,s,0x2bc+i*0xa0,d,2,race_positions[i]))return false;
         unsigned t{};if(!type(s,category,i+1,t))return false;
         if(!locked&&(!configure(c,s,0x5dc+i*0xa0,types[t],3,race_positions[i])||

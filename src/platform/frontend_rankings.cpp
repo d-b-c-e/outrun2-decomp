@@ -55,6 +55,7 @@ void labels(S& s,std::initializer_list<unsigned> a){
 const std::string& localized(S& s,unsigned id){const auto* v=s.text?s.text->get(id):nullptr;if(!v)fault(0x465eb0);return *v;}
 const FrontendFont& font9(S& s){if(!s.fonts)fault(0x42ca60);return s.fonts->fonts[9];}
 bool unlocked_4474e0(const S& s,int bit){
+    if(g_pc_unlock_all)return true;
     int q=bit;if(q<0)q+=7;const int byte=q>>3;int b=bit%8;if(b<0)b+=8;   // and 0x80000007 / sar 3
     return (s.profile.at(std::size_t(0x28+byte))&(1u<<b))!=0;
 }

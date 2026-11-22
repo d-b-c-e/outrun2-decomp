@@ -53,6 +53,7 @@ struct Run {
     bool unlocked(int bit)const{                                                  // 4474E0
         int q=bit;if(q<0)q+=7;const int byte=q>>3;int b=bit%8;if(b<0)b+=8;
         if(byte<0||0x28+byte>=int(PcLicenseBytes))fault(0x4474e0);
+        if(g_pc_unlock_all)return true;   // shown as owned: buy() never runs, no Miles are spent
         return (s.profile[std::size_t(0x28+byte)]&(1u<<b))!=0;}
     unsigned price(int item)const{                                                // 4EF4D0
         if(item<0||item>=0xcf||!s.prices)fault(0x4ef4d0);

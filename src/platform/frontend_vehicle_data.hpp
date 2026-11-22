@@ -41,14 +41,15 @@ inline bool vehicle_resource_46bbe0(unsigned model,unsigned& resource){
 }
 inline bool vehicle_unlocked_4c8f90(const PcLicense& profile,unsigned menu_index){
     if(menu_index>=VehicleMenuUnlocks.size())return false;
-    if(menu_index<2)return true;
+    if(menu_index<2||g_pc_unlock_all)return true;
     const auto bit=unsigned(VehicleMenuUnlocks[menu_index]);
     return (profile[0x28+bit/8]&(1u<<(bit%8)))!=0;
 }
 inline bool vehicle_colour_unlocked_4c8fc0(const PcLicense& profile,unsigned menu_index,unsigned colour){
     if(menu_index>=30||colour>=8)return false;
     const auto bit=VehicleColourUnlocks[menu_index][colour];
-    if(bit<0)return bit==-1;
+    if(bit<0)return bit==-1;   // -2: the car has no such colour, with or without unlockAll
+    if(g_pc_unlock_all)return true;
     return (profile[0x28+unsigned(bit)/8]&(1u<<(unsigned(bit)%8)))!=0;
 }
 }
