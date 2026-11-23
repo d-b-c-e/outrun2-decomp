@@ -8,6 +8,7 @@
 //   stays.
 // - The header's status line and title move to the left side, the badge to the right; the button prompts at the bottom
 //   move to their side (left half left, right half right). They keep their size: Tweaks' HUD amount (`shift`).
+// - A picture the 4:3 cuts at its edge moves with that edge (by the margin), so the screen's edge cuts it.
 // - Everything else (the menu's own text, cars, maps, people) stays where the 4:3 menu had it, at its size, and is
 //   clipped to the 4:3 as before, so the pieces the game parks beyond its edges stay hidden.
 // The race HUD is not touched (UIScalingMode applies there). Pure, tested in windows/tests/test_triple_screens.cpp.
@@ -16,7 +17,7 @@ namespace outrun::xbox_runtime {
 enum class MenuPlace { keep, stretch, extend, shift };
 struct MenuDraw { MenuPlace place{MenuPlace::keep}; float dx{}; };
 // x0..x1, y0..y1: the draw's rectangle in 640x480 UI units.
-inline MenuDraw menu_place(float x0,float x1,float y0,float y1,float shift){
+inline MenuDraw menu_place(float x0,float x1,float y0,float y1,float shift,float margin_dx=0.f){
     const float w=x1-x0,h=y1-y0,cx=(x0+x1)*.5f;
     const bool left_edge=x0<=4.f,right_edge=x1>=636.f;
     if(y0<=2.f&&y1>=478.f)return {MenuPlace::stretch,0.f};                                    // a full-height panel
@@ -31,12 +32,16 @@ inline MenuDraw menu_place(float x0,float x1,float y0,float y1,float shift){
         return {};
     }
     if(y0>=405.f&&y1<=482.f)return {MenuPlace::shift,cx<320.f?-shift:shift};                  // the button prompts
+    // A picture the 4:3 cuts at its edge (Coast 2 Coast's flagman, 426..642): it moves with that edge, so the screen's
+    // edge still cuts it. Not the carousels, which run on past the edge.
+    if(h>=100.f&&x1>=636.f&&x1<=646.f&&x0>=320.f)return {MenuPlace::shift,margin_dx};
+    if(h>=100.f&&x0>=-6.f&&x0<=4.f&&x1<=320.f)return {MenuPlace::shift,-margin_dx};
     return {};
 }
 // Where an x of a draw goes (UI units; `margin` the 16:9's extra width on each side of the 640).
 inline float menu_x(MenuPlace place,float dx,float x,float margin){
     switch(place){
-    case MenuPlace::stretch:return 320.f+(x-320.f)*(640.f+2.f*margin)/640.f;
+    case MenuPlace::stretch:return x<=4.f?-margin:x>=636.f?640.f+margin:320.f+(x-320.f)*(640.f+2.f*margin)/640.f;   // edges to the screen's
     case MenuPlace::extend:return x<=0.f?x-margin:x>=640.f?x+margin:x;
     case MenuPlace::shift:return x+dx;
     default:return x;

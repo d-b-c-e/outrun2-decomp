@@ -1041,7 +1041,7 @@ void D3D11D3D9Device::menu_layout(float ex){
         x0=std::min(x0,x);x1=std::max(x1,x);y0=std::min(y0,y);y1=std::max(y1,y);}
     const unsigned texture=textures[0];
     MenuDraw d;
-    if(x1-x0<=40.f&&menu_run_.continues(texture,y0,y1,x0))d=menu_run_.draw;else d=menu_place(x0,x1,y0,y1,menu_shift_);
+    if(x1-x0<=40.f&&menu_run_.continues(texture,y0,y1,x0))d=menu_run_.draw;else d=menu_place(x0,x1,y0,y1,menu_shift_,ex*sx);
     menu_run_=MenuRun{texture,y0,y1,x0,x1,d,true};
     if(d.place!=MenuPlace::keep){const float margin=ex*sx;
         for(auto& v:batch_){const float w=v.pos[3],x=menu_x(d.place,d.dx,ux(v.pos[0]/w),margin);

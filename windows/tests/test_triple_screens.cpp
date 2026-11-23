@@ -48,6 +48,7 @@ int main(){
         CHECK(place(2,514,1,481).place==MenuPlace::stretch&&place(514,642,1,481).place==MenuPlace::stretch);
         CHECK(std::fabs(menu_x(MenuPlace::stretch,0,0,m)+m)<1e-3f&&std::fabs(menu_x(MenuPlace::stretch,0,640,m)-640-m)<1e-3f);
         CHECK(menu_x(MenuPlace::stretch,0,320,m)==320.f);                                     // about the centre
+        CHECK(menu_x(MenuPlace::stretch,0,2,m)==-m&&menu_x(MenuPlace::stretch,0,642,m)==640+m);   // a panel's edge on the screen's
         CHECK(place(1,513,-3,80).place==MenuPlace::stretch&&place(-9.7f,650.8f,69,80).place==MenuPlace::stretch);
         CHECK(place(295,344,407,481).place==MenuPlace::stretch);                                // a strip tile
         const auto tab=place(-76,340,71,90);CHECK(tab.place==MenuPlace::extend);
@@ -55,7 +56,9 @@ int main(){
         CHECK(place(330,380,71,90).place==MenuPlace::keep);                                    // the tab's end cap
         CHECK(place(.5f,16.5f,.5f,17.5f).dx==-s&&place(50,562,34.5f,73.5f).dx==-s&&place(556,592,36,93).dx==s);
         CHECK(place(55,83,415,443).dx==-s&&place(457,485,415,443).dx==s&&place(389.5f,405.5f,420.5f,437.5f).dx==s);
-        CHECK(place(343,599,142,398).place==MenuPlace::keep&&place(426,642,120,411).place==MenuPlace::keep);   // car, person
+        CHECK(place(343,599,142,398).place==MenuPlace::keep);                                   // the car
+        {const auto p=menu_place(426,642,120,411,s,m);CHECK(p.place==MenuPlace::shift&&p.dx==m);}  // the flagman, cut by the edge
+        CHECK(menu_place(556,692,360.9f,382.9f,s,m).place==MenuPlace::keep);                   // a carousel item past it
         CHECK(place(519.5f,837.5f,361,383).place==MenuPlace::keep&&place(644,807,112,140).place==MenuPlace::keep);
         MenuRun run{173,420.5f,437.5f,300,316,{MenuPlace::shift,-s},true};
         CHECK(run.continues(173,420.5f,437.5f,309)&&!run.continues(173,420.5f,437.5f,340)&&!run.continues(24,420.5f,437.5f,309));
