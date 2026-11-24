@@ -683,7 +683,8 @@ void host_hooks(GameHost& s,std::uint64_t down){
     }
     // Host test hook OR2_HOST_GOAL=N: the race manager's goal state (450230(1),
     // as its goal line crossing sets it) once the race has run N frames, to
-    // exercise modes 19/33 without driving a whole route.
+    // exercise modes 19/33 without driving a whole route. The car stays where it is,
+    // so the post-goal side of the course (its crowd backdrop) is never loaded.
     if(s.runtime&&s.runtime->mode_state.current==16u)if(const char* g=std::getenv("OR2_HOST_GOAL")){
         static bool done=false;
         // OR2_HOST_GOAL=N:state:every re-arms for every race (each OutRun stage, to reach the ending).
@@ -774,8 +775,13 @@ void host_hooks(GameHost& s,std::uint64_t down){
         if(!done&&s.input_samples>=at){done=true;(void)pf::native_runtime_request_mode(*s.runtime,want);
             std::fprintf(stderr,"[%u] host: mode %u requested\n",s.input_samples,want);}
     }
-    // Host test hook OR2_HOST_SKIP_ENDING=1: mode 24 (the goal ending, not ported) requests
-    // mode 25 at once, to exercise the result / name entry modes after a goal.
+    // Host test hook OR2_HOST_SKIP_ENDING=1: mode 24 (the arcade goal ending, race_ending.cpp)
+    // requests mode 25 at once, to exercise the result / name entry modes after a goal.
+    // Mode 24 is entered only with [780260] == 0 (mode 33 at 49D982, Heart Attack at 4FED0B);
+    // the PC menus (SUMO_FE, 49E3C4) set it to 1, so their goals go 19 -> 33 -> 34 (OutRun
+    // Miles) instead. Their goal scene is the course record's post-goal side: the secondary
+    // descriptor 76 (6A55E8[76] = 5D4D30, course 0xE) whose background is resource 0x1E9,
+    // \BK\cs_BK_SUMOEND_pmt.sz, the crowd; 450230(1) alone (OR2_HOST_GOAL) does not reach it.
     if(s.runtime&&s.runtime->mode_state.current==24u&&std::getenv("OR2_HOST_SKIP_ENDING")){
         static std::uint32_t skips=0;
         if(s.runtime->mode_state.requested!=25u&&pf::native_runtime_request_mode(*s.runtime,25u)&&++skips==1u)
