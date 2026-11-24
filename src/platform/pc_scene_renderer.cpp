@@ -40,7 +40,6 @@ PcSceneRenderer::PcSceneRenderer(PcD3D9Device& device):device_(device),matrix_ar
     // 40E4B0 -> 404250 once the device exists (render/stage defaults, 40F6B0,
     // 405160, fixed pixel shaders, normalisation cube map, shadow targets).
     renderer_init_gaps=renderer_init_404250(*flush_,*queue_,frame_.layer_7d25f0);
-    frame_.device_ready_7d2614=1;
 }
 PcSceneRenderer::~PcSceneRenderer(){
     for(const auto& swap:pending_swaps_406630)device_.release(swap.second);
@@ -702,6 +701,7 @@ void PcSceneRenderer::render_frame(driving::PcEventControlState& events,std::uin
     sv.mode_84a318=mode_84a318;
     if(fix_znear())sv.scene_effect_projection=[this](bool begin){scene_effect_projection(begin);};
     if(layer_callback)for(std::uint32_t k=0;k<frame_.layers.size();++k)frame_.layers[k].callback=layer_callback(k);
+    frame_.pause_7d2614=pause_7d2614?pause_7d2614():0u;
     const auto mx_depth=matrices_.depth;const auto mx_offset=matrices_.current_offset;
     try{frame_render_449050(*flush_,frame_,in,sv);
         driving::pc_matrix_trace_scope("frame",frames,mode_78026c,0x449050u,0u,mx_depth,mx_offset,matrices_);}

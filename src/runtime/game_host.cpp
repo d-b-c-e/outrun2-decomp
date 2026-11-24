@@ -1297,6 +1297,7 @@ void attach_pc_scene(GameHost& host,pf::NativeRuntimeContext& context,pf::Retail
         return pf::native_sprite2d_leaf(context,scene,pc,a);};
     scene.layer_callback=[&context](std::uint32_t layer){return pf::native_race_end_layer_callback(context,layer);};
     scene.mode_84a318=[&context]{return pf::native_race_end_84a318(context);};
+    scene.pause_7d2614=[&context]{return context.event_function36.title_pause_flag_7d2614;};
     scene.course_effects=[&context](std::uint32_t& work,std::uint32_t& flags){
         work=pf::native_course_pass_work(context);flags=pf::native_course_pass_flags(context);};
     scene.profile=[](std::uint32_t kind,std::uint32_t pc,std::uint64_t ns){

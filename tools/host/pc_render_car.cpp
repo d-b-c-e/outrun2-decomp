@@ -122,7 +122,7 @@ int main(int argc,char** argv){
         qc.immediate_8999b0=1;qc.flush_4052c0=[&]{render_queue_flush_4052c0(fc,qc);};
         std::vector<std::uint8_t> body(0x800);
         PcEnvironmentRenderTables tables_env{Bytes(env.lights_899b98.data(),env.lights_899b98.size()),Bytes(env.fog_7d3a10.data(),env.fog_7d3a10.size()),0};
-        PcFrameState fs{};fs.clear_colour_89bd5c=0xff404850u;fs.device_ready_7d2614=1;
+        PcFrameState fs{};fs.clear_colour_89bd5c=0xff404850u;fs.pause_7d2614=1;
         PcVehicleDisplayContext vc{fc,qc,tables_env,2,0,ms,Bytes(body.data(),body.size()),32,0};
         PcSceneDisplayGlobals sg{};
         struct Owner{PcVehicleDisplayContext* vc;PcFrameState* fs;Bytes car;PcFlushContext* fc;PcRenderQueue* alpha;unsigned displays{};};

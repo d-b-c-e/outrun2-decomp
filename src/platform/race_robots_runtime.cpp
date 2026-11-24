@@ -221,7 +221,11 @@ bool run(NativeRuntimeContext& c,std::uint32_t work,driving::PcMatrixStack& matr
             PcRaceMemory nm;auto& hud=native_race_hud(c);nm.map(0x7f2560u,hud.navi.g7f1900.data()+(0x7f2560u-0x7f1900u),0x180u);
             return navi_score_mean_45bf30(nm,k.args[0]);}
         case 0x45c440u:++r.routed[k.pc];return c.race.car_world.heart_mode_7f2428;              // mov eax,[7F2428]
-        case 0x46c520u:++r.routed[k.pc];if(c.start_mode.manager_state_7f94c0){++r.missing[k.pc];throw RobotMissing(k.pc);}return 0u;   // [7F94D4] (no LAN session: 0)
+        // 46C520 = [7F94D4], the Heart Attack girlfriend 46C280 / 4EEB50 store (0 Jennifer, 1 Clarissa, 2 Holly): the
+        // passenger's 487F50 picks her by it, as START's 488090 does for her model bank (native_runtime.cpp). A constant 0
+        // built Jennifer over a bank START never loaded in Clarissa's and Holly's modes (Wheelkit issue outrun-2006-0019).
+        case 0x46c520u:++r.routed[k.pc];if(c.start_mode.manager_state_7f94c0){++r.missing[k.pc];throw RobotMissing(k.pc);}
+            return c.start_mode.frontend_prepare.event_config_7f94c4[4];
         case 0x46c530u:++r.routed[k.pc];if(c.start_mode.manager_state_7f94c0){++r.missing[k.pc];throw RobotMissing(k.pc);}return 0u;   // 55A930 ? [7F95C4] : 0
         case 0x487810u:{++r.routed[k.pc];PcRaceContext inner{r.memory,matrices,service,nullptr};race_robot_common_init_487810(inner,k.args[0]);return 0u;}
         case 0x487b70u:{++r.routed[k.pc];PcRaceContext inner{r.memory,matrices,service,nullptr};race_robot_motion_connect_487b70(inner,k.args[0],k.args[1],k.args[2]);return 0u;}
@@ -381,7 +385,12 @@ bool run(NativeRuntimeContext& c,std::uint32_t work,driving::PcMatrixStack& matr
         if(e.address>=PcRobMotionTablesState::Base&&e.address<PcRobMotionTablesState::End&&!r.motion_tables.ready)
             r.last_error+=" (RobMotion tables 4F2470: "+(r.motion_tables.init_calls?r.motion_tables.error:std::string("not run"))+")";}
     catch(const std::exception& e){fault=0xffffffffu;r.last_error=e.what();}
-    if(fault&&first_error.empty())first_error=r.last_error;
+    if(fault&&first_error.empty()){
+        first_error=r.last_error;
+        // Once per latch (runtime.log): the robot is no longer animated or drawn until its next init.
+        if(scene)std::printf("race robots: AUTOSCENE stopped: %s\n",first_error.c_str());
+        else std::printf("race robots: ROB%02u (event %03X) stopped until its next init: %s\n",index+1u,0x16au+index,first_error.c_str());
+    }
     matrices.current_offset=offset;matrices.depth=depth;
     return fault==0u;
 }
@@ -459,6 +468,9 @@ bool native_race_robots_invoke(NativeRuntimeContext& c,std::uint32_t callback,dr
     const auto slot=c.event_state.current_slot;
     if(slot>=c.event_state.slots.size()){r.last_error="robot callback outside an event slot";++r.skipped;return true;}
     const std::uint32_t work=c.event_state.slots[slot].work_token;
+    // An init builds the robot again: a fault latched in an earlier race no longer skips it (the latch lasted the
+    // whole session, so one bad race lost the driver or the passenger in every later race).
+    if(kind==1){const std::uint32_t i=robot_index(work);if(i<r.fault.size()){r.fault[i]=0u;r.errors[i].clear();}}
     run(c,work,matrices,[&](PcRaceContext& ctx){fn(ctx,work);});
     return true;
 }

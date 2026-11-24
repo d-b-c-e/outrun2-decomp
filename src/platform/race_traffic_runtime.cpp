@@ -905,6 +905,13 @@ struct Run {
             if(pc==0x465160u){routed(pc);if(!title_ui_resource_construct_465160(bytes.data(),0xa0u))missing(pc,"465160 resource construct");return k.ecx;}
             FrontendUiResources ui{st.frontend_sprites};ui.motion_step=st.frontend_ui_motion_step;
             ui.effect_user=st.frontend_effect_user;ui.effect_4249f0=st.frontend_effect;
+            // 4656B0's follow pointer (4FE6C0 and the request objects' popups) reads this memory:
+            // an unmapped address stays a missing 4656B0.
+            ui.follow_user=&m();
+            ui.follow_4656b0=[](void* p,std::uint32_t address,std::uint8_t* out){
+                const auto& memory=*static_cast<const PcRaceMemory*>(p);
+                if(!memory.mapped(address,12u))return false;
+                std::memcpy(out,memory.at(address,12u),12u);return true;};
             std::uint32_t value{};
             // Translated external calls expose a 12-word stack window, not the
             // callee's arity. Use the resource method's actual stack arguments.

@@ -184,11 +184,11 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
     if(!race){if(desktop_key(0x1c))held|=1u<<Confirm;if(desktop_key(0x01))held|=1u<<Back;if(desktop_key(0xc8))held|=1u<<NavUp;
               if(desktop_key(0xd0))held|=1u<<NavDown;if(desktop_key(0xcb))held|=1u<<NavLeft;if(desktop_key(0xcd))held|=1u<<NavRight;}
     const std::uint32_t keys=held;
-    // The paddles are the menus' LB and RB with every gearbox (the app writes them whatever the profile's transmission);
-    // in the race they shift only for a Sequential profile, as before.
-    const bool paddles_shift=in.transmission==WK_TRANSMISSION_SEQUENTIAL;
+    // The paddles are the menus' LB and RB with every gearbox (the app writes them whatever the profile's transmission),
+    // and in the race they shift with every gearbox too: the game's own AT/MT choice on Car Select decides, as on a pad
+    // (DrivingControl 502C90 reads the shift buttons only for a manual car, +0x13 == 1; an automatic ignores them).
+    // Wheelkit issue outrun-2006-0016: Manual chosen in the game on an Automatic profile waited for shifts never sent.
     for(unsigned i=0;i<ButtonCount;++i){
-        if(race&&!paddles_shift&&(i==ShiftUp||i==ShiftDown))continue;
         if(race&&i>=Color)continue;   // the menus' X, RT, Y and LT do nothing in the race
         if(in.held[ButtonActions[i]])held|=1u<<i;
     }
@@ -265,7 +265,7 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.7-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.8-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;

@@ -3433,6 +3433,14 @@ bool scene_owner_mission_type4_4962a0(const NativeRuntimeContext& c){
     std::uint32_t type{};
     return race_record_type(*start.scene_owner_race_assets,start.scene_owner_race_key,start.scene_owner_race_sub_key,type)&&type==4u;
 }
+// 4962D0: [836374] && [83637C] && the selected Races record's type (+20) == 6, the girlfriend missions; START 49E0A6
+// opens the passenger (event 0x16B) for them although 4957F0 (836374) keeps her out of the other missions.
+bool scene_owner_mission_type6_4962d0(const NativeRuntimeContext& c){
+    const auto& start=c.start_mode;
+    if(!start.selection_active_836374||c.mission.manager.record_83637c<0||!start.scene_owner_race_assets)return false;
+    std::uint32_t type{};
+    return race_record_type(*start.scene_owner_race_assets,start.scene_owner_race_key,start.scene_owner_race_sub_key,type)&&type==6u;
+}
 }
 
 std::uint32_t native_scene_owner_collision_43dba0(NativeRuntimeContext&,std::uint32_t,std::uint32_t);
@@ -4153,9 +4161,12 @@ bool native_start_owned_call(NativeRuntimeContext& context,std::uint32_t pc_entr
                 le32(context.event_function36.frontend_profiles.active.data()+0x208u));
             result=start.render_mode_754b0c=context.pc_sound.voice_set_754b0c;
             return true;
-        case 0x004962a0u:case 0x004962d0u:
+        case 0x004962a0u:
             if(count!=0u||start.session_manager_active_836374)return false;
             result=0u;return true;
+        case 0x004962d0u:   // the passenger gate of stage 60 (49E0A6): 1 in the girlfriend missions (Wheelkit issue outrun-2006-0019)
+            if(count!=0u)return false;
+            result=scene_owner_mission_type6_4962d0(context)?1u:0u;return true;
         case 0x004999a0u:
             if(count!=1u||!args)return false;
             result=(args[0]==0u||args[0]==7u||args[0]==8u)?1u:0u;

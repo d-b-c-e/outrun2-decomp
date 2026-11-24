@@ -51,6 +51,13 @@ int main(int argc,char** argv){
     // 40EC70 cleared the back buffer with 89BD5C (0 here): opaque black.
     const auto& rgba=device.rgba();
     require(rgba[0]==0&&rgba[3]==0,"448DB0 clear through the D3D9 form");
+    // 40ED60: the texture animation clock 89EDB8 (40ECC0's morph_var.dat index: wing beats, flags, palms) steps once
+    // per 449050 frame while [7D2614] (the pause flag, 0 from 448CE0) is clear, and holds while it is set.
+    require(r.globals().w(0x89edb8)==1u,"40ED60 clock stepped by the frame");
+    r.pause_7d2614=[]{return 1u;};r.render_frame(events,0x20);
+    require(r.globals().w(0x89edb8)==1u,"40ED60 clock held while paused");
+    r.pause_7d2614=nullptr;r.render_frame(events,0x20);
+    require(r.globals().w(0x89edb8)==2u,"40ED60 clock steps again after the pause");
     {   // The real frame consumer supplies ownership, never a first-RHW guess.
         platform::PcSoftD3D9Device phase_device(64,64);platform::PcSceneRenderer phase_scene(phase_device);
         driving::PcEventControlState e{};e.slots[8].flags=2;

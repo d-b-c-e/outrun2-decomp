@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 using namespace outrun;
 static unsigned checks;
@@ -63,6 +64,30 @@ int main(int argc,char** argv){
     platform::GameUiDraw draw{};draw.corners[0]={{320,240}};
     platform::frontend_sprite_transform(draw,*pool.get(h),640,480);
     req(draw.corners[0][0]==350&&draw.corners[0][1]==230,"instance transform around authored canvas centre");
+    {   // 4656B0's follow pointer (+9C): +40..+48 = the three floats at the guest address +98, then the matrix. The C2C
+        // request manager's 4FE6C0 (the popup of Clarissa's requests) sets +98 = manager +7684, +9C = 1; refusing it
+        // latched the traffic module (issue outrun-2006-0020: no car-car collision pass, no ram flag 7F95F4).
+        constexpr std::uint32_t Follow=0x800ae4u;
+        resource.put32(0x98,Follow);resource.put32(0x9c,1);
+        req(!ui.finalize(resource)&&ui.missing_pc==0x4656b0u,"a following resource without a guest reader stays a missing 4656B0");
+        ui.missing_pc=0;
+        struct Guest{std::uint32_t address;float xyz[3];} guest{Follow,{-12.5f,40.0f,0.25f}};
+        ui.follow_user=&guest;
+        ui.follow_4656b0=[](void* p,std::uint32_t address,std::uint8_t* out){
+            const auto& g=*static_cast<const Guest*>(p);
+            if(address!=g.address)return false;
+            std::memcpy(out,g.xyz,12);return true;};
+        req(ui.finalize(resource)&&ui.missing_pc==0u&&resource.f32(0x40)==-12.5f&&resource.f32(0x44)==40.0f&&
+            resource.f32(0x48)==0.25f&&pool.get(h)->matrix[12]==-12.5f&&pool.get(h)->matrix[13]==40.0f&&
+            pool.get(h)->matrix[14]==0.25f&&pool.get(h)->matrix[0]==2,"4656B0 copies the followed position before the matrix");
+        guest.xyz[0]=8.0f;
+        req(ui.finalize(resource)&&pool.get(h)->matrix[12]==8.0f,"the followed position is read again on every 4656B0");
+        resource.put32(0x98,0x1234u);
+        req(!ui.finalize(resource)&&ui.missing_pc==0x4656b0u&&pool.get(h)->matrix[12]==8.0f,
+            "an unreadable follow address stays a missing 4656B0 and leaves the sprite");
+        ui.missing_pc=0;ui.follow_user=nullptr;ui.follow_4656b0=nullptr;
+        resource.put32(0x98,0);resource.put32(0x9c,0);
+    }
     pool.tick();pool.tick();pool.tick();
     req(ui.call(0x4652e0,resource,nullptr,0,result)&&result==1,"ready follows completed animation");
     req(ui.call(0x465250,resource,nullptr,0,result)&&!pool.get(h)->allocated&&resource.u32(8)==~0u,"resource release owns its sprite");

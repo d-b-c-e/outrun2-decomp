@@ -13,6 +13,12 @@ struct FrontendUiResources {
     float motion_step{}; // explicit 449E30 milliseconds * PC float 0.001
     void* effect_user{};
     bool (*effect_4249f0)(void*,std::uint32_t){};
+    // 4656B0's follow pointer: a resource with +9C set takes +40..+48 from the three floats at
+    // the guest address +98 (the C2C request manager's popups, 4FE6C0: manager +7684). The
+    // caller's guest memory reads them (false: unreadable); without a reader such a resource
+    // stays an observable missing 4656B0.
+    void* follow_user{};
+    bool (*follow_4656b0)(void*,std::uint32_t address,std::uint8_t* out12){};
     bool input_feedback(driving::Bytes root,std::uint32_t key,std::int32_t argument);
     bool call(std::uint32_t pc,driving::Bytes resource,const std::uint32_t* args,
               std::size_t count,std::uint32_t& result);

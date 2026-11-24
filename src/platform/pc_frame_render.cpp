@@ -92,7 +92,7 @@ void course_post_40be70(PcFlushContext& c,const PcFrameInputs& in,std::uint8_t c
 void frame_render_449050(PcFlushContext& c,PcFrameState& s,const PcFrameInputs& in,PcFrameServices& sv){
     const PcDrawPhaseScope world(c.device,PcDrawPhase::World);
     auto& g=c.g;
-    if(!s.device_ready_7d2614&&enhancements::display_ticks())++g.w(0x89edb8);   // 40ED60 (port: not on display-only frames)
+    if(!s.pause_7d2614&&enhancements::display_ticks())++g.w(0x89edb8);   // 40ED60 (port: not on display-only frames)
     frame_begin_448db0(c,s,in);
     std::uint32_t saved_viewport[6]{};
     if(in.game_mode_78026c==0x18u){

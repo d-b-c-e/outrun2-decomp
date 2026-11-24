@@ -209,7 +209,7 @@ if(only=="frame_render_probe"){
             fs.layers[l].callback=(rng()%4u)?0u:layer_cb[rng()%CallbackCount];
             p32(0x7d2618+l*12,fs.layers[l].colour);p32(0x7d261c+l*12,fs.layers[l].depth);p32(0x7d2620+l*12,fs.layers[l].callback);
         }
-        fs.device_ready_7d2614=rng()%2u;p32(0x7d2614,fs.device_ready_7d2614);
+        fs.pause_7d2614=rng()%2u;p32(0x7d2614,fs.pause_7d2614);
         fs.clear_colour_89bd5c=rng();p32(0x89bd5c,fs.clear_colour_89bd5c);
         for(std::uint32_t a:{0x7d25e8u,0x7d25ecu,0x7d25f0u,0x7d25f4u,0x7d2610u,0x73e2a4u,0x73e2a8u})p32(a,0x77u);
         fs.current_colour_7d25e8=fs.backbuffer_7d25ec=fs.layer_7d25f0=fs.depth_7d25f4=fs.current_depth_7d2610=fs.course_73e2a4=fs.course_73e2a8=0x77u;

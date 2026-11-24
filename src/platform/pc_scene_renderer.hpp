@@ -247,6 +247,8 @@ public:
     // 448FD0 layer callbacks (7D2620 + layer * 0xC) and [84A318] for 449050; unset: none / 0.
     std::function<std::uint32_t(std::uint32_t layer)> layer_callback;
     std::function<std::uint32_t()> mode_84a318;
+    // [7D2614] (the pause flag 449040 writes) for 449050's 40ED60 clock step; unset: 0 (not paused).
+    std::function<std::uint32_t()> pause_7d2614;
     // [79F5EC] (SCN_EFC work, 0 when event 387 is closed) and its flags word for the course passes 40BD80 / 40BE70.
     std::function<void(std::uint32_t& work,std::uint32_t& flags)> course_effects;
 private:

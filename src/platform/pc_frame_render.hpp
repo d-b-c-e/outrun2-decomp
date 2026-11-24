@@ -13,7 +13,10 @@
 namespace outrun::platform {
 struct PcFrameLayer { std::uint32_t colour{},depth{},callback{}; }; // 7D2618 + layer*0xC
 struct PcFrameState {
-    std::uint32_t device_ready_7d2614{};
+    // [7D2614] the pause flag: 0 from 448CE0, set / cleared by 449040 (440930 SetEvPauseFlag / 4409C0 ClrEvPauseFlag).
+    // While it is 0 each 449050 frame advances the texture animation clock 89EDB8 (40ED60), which the vertex-animated
+    // nodes (flag 0x20: the birds' wings, flags, palms, crowds) read through 40ECC0.
+    std::uint32_t pause_7d2614{};
     std::uint32_t current_colour_7d25e8{},backbuffer_7d25ec{},layer_7d25f0{},depth_7d25f4{};
     std::array<std::uint32_t,6> viewport_7d25f8{};
     std::uint32_t current_depth_7d2610{};
