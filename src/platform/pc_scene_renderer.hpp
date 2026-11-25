@@ -42,6 +42,10 @@ CameraBodyHidden& camera_body_hidden();
 // The file stem of model resource `resource` in the PC resource filename table 633558 ("cs_CS_BEAC_pmt"): the folder
 // of the bank's replacement textures. Empty when the entry is missing.
 std::string pc_bank_pack_name(std::uint32_t resource);
+// Told of each model bank as it is queued for loading (its resource id and pack name), from the game's thread: the
+// desktop logs the goal's crowd backdrop (Wheelkit issue outrun-2006-0014). Null: nobody is told.
+using SceneBankQueued=void(*)(std::uint32_t resource,const std::string& name);
+SceneBankQueued& scene_bank_queued();
 class PcSceneRenderer {
 public:
     explicit PcSceneRenderer(PcD3D9Device& device);

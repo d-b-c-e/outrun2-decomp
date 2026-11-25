@@ -13,12 +13,16 @@
 #include "platform/runtime_input.hpp"
 #include "platform/pc_pmt_loader.hpp"
 #include "platform/pc_curve_scene.hpp"
+#include "platform/pc_scene_renderer.hpp"
+#include "platform/race_goal_test.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string>
 namespace outrun::desktop {
 namespace {
@@ -62,6 +66,7 @@ struct State {
     std::uint32_t previous{};
     ForceProbe probe;unsigned probe_logged{};bool force_stopped{},racing{};   // force feedback (outrun_force.hpp)
     unsigned status_ticks{};int status_state{-1};
+    std::uint32_t goal_mode{~0u};   // the goal test's last game mode (race_goal_test.hpp)
 };
 State s;
 void WK_CALL log_line(const char* line,void*){std::printf("%s\n",line);std::fflush(stdout);}
@@ -159,6 +164,38 @@ void telemetry(const platform::NativeRuntimeContext* rt){
     if(!(rt&&mode==16u))force_end();
     wk.wk_telemetry_frame(&c);
 }
+// The goal test (platform/race_goal_test.hpp, Wheelkit issue outrun-2006-0014): armed only in a fenced test run with
+// goal-test.on in %LOCALAPPDATA%\Wheelkit\outrun-2006 (the launch check's goal route writes it); its text may say
+// "before=<segments> settle=<frames> connector=0". It also holds the throttle in the race, so the route needs no drive.
+void goal_log(const char* line){wheelkit_log(line);}
+void goal_test_configure(){
+    if(!(wk.wk_switches()&WK_SWITCH_FENCE))return;
+    char local[MAX_PATH];const DWORD n=GetEnvironmentVariableA("LOCALAPPDATA",local,MAX_PATH);
+    if(!n||n>=MAX_PATH)return;
+    std::ifstream file(std::string(local)+"\\Wheelkit\\outrun-2006\\goal-test.on");
+    if(!file)return;
+    auto& g=platform::race_goal_test();
+    std::stringstream text;text<<file.rdbuf();std::string word;
+    while(text>>word){
+        const auto eq=word.find('=');if(eq==std::string::npos)continue;
+        const auto key=word.substr(0,eq);const long v=std::strtol(word.c_str()+eq+1,nullptr,10);
+        if(key=="before"&&v>=10&&v<=400)g.before_end=std::int32_t(v);
+        else if(key=="settle"&&v>=30&&v<=3600)g.settle=std::uint32_t(v);
+        else if(key=="connector")g.connector=v!=0;
+    }
+    g.log=goal_log;g.armed=true;
+    char line[200];std::snprintf(line,sizeof line,"goal test: on (goal-test.on, a fenced run): the car is placed %d segments before the end "
+        "of each stage%s after %u frames on it, the throttle held",g.before_end,g.connector?" and connector":"",g.settle);
+    wk.wk_log(line);
+}
+// The goal's crowd backdrop (texture 659156B6) as its bank is queued; in a goal test every stage background too.
+void bank_queued(std::uint32_t resource,const std::string& name){
+    const bool crowd=_stricmp(name.c_str(),"cs_BK_SUMOEND_pmt")==0;
+    if(!crowd&&!(platform::race_goal_test().armed&&(name.rfind("cs_BK_",0)==0||name.rfind("cs_ENVBK_",0)==0)))return;
+    char line[200];std::snprintf(line,sizeof line,"course: background bank %s (resource %X) loading%s",name.c_str(),unsigned(resource),
+        crowd?": the goal's crowd backdrop (texture 659156B6)":"");
+    wheelkit_log(line);
+}
 void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext* rt){
     if(s.inner)s.inner(out,rt);
     // The keyboard reaches the race only through the PC layer (406FA0), set only for a connected pad otherwise.
@@ -241,6 +278,10 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
         if(on(down,MenuLT))out.frontend.device_held|=0x1000u;                  // LT, one frame per press
         if(on(down,ChangeClass))out.frontend.device_held|=0x2000u;             // RT: the car class (4C9290), the music list (4C9940)
     }
+    if(platform::race_goal_test().armed){   // the goal test: the game's modes, and the throttle held in the race
+        if(mode!=s.goal_mode){char line[80];std::snprintf(line,sizeof line,"goal test: game mode %u -> %u",s.goal_mode,mode);wk.wk_log(line);s.goal_mode=mode;}
+        if(mode==16u){out.accelerator=255u;d.axes_94[0x0d]=255;}
+    }
 }
 }
 
@@ -265,10 +306,12 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.8-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.9-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;
+    platform::scene_bank_queued()=bank_queued;
+    goal_test_configure();
     wk.wk_ffb_set_level(ForceFactor);   // the game's force level (outrun_force.hpp), before Steering strength
     // The game's own views in its cycle, and the Bonnet view it lacks (camera_controls.cpp adds it after the bumper).
     // Every view starts in Game framing on triple screens; F7 switches one to Realistic (the owner, Wheelkit issue

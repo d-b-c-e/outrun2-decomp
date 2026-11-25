@@ -54,6 +54,7 @@ void PcSceneRenderer::flush_alpha(){
 }
 // The bank's file stem from the PC resource filename table 633558 ("\Stage\BEAC\cs_CS_BEAC_pmt.sz" -> "cs_CS_BEAC_pmt"):
 // the folder its replacement textures sit in. Empty when the EXE image or the entry is missing.
+SceneBankQueued& scene_bank_queued(){static SceneBankQueued f=nullptr;return f;}
 std::string pc_bank_pack_name(std::uint32_t resource){
     if(resource>=0x223u)return {};
     const auto* entry=exe_image_bytes(0x633558u+resource*4u,4);if(!entry)return {};
@@ -98,6 +99,7 @@ bool PcSceneRenderer::queue_bank(std::uint32_t resource,std::vector<std::uint8_t
     auto bank=open_bank(std::move(pmt),error,resource);
     if(!bank)return false;
     PendingBank p;p.resource=resource;p.bank=std::move(bank);
+    if(const auto told=scene_bank_queued())told(resource,p.bank->resources.pack_name);
     pmt_objects_begin_42e490(p.bank->resources,p.cursor);
     pending_banks_.push_back(std::move(p));
     error.clear();return true;
@@ -129,6 +131,7 @@ bool PcSceneRenderer::load_bank(std::uint32_t resource,std::vector<std::uint8_t>
     if(!p.bank){
         p.resource=resource;p.bank=open_bank(std::move(pmt),error,resource);
         if(!p.bank)return false;
+        if(const auto told=scene_bank_queued())told(resource,p.bank->resources.pack_name);
         pmt_objects_begin_42e490(p.bank->resources,p.cursor);
     }
     try{while(!step_bank(p)){}}

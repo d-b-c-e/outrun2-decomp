@@ -22,6 +22,7 @@
 #include "driving/pc_wall_controller.hpp"
 #include "platform/course_world_runtime.hpp"
 #include "platform/race_goal_camera.hpp"
+#include "platform/race_goal_test.hpp"
 #include "platform/pc_network.hpp"
 #include "platform/race_end_runtime.hpp"
 #include "platform/race_robots.hpp"
@@ -554,6 +555,61 @@ driving::RoadMuSource race_player_road_mu(NativeRuntimeContext& c){
     }
     return source;
 }
+namespace {
+// The goal test (race_goal_test.hpp, Wheelkit issue outrun-2006-0014): once the car has run `settle` frames on a stage
+// (twice that on a connector), it is placed `before_end` segments before that piece's end by PlWrecker's immediate snap (504900
+// phase 1, as a wall recovery places it), with the road found first so a missing piece never moves it.
+void goal_test_frame(Frame& f,FrontendCarSelect& s,driving::PcMatrixStack& matrices,bool direct_dispatch){
+    auto& g=race_goal_test();
+    if(!g.armed||!direct_dispatch||f.failed)return;
+    auto& c=f.c;
+    if(c.mode_state.current!=16u||c.event_state.pause_depth!=0u||!s.producer_active||s.race_inits==0u||
+       s.producer_recovery_pending||f.e.i16(0xd68)!=0||(f.e.u32(4)&8u))return;   // racing, no recovery running, past the start hold
+    char line[300];
+    auto say=[&]{if(g.log)g.log(line);else{std::printf("%s\n",line);std::fflush(stdout);}};
+    const std::uint32_t type=f.e.u32(0x5c),key=f.e.u32(0x68);const std::int32_t seg=f.e.i16(0x64);
+    if(type>1u)return;
+    const std::int32_t end=f.course_end(type);
+    // The last stage: its record has no next stage (44B7B0), so the end of its piece is the goal line.
+    bool last=false;
+    if(const auto at=driving::pc_find_stage_record(f.stages,key)){
+        const auto o=*at*0x78u;
+        if(o+0x34u<=f.stages.records.size())last=f.stages.records.u32(o+0x2cu)==0xffffffffu&&f.stages.records.u32(o+0x30u)==0xffffffffu;}
+    const char* what=type==0u?(last?"last stage":"stage"):"connector";
+    if(type!=g.piece_type||key!=g.piece_key){
+        g.piece_type=type;g.piece_key=key;g.frames=0;
+        std::snprintf(line,sizeof line,"goal test: on the %s, stage key %u, segment %d of %d",what,key,seg,end);say();}
+    if(++g.report%120u==0u){
+        std::snprintf(line,sizeof line,"goal test: %s, stage key %u, segment %d of %d, %.0f km/h",what,key,seg,end,
+            double(f.e.f32(0x1f8)));say();}
+    if(++g.frames!=(type==1u?g.settle*2u:g.settle)||(type==1u&&!g.connector))return;   // twice as long on a connector: the next stage loads
+    const std::int32_t target=end-g.before_end;
+    if(end<=0||target<=0||seg>=target-5||g.placements>=8u)return;
+    // The road at the target first (a piece without its polygons would put the car at the origin).
+    std::array<std::uint8_t,16> place{};for(unsigned k=0;k<16;++k)place[k]=f.e.u8(0x5c+k);
+    driving::Bytes pl(place.data(),place.size());pl.put16(8,std::uint16_t(target));
+    try{
+        driving::CourseWorldQuery query{f.tables,matrices,s.race_prediction};
+        driving::PcRoadInfoContext road{f.tables,matrices,f.area_yaw()};
+        std::array<std::uint8_t,0x64> info{};driving::Bytes ri(info.data(),info.size());
+        if(!driving::pc_get_cs_road_info_by_cs_len(ri,pl,f.e.i32(0x1c0),road)){
+            std::snprintf(line,sizeof line,"goal test: no road at segment %d of the %s (stage key %u); the car stays",target,what,key);say();return;}
+        auto route=f.route();
+        driving::PcCourseAdvanceContext advance{f.ends,f.stages,f.stage_cache(),route,0u,0u,c.race.area_state_7d2e80>9u};
+        driving::PcDispMatrixContext display{matrices,1.f,c.race.camera_override.scene_82e7d4};
+        driving::PcPlWreckerContext ctx{advance,road,query,display,&s,mark_player_recovery};
+        const std::uint16_t was=std::uint16_t(f.e.i16(0x64));
+        f.e.put16(0x64,std::uint16_t(target));
+        try{driving::pc_pl_wrecker(f.e,f.W,f.P,f.W.sub(0x258,4u*0xf4u),1,ctx);}
+        catch(...){f.e.put16(0x64,was);throw;}
+        ++g.placements;
+        std::snprintf(line,sizeof line,"goal test: placed the car %d segments before the end of the %s (stage key %u, segment %d of %d; it was at %d)%s",
+            g.before_end,what,key,target,end,seg,last?": the goal line is ahead":"");say();
+    }catch(const std::exception& ex){
+        g.armed=false;std::snprintf(line,sizeof line,"goal test: the placement failed (%.200s); the test is off",ex.what());say();
+    }
+}
+}
 bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixStack& matrices,bool direct_dispatch){
     auto& s=c.event_function36.car_select;auto& w=c.race.car_world;
     Frame f{c,w,matrices,Bytes(s.car_799d18.data(),s.car_799d18.size()),Bytes(s.body_82e7f0.data(),s.body_82e7f0.size()),
@@ -581,6 +637,7 @@ bool race_player_car_control_4a8330(NativeRuntimeContext& c,driving::PcMatrixSta
         for(std::size_t o:{0x28au,0x37eu,0x288u,0x37cu,0x470u,0x564u})f.W.put16(o,std::uint16_t(snap.i16(o)));
     }
     ++w.frames;
+    goal_test_frame(f,s,matrices,direct_dispatch);
 #if defined(OR2_DEV_SCRIPTED_RECOVERY)
     // One developer-only request on the admitted ordinary software shadow.
     // The real PlWrecker callback advances continuity; ordinary car calls
