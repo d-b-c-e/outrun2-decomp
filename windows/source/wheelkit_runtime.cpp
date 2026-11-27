@@ -229,7 +229,10 @@ void filter(platform::NativeInputState& out,const platform::NativeRuntimeContext
         if(race&&i>=Color)continue;   // the menus' X, RT, Y and LT do nothing in the race
         if(in.held[ButtonActions[i]])held|=1u<<i;
     }
-    if(in.transmission==WK_TRANSMISSION_H_PATTERN){   // OutRun shifts sequentially: pulses toward the held gate
+    // The shifter's gates drive the same way whatever the profile's gearbox, when the profile binds them (the app writes
+    // them with every gearbox): Manual chosen in the game on an Automatic profile shifts with the H-pattern too, and an
+    // automatic car ignores the pulses (Wheelkit issue outrun-2006-0021).
+    if(in.transmission==WK_TRANSMISSION_H_PATTERN||(in.bound&WK_BOUND_GEARS)){   // OutRun shifts sequentially: pulses toward the held gate
         bool gates[6];for(int i=0;i<6;++i)gates[i]=in.held[WK_ACTION_GEAR1+i]!=0;
         const bool car=rt&&race;std::uint32_t gear=0;
         if(car)std::memcpy(&gear,rt->event_function36.car_select.car_799d18.data()+0x208,4);
@@ -306,7 +309,7 @@ void wheelkit_configure(const Ini& settings){
         std::fflush(stdout);return;
     }
     const std::string ini=settings.path();
-    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.9-alpha";
+    wk_identity id{};id.size=sizeof id;id.game_id="outrun-2006";id.game_name="OutRun 2006 Coast 2 Coast";id.game_version="0.9.10-alpha";
     id.settings_file=ini.c_str();id.log=log_line;   // the window comes later, with the device (overlay)
     if(!wk.wk_start(&id)){std::printf("wheelkit: not started: %s\n",wk.wk_last_error());std::fflush(stdout);return;}
     s.on=true;

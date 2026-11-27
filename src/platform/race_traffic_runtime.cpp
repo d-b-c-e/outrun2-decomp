@@ -964,10 +964,12 @@ void native_race_requests_map(NativeRuntimeContext& c,PcRaceMemory& m){
     if(!t.requests_heap)t.requests_heap=std::make_unique<GuestHeap>(NativeRaceTraffic::RequestsHeapBase,NativeRaceTraffic::RequestsHeapSize);
     t.requests_heap->map(m);
     if(t.requests_cells.empty()){
-        // 85B338..: 5217E0's function-local statics 85B338 / 85B33C and their guard 85B340 (.bss, zero), writable over the
-        // read-only EXE range 85AF00..85B3FF (run-0311 latched at 5217F8 when the cell started at 85B340).
+        // 85B32C..: 521350's function-local statics 85B32C / 85B330 and their guard 85B334, then 5217E0's 85B338 / 85B33C
+        // and their guard 85B340 (.bss, zero), writable over the read-only EXE range 85AF00..85B3FF (run-0311 latched at
+        // 5217F8 when the cell started at 85B340; the owner's drive of 2026-11-27 latched at 521375, the guard 85B334, as
+        // the second request began: no traffic, the slipstream request for good, Wheelkit issue outrun-2006-0022).
         static constexpr std::pair<std::uint32_t,std::uint32_t> Cells[]{{0x84d900u,0x80u},{0x850b80u,0x20u},{0x854d00u,0x40u},
-            {0x856940u,0x10u},{0x8572a0u,0x28u},{0x85b338u,0x188u}};
+            {0x856940u,0x10u},{0x8572a0u,0x28u},{0x85b32cu,0x194u}};
         std::vector<std::uint8_t> data(0x100u);
         std::memcpy(data.data(),exe_image_bytes(0x64f000u,0x100u),0x100u);
         t.requests_cells.emplace_back(0x64f000u,std::move(data));

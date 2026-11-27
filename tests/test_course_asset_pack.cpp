@@ -828,13 +828,13 @@ int main(int argc,char** argv){
                 auto& traffic=native_race_traffic(request);auto& block=traffic.requests_7f9460;auto& voice=native_race_hud(request).voice;
                 auto& slots=request.event_state.slots;auto& car=request.event_function36.car_select.car_799d18;
                 auto& works=request.race.robots.state.works;auto& rnd=request.event_function36.pc_crt_random_state;
-                auto cell=std::find_if(traffic.requests_cells.begin(),traffic.requests_cells.end(),[](const auto& p){return p.first==0x85b338u;});
-                require(cell!=traffic.requests_cells.end()&&cell->second.size()==0x188u,"the request cell 85B338..85B4BF holds 5217E0's statics");
+                auto cell=std::find_if(traffic.requests_cells.begin(),traffic.requests_cells.end(),[](const auto& p){return p.first==0x85b32cu;});
+                require(cell!=traffic.requests_cells.end()&&cell->second.size()==0x194u,"the request cell 85B32C..85B4BF holds 521350's and 5217E0's statics");
                 auto& statics=cell->second;
                 const auto block0=block;const auto voice0=voice;const auto statics0=statics;const auto car0=car;const auto works0=works;
                 const auto rnd0=rnd;const auto car_work0=slots[8].work_token,passenger0=slots[0x16bu].work_token;
                 std::fill(statics.begin(),statics.end(),std::uint8_t(0));                     // as at process start (.bss)
-                auto stat=[&](std::uint32_t at){std::uint32_t v;std::memcpy(&v,statics.data()+(at-0x85b338u),4);return v;};
+                auto stat=[&](std::uint32_t at){std::uint32_t v;std::memcpy(&v,statics.data()+(at-0x85b32cu),4);return v;};
                 auto table=[](std::uint32_t at){std::int32_t v;std::memcpy(&v,exe_image_bytes(at,4u),4);return v;};
                 auto call=[&](std::uint32_t pc,std::initializer_list<std::uint32_t> args){
                     voice=NaviVoiceQueue{};std::uint32_t eax=0u;
@@ -864,6 +864,14 @@ int main(int argc,char** argv){
                 set(0x68u,0xffffffffu);set(0x78u,0u);set(0x7cu,1u);put32(block,0x164u,1u);    // 46C530 nonzero: robot 1 keeps its pose
                 require(call(0x521890u,{2u})&&work(0x7cu)==0u&&work(0x68u)==0xffffffffu&&work(0x78u)==0u,
                         "521890 while 46C530 is nonzero: 487DD0 still clears +7C; 487D60 leaves robot 1's pose");
+                // 521350 (the request objects' next pick, 509BD3..513143): its statics 85B32C / 85B330 and their guard 85B334
+                // lay under the read-only EXE range; the owner's drive of 2026-11-27 latched the traffic module at 521375 as the
+                // slipstream request began (Wheelkit issue outrun-2006-0022).
+                // 521350(kind, pick) (RET 8): on its first call the guard 85B334 is set and 85B330 = the race clock + B4; a pick
+                // below 0 is a rand() % 5, never the last one (85B32C). It runs on without latching the module.
+                {const bool ran=call(0x521350u,{3u,0xffffffffu});
+                 require(ran&&(stat(0x85b334u)&1u)&&stat(0x85b330u)>=0xb4u&&stat(0x85b32cu)<5u,
+                         "521350: its guard 85B334, timer 85B330 and pick 85B32C are written in the cell; the traffic module runs on");}
                 block=block0;voice=voice0;statics=statics0;car=car0;works=works0;rnd=rnd0;
                 slots[8].work_token=car_work0;slots[0x16bu].work_token=passenger0;
                 std::fprintf(stderr,"request record 505850 state 6: 5217E0 statics and voice line, 521890 passenger pose and 46C530 skip checked\n");

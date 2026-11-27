@@ -340,6 +340,23 @@ struct Service {
         case 0x43de50:routed(pc);release_collision_43de50(a[0]);return 0u;
         case 0x44a1a0:routed(pc);native_scene_owner_environment_reset_44a080(c);return 0u;   // 440CD0 x3 then 44A080
         case 0x46c4d0:routed(pc);return resources_481590();
+        // The area switch's request manager calls (44E590 states 6, 7 and 0xE of variant 5). 46C2C0(1), 46C240 and
+        // 46C380(&local) run on the traffic module's memory, as START makes them (native_runtime.cpp): 46C240 reads the
+        // next stage's script through 4F12A0, and 46C380's 4F03E0 reads the placement handles 84D6CC, which the AREA
+        // memory does not map (the AREA aborted every frame from the first section switch of a request race, and the
+        // next section never loaded: Wheelkit issue outrun-2006-0024). 46C380's local is the AREA's (race_area.cpp maps
+        // it), and the traffic memory maps it with the AREA's regions. 46C4C0 and 46C260 are ported below: their
+        // callees (448990, 4278C0) are this module's.
+        case 0x46c240:case 0x46c2c0:case 0x46c380:{
+            if(!ctx)missing_value(pc,"request manager call without a race context");
+            std::uint32_t eax{};bool ok;
+            if(pc==0x46c240u)ok=native_race_requests_call(c,ctx->matrices,pc,{},eax);
+            else ok=native_race_requests_call(c,ctx->matrices,pc,{a[0]},eax);
+            if(!ok){const auto& t=native_race_traffic(c);
+                missing_value(pc,"request manager: "+(t.error.empty()?std::string("traffic module latched"):t.error));}
+            routed(pc);return eax;}
+        case 0x46c4c0:routed(pc);release_481540();return 0u;
+        case 0x46c260:routed(pc);sounds_481490();return 0u;
         // 4F03A0(&table, lane) (variant 5, after 46C380): 440CD0 of the lane's handle, then the
         // handle = [table] (the request manager's copy of the lane 0 placements, in its heap).
         case 0x4f03a0:{
@@ -531,6 +548,26 @@ struct Service {
             if(ready){m.put32(B+0xe8u,2u);return 1u;}
         }
         return 0u;
+    }
+    // 46C4C0 -> 481540 (ECX = 7F9460): each 64F090 resource whose +B0 flag is 1 released (448990) and its flag
+    // cleared; +E8 = 0 (481590 requests them again for the next stage).
+    void release_481540(){
+        auto& m=o.memory;constexpr std::uint32_t B=0x7f9460u;
+        for(std::uint32_t k=0;k<14u;++k)if(m.u32(B+0xb0u+k*4u)==1u){
+            PcRaceCall q{};q.pc=0x448990u;q.argc=1;q.args[0]=m.u32(0x64f090u+k*4u);(void)(*this)(q);
+            m.put32(B+0xb0u+k*4u,0u);}
+        m.put32(B+0xe8u,0u);
+    }
+    // 46C260 -> 481490 (ECX = 7F9460): the request voices' sound banks +F8[0..2] (words, up to the first 0) and the
+    // girl's bank 5B44EC[+F4] unloaded (4278C0), those words cleared; +F0 = +EC = 0.
+    void sounds_481490(){
+        auto& m=o.memory;constexpr std::uint32_t B=0x7f9460u;
+        auto unload=[&](std::uint32_t id){PcRaceCall q{};q.pc=0x4278c0u;q.argc=1;q.args[0]=id;(void)(*this)(q);};
+        for(std::uint32_t i=0;i<3u;++i){
+            const std::uint32_t w=m.u16(B+0xf8u+i*2u);if(!w)break;
+            unload(w);m.put16(B+0xf8u+i*2u,0u);}
+        unload(m.u16(0x5b44ecu+m.u32(B+0xf4u)*4u));
+        m.put32(B+0xf0u,0u);m.put32(B+0xecu,0u);
     }
     // ---- course-prog: end ----
     // Bank of a resource on the renderer: only resident resources (the
