@@ -352,11 +352,12 @@ struct Service {
             std::uint32_t eax{};bool ok;
             if(pc==0x46c240u)ok=native_race_requests_call(c,ctx->matrices,pc,{},eax);
             else ok=native_race_requests_call(c,ctx->matrices,pc,{a[0]},eax);
+            if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] frame %u area %X(%X) -> %X ok %d\n",c.completed_frames,pc,a[0],eax,int(ok));
             if(!ok){const auto& t=native_race_traffic(c);
                 missing_value(pc,"request manager: "+(t.error.empty()?std::string("traffic module latched"):t.error));}
             routed(pc);return eax;}
-        case 0x46c4c0:routed(pc);release_481540();return 0u;
-        case 0x46c260:routed(pc);sounds_481490();return 0u;
+        case 0x46c4c0:routed(pc);release_481540();if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] frame %u area 46C4C0\n",c.completed_frames);return 0u;
+        case 0x46c260:routed(pc);sounds_481490();if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] frame %u area 46C260\n",c.completed_frames);return 0u;
         // 4F03A0(&table, lane) (variant 5, after 46C380): 440CD0 of the lane's handle, then the
         // handle = [table] (the request manager's copy of the lane 0 placements, in its heap).
         case 0x4f03a0:{

@@ -48,6 +48,7 @@ struct NativeRaceTraffic {
     static constexpr std::uint32_t RequestsHeapBase=0x0d000000u,RequestsHeapSize=0x800000u;
     std::vector<std::uint8_t> requests_7f9460=std::vector<std::uint8_t>(RequestsBytes);
     std::unique_ptr<GuestHeap> requests_heap;
+    std::uint32_t requests_previous_script{};   // 4F12A0: the script before the current one, freed at the next load
     // its .data 64F000..64F0FF (resource ids, REQUEST names, 64F0CE) and the .bss cells of its
     // modules 4F1860 / 4FC9A0.. / 5064E0 / 5099C0 / 50E9F0 / 508490.. (zero at start)
     std::vector<std::pair<std::uint32_t,std::vector<std::uint8_t>>> requests_cells;

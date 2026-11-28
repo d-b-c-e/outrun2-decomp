@@ -359,11 +359,15 @@ std::uint32_t translated_call_list(PcRaceMemory& m,const PcRaceService& service,
     try{fn(c);}
     catch(...){
         // OR2_TR_STACK: the code addresses on the guest stack at the fault (the call chain).
+        // The desktop build's runtime.log is stdout: the line goes to both. The scan starts 0x400 below the last call's
+        // ESP (the faulting function's own frame is below it).
         if(std::getenv("OR2_TR_STACK")&&active.size()==1u){
-            std::fprintf(stderr,"[tr] fault in %s, eip-ish stack:",hex(pc).c_str());
-            for(std::uint32_t a=c.esp;a+4u<=TranslatedStackBase+TranslatedStackSize;a+=4u){
-                const auto v=or2x86::ld32(c,a);if(v>=0x401000u&&v<0x590000u)std::fprintf(stderr," %06X",v);}
-            std::fprintf(stderr,"\n");
+            for(std::FILE* f:{stderr,stdout}){
+                std::fprintf(f,"[tr] fault in %s, eip-ish stack:",hex(pc).c_str());
+                for(std::uint32_t a=std::max(c.esp-0x400u,TranslatedStackBase);a+4u<=TranslatedStackBase+TranslatedStackSize;a+=4u){
+                    const auto v=or2x86::ld32(c,a);if(v>=0x401000u&&v<0x590000u)std::fprintf(f," %06X",v);}
+                std::fprintf(f,"\n");
+            }
         }
         finish();throw;}
     finish();

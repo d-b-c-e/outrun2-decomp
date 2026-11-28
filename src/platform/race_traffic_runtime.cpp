@@ -197,6 +197,10 @@ void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
     // request picks the next stages; the PC's own read): unmapped, it latched the traffic module at a C2C request's
     // stage end (route run of 2026-11-27, 7C276C; Wheelkit issue outrun-2006-0022).
     {auto& license=c.event_function36.frontend_profiles.active;m.map(0x7c23e0u,license.data(),license.size());}
+    // 500176 reads 7C274E[kind * 2] for every course record, and the connector and goal records' kinds (up to FF) read
+    // past the license into the resource table 7C2800.. (resource 4's +22, a state dword's upper half). Those bytes read
+    // 0 here, read-only (route run of 2026-11-27 read 7C2942 for kind FA).
+    {static const std::array<std::uint8_t,0x7c2950u-0x7c27ecu> tail{};m.map_const(0x7c27ecu,tail.data(),tail.size());}
     // The OutRun Miles word 84BCF8 (4EF440 / 4EF460, the race end's): the request objects add to it as a C2C request is
     // won (as the score path maps it); unmapped, it latched the traffic module there (route run of 2026-11-27).
     m.map(0x84bcf8u,native_race_end(c).state.miles.data()+(0x84bcf8u-PcRaceEndState::MilesBase),4);
@@ -777,7 +781,14 @@ struct Run {
             std::string relative=guest_string(m(),a[0]);
             while(!relative.empty()&&(relative[0]=='\\'||relative[0]=='/'))relative.erase(0,1);
             for(auto& ch:relative)if(ch=='\\')ch='/';
-            if(const auto old=m().u32(loader+4u)){t.requests_heap->free(old);m().put32(loader+4u,0u);}
+            if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] frame %u 4F12A0 %s loader %X old %X\n",c.completed_frames,relative.c_str(),loader,m().u32(loader+4u));
+            // The old script is kept until the next load: the request in progress still reads its record in it after the next
+            // stage's script came in at a section switch (4829D0 from the AREA), as the PC's freed block stays intact there
+            // (580C38 frees it, and the next stage's file takes another block of its heap). Freed at once, the request objects
+            // read reused memory and latched the traffic module (run of 2026-11-28 00:30; Wheelkit issue outrun-2006-0022).
+            if(const auto old=m().u32(loader+4u)){
+                if(t.requests_previous_script)t.requests_heap->free(t.requests_previous_script);
+                t.requests_previous_script=old;m().put32(loader+4u,0u);}
             std::vector<std::uint8_t> bytes;
             auto* store=c.event_function36.retail_assets;
             if(!store||!retail_asset_read_relative(*store,relative,bytes,8u<<20)||bytes.size()<8u){
@@ -792,6 +803,7 @@ struct Run {
                 if(patch+4u>bytes.size()||target>bytes.size())missing(pc,relative+": relocation outside the file");
                 m().put32(base+patch,base+target);}
             m().put32(loader+4u,base);m().put32(loader,base+8u+relocs*8u);m().put32(loader+8u,3u);
+            if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] 4F12A0 new %X size %X\n",base,unsigned(bytes.size()));
             return 1u;}
         case 0x4f1a90u:case 0x4f1ba0u:{
             const std::uint32_t loader=a[1];
@@ -957,6 +969,7 @@ template<class F> bool run_traffic(NativeRuntimeContext& c,driving::PcMatrixStac
     while(matrices.depth>depth)driving::pc_matrix_pop(matrices);
     t.latched=true;
     std::fprintf(stderr,"race traffic latched: %s\n",t.error.c_str());
+    if(std::getenv("OR2_REQ_TRACE"))std::printf("[req] frame %u traffic latched: %s (last service %X)\n",c.completed_frames,t.error.c_str(),t.last_routed_pc);
     return false;
 }
 }
@@ -1289,7 +1302,17 @@ std::uint32_t requests_stage_script_4829d0(NativeRuntimeContext& c,PcRaceContext
         for(std::size_t i=0;i<tables.primary_count;++i)if(tables.primary[i].token==token&&tables.primary[i].size>=4u){
             std::uint32_t id;std::memcpy(&id,tables.primary[i].data,4);return id;}
         throw TrafficUnported(0x4829d0u,"stage descriptor token not in the course tables");};
-    if(m.u32(B+0x168u)==0xffffffffu){
+    // 44C830 reads the AREA's selected record [7D3188]: at a section switch in the race the AREA has moved it to the next
+    // stage's record, so the next stage's script is loaded (the START copy 7D30A8 named the first stage again: Req_Beach.bin
+    // loaded twice and the request objects then read a freed record, run of 2026-11-27 22:57; Wheelkit issue outrun-2006-0022).
+    // Before the AREA's first callback (START's 46C240) 7D3188 is not there yet: START's own selection, as before.
+    const std::uint32_t selected=m.mapped(0x7d3188u,4u)?m.u32(0x7d3188u):0u;
+    if(m.u32(B+0x168u)==0xffffffffu&&selected&&m.mapped(selected,driving::PcCourseRecord44d720Size)&&m.u32(selected+4u)!=0xfu){
+        std::array<std::uint8_t,driving::PcCourseRecord44d720Size> record{};
+        std::memcpy(record.data(),m.at(selected,record.size()),record.size());
+        m.put32(B+0x13cu,m.u32(selected+4u));
+        m.put32(B+0x140u,course_id(record));                                              // 482A19: [[[7D3188]+14]]
+    }else if(m.u32(B+0x168u)==0xffffffffu){
         std::uint32_t key=0xfu;if(rt.selected_copy_active)std::memcpy(&key,rt.selected_7d30a8.data()+4u,4);   // 44C830
         m.put32(B+0x13cu,key);
         if(key==0xfu){std::uint32_t k2;std::memcpy(&k2,rt.selected_7d2de0.data()+4u,4);m.put32(B+0x13cu,k2);m.put32(B+0x140u,course_id(rt.selected_7d2de0));}
