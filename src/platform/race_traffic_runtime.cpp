@@ -193,6 +193,13 @@ void map_memory(NativeRuntimeContext& c,NativeRaceTraffic& t){
     mirror_events(c,t);
     m.map(0x799b30u,t.events_799b30.data(),t.events_799b30.size());
     m.map(0x79fb48u,t.flags_79fb48.data(),t.flags_79fb48.size());
+    // The active license 7C23E0..7C27EB: the request objects read its course states 7C274E[course * 2] (500176, as a C2C
+    // request picks the next stages; the PC's own read): unmapped, it latched the traffic module at a C2C request's
+    // stage end (route run of 2026-11-27, 7C276C; Wheelkit issue outrun-2006-0022).
+    {auto& license=c.event_function36.frontend_profiles.active;m.map(0x7c23e0u,license.data(),license.size());}
+    // The OutRun Miles word 84BCF8 (4EF440 / 4EF460, the race end's): the request objects add to it as a C2C request is
+    // won (as the score path maps it); unmapped, it latched the traffic module there (route run of 2026-11-27).
+    m.map(0x84bcf8u,native_race_end(c).state.miles.data()+(0x84bcf8u-PcRaceEndState::MilesBase),4);
     put32(t.cell_799d18.data(),c.event_state.slots[8].work_token);m.map(0x799d18u,t.cell_799d18.data(),4);
     if(const auto car=c.event_state.slots[8].work_token)m.map(car,c.event_function36.car_select.car_799d18.data(),c.event_function36.car_select.car_799d18.size());
     put32(t.cell_79f574.data(),c.event_state.slots[385].work_token);m.map(0x79f574u,t.cell_79f574.data(),4);
@@ -729,6 +736,14 @@ struct Run {
         case 0x580f40u:routed(pc);return frontend_crt_random_580f40(c.event_function36.pc_crt_random_state);
         // SPRANI pool (95E028 + handle * 0x7C), the race end binding's semantics
         case 0x428320u:routed(pc);return c.event_function36.frontend_sprites.create(a[0],a[1],a[2],-1,-1,false,c.event_function36.title_pause_flag_95b214);
+        case 0x4fdf20u:{routed(pc);   // 4FDF20 (ECX = the request manager, 4FC714: the next request's stage begins): +760C =
+            // [6280C0]; 428460(2C00B2, 6, 3, 0, F0); 424940(4D); 424940(16C). Not in the bulk translation: it latched the traffic
+            // module at a C2C request's stage end (route run of 2026-11-27; Wheelkit issue outrun-2006-0022).
+            m().put32(k.ecx+0x760cu,m().u32(0x6280c0u));
+            auto call=[&](std::uint32_t target,std::initializer_list<std::uint32_t> args){
+                PcRaceCall q{};q.pc=target;for(auto v:args)q.args[q.argc++]=v;(void)(*this)(q);};
+            call(0x428460u,{0x2c00b2u,6u,3u,0u,0xf0u});call(0x424940u,{0x4du});call(0x424940u,{0x16cu});
+            return 0u;}
         case 0x428460u:routed(pc);return c.event_function36.frontend_sprites.create(a[0],a[1],a[2],std::int32_t(a[3]),std::int32_t(a[4]),true,c.event_function36.title_pause_flag_95b214);
         case 0x4285a0u:routed(pc);if(a[0]<FrontendSprites::Count)c.event_function36.frontend_sprites.release(a[0]);return 0u;
         case 0x428770u:routed(pc);if(auto* s=c.event_function36.frontend_sprites.get_mutable(a[0]))s->mode=a[1];return 0u;
